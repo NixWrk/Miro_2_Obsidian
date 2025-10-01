@@ -1,1 +1,1 @@
-# Miro_2_Json
+# Miro_2_Obsidian
