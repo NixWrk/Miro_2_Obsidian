@@ -22,10 +22,12 @@ from Scale_engine import (  # noqa: F401
 # Constants
 # =========================
 
-CONTAINER_TYPES = {"group", "frame", "diagram"}
+DECK_TYPES = {"slide_container"}
+CONTAINER_TYPES = {"group", "frame", "diagram", "slide_container"} 
 FRAME_LIKE_TYPES = {"frame", "diagram"}  # строим как рамку
 
-OBSIDIAN_FONT_SIZE = 14  # px
+
+OBSIDIAN_FONT_SIZE = 18  # px
 FLOW_PREFIX = "flow_chart_"
 
 # Цвета стикеров Miro
@@ -1366,6 +1368,58 @@ def convert_miro_to_canvas(
                     lst.append(ch)
                     seen.add(ch)
 
+     # --- Slides: deck и принадлежность фреймов к деке ---
+
+    # Найдём все slide_container'ы
+    deck_ids = {
+        str(it.get("id"))
+        for it in all_items
+        if isinstance(it, dict) and (it.get("type") or "").lower() in DECK_TYPES
+    }
+
+    def _is_slide_frame(mi_frame: Dict[str, Any]) -> bool:
+        """True, если фрейм относится к slide_container (деке)."""
+        if (mi_frame.get("type") or "").lower() != "frame":
+            return False
+        if not deck_ids:
+            return False
+
+        # 1) Явный parent → deck
+        par = mi_frame.get("parent")
+        if isinstance(par, dict) and par.get("id") is not None and str(par.get("id")) in deck_ids:
+            return True
+
+        # 2) Через собранные связи children[deck_id] (если API их положил)
+        fid = str(mi_frame.get("id", "") or "")
+        for did in deck_ids:
+            if fid in (children.get(did) or []):
+                return True
+
+        # 3) Эвристика: часто экспорт слайдов даёт (x,y)≈(0,0) у фрейма
+        pos = (mi_frame.get("position") or {})
+        try:
+            x0 = float(pos.get("x") or 0.0)
+            y0 = float(pos.get("y") or 0.0)
+        except Exception:
+            x0 = y0 = 0.0
+        if abs(x0) < 1e-6 and abs(y0) < 1e-6:
+            return True
+
+        return False
+
+    # Гарантируем, что у каждой деки в children будут её фреймы-слайды
+    slide_frame_ids = [
+        str(it.get("id"))
+        for it in containers
+        if (it.get("type") or "").lower() == "frame" and _is_slide_frame(it)
+    ]
+    for did in deck_ids:
+        lst = children.setdefault(did, [])
+        seen = set(lst)
+        for fid in slide_frame_ids:
+            if fid and fid not in seen:
+                lst.append(fid)
+                seen.add(fid)
 
 
     # --- второй проход: сначала обычные узлы/рёбра (кроме контейнеров)
@@ -1470,10 +1524,14 @@ def convert_miro_to_canvas(
             d += 1
         return d
 
-    # сначала более глубокие, чтобы родитель мог включить уже созданные дочерние контейнеры
-    containers.sort(key=_container_depth, reverse=True)
+    def _is_deck(it: Dict[str, Any]) -> bool:
+        return (it.get("type") or "").lower() in DECK_TYPES
 
-    for cont in containers:
+    # 3.1. Сначала обычные контейнеры (frame/diagram/group)
+    normal_containers = [c for c in containers if not _is_deck(c)]
+    normal_containers.sort(key=_container_depth, reverse=True)
+
+    for cont in normal_containers:
         cid = str(cont.get("id", "") or "")
         if not cid:
             continue
@@ -1487,7 +1545,7 @@ def convert_miro_to_canvas(
         # геометрия «фреймоподобных» контейнеров в координатах Canvas (левый-верх)
         frect = _frame_rect(cont, scale=scale) if is_frame_like else None
 
-        # для frame/diagram оставляем только тех детей, чей ЦЕНТР внутри frect (с небольшим допуском)
+        # фильтр по центру (для frame/diagram)
         if is_frame_like and frect:
             child_ids = [ch for ch in raw_child_ids if _node_center_inside_rect(node_map[ch], frect, tol=1.0)]
         else:
@@ -1502,13 +1560,11 @@ def convert_miro_to_canvas(
 
         # финальный прямоугольник контейнера
         if is_frame_like:
-            # предпочитаем собственную геометрию, но расширяем, если дети вылезли
             if frect and bbox:
                 rect = frect if _rect_contains(frect, bbox, eps=0.5) else _rect_union(frect, bbox)
             else:
                 rect = frect or bbox  # пустая рамка тоже допустима
         else:
-            # у обычной группы геометрии нет — берём только bbox детей
             rect = bbox
 
         if not rect:
@@ -1545,6 +1601,49 @@ def convert_miro_to_canvas(
         }
         nodes.append(group_node)
         node_map[cid] = group_node
+
+    # 3.2. Теперь собираем deck как группы, содержащие фреймы-слайды (уже созданные выше)
+    deck_containers = [c for c in containers if _is_deck(c)]
+
+    for cont in deck_containers:
+        cid = str(cont.get("id", "") or "")
+        if not cid:
+            continue
+
+        # Берём детей деки, которые уже есть как ноды (frame-группы)
+        child_ids = [ch for ch in (children.get(cid) or []) if ch in node_map]
+        if not child_ids:
+            continue
+
+        # bbox по frame-группам (deck своей геометрии не имеет)
+        rect = _bbox_of_nodes(node_map, child_ids, padding=12)
+        if not rect:
+            continue
+
+        label = _group_label(cont)
+        color = _extract_group_color(cont)
+        t = (theme or "light").lower()
+        if t == "dark":
+            if (not color) or _is_white_like(color):
+                color = "#000000"
+        else:
+            if (not color) or _is_black_like(color):
+                color = "#FFFFFF"
+
+        group_node = {
+            "id": cid,
+            "type": "group",
+            "x": rect["x"],
+            "y": rect["y"],
+            "width": rect["width"],
+            "height": rect["height"],
+            "label": label,
+            "nodes": child_ids,   # ВАЖНО: deck содержит frame-группы
+            "color": color,
+        }
+        nodes.append(group_node)
+        node_map[cid] = group_node
+
 
 
 
