@@ -100,30 +100,22 @@ def ensure_unique_filename(path: Path) -> Path:
     ext = path.suffix
     counter = 1
 
-    # лог входа
-    print(f"[DBG] ensure_unique_filename IN : {path}")
-
     if ext:
         candidate = parent / f"{stem}{ext}"
         while candidate.exists():
-            print(f"[DBG] exists -> {candidate}")
             candidate = parent / f"{stem} ({counter}){ext}"
             counter += 1
-        print(f"[DBG] ensure_unique_filename OUT: {candidate}")
         return candidate
 
     # без расширения: проверяем и stem и stem.*
     candidate = parent / stem
     if not candidate.exists() and not any(parent.glob(f"{stem}.*")):
-        print(f"[DBG] ensure_unique_filename OUT: {candidate}")
         return candidate
 
     while True:
         candidate = parent / f"{stem} ({counter})"
         if not candidate.exists() and not any(parent.glob(f"{stem} ({counter}).*")):
-            print(f"[DBG] ensure_unique_filename OUT: {candidate}")
             return candidate
-        print(f"[DBG] exists -> {candidate} / {stem} ({counter}).*")
         counter += 1
 
 

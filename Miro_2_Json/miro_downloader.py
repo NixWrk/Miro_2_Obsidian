@@ -186,7 +186,6 @@ def write_json(filename: Path, data: list[dict]) -> None:
     try:
         with open(filename, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=4)
-        print(f"[DBG] write_json -> {filename}")
         print(f"💾 JSON сохранён: {filename}")
     except OSError as e:
         print(f"❌ Ошибка записи JSON {filename}: {e}")
