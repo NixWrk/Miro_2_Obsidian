@@ -5,7 +5,7 @@ import customtkinter as ctk
 import tkinter.filedialog as fd
 from tkinter import messagebox
 
-from Converter import convert_miro_to_canvas, find_vault_roots_upwards
+from Converter import convert_miro_to_canvas, find_vault_roots_upwards, OBSIDIAN_FONT_SIZE
 
 
 # импорт интеллектуального расчёта Scale
@@ -17,8 +17,6 @@ from Scale_engine import (
     recompute_from_min_node_height,
     preview_values,
 )
-
-OBSIDIAN_FONT_SIZE = 14 
 
 # тема Obsidian (UI label -> значение для конвертера)
 THEME_LABEL_TO_VALUE = {"Тёмная": "dark", "Светлая": "light"}
