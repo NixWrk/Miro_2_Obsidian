@@ -9,14 +9,6 @@ import shutil
 from html import escape as _html_escape
 from typing import Any, Dict, Iterable, List, Optional
 
-# Эти импорты «на будущее» — оставлены, чтобы не ломать внешние зависимости
-# (например, GUI/превью). flake8/ruff: noqa
-from Scale_engine import (  # noqa: F401
-    ViewProfile,
-    analyze_board,            
-    pick_recommended_scale,   
-    compute_scale_preview,    
-)
 
 # =========================
 # Constants
