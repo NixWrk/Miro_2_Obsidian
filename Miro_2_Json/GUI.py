@@ -477,7 +477,7 @@ class MiroDownloaderApp(ctk.CTk):
             done.set()
 
         self.after(0, _ask)  # показать диалог из главного потока
-        done.wait()
+        done.wait(timeout=300)  # ждём ответа не более 5 минут, затем возвращаем False
         return result["val"]
 
 
