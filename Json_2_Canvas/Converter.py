@@ -1282,6 +1282,45 @@ def convert_item_to_edge(item: Dict[str, Any], theme: str = "light") -> Optional
 # Top-level pipeline
 # =========================
 
+def _is_deck(it: Dict[str, Any]) -> bool:
+    return (it.get("type") or "").lower() in DECK_TYPES
+
+
+def _is_slide_frame(
+    mi_frame: Dict[str, Any],
+    deck_ids: set,
+    children: Dict[str, List[str]],
+) -> bool:
+    """True, если фрейм относится к slide_container (деке)."""
+    if (mi_frame.get("type") or "").lower() != "frame":
+        return False
+    if not deck_ids:
+        return False
+
+    # 1) Явный parent → deck
+    par = mi_frame.get("parent")
+    if isinstance(par, dict) and par.get("id") is not None and str(par.get("id")) in deck_ids:
+        return True
+
+    # 2) Через собранные связи children[deck_id] (если API их положил)
+    fid = str(mi_frame.get("id", "") or "")
+    for did in deck_ids:
+        if fid in (children.get(did) or []):
+            return True
+
+    # 3) Эвристика: часто экспорт слайдов даёт (x,y)≈(0,0) у фрейма
+    pos = (mi_frame.get("position") or {})
+    try:
+        x0 = float(pos.get("x") or 0.0)
+        y0 = float(pos.get("y") or 0.0)
+    except Exception:
+        x0 = y0 = 0.0
+    if abs(x0) < 1e-6 and abs(y0) < 1e-6:
+        return True
+
+    return False
+
+
 def convert_miro_to_canvas(
     json_path: str,
     target_dir: str,
@@ -1369,41 +1408,11 @@ def convert_miro_to_canvas(
         if isinstance(it, dict) and (it.get("type") or "").lower() in DECK_TYPES
     }
 
-    def _is_slide_frame(mi_frame: Dict[str, Any]) -> bool:
-        """True, если фрейм относится к slide_container (деке)."""
-        if (mi_frame.get("type") or "").lower() != "frame":
-            return False
-        if not deck_ids:
-            return False
-
-        # 1) Явный parent → deck
-        par = mi_frame.get("parent")
-        if isinstance(par, dict) and par.get("id") is not None and str(par.get("id")) in deck_ids:
-            return True
-
-        # 2) Через собранные связи children[deck_id] (если API их положил)
-        fid = str(mi_frame.get("id", "") or "")
-        for did in deck_ids:
-            if fid in (children.get(did) or []):
-                return True
-
-        # 3) Эвристика: часто экспорт слайдов даёт (x,y)≈(0,0) у фрейма
-        pos = (mi_frame.get("position") or {})
-        try:
-            x0 = float(pos.get("x") or 0.0)
-            y0 = float(pos.get("y") or 0.0)
-        except Exception:
-            x0 = y0 = 0.0
-        if abs(x0) < 1e-6 and abs(y0) < 1e-6:
-            return True
-
-        return False
-
     # Гарантируем, что у каждой деки в children будут её фреймы-слайды
     slide_frame_ids = [
         str(it.get("id"))
         for it in containers
-        if (it.get("type") or "").lower() == "frame" and _is_slide_frame(it)
+        if (it.get("type") or "").lower() == "frame" and _is_slide_frame(it, deck_ids, children)
     ]
     for did in deck_ids:
         lst = children.setdefault(did, [])
@@ -1515,9 +1524,6 @@ def convert_miro_to_canvas(
             cur = by_id.get(pid)
             d += 1
         return d
-
-    def _is_deck(it: Dict[str, Any]) -> bool:
-        return (it.get("type") or "").lower() in DECK_TYPES
 
     # 3.1. Сначала обычные контейнеры (frame/diagram/group)
     normal_containers = [c for c in containers if not _is_deck(c)]
