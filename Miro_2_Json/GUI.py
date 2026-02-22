@@ -805,12 +805,18 @@ class MiroDownloaderApp(ctk.CTk):
    
 
     def on_close(self):
-        self.destroy()
-        self.quit()
-        os._exit(0)  # гарантированное завершение процесса и потоков
+        try:
+            self.destroy()
+        except Exception:
+            pass
+        finally:
+            os._exit(0)  # гарантированное завершение процесса и всех потоков (включая Flask)
 
 
 if __name__ == "__main__":
+    import atexit
+    atexit.register(lambda: os._exit(0))  # убиваем Flask-поток при любом выходе из процесса
+
     ctk.set_appearance_mode("System")
     ctk.set_default_color_theme("blue")
     app = MiroDownloaderApp()
