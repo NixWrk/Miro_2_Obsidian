@@ -21,6 +21,7 @@ AUTH_URL = (
 
 app = Flask(__name__)
 auth_code = None
+_flask_started = False
 
 @app.route("/popup")
 def popup():
@@ -68,15 +69,21 @@ def get_access_token(code: str) -> str:
 
 
 def authorize_and_get_token() -> str:
-    """Авторизация в Miro через popup, без лишних страниц ожидания"""
-    global auth_code
+    """Авторизация в Miro через popup, без лишних страниц ожидания.
+    Flask-сервер запускается только один раз за жизнь процесса —
+    повторные вызовы переиспользуют уже работающий сервер на порту 8000.
+    """
+    global auth_code, _flask_started
     auth_code = None
 
-    def run_flask():
-        app.run(port=8000, debug=False, use_reloader=False)
+    if not _flask_started:
+        def run_flask():
+            app.run(port=8000, debug=False, use_reloader=False)
 
-    th = threading.Thread(target=run_flask, daemon=True)
-    th.start()
+        th = threading.Thread(target=run_flask, daemon=True)
+        th.start()
+        _flask_started = True
+        time.sleep(0.5)  # даём серверу подняться перед открытием браузера
 
     print("🔐 Запускаю авторизацию в Miro…")
     webbrowser.open("http://localhost:8000/popup")
