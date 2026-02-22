@@ -906,25 +906,3 @@ def apply_strategy(path: Path, strategy: str) -> Path | None:
 
 
 
-def compute_target_filename(item: dict, safe_team: str, safe_board: str,
-                            rename_files: bool, is_image: bool) -> str:
-    t = item.get("type")
-    data = item.get("data") or {}
-
-    if t == "doc_format":
-        base = extract_doc_format_title(data.get("html", "")) or item.get("id", "doc")
-        ext = ".pdf"   # <- целим сразу в PDF
-    else:
-        title = data.get("title")
-        if title:
-            p = Path(title)
-            base, ext = p.stem, p.suffix
-        else:
-            base, ext = item.get("id", "file"), ""
-        if not ext:
-            url = data.get("imageUrl" if is_image else "documentUrl", "")
-            if url:
-                ext = Path(url.split("?")[0]).suffix
-
-    base = safe_filename(base)
-    return f"{safe_team}_{safe_board}_{base}{ext}" if rename_files else f"{base}{ext}"

@@ -120,49 +120,31 @@ def ensure_unique_filename(path: Path) -> Path:
 
 
 
-def prepare_file_mapping(items: list[dict], images: list[dict], documents: list[dict],
-                         attachments_dir: Path, safe_team: str, safe_board: str,
-                         rename_files: bool) -> tuple[dict[str, str], list[Path]]:
+def compute_target_filename(item: dict, safe_team: str, safe_board: str,
+                            rename_files: bool, is_image: bool) -> str:
     """
-    Готовит mapping item_id -> filename и список будущих файлов для проверки конфликтов.
-
-    Args:
-        items: все элементы доски
-        images: элементы с type == "image"
-        documents: элементы с type == "document"
-        attachments_dir: куда будут сохраняться файлы
-        safe_team: безопасное имя команды
-        safe_board: безопасное имя доски
-        rename_files: добавлять ли team/board в имена файлов
-
-    Returns:
-        mapping: {item_id: filename}
-        future_files: список путей для проверки конфликтов
+    Вычисляет целевое имя файла для элемента доски.
+    Обрабатывает image, document и doc_format (→ .pdf).
     """
-    mapping = {}
-    future_files = []
+    t = item.get("type")
+    data = item.get("data") or {}
 
-    for res in images + documents:
-        title = res["data"].get("title")
+    if t == "doc_format":
+        base = extract_doc_format_title(data.get("html", "")) or item.get("id", "doc")
+        ext = ".pdf"
+    else:
+        title = data.get("title")
         if title:
-            base_name = Path(title).stem
-            ext = Path(title).suffix
+            p = Path(title)
+            base, ext = p.stem, p.suffix
         else:
-            base_name = res["id"]
-            ext = ""
-
+            base, ext = item.get("id", "file"), ""
         if not ext:
-            url = res["data"].get("imageUrl") or res["data"].get("documentUrl")
-            ext = Path(url.split("?")[0]).suffix
+            url = data.get("imageUrl" if is_image else "documentUrl", "")
+            if url:
+                ext = Path(url.split("?")[0]).suffix
 
-        if rename_files:
-            filename = f"{safe_team}_{safe_board}_{safe_filename(base_name)}{ext}"
-        else:
-            filename = f"{safe_filename(base_name)}{ext}"
-
-        mapping[res["id"]] = filename
-        future_files.append(attachments_dir / filename)
-
-    return mapping, future_files
+    base = safe_filename(base)
+    return f"{safe_team}_{safe_board}_{base}{ext}" if rename_files else f"{base}{ext}"
 
 
