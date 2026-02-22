@@ -1228,14 +1228,6 @@ def convert_item_to_edge(item: Dict[str, Any], theme: str = "light") -> Optional
     is_black   = _is_black_like(col_raw)
     is_white   = _is_white_like(col_raw)
 
-    # если линия невидима — не красим
-    try:
-        sw  = float(style.get("strokeWidth") or 0)
-        sop = float(style.get("strokeOpacity") or 1)
-    except Exception:
-        sw, sop = 0.0, 1.0
-    invisible = (sw <= 0) or (sop <= 0)
-
     chosen_color: Optional[str] = None
     if not invisible:
         t = (theme or "light").lower()
