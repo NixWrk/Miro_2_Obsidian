@@ -1,28 +1,23 @@
 ﻿#miro_downloader
-import json
-import time
-import requests
-import mimetypes
-from pathlib import Path
-from tqdm import tqdm
-from ratelimit import rate_limited
-from collections import Counter
-from urllib.parse import unquote
-from concurrent.futures import ThreadPoolExecutor, as_completed
-import re
-from urllib.parse import urlsplit, unquote
-import os
 import base64
-from utils import add_extension_unique,safe_filename, ensure_unique_filename, extract_doc_format_title
-
+import json
+import mimetypes
+import os
+import re
+import time
+from collections import Counter
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Callable, Optional
-from collections import Counter
+from urllib.parse import unquote, urlsplit, urlunsplit, parse_qsl, urlencode
 
+import requests
+from ratelimit import rate_limited
 from requests.adapters import HTTPAdapter
+from tqdm import tqdm
 from urllib3.util.retry import Retry
-from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode
+
+from utils import add_extension_unique, safe_filename, ensure_unique_filename, extract_doc_format_title
 
 
 MAX_WORKERS = 8  # Количество одновременных загрузок
