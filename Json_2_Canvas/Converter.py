@@ -1300,16 +1300,6 @@ def _is_slide_frame(
         if fid in (children.get(did) or []):
             return True
 
-    # 3) Эвристика: часто экспорт слайдов даёт (x,y)≈(0,0) у фрейма
-    pos = (mi_frame.get("position") or {})
-    try:
-        x0 = float(pos.get("x") or 0.0)
-        y0 = float(pos.get("y") or 0.0)
-    except Exception:
-        x0 = y0 = 0.0
-    if abs(x0) < 1e-6 and abs(y0) < 1e-6:
-        return True
-
     return False
 
 
