@@ -5,8 +5,7 @@ from dataclasses import dataclass
 from math import inf
 from typing import Any, Dict, Iterable, Tuple
 
-# iter_objects мы ожидаем получить из converter.py при прямом вызове функций,
-# но для compute_scale_preview мы будем читать JSON и сами пройдёмся по структуре.
+from Converter import iter_objects
 
 # ===== Профиль целевого экрана/ограничений =====
 @dataclass
@@ -19,44 +18,6 @@ class ViewProfile:
     min_font_px: int = 8      # минимальный кегль текста после масштабирования
 
 # ===== Базовая аналитика по доске =====
-def _iter_objects_generic(root: Any) -> Iterable[Dict[str, Any]]:
-    """
-    Универсальный обход объектов без зависимости от converter.iter_objects.
-    - список словарей,
-    - словарь с типичными коллекциями,
-    - словарь с произвольными списками dict'ов.
-    """
-    KEY_SETS = [
-        "items","item",
-        "connectors","connector",
-        "tags","tag",
-        "frames","frame",
-        "documents","document",
-        "embeds","embed",
-        "images","image",
-        "texts","text",
-        "shapes","shape",
-    ]
-    if isinstance(root, list):
-        for x in root:
-            if isinstance(x, dict):
-                yield x
-    elif isinstance(root, dict):
-        picked = False
-        for k in KEY_SETS:
-            v = root.get(k)
-            if isinstance(v, list):
-                picked = True
-                for x in v:
-                    if isinstance(x, dict):
-                        yield x
-        if not picked:
-            for v in root.values():
-                if isinstance(v, list):
-                    for x in v:
-                        if isinstance(x, dict):
-                            yield x
-
 def analyze_board_from_items(items: Iterable[Dict[str, Any]]) -> Dict[str, float]:
     """
     Аналитика по НОДАМ (без коннекторов):
@@ -104,7 +65,7 @@ def analyze_board_from_items(items: Iterable[Dict[str, Any]]) -> Dict[str, float
     return {"bbox_w": bbox_w, "bbox_h": bbox_h, "mnw": mnw, "mnh": mnh}
 
 def analyze_board(miro_root: Any) -> Dict[str, float]:
-    return analyze_board_from_items(_iter_objects_generic(miro_root))
+    return analyze_board_from_items(iter_objects(miro_root))
 
 # ===== Расчёт масштабов =====
 def compute_scale_fit(bbox_w: float, bbox_h: float, profile: ViewProfile) -> float:
