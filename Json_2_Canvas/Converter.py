@@ -1555,6 +1555,16 @@ def convert_miro_to_canvas(
     normal_containers = [c for c in containers if not _is_deck(c)]
     normal_containers.sort(key=_container_depth, reverse=True)
 
+    # Набор id фреймов-слайдов — нужен чтобы добавить ratio при создании группы
+    slide_frame_id_set = set(slide_frame_ids)
+    # Первый слайд каждой деки (для metadata.startNode)
+    first_slide_per_deck: Dict[str, str] = {}
+    for did in deck_ids:
+        for fid in (children.get(did) or []):
+            if fid in slide_frame_id_set:
+                first_slide_per_deck[did] = fid
+                break
+
     for cont in normal_containers:
         cid = str(cont.get("id", "") or "")
         if not cid:
@@ -1633,6 +1643,9 @@ def convert_miro_to_canvas(
             "nodes": child_ids,
             "color": color,
         }
+        # Advanced Canvas: слайды требуют поля ratio (ширина/высота)
+        if cid in slide_frame_id_set and rect["height"] > 0:
+            group_node["ratio"] = rect["width"] / rect["height"]
         nodes.append(group_node)
         node_map[cid] = group_node
 
@@ -1699,7 +1712,16 @@ def convert_miro_to_canvas(
 
 
 
-    canvas_obj = {"nodes": nodes, "edges": edges}
+    canvas_obj: Dict[str, Any] = {"nodes": nodes, "edges": edges}
+
+    # Advanced Canvas metadata: startNode = первый слайд первой деки (если есть)
+    all_first_slides = list(first_slide_per_deck.values())
+    if all_first_slides:
+        canvas_obj["metadata"] = {
+            "version": "1.0-1.0",
+            "frontmatter": {},
+            "startNode": all_first_slides[0],
+        }
 
     os.makedirs(target_dir, exist_ok=True)
     with open(canvas_path, "w", encoding="utf-8") as f:
