@@ -515,6 +515,9 @@ class MiroDownloaderApp(ctk.CTk):
         attachments_dir = save_base / f"{safe_team}_{safe_board}_files"
         attachments_dir.mkdir(parents=True, exist_ok=True)
 
+        # блокируем кнопку на время скачивания
+        self.start_btn.configure(state="disabled")
+
         # очистка логов и первичное сообщение
         self._clear_log()
         self.log("Подключаюсь к доске, считаю элементы...")
@@ -568,7 +571,7 @@ class MiroDownloaderApp(ctk.CTk):
                         chosen["val"] = self.ask_strategy(conflicts)
                         done.set()
                     self.after(0, _ask)
-                    done.wait()
+                    done.wait(timeout=300)  # ждём ответа не более 5 минут
                     strategy = chosen["val"]
                     if strategy is None:
                         return
@@ -635,8 +638,8 @@ class MiroDownloaderApp(ctk.CTk):
                         return self.file_rows[item_id]
                     def on_file_done(item_id):
                         self.file_rows[item_id].set_done()
-                    def on_overall_progress_group(done, total):
-                        self.update_overall_progress(overall_offset + done, len(all_items))
+                    def on_overall_progress_group(done, total, _off=overall_offset):
+                        self.update_overall_progress(_off + done, len(all_items))
 
                     download_all(
                         images, attachments_dir, self.token,
@@ -700,8 +703,8 @@ class MiroDownloaderApp(ctk.CTk):
                         return self.file_rows[item_id]
                     def on_file_done(item_id):
                         self.file_rows[item_id].set_done()
-                    def on_overall_progress_group(done, total):
-                        self.update_overall_progress(overall_offset + done, len(all_items))
+                    def on_overall_progress_group(done, total, _off=overall_offset):
+                        self.update_overall_progress(_off + done, len(all_items))
 
                     download_all(
                         documents, attachments_dir, self.token,
@@ -727,8 +730,8 @@ class MiroDownloaderApp(ctk.CTk):
                         return self.file_rows[item_id]
                     def on_file_done(item_id):
                         self.file_rows[item_id].set_done()
-                    def on_overall_progress_group(done, total):
-                        self.update_overall_progress(overall_offset + done, len(all_items))
+                    def on_overall_progress_group(done, total, _off=overall_offset):
+                        self.update_overall_progress(_off + done, len(all_items))
 
                     download_all(
                         doc_formats, attachments_dir, self.token,
@@ -759,7 +762,9 @@ class MiroDownloaderApp(ctk.CTk):
             except Exception as e:
                 self.after(0, partial(messagebox.showerror, "Ошибка",
                                       f"Ошибка при загрузке: {e}"))
-
+            finally:
+                # разблокируем кнопку в любом случае — успех, ошибка или отмена
+                self.after(0, lambda: self.start_btn.configure(state="normal"))
 
         threading.Thread(target=worker, daemon=True).start()
 
