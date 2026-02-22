@@ -14,7 +14,6 @@ from Scale_engine import (
     compute_scale_preview,
     recompute_from_font,
     recompute_from_min_node_width,
-    recompute_from_min_node_height,
     preview_values,
 )
 
@@ -255,9 +254,6 @@ class App(ctk.CTk):
             return
         entry.delete(0, "end"); entry.insert(0, value)
 
-    def _update_preview_label(self, prev: dict):
-        return  # строковое превью отключено
-
     def _set_entry_disabled(self, entry, value: str):
         try:
             entry.configure(state="normal")
@@ -367,12 +363,6 @@ class App(ctk.CTk):
             self._last_scale_value = self.scale_value
             self._last_minw_value  = prev["Wmin"]
 
-            self._update_preview_label({
-                "scale": self.scale_value,
-                "Wmin":  prev["Wmin"],
-                "Hmin":  prev["Hmin"],
-                "font_px": prev["font_px"],
-            })
             self.status.configure(text="Рекомендованный масштаб рассчитан.")
         except Exception as e:
             messagebox.showerror("Ошибка расчёта масштаба", str(e))
@@ -410,7 +400,6 @@ class App(ctk.CTk):
             prev = preview_values(self.scale_value, self.scale_ctx, OBSIDIAN_FONT_SIZE, self.min_font_value)
 
         self._set_entries_from_preview(prev)
-        self._update_preview_label(prev)
 
     def on_min_font_changed(self):
         if self._updating:
@@ -434,7 +423,6 @@ class App(ctk.CTk):
                 "font_px": max(self.min_font_value, int(round(OBSIDIAN_FONT_SIZE * S))),
             }
             self._set_entries_from_preview(prev)
-            self._update_preview_label(prev)
             self.status.configure(text=f"Кегль → S≈{self._qS_show(S):.1f}")
             return
 
@@ -459,7 +447,6 @@ class App(ctk.CTk):
 
         prev = preview_values(self.scale_value, self.scale_ctx, OBSIDIAN_FONT_SIZE, self.min_font_value)
         self._set_entries_from_preview(prev)
-        self._update_preview_label(prev)
 
         # Подсказка в статус: показуем причину клампа (если был)
         msg = f"Кегль → S≈{self._qS_show(S):.1f}"
@@ -500,34 +487,6 @@ class App(ctk.CTk):
 
         prev = preview_values(self.scale_value, self.scale_ctx, OBSIDIAN_FONT_SIZE, self.min_font_value)
         self._set_entries_from_preview(prev)
-        self._update_preview_label(prev)
-
-    def on_min_node_h_changed(self):
-        # поле H заблокировано; функция оставлена «на будущее»
-        if self._updating: return
-        if not self.scale_ctx:
-            messagebox.showwarning("Нет данных", "Сначала нажмите «Рассчитать масштаб (FHD)».")
-            return
-        Ht = self._parse_int(self.minh_entry.get(), None)
-        if Ht is None: return
-
-        mnh = float(self.scale_ctx.get("mnh", 0.0) or 0.0)
-        if mnh <= 0: return
-
-        if self._user_mode:
-            S = Ht / mnh
-        else:
-            s_fit  = float(self.scale_ctx.get("scale_fit", 0.0) or 0.0)
-            s_node = Ht / mnh
-            s_font = self.profile.min_font_px / max(1, OBSIDIAN_FONT_SIZE)
-            S = max(s_fit, s_node, s_font)
-
-        self.scale_value       = self._qS_store(S)
-        self._last_scale_value = self.scale_value
-
-        prev = preview_values(self.scale_value, self.scale_ctx, OBSIDIAN_FONT_SIZE, self.min_font_value)
-        self._set_entries_from_preview(prev)
-        self._update_preview_label(prev)
 
     def on_convert(self):
         # валидация входа
