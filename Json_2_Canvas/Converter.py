@@ -1367,6 +1367,39 @@ def convert_miro_to_canvas(
             children.setdefault(pid, []).append(iid)
 
 
+    # --- нормализация rect вложенных фреймов (relativeTo: parent_top_left/parent_center)
+    # Фреймы-слайды внутри slide_container имеют position.relativeTo="parent_top_left",
+    # поэтому _frame_rect_unscaled вернул локальные координаты как глобальные.
+    # Пересчитываем их через rect родителя (если он уже известен).
+    for it in containers:
+        iid = str(it.get("id", "") or "")
+        if iid not in container_rects_unscaled:
+            continue
+        pos = it.get("position") or {}
+        rel = str(pos.get("relativeTo") or "").lower()
+        if rel not in ("parent_top_left", "parent_center"):
+            continue
+        par = it.get("parent")
+        if not isinstance(par, dict) or par.get("id") is None:
+            continue
+        pid = str(par.get("id"))
+        parent_rect = container_rects_unscaled.get(pid)
+        if not parent_rect:
+            continue
+        # нормализуем сам фрейм как обычный дочерний элемент
+        normalized = _normalize_child_pos_to_canvas(it, parent_rect)
+        npos = normalized.get("position") or {}
+        geom = it.get("geometry") or {}
+        try:
+            cx = float(npos.get("x") or 0.0)
+            cy = float(npos.get("y") or 0.0)
+            w  = float(geom.get("width") or 0.0)
+            h  = float(geom.get("height") or 0.0)
+        except Exception:
+            continue
+        if w > 0 and h > 0:
+            container_rects_unscaled[iid] = {"x": cx - w/2.0, "y": cy - h/2.0, "width": w, "height": h}
+
     # учесть явные списки детей в самих группах (data.items)
     for cont in containers:
         cid = str(cont.get("id", "") or "")
