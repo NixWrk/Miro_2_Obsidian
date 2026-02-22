@@ -503,7 +503,7 @@ class App(ctk.CTk):
             vault = self.vault_entry.get().strip()
             if not vault: return
 
-        theme_value = THEME_LABEL_TO_VALUE.get(self.theme_var.get(), "dark")
+        theme_value = THEME_LABEL_TO_VALUE.get(self.theme_var.get(), THEME_LABEL_TO_VALUE[DEFAULT_THEME_LABEL])
         try:
             canvas_path = convert_miro_to_canvas(
                 json_path=self.json_file,
