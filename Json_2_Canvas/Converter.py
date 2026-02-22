@@ -1567,7 +1567,17 @@ def convert_miro_to_canvas(
         raw_child_ids = [ch for ch in (children.get(cid) or []) if ch in node_map]
 
         # геометрия «фреймоподобных» контейнеров в координатах Canvas (левый-верх)
-        frect = _frame_rect(cont, scale=scale) if is_frame_like else None
+        # Используем нормализованный rect из container_rects_unscaled (уже пересчитан
+        # для вложенных фреймов с relativeTo=parent_top_left), применяем масштаб вручную.
+        if is_frame_like:
+            _r0 = container_rects_unscaled.get(cid)
+            frect = (
+                {"x": _r0["x"] * scale, "y": _r0["y"] * scale,
+                 "width": _r0["width"] * scale, "height": _r0["height"] * scale}
+                if _r0 else _frame_rect(cont, scale=scale)
+            )
+        else:
+            frect = None
 
         # фильтр по центру (для frame/diagram)
         if is_frame_like and frect:
