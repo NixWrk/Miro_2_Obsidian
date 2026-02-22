@@ -1385,7 +1385,18 @@ def convert_miro_to_canvas(
         pid = str(par.get("id"))
         parent_rect = container_rects_unscaled.get(pid)
         if not parent_rect:
-            continue
+            # slide_container не имеет геометрии — строим rect из его позиции
+            par_item = by_id.get(pid)
+            if not par_item:
+                continue
+            par_pos = par_item.get("position") or {}
+            try:
+                par_cx = float(par_pos.get("x") or 0.0)
+                par_cy = float(par_pos.get("y") or 0.0)
+            except Exception:
+                continue
+            # point-rect: top_left = center (w=0, h=0), нормализация сработает корректно
+            parent_rect = {"x": par_cx, "y": par_cy, "width": 0.0, "height": 0.0}
         # нормализуем сам фрейм как обычный дочерний элемент
         normalized = _normalize_child_pos_to_canvas(it, parent_rect)
         npos = normalized.get("position") or {}
