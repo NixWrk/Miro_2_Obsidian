@@ -224,6 +224,7 @@ def get_items_on_board(
     logger: Optional[Callable[[str], None]] = None,
     prefer_experimental_items: bool = True,
     confirm_skip_source: Optional[Callable[[str, int, str], bool]] = None,
+    confirm_exp_fallback: Optional[Callable[[int], bool]] = None,
 ) -> list[dict]:
     """
     Максимально полная выкачка данных по доске (для бэкапа) через Miro REST v2.
@@ -237,7 +238,8 @@ def get_items_on_board(
       - Комментарии и talktrack недоступны через публичный REST и требуют Board Export API (Enterprise).
       - Бинарники (оригиналы) отдельных типов не всегда доступны на прямую; REST вернёт метаданные/URLs.
       - Если prefer_experimental_items=True, items берутся из v2-experimental (даёт контент фигур/flowchart).
-    При ошибке автоматически откатывается на v2.
+        При частичном падении пагинации вызывается confirm_exp_fallback(n_partial) — пользователь решает,
+        переключаться ли на v2 (True) или оставить частичные данные (False).
     """
 
     MAX_LIMIT = 50  # у Miro ограничение на страницу
@@ -351,18 +353,34 @@ def get_items_on_board(
     base_exp = f"https://api.miro.com/v2-experimental/boards/{board_id}"
 
     # ---- ITEMS: сначала пробуем experimental (если включено), иначе сразу v2
-    items_tried_exp = False
+    _exp_completed = False  # True только если пагинация experimental прошла до конца без ошибок
     if prefer_experimental_items:
+        n_before_exp = len(all_items)
         try:
-            items_tried_exp = True
             fetch_cursor_paginated(f"{base_exp}/items", "item", "items(v2-experimental)", enrich_item_payload)
+            _exp_completed = True
         except requests.HTTPError as e:
-            log(f"items: v2-experimental недоступен, откатываюсь на v2 ({e})")
-            # очистки не делаем — возможно, уже что-то успели получить; обычно нет, но на всякий
-            pass
+            n_partial = len(all_items) - n_before_exp
+            if n_partial > 0:
+                # Пагинация упала на середине — есть частичные данные
+                log(f"items: v2-experimental прервался после {n_partial} элементов ({e})")
+                do_fallback = True
+                if confirm_exp_fallback:
+                    do_fallback = bool(confirm_exp_fallback(n_partial))
+                if do_fallback:
+                    # Чистим частичные данные и переключаемся на v2
+                    del all_items[n_before_exp:]
+                    log("items: переключаюсь на v2 (частичные данные experimental очищены)")
+                    fetch_cursor_paginated(f"{base_v2}/items", "item", "items(v2)", enrich_item_payload)
+                else:
+                    log("items: оставляю частичные данные experimental, v2 не запрашиваю")
+            else:
+                # Упало до первой страницы — тихий fallback на v2
+                log(f"items: v2-experimental недоступен, переключаюсь на v2 ({e})")
+                fetch_cursor_paginated(f"{base_v2}/items", "item", "items(v2)", enrich_item_payload)
 
-    # если эксп-версию не пробовали или она упала — тянем v2
-    if not prefer_experimental_items or (items_tried_exp and all(i.get("source") != "items(v2-experimental)" for i in all_items)):
+    # пользователь выбрал Stable — сразу v2
+    if not prefer_experimental_items:
         fetch_cursor_paginated(f"{base_v2}/items", "item", "items(v2)", enrich_item_payload)
 
     # ---- прочие коллекции: стабильное v2

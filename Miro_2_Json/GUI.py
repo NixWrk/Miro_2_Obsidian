@@ -433,6 +433,32 @@ class MiroDownloaderApp(ctk.CTk):
         self.wait_window(dlg)
         return dlg.result
 
+    def ask_exp_fallback(self, n_partial: int) -> bool:
+        """
+        Диалог при частичном падении experimental API.
+        True  → переключиться на Stable v2 (очистить partial, загрузить заново).
+        False → оставить частичные данные как есть.
+        """
+        from threading import Event
+        done = Event()
+        result = {"val": False}
+
+        def _ask():
+            text = (
+                f"Experimental API прервался после получения {n_partial} элементов.\n\n"
+                f"Переключиться на Stable V2 и загрузить items заново?\n"
+                f"(частичные данные будут очищены)\n\n"
+                f"Нажмите «Да» для переключения на Stable,\n"
+                f"«Нет» — чтобы продолжить с тем что получено."
+            )
+            ans = messagebox.askyesno("Ошибка Experimental API", text)
+            result["val"] = bool(ans)
+            done.set()
+
+        self.after(0, _ask)
+        done.wait(timeout=120)  # ждём ответа не более 2 минут
+        return result["val"]
+
     def ask_continue_forbidden(self, src: str, status: int, msg: str) -> bool:
         """
         Показывает диалог «доступ запрещён к <src>» и спрашивает: продолжить без этих данных?
@@ -498,19 +524,13 @@ class MiroDownloaderApp(ctk.CTk):
         def worker():
             try:
                 # 1) получаем элементы (если ваш get_items_on_board поддерживает logger, передайте его)
-                try:
-                    items = get_items_on_board(
-                        board_id, self.token,
-                        logger=self.log,
-                        prefer_experimental_items=self.prefer_experimental,
-                        confirm_skip_source=lambda src, status, msg: self.ask_continue_forbidden(src, status, msg),
-                    )
-                except TypeError:
-                    # на случай если в установленной версии нет нового параметра
-                    try:
-                        items = get_items_on_board(board_id, self.token, self.log, self.prefer_experimental)
-                    except TypeError:
-                        items = get_items_on_board(board_id, self.token, logger=self.log)
+                items = get_items_on_board(
+                    board_id, self.token,
+                    logger=self.log,
+                    prefer_experimental_items=self.prefer_experimental,
+                    confirm_skip_source=lambda src, status, msg: self.ask_continue_forbidden(src, status, msg),
+                    confirm_exp_fallback=lambda n: self.ask_exp_fallback(n),
+                )
                 
 
                 # NEW: убираем дубликаты из разных источников (items и documents иногда отдают дубликаты)
