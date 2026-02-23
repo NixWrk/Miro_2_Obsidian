@@ -7,6 +7,7 @@ import os
 import re
 import shutil
 from html import escape as _html_escape, unescape as _html_unescape
+from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 
 
@@ -1390,8 +1391,15 @@ def convert_item_to_canvas_node(
         # Минимальный размер для embed-ноды (16:9, стандарт YouTube)
         EMBED_MIN_W, EMBED_MIN_H = 560, 315
 
-        if local_name:
-            # Скачанное превью → нода-файл (картинка), размер из Miro geometry
+        # Допустимые расширения изображений для embed-превью
+        _EMBED_IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".svg"}
+        local_name_is_image = (
+            local_name and
+            Path(local_name).suffix.lower() in _EMBED_IMAGE_EXTS
+        )
+
+        if local_name_is_image:
+            # Скачанное превью — реальное изображение → нода-файл
             abs_path = os.path.join(new_files_folder, local_name)
             rel = relpath_from_vault(abs_path, vault_root)
             node = {**base, "type": "file", "file": rel}
