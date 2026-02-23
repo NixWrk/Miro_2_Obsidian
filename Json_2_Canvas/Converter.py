@@ -1328,17 +1328,24 @@ def convert_item_to_canvas_node(
         title      = (data.get("title")        or "").strip()
         provider   = (data.get("providerName") or "").strip()
 
+        # Минимальный размер для embed-ноды (16:9, стандарт YouTube)
+        EMBED_MIN_W, EMBED_MIN_H = 560, 315
+
         if local_name:
             # Скачанное превью → нода-файл (картинка), размер из Miro geometry
             abs_path = os.path.join(new_files_folder, local_name)
             rel = relpath_from_vault(abs_path, vault_root)
             node = {**base, "type": "file", "file": rel}
+            node["width"]  = max(node["width"],  EMBED_MIN_W)
+            node["height"] = max(node["height"], EMBED_MIN_H)
             return node
         elif url:
             # Превью нет → Obsidian markdown embed: ![title](url)
             # Obsidian рендерит это как встроенный превью прямо в canvas
             md_title = (title or provider or "embed").replace("]", "").replace(")", "")
             node = {**base, "type": "text", "text": f"![{md_title}]({url})"}
+            node["width"]  = max(node["width"],  EMBED_MIN_W)
+            node["height"] = max(node["height"], EMBED_MIN_H)
             return node
         else:
             return None
