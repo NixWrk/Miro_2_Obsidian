@@ -1265,9 +1265,9 @@ def convert_item_to_canvas_node(
             solo_url = _extract_solo_url(raw_content)
             if solo_url:
                 solo_url = _html_unescape(solo_url)
-                # Фиксированный размер: 854×480 (16:9) × scale
-                _lw = max(round(854 * scale), 854)
-                _lh = max(round(480 * scale), 480)
+                # Фиксированный размер: 560×315 (16:9) × scale
+                _lw = max(round(560 * scale), 560)
+                _lh = max(round(315 * scale), 315)
                 link_node = {
                     "id":     base["id"],
                     "type":   "link",
@@ -1405,9 +1405,8 @@ def convert_item_to_canvas_node(
         title      = (data.get("title")        or "").strip()
         provider   = (data.get("providerName") or "").strip()
 
-        # Минимальный размер embed-ноды (16:9 YouTube)
-        # Фиксированный размер для всех type:link нод: 854×480 (16:9) × scale
-        LINK_BASE_W, LINK_BASE_H = 854, 480
+        # Фиксированный размер для всех type:link нод: 560×315 (16:9) × scale
+        LINK_BASE_W, LINK_BASE_H = 560, 315
         content_w = max(round(LINK_BASE_W * scale), LINK_BASE_W)
         content_h = max(round(LINK_BASE_H * scale), LINK_BASE_H)
 
