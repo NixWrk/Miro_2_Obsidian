@@ -1340,10 +1340,11 @@ def convert_item_to_canvas_node(
             node["height"] = max(node["height"], EMBED_MIN_H)
             return node
         elif url:
-            # Превью нет → Obsidian markdown embed: ![title](url)
-            # Obsidian рендерит это как встроенный превью прямо в canvas
-            md_title = (title or provider or "embed").replace("]", "").replace(")", "")
-            node = {**base, "type": "text", "text": f"![{md_title}]({url})"}
+            # Превью нет → нативная ссылка-нода Obsidian Canvas (type: "link")
+            # Obsidian отображает её как карточку превью веб-страницы
+            node = {**base, "type": "link", "url": url}
+            # удаляем поля, несовместимые с type:link
+            node.pop("text", None)
             node["width"]  = max(node["width"],  EMBED_MIN_W)
             node["height"] = max(node["height"], EMBED_MIN_H)
             return node
