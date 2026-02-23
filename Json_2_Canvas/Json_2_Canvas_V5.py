@@ -3,7 +3,7 @@ from typing import Dict, Any, Iterable, List
 
 import customtkinter as ctk
 import tkinter.filedialog as fd
-from tkinter import messagebox
+from CTkMessagebox import CTkMessagebox
 
 from Converter import convert_miro_to_canvas, find_vault_roots_upwards, OBSIDIAN_FONT_SIZE
 
@@ -338,7 +338,7 @@ class App(ctk.CTk):
 
     def on_recommend_scale(self):
         if not self.json_entry.get().strip():
-            messagebox.showerror("Ошибка", "Сначала выберите JSON от Miro.")
+            CTkMessagebox(master=self, title="Ошибка", message="Сначала выберите JSON от Miro.", icon="cancel")
             return
         try:
             info = compute_scale_preview(
@@ -373,7 +373,7 @@ class App(ctk.CTk):
 
             self.status.configure(text="Рекомендованный масштаб рассчитан.")
         except Exception as e:
-            messagebox.showerror("Ошибка расчёта масштаба", str(e))
+            CTkMessagebox(master=self, title="Ошибка расчёта масштаба", message=str(e), icon="cancel")
 
     # --- Manual edits (commit-on-change) ---
 
@@ -458,7 +458,7 @@ class App(ctk.CTk):
     def on_min_node_w_changed(self):
         if self._updating: return
         if not self.scale_ctx:
-            messagebox.showwarning("Нет данных", "Сначала нажмите «Рассчитать масштаб (FHD)».")
+            CTkMessagebox(master=self, title="Нет данных", message="Сначала нажмите «Рассчитать масштаб (FHD)».", icon="warning")
             return
 
         raw = self.minw_entry.get()
@@ -482,21 +482,21 @@ class App(ctk.CTk):
     def on_convert(self):
         # валидация входа
         if not self.json_file:
-            messagebox.showerror("Ошибка", "Не выбран JSON-файл.")
+            CTkMessagebox(master=self, title="Ошибка", message="Не выбран JSON-файл.", icon="cancel")
             return
         if not self.target_dir:
-            messagebox.showerror("Ошибка", "Не выбрана папка назначения.")
+            CTkMessagebox(master=self, title="Ошибка", message="Не выбрана папка назначения.", icon="cancel")
             return
         # vault root — определяем автоматически по target_dir
         candidates = find_vault_roots_upwards(self.target_dir)
         if len(candidates) == 1:
             vault = candidates[0]
         elif len(candidates) > 1:
-            messagebox.showwarning("Несколько Vault", "Обнаружено несколько .obsidian на пути вверх. Выберите корневой Vault вручную.")
+            CTkMessagebox(master=self, title="Несколько Vault", message="Обнаружено несколько .obsidian на пути вверх. Выберите корневой Vault вручную.", icon="warning")
             vault = fd.askdirectory(title="Выберите корень Obsidian Vault")
             if not vault: return
         else:
-            messagebox.showwarning("Vault не найден", "Не удалось найти .obsidian автоматически. Выберите корень Vault вручную.")
+            CTkMessagebox(master=self, title="Vault не найден", message="Не удалось найти .obsidian автоматически. Выберите корень Vault вручную.", icon="warning")
             vault = fd.askdirectory(title="Выберите корень Obsidian Vault")
             if not vault: return
 
@@ -513,9 +513,9 @@ class App(ctk.CTk):
                 theme=theme_value,
             )
             self.status.configure(text=f"Готово: {canvas_path}")
-            messagebox.showinfo("Успех", f"Canvas создан:\n{canvas_path}")
+            CTkMessagebox(master=self, title="Успех", message=f"Canvas создан:\n{canvas_path}", icon="check")
         except Exception as e:
-            messagebox.showerror("Ошибка конвертации", str(e))
+            CTkMessagebox(master=self, title="Ошибка конвертации", message=str(e), icon="cancel")
             self.status.configure(text=f"Ошибка: {e}")
 
 
