@@ -327,8 +327,19 @@ def run_download(
                 overwrite_when_guessing_ext=(strategy == "overwrite"),
             )
             if got_path:
-                it["local_name"] = got_path.name
-                _done(item_id)
+                # Принимаем только реальные изображения, не JSON/HTML/etc.
+                _IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".svg"}
+                if got_path.suffix.lower() in _IMAGE_EXTS:
+                    it["local_name"] = got_path.name
+                    _done(item_id)
+                else:
+                    # Скачалось не изображение (например JSON-метаданные) —
+                    # удаляем мусорный файл, превью считаем недоступным
+                    try:
+                        got_path.unlink(missing_ok=True)
+                    except Exception:
+                        pass
+                    on_file_fail(item_id, f"embed preview: получен не-image файл ({got_path.suffix}), игнорируем")
             else:
                 on_file_fail(item_id, "embed preview: скачивание не удалось")
             _progress(idx + 1, len(embeds_with_preview))

@@ -132,6 +132,14 @@ def compute_target_filename(item: dict, safe_team: str, safe_board: str,
     if t == "doc_format":
         base = extract_doc_format_title(data.get("html", "")) or item.get("id", "doc")
         ext = ".pdf"
+    elif t == "embed":
+        # Для embed: base — из title (без расширения), ext — из previewUrl
+        raw_title = data.get("title") or data.get("providerName") or item.get("id", "embed")
+        base = Path(raw_title).stem  # убираем возможное расширение из title
+        preview_url = data.get("previewUrl", "")
+        ext = Path(preview_url.split("?")[0]).suffix if preview_url else ""
+        # Если расширение не определяется из URL — оставляем пустым,
+        # download_resource_with_redirect угадает по Content-Type
     else:
         title = data.get("title")
         if title:
