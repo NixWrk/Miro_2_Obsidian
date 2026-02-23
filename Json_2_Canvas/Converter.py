@@ -6,7 +6,7 @@ import json
 import os
 import re
 import shutil
-from html import escape as _html_escape
+from html import escape as _html_escape, unescape as _html_unescape
 from typing import Any, Dict, Iterable, List, Optional
 
 
@@ -113,6 +113,49 @@ _HIGHLIGHT_TAG_RE = re.compile(
     r'(<(?:span|strong)\b[^>]*\bstyle\s*=\s*"([^"]*)"[^>]*>)',
     re.I,
 )
+
+# Детектор: текстовый блок содержит ТОЛЬКО одну URL-ссылку, без другого текста.
+# Матчит href из <a href="..."> или голую http(s)/ftp URL.
+_SOLO_LINK_RE = re.compile(
+    r'^https?://\S+$|^ftp://\S+$',
+    re.I,
+)
+_SOLO_A_HREF_RE = re.compile(
+    r'^\s*(?:<p[^>]*>\s*)?<a\b[^>]*\bhref\s*=\s*["\']([^"\']+)["\'][^>]*>.*?</a>\s*(?:</p>\s*)?$',
+    re.I | re.S,
+)
+
+
+def _extract_solo_url(html_or_plain: str) -> str | None:
+    """
+    Если блок содержит ровно одну ссылку и ничего кроме неё — возвращает URL.
+    Иначе None.
+    Принимает как HTML (<p><a href="...">...</a></p>), так и plain text.
+    """
+    text = html_or_plain.strip()
+    if not text:
+        return None
+    # Голая URL-строка (plain text)
+    if _SOLO_LINK_RE.match(text):
+        return text
+    # HTML: считаем число тегов <a ...>
+    a_tags = re.findall(r'<a\b', text, re.I)
+    if len(a_tags) != 1:
+        return None
+    # HTML с единственным <a href>: точный матч — только тег внутри <p>
+    m = _SOLO_A_HREF_RE.match(text)
+    if m:
+        return m.group(1).strip()
+    # Нестандартное обрамление: проверяем, что после удаления тегов
+    # не осталось постороннего текста
+    href_m = re.search(r'<a\b[^>]*\bhref\s*=\s*["\']([^"\']+)["\']', text, re.I)
+    if not href_m:
+        return None
+    stripped = re.sub(r'<[^>]+>', '', text).strip()
+    if not stripped or stripped == href_m.group(1).strip():
+        return href_m.group(1).strip()
+    return None
+
 
 # =========================
 # Small utilities
@@ -1201,6 +1244,22 @@ def convert_item_to_canvas_node(
             if wrapper_extra_color:
                 style_bits.append(f"color:{wrapper_extra_color}")
             node["text"] = f'<span style="{"; ".join(style_bits)}">{safe}</span>'
+
+        # ---- Solo-URL: text-блок содержит только ссылку → type:link ----
+        if item_type == "text":
+            solo_url = _extract_solo_url(raw_content)
+            if solo_url:
+                solo_url = _html_unescape(solo_url)
+                link_node = {
+                    "id":     base["id"],
+                    "type":   "link",
+                    "url":    solo_url,
+                    "x":      base["x"],
+                    "y":      base["y"],
+                    "width":  base["width"],
+                    "height": base["height"],
+                }
+                return link_node
 
         return node
 
