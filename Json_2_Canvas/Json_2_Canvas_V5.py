@@ -40,7 +40,6 @@ class App(ctk.CTk):
         # ---- state ----
         self.json_file: str | None = None
         self.target_dir: str | None = None
-        self.vault_root: str | None = None
 
         self.delete_json_var = ctk.BooleanVar(value=False)
         self.delete_src_var  = ctk.BooleanVar(value=False)
@@ -98,12 +97,6 @@ class App(ctk.CTk):
         self.target_entry = ctk.CTkEntry(self, width=560)
         self.target_entry.grid(row=2, column=1, padx=pad_x, pady=pad_y, sticky="we")
         ctk.CTkButton(self, text="Обзор…", width=120, command=self.pick_target_dir).grid(row=2, column=2, padx=pad_x, pady=pad_y)
-
-        # Row 3: Vault root (auto)
-        ctk.CTkLabel(self, text="Корень Vault:").grid(row=3, column=0, padx=pad_x, pady=pad_y, sticky="e")
-        self.vault_entry = ctk.CTkEntry(self, width=560)
-        self.vault_entry.grid(row=3, column=1, padx=pad_x, pady=pad_y, sticky="we")
-        ctk.CTkButton(self, text="Определить", width=120, command=self.detect_vault).grid(row=3, column=2, padx=pad_x, pady=pad_y)
 
         # Row 4: Scale & Preview frame
         self.scale_frame = ctk.CTkFrame(self)
@@ -229,25 +222,6 @@ class App(ctk.CTk):
         if not path: return
         self.target_dir = path
         self.target_entry.delete(0, "end"); self.target_entry.insert(0, path)
-
-    def detect_vault(self):
-        if not self.target_dir:
-            messagebox.showerror("Ошибка", "Сначала выберите папку для Canvas.")
-            return
-        candidates = find_vault_roots_upwards(self.target_dir)
-        if len(candidates) == 0:
-            messagebox.showerror("Vault не найден", "Не удалось автоматически найти .obsidian. Укажите корень Vault вручную.")
-            picked = fd.askdirectory(title="Выберите корень Obsidian Vault")
-            if not picked: return
-            self.vault_root = picked
-        elif len(candidates) > 1:
-            messagebox.showerror("Несколько Vault", "Обнаружено несколько .obsidian на пути вверх. Выберите корневой Vault вручную.")
-            picked = fd.askdirectory(title="Выберите корень Obsidian Vault")
-            if not picked: return
-            self.vault_root = picked
-        else:
-            self.vault_root = candidates[0]
-        self.vault_entry.delete(0, "end"); self.vault_entry.insert(0, self.vault_root)
 
     # --- Parsing helpers ---
 
@@ -513,11 +487,17 @@ class App(ctk.CTk):
         if not self.target_dir:
             messagebox.showerror("Ошибка", "Не выбрана папка назначения.")
             return
-        # vault root
-        vault = self.vault_entry.get().strip()
-        if not vault:
-            self.detect_vault()
-            vault = self.vault_entry.get().strip()
+        # vault root — определяем автоматически по target_dir
+        candidates = find_vault_roots_upwards(self.target_dir)
+        if len(candidates) == 1:
+            vault = candidates[0]
+        elif len(candidates) > 1:
+            messagebox.showwarning("Несколько Vault", "Обнаружено несколько .obsidian на пути вверх. Выберите корневой Vault вручную.")
+            vault = fd.askdirectory(title="Выберите корень Obsidian Vault")
+            if not vault: return
+        else:
+            messagebox.showwarning("Vault не найден", "Не удалось найти .obsidian автоматически. Выберите корень Vault вручную.")
+            vault = fd.askdirectory(title="Выберите корень Obsidian Vault")
             if not vault: return
 
         theme_value = THEME_LABEL_TO_VALUE.get(self.theme_var.get(), THEME_LABEL_TO_VALUE[DEFAULT_THEME_LABEL])
