@@ -1265,9 +1265,9 @@ def convert_item_to_canvas_node(
             solo_url = _extract_solo_url(raw_content)
             if solo_url:
                 solo_url = _html_unescape(solo_url)
-                # Нет данных о реальном размере контента → 560×315 (16:9) × scale
-                _lw = max(round(560 * scale), 560)
-                _lh = max(round(315 * scale), 315)
+                # Фиксированный размер: 854×480 (16:9) × scale
+                _lw = max(round(854 * scale), 854)
+                _lh = max(round(480 * scale), 480)
                 link_node = {
                     "id":     base["id"],
                     "type":   "link",
@@ -1406,17 +1406,10 @@ def convert_item_to_canvas_node(
         provider   = (data.get("providerName") or "").strip()
 
         # Минимальный размер embed-ноды (16:9 YouTube)
-        EMBED_MIN_W, EMBED_MIN_H = 560, 315
-
-        # Реальный размер контента из iframe (если есть) × scale
-        iframe_size = _extract_iframe_size(data.get("html") or "")
-        if iframe_size:
-            content_w = max(round(iframe_size[0] * scale), EMBED_MIN_W)
-            content_h = max(round(iframe_size[1] * scale), EMBED_MIN_H)
-        else:
-            # Нет iframe — fallback 16:9
-            content_w = EMBED_MIN_W
-            content_h = EMBED_MIN_H
+        # Фиксированный размер для всех type:link нод: 854×480 (16:9) × scale
+        LINK_BASE_W, LINK_BASE_H = 854, 480
+        content_w = max(round(LINK_BASE_W * scale), LINK_BASE_W)
+        content_h = max(round(LINK_BASE_H * scale), LINK_BASE_H)
 
         # Допустимые расширения изображений для embed-превью
         _EMBED_IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".svg"}
