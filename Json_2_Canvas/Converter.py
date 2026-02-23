@@ -127,6 +127,20 @@ _SOLO_A_HREF_RE = re.compile(
 )
 
 
+def _extract_iframe_size(html: str) -> tuple[int, int] | None:
+    """
+    Парсит первый <iframe> в HTML и возвращает (width, height) в пикселях.
+    Возвращает None если iframe не найден или размеры не читаются.
+    """
+    if not html:
+        return None
+    w_m = re.search(r'<iframe\b[^>]*\bwidth=["\']?(\d+)', html, re.I)
+    h_m = re.search(r'<iframe\b[^>]*\bheight=["\']?(\d+)', html, re.I)
+    if w_m and h_m:
+        return int(w_m.group(1)), int(h_m.group(1))
+    return None
+
+
 def _extract_solo_url(html_or_plain: str) -> str | None:
     """
     Если блок содержит ровно одну ссылку и ничего кроме неё — возвращает URL.
@@ -1251,14 +1265,17 @@ def convert_item_to_canvas_node(
             solo_url = _extract_solo_url(raw_content)
             if solo_url:
                 solo_url = _html_unescape(solo_url)
+                # Нет данных о реальном размере контента → 560×315 (16:9) × scale
+                _lw = max(round(560 * scale), 560)
+                _lh = max(round(315 * scale), 315)
                 link_node = {
                     "id":     base["id"],
                     "type":   "link",
                     "url":    solo_url,
                     "x":      base["x"],
                     "y":      base["y"],
-                    "width":  base["width"],
-                    "height": base["height"],
+                    "width":  _lw,
+                    "height": _lh,
                 }
                 return link_node
 
@@ -1388,8 +1405,18 @@ def convert_item_to_canvas_node(
         title      = (data.get("title")        or "").strip()
         provider   = (data.get("providerName") or "").strip()
 
-        # Минимальная ширина embed-ноды; высота всегда 16:9 от ширины
-        EMBED_MIN_W = 560
+        # Минимальный размер embed-ноды (16:9 YouTube)
+        EMBED_MIN_W, EMBED_MIN_H = 560, 315
+
+        # Реальный размер контента из iframe (если есть) × scale
+        iframe_size = _extract_iframe_size(data.get("html") or "")
+        if iframe_size:
+            content_w = max(round(iframe_size[0] * scale), EMBED_MIN_W)
+            content_h = max(round(iframe_size[1] * scale), EMBED_MIN_H)
+        else:
+            # Нет iframe — fallback 16:9
+            content_w = EMBED_MIN_W
+            content_h = EMBED_MIN_H
 
         # Допустимые расширения изображений для embed-превью
         _EMBED_IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".svg"}
@@ -1403,19 +1430,15 @@ def convert_item_to_canvas_node(
             abs_path = os.path.join(new_files_folder, local_name)
             rel = relpath_from_vault(abs_path, vault_root)
             node = {**base, "type": "file", "file": rel}
-            w = max(node["width"], EMBED_MIN_W)
-            node["width"]  = w
-            node["height"] = round(w * 9 / 16)
+            node["width"]  = content_w
+            node["height"] = content_h
             return node
         elif url:
             # Превью нет → нативная ссылка-нода Obsidian Canvas (type: "link")
-            # Obsidian отображает её как карточку превью веб-страницы.
-            # Высота = 16:9 от ширины (Miro-нода была выше из-за текстового анонса).
             node = {**base, "type": "link", "url": url}
             node.pop("text", None)
-            w = max(node["width"], EMBED_MIN_W)
-            node["width"]  = w
-            node["height"] = round(w * 9 / 16)
+            node["width"]  = content_w
+            node["height"] = content_h
             return node
         else:
             return None
