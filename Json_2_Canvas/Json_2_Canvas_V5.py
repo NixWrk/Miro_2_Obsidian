@@ -112,13 +112,7 @@ class App(ctk.CTk):
             font=ctk.CTkFont(size=16, weight="bold")
         ).grid(row=0, column=0, columnspan=8, padx=8, pady=(6, 6), sticky="w")
 
-        # Row 4.1: Кнопка, Scale, Кегль max, Кегль min
-        self.btn_recommend = ctk.CTkButton(
-            self.scale_frame, text="Рассчитать масштаб (FHD)",
-            width=180, command=self.on_recommend_scale
-        )
-        self.btn_recommend.grid(row=1, column=0, padx=(8, 12), pady=4, sticky="w")
-
+        # Row 4.1: Scale, Кегль max, Кегль min
         ctk.CTkLabel(self.scale_frame, text="Scale:").grid(row=1, column=1, padx=(8, 6), pady=4, sticky="e")
         self.scale_entry = ctk.CTkEntry(self.scale_frame, width=120)
         self.scale_entry.grid(row=1, column=2, padx=(0, 16), pady=4, sticky="w")
@@ -163,10 +157,6 @@ class App(ctk.CTk):
         self.minh_entry = ctk.CTkEntry(self.scale_frame, width=84)
         self.minh_entry.grid(row=2, column=4, padx=(4, 8), pady=(0, 6), sticky="w")
         self.minh_entry.configure(state="disabled")  # H нередактируемое
-
-        # Блокируем Enter на кнопке рекомендаций
-        self.btn_recommend.bind("<Return>",   lambda e: "break")
-        self.btn_recommend.bind("<KP_Enter>", lambda e: "break")
 
         # Row 5: Theme selection
         ctk.CTkLabel(self, text="Тема Obsidian:").grid(row=5, column=0, padx=pad_x, pady=pad_y, sticky="e")
@@ -216,6 +206,7 @@ class App(ctk.CTk):
         if not path: return
         self.json_file = path
         self.json_entry.delete(0, "end"); self.json_entry.insert(0, path)
+        self.on_recommend_scale()  # автоматический расчёт масштаба
 
     def pick_target_dir(self):
         path = fd.askdirectory()
@@ -337,12 +328,11 @@ class App(ctk.CTk):
     # --- Recommend (optimal) scale from file ---
 
     def on_recommend_scale(self):
-        if not self.json_entry.get().strip():
-            CTkMessagebox(master=self, title="Ошибка", message="Сначала выберите JSON от Miro.", icon="cancel")
+        if not self.json_file:
             return
         try:
             info = compute_scale_preview(
-                json_path=self.json_entry.get().strip(),
+                json_path=self.json_file,
                 profile=self.profile,
                 base_font_px=OBSIDIAN_FONT_SIZE
             )
