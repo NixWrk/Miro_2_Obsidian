@@ -1101,10 +1101,10 @@ def convert_item_to_canvas_node(
         # оценка высоты для контроля
         need_h = _estimate_render_height(raw_content, width_px=base_w, font_px=font_px, line_height=lh)
 
-        if (not is_sticky and not is_shape) and need_h > node["height"]:
-            # только «чистые» TEXT можно растягивать по высоте
+        if not is_sticky and need_h > node["height"]:
+            # TEXT и SHAPE растягиваем по высоте если текст не вмещается
             node["height"] = need_h
-        # для фигуры/стикера высоту не увеличиваем — кегль уже подогнан под бокс
+        # для стикера высоту не увеличиваем — кегль уже подогнан под бокс автофитом
 
         return node
 
