@@ -1116,10 +1116,11 @@ def convert_item_to_canvas_node(
 
         if has_span_bgcolor:
             # Есть выделение (background-color на span/strong).
-            # Текст с явным style.color — берём его как есть, тема не влияет.
-            # Текст без style.color — не ставим wrapper color, наследует тему
-            # (невыделенный текст отображается согласно теме Obsidian).
-            wrapper_extra_color = style_color if style_color else None
+            # style.color из Miro — это цвет «по умолчанию» для всего блока,
+            # но он конфликтует с тёмной темой для невыделенного текста.
+            # Не ставим wrapper color вообще — пусть невыделенный текст наследует тему,
+            # а выделенные span'ы сами задают свой фон и цвет.
+            wrapper_extra_color = None
         elif _is_html(raw_content):
             inline_color = _extract_inline_color(raw_content)
             if inline_color and theme.lower() == "dark" and _is_miro_black_color(inline_color):
