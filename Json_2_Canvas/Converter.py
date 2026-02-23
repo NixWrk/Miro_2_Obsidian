@@ -1388,8 +1388,8 @@ def convert_item_to_canvas_node(
         title      = (data.get("title")        or "").strip()
         provider   = (data.get("providerName") or "").strip()
 
-        # Минимальный размер для embed-ноды (16:9, стандарт YouTube)
-        EMBED_MIN_W, EMBED_MIN_H = 560, 315
+        # Минимальная ширина embed-ноды; высота всегда 16:9 от ширины
+        EMBED_MIN_W = 560
 
         # Допустимые расширения изображений для embed-превью
         _EMBED_IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".svg"}
@@ -1403,17 +1403,19 @@ def convert_item_to_canvas_node(
             abs_path = os.path.join(new_files_folder, local_name)
             rel = relpath_from_vault(abs_path, vault_root)
             node = {**base, "type": "file", "file": rel}
-            node["width"]  = max(node["width"],  EMBED_MIN_W)
-            node["height"] = max(node["height"], EMBED_MIN_H)
+            w = max(node["width"], EMBED_MIN_W)
+            node["width"]  = w
+            node["height"] = round(w * 9 / 16)
             return node
         elif url:
             # Превью нет → нативная ссылка-нода Obsidian Canvas (type: "link")
-            # Obsidian отображает её как карточку превью веб-страницы
+            # Obsidian отображает её как карточку превью веб-страницы.
+            # Высота = 16:9 от ширины (Miro-нода была выше из-за текстового анонса).
             node = {**base, "type": "link", "url": url}
-            # удаляем поля, несовместимые с type:link
             node.pop("text", None)
-            node["width"]  = max(node["width"],  EMBED_MIN_W)
-            node["height"] = max(node["height"], EMBED_MIN_H)
+            w = max(node["width"], EMBED_MIN_W)
+            node["width"]  = w
+            node["height"] = round(w * 9 / 16)
             return node
         else:
             return None
