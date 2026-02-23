@@ -1206,11 +1206,6 @@ def convert_item_to_canvas_node(
 
 
 
-    # ---------- EMBED → LINK ----------
-    if item_type == "embed":
-        url = (item.get("data") or {}).get("url") or (item.get("links") or {}).get("web", "")
-        return {**base, "type": "link", "url": url}
-
     # ---------- CARD / PREVIEW / APP_CARD → TEXT ----------
     if item_type in ("card", "preview", "app_card"):
         data = item.get("data") or {}
@@ -1334,28 +1329,19 @@ def convert_item_to_canvas_node(
         provider   = (data.get("providerName") or "").strip()
 
         if local_name:
-            # Скачанное превью → нода-картинка
+            # Скачанное превью → нода-файл (картинка), размер из Miro geometry
             abs_path = os.path.join(new_files_folder, local_name)
             rel = relpath_from_vault(abs_path, vault_root)
             node = {**base, "type": "file", "file": rel}
             return node
-        else:
-            # Превью нет → текстовая ссылка
-            label = title or url
-            provider_str = f" ({provider})" if provider else ""
-            if url:
-                link_html = f'<p><a href="{url}">{_html_escape(label, False)}{_html_escape(provider_str, False)}</a></p>'
-            else:
-                link_html = f'<p>{_html_escape(label, False)}{_html_escape(provider_str, False)}</p>'
-
-            base_font_px = _extract_font_base_px(item, fallback=OBSIDIAN_FONT_SIZE)
-            lh = _extract_line_height(item.get("style") or {}, default=1.35)
-            font_px = compute_font_px(scale, int(base_font_px), min_font_px)
-
-            node = {**base, "type": "text", "text": ""}
-            node.setdefault("styleAttributes", {})["fontSize"] = font_px
-            node["text"] = f'<div style="font-size:{font_px}px; line-height:{lh}">{link_html}</div>'
+        elif url:
+            # Превью нет → Obsidian markdown embed: ![title](url)
+            # Obsidian рендерит это как встроенный превью прямо в canvas
+            md_title = (title or provider or "embed").replace("]", "").replace(")", "")
+            node = {**base, "type": "text", "text": f"![{md_title}]({url})"}
             return node
+        else:
+            return None
 
     # ----------  TAG → TEXT-МЕТКА ----------
 
