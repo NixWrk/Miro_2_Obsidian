@@ -1115,8 +1115,10 @@ def convert_item_to_canvas_node(
         wrapper_extra_color: Optional[str] = None
 
         if has_span_bgcolor:
-            # Цветное выделение есть — передаём HTML как есть, цвет не подменяем
-            pass
+            # Есть выделение (background-color на span/strong) — цвет текста берём
+            # строго из Miro: style.color как есть, или явный чёрный если не задан.
+            # Тема не влияет.
+            wrapper_extra_color = style_color if style_color else "#000000"
         elif _is_html(raw_content):
             inline_color = _extract_inline_color(raw_content)
             if inline_color and theme.lower() == "dark" and _is_miro_black_color(inline_color):
