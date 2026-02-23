@@ -563,7 +563,8 @@ def _estimate_render_height(html_or_text: str, *, width_px: float, font_px: floa
 
 # --- Sticky helpers ---
 
-STICKY_TEXT_PADDING = 30  # внутренние отступы в пикселях для оценки вписывания
+STICKY_TEXT_PADDING = 30      # максимальные внутренние отступы sticky-ноды (px)
+STICKY_PAD_MAX_RATIO = 0.15  # отступ не более 15% от стороны бокса
 
 def _autofit_font_px_for_box(
     html_or_text: str,
@@ -1028,9 +1029,14 @@ def convert_item_to_canvas_node(
         start_px = max(min_font_px, raw_node_px)
 
         if is_sticky:
-            # Вписываем текст внутрь бокса: полезная область
-            avail_w = max(1.0, base_w - 2 * STICKY_TEXT_PADDING)
-            avail_h = max(1.0, base_h - 2 * STICKY_TEXT_PADDING)
+            # Вписываем текст внутрь бокса: полезная область.
+            # Padding динамический: не более STICKY_TEXT_PADDING,
+            # но и не более STICKY_PAD_MAX_RATIO от стороны бокса —
+            # чтобы маленькие стикеры не теряли почти всю высоту.
+            pad_w = min(STICKY_TEXT_PADDING, base_w * STICKY_PAD_MAX_RATIO)
+            pad_h = min(STICKY_TEXT_PADDING, base_h * STICKY_PAD_MAX_RATIO)
+            avail_w = max(1.0, base_w - 2 * pad_w)
+            avail_h = max(1.0, base_h - 2 * pad_h)
 
             # Нижняя/верхняя границы подбора
             lo = max(1, min(raw_node_px, min_font_px))              # можно опуститься ниже глобального min
