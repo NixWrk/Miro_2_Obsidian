@@ -106,7 +106,8 @@ P_CLOSE_RE = re.compile(r"</p\s*>", re.I)
 BR_RE = re.compile(r"<br\s*/?>", re.I)
 LI_RE = re.compile(r"<li\b", re.I)
 PCT_RE = re.compile(r"^\s*([+-]?\d+(?:\.\d+)?)\s*%\s*$")
-COLOR_PROP_RE = re.compile(r"(color\s*:\s*)(#[0-9a-fA-F]{3,8}|rgb\s*\(\s*\d+\s*,\s*\d+\s*,\s*\d+\s*\))", re.I)
+COLOR_PROP_RE   = re.compile(r"(color\s*:\s*)(#[0-9a-fA-F]{3,8}|rgb\s*\(\s*\d+\s*,\s*\d+\s*,\s*\d+\s*\))", re.I)
+SPAN_BGCOLOR_RE = re.compile(r"<span\b[^>]*background-color\s*:", re.I)  # span с background-color
 
 # =========================
 # Small utilities
@@ -598,6 +599,53 @@ def _autofit_font_px_for_box(
     return max(min_px, best)
 
 
+def _fit_font_px(
+    html_or_text: str,
+    box_w: float,
+    box_h: float,
+    *,
+    target_px: int,
+    min_font_px: int,
+    line_height: float,
+) -> tuple[int, bool]:
+    """
+    Подбирает кегль для ноды по правилу «из Miro, только уменьшаем»:
+
+      1. Пробуем target_px — если текст вписывается, возвращаем его.
+      2. Не вписывается → уменьшаем до min_font_px (бинарный поиск вниз).
+      3. Даже при min_font_px не вписывается → возвращаем min_font_px
+         и флаг needs_grow=True (нода должна быть увеличена).
+
+    box_w/box_h — доступная область (avail) уже с учётом padding снаружи.
+    Возвращает (font_px, needs_grow).
+    """
+    def fits(px: int) -> bool:
+        need = _estimate_render_height(html_or_text, width_px=max(1.0, box_w),
+                                       font_px=px, line_height=line_height)
+        return need <= box_h
+
+    # Шаг 1: target вписывается?
+    if fits(target_px):
+        return target_px, False
+
+    # Шаг 2: бинарный поиск в [min_font_px, target_px - 1]
+    if target_px > min_font_px:
+        lo, hi = min_font_px, target_px - 1
+        best = min_font_px
+        while lo <= hi:
+            mid = (lo + hi) // 2
+            if fits(mid):
+                best = mid
+                lo = mid + 1
+            else:
+                hi = mid - 1
+        if best >= min_font_px and fits(best):
+            return best, False
+
+    # Шаг 3: даже min_font_px не влезает
+    return min_font_px, True
+
+
 # === GROUPS / FRAMES helpers ===
 
 def _val_px_or_pct(v: Any, total: float) -> Optional[float]:
@@ -1020,70 +1068,66 @@ def convert_item_to_canvas_node(
                 raw_content = subtype.replace("_", " ")
 
       
-        # Базовый кегль из Miro (на самом элементе) + пересчёт в Canvas по масштабу
+        # Базовый кегль из Miro + пересчёт по масштабу
         base_font_px = _extract_font_base_px(item, fallback=OBSIDIAN_FONT_SIZE)
         lh = _extract_line_height(item.get("style") or {}, default=1.35)
+        target_px = max(min_font_px, int(round(base_font_px * scale)))
 
-        # "расчётный" минимум для узла (floor)
-        raw_node_px = int(base_font_px * scale)
-        start_px = max(min_font_px, raw_node_px)
-
+        # Доступная область для вписывания текста
         if is_sticky:
-            # Вписываем текст внутрь бокса: полезная область.
-            # Padding динамический: не более STICKY_TEXT_PADDING,
-            # но и не более STICKY_PAD_MAX_RATIO от стороны бокса —
-            # чтобы маленькие стикеры не теряли почти всю высоту.
+            # У стикеров динамический внутренний padding
             pad_w = min(STICKY_TEXT_PADDING, base_w * STICKY_PAD_MAX_RATIO)
             pad_h = min(STICKY_TEXT_PADDING, base_h * STICKY_PAD_MAX_RATIO)
             avail_w = max(1.0, base_w - 2 * pad_w)
             avail_h = max(1.0, base_h - 2 * pad_h)
-
-            # Нижняя/верхняя границы подбора
-            lo = max(1, min(raw_node_px, min_font_px))              # можно опуститься ниже глобального min
-            hard_cap = int(max(8, min(base_h, base_w)))
-            hi = max(start_px, int(start_px * 1.25), hard_cap)
-
-            font_px = _autofit_font_px_for_box(
-                raw_content,
-                avail_w,
-                avail_h,
-                line_height=lh,
-                min_px=lo,
-                max_px=hi,
-            )
         else:
-            # Обычный TEXT без автофита
-            font_px = compute_font_px(scale, int(base_font_px), min_font_px)
+            # text / shape: _estimate_render_height сам вычитает 12px внутри
+            avail_w = base_w
+            avail_h = base_h
 
-        # применяем выбранный кегль (для всех типов)
+        # Подбор кегля: берём target из Miro, уменьшаем только если не влезает
+        font_px, needs_grow = _fit_font_px(
+            raw_content, avail_w, avail_h,
+            target_px=target_px,
+            min_font_px=min_font_px,
+            line_height=lh,
+        )
+
         sa["fontSize"] = font_px
 
+        # Увеличиваем ноду пропорционально если даже min_font_px не вписался
+        if needs_grow:
+            need_h = _estimate_render_height(raw_content, width_px=avail_w,
+                                             font_px=font_px, line_height=lh)
+            if need_h > avail_h and avail_h > 0:
+                grow = need_h / avail_h          # коэффициент роста
+                node["width"]  = base_w  * grow
+                node["height"] = base_h  * grow
+
+        # ---- Цвет текста ----
+        # Если в HTML есть span с background-color — контент из Miro, сохраняем как есть
+        # (цвет текста и фон спанов не трогаем, тема игнорируется).
+        # Иначе — обычная логика с учётом темы.
+        has_span_bgcolor = bool(SPAN_BGCOLOR_RE.search(raw_content)) if _is_html(raw_content) else False
+
         style_color = ((item.get("style") or {}).get("color") or "").strip()
-        inline_color = _extract_inline_color(raw_content) if _is_html(raw_content) else None
-
-        # Решаем итоговую стратегию:
-        #  - если есть inline color → он главный
-        #  - иначе берём style.color (кроме особого «микро-чёрного» в тёмной теме)
-        #  - иначе без цвета (наследуем тему)
-        wrapper_extra_color: Optional[str] = None
         content_html = raw_content
+        wrapper_extra_color: Optional[str] = None
 
-        if _is_html(raw_content):
+        if has_span_bgcolor:
+            # Цветное выделение есть — передаём HTML как есть, цвет не подменяем
+            pass
+        elif _is_html(raw_content):
+            inline_color = _extract_inline_color(raw_content)
             if inline_color and theme.lower() == "dark" and _is_miro_black_color(inline_color):
-                # В тёмной теме чёрный → наследовать (убираем color: из инлайна)
                 content_html = _strip_inline_black_color(raw_content)
-                # Если хочешь вместо наследования всегда ставить белый:
-                # wrapper_extra_color = "#FFFFFF"
             elif not inline_color and style_color:
-                # инлайна нет — прокинем style.color в обёртку,
-                # но в тёмной теме НЕ прокидываем «микро-чёрный»
                 if not (theme.lower() == "dark" and _is_miro_black_color(style_color)):
                     wrapper_extra_color = style_color
         else:
-            # plain text: применяем style.color, но уважая тёмную тему + «микро-чёрный»
+            # plain text
             if style_color and not (theme.lower() == "dark" and _is_miro_black_color(style_color)):
                 wrapper_extra_color = style_color
-            # если тёмная тема и style.color — «микро-чёрный», ничего не ставим → наследуем светлый по теме
 
         # Собираем HTML-обёртку
         if _is_html(content_html):
@@ -1097,14 +1141,6 @@ def convert_item_to_canvas_node(
             if wrapper_extra_color:
                 style_bits.append(f"color:{wrapper_extra_color}")
             node["text"] = f'<span style="{"; ".join(style_bits)}">{safe}</span>'
-
-        # оценка высоты для контроля
-        need_h = _estimate_render_height(raw_content, width_px=base_w, font_px=font_px, line_height=lh)
-
-        if not is_sticky and need_h > node["height"]:
-            # TEXT и SHAPE растягиваем по высоте если текст не вмещается
-            node["height"] = need_h
-        # для стикера высоту не увеличиваем — кегль уже подогнан под бокс автофитом
 
         return node
 
