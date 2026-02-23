@@ -1263,6 +1263,100 @@ def convert_item_to_canvas_node(
                 node["width"], node["height"] = w * k, h * k
         return node
 
+    # ---------- CARD → ТЕКСТОВАЯ НОДА С ЦВЕТОМ ----------
+    if item_type == "card":
+        data = item.get("data") or {}
+        style = item.get("style") or {}
+
+        title_html   = (data.get("title")       or "").strip()
+        desc_html    = (data.get("description") or "").strip()
+        due_raw      = (data.get("dueDate")     or "").strip()
+        assignee_id  = (data.get("assigneeId")  or "").strip()
+        card_color   = (style.get("cardTheme")  or "").strip()
+
+        # Форматируем дату из ISO → читаемый вид
+        due_str = ""
+        if due_raw:
+            try:
+                import datetime
+                dt = datetime.datetime.fromisoformat(due_raw.replace("Z", "+00:00"))
+                due_str = dt.strftime("%d.%m.%Y")
+            except Exception:
+                due_str = due_raw[:10]  # просто первые 10 символов
+
+        # Собираем HTML карточки
+        parts: list[str] = []
+        if title_html:
+            # заголовок — оборачиваем в <strong> если не содержит своих тегов
+            if not _is_html(title_html):
+                parts.append(f"<p><strong>{_html_escape(title_html, False)}</strong></p>")
+            else:
+                parts.append(f"<div><strong>{title_html}</strong></div>")
+        if desc_html:
+            parts.append(desc_html if _is_html(desc_html) else f"<p>{_html_escape(desc_html, False)}</p>")
+        meta: list[str] = []
+        if due_str:
+            meta.append(f"📅 {due_str}")
+        if assignee_id:
+            meta.append(f"👤 {assignee_id}")
+        if meta:
+            parts.append(f'<p style="color:#888888">{"  ·  ".join(meta)}</p>')
+
+        content_html = "".join(parts) or "<p></p>"
+
+        base_font_px = _extract_font_base_px(item, fallback=OBSIDIAN_FONT_SIZE)
+        lh = _extract_line_height(style, default=1.35)
+        font_px = compute_font_px(scale, int(base_font_px), min_font_px)
+
+        node = {**base, "type": "text", "text": ""}
+        node.setdefault("styleAttributes", {}).update({
+            "shape": "round-rectangle",
+            "fontSize": font_px,
+        })
+        if card_color:
+            node["styleAttributes"]["backgroundColor"] = card_color
+
+        node["text"] = f'<div style="font-size:{font_px}px; line-height:{lh}">{content_html}</div>'
+
+        # подгоняем высоту под контент
+        need_h = _estimate_render_height(content_html, width_px=base_w, font_px=font_px, line_height=lh)
+        if need_h > base_h:
+            node["height"] = need_h
+
+        return node
+
+    # ---------- EMBED → FILE (превью) или TEXT (ссылка) ----------
+    if item_type == "embed":
+        data = item.get("data") or {}
+        local_name = item.get("local_name") or ""
+        url        = (data.get("url")          or "").strip()
+        title      = (data.get("title")        or "").strip()
+        provider   = (data.get("providerName") or "").strip()
+
+        if local_name:
+            # Скачанное превью → нода-картинка
+            abs_path = os.path.join(new_files_folder, local_name)
+            rel = relpath_from_vault(abs_path, vault_root)
+            node = {**base, "type": "file", "file": rel}
+            return node
+        else:
+            # Превью нет → текстовая ссылка
+            label = title or url
+            provider_str = f" ({provider})" if provider else ""
+            if url:
+                link_html = f'<p><a href="{url}">{_html_escape(label, False)}{_html_escape(provider_str, False)}</a></p>'
+            else:
+                link_html = f'<p>{_html_escape(label, False)}{_html_escape(provider_str, False)}</p>'
+
+            base_font_px = _extract_font_base_px(item, fallback=OBSIDIAN_FONT_SIZE)
+            lh = _extract_line_height(item.get("style") or {}, default=1.35)
+            font_px = compute_font_px(scale, int(base_font_px), min_font_px)
+
+            node = {**base, "type": "text", "text": ""}
+            node.setdefault("styleAttributes", {})["fontSize"] = font_px
+            node["text"] = f'<div style="font-size:{font_px}px; line-height:{lh}">{link_html}</div>'
+            return node
+
     # ----------  TAG → TEXT-МЕТКА ----------
 
 

@@ -19,6 +19,7 @@ from urllib.parse import urlsplit
 from miro_downloader import (
     get_items_on_board,
     download_all,
+    download_resource_with_redirect,
     apply_strategy,
     add_browser_links,
     write_json,
@@ -181,7 +182,12 @@ def run_download(
     images     = [x for x in items if x["type"] == "image"]
     documents  = [x for x in items if x["type"] == "document"]
     doc_formats = [x for x in items if x["type"] == "doc_format"]
-    all_items  = images + documents + doc_formats
+    # embed: скачиваем previewUrl, если есть
+    embeds_with_preview = [
+        x for x in items
+        if x["type"] == "embed" and (x.get("data") or {}).get("previewUrl")
+    ]
+    all_items  = images + documents + doc_formats + embeds_with_preview
 
     # ------------------------------------------------------------------
     # 3. Желаемые пути → проверка конфликтов → стратегия
@@ -193,6 +199,9 @@ def run_download(
     for it in documents + doc_formats:
         wanted_paths.append(attachments_dir / compute_target_filename(
             it, safe_team, safe_board, rename_files, is_image=False))
+    for it in embeds_with_preview:
+        wanted_paths.append(attachments_dir / compute_target_filename(
+            it, safe_team, safe_board, rename_files, is_image=True))
 
     future_files = [json_path] + wanted_paths
     conflicts = collect_conflicts(future_files)
@@ -230,7 +239,7 @@ def run_download(
     log(
         f"Начинаю скачивание {len(all_items)} файлов "
         f"(изображения: {len(images)}, документы: {len(documents)}, "
-        f"встроенные: {len(doc_formats)})..."
+        f"встроенные: {len(doc_formats)}, embed-превью: {len(embeds_with_preview)})..."
     )
     on_prepare_rows(id_to_final, all_items)
 
@@ -299,6 +308,30 @@ def run_download(
             inline_image_id_map=image_id_map,
             on_file_fail=on_file_fail,
         )
+
+    # ------------------------------------------------------------------
+    # Phase 4: EMBED PREVIEWS
+    # ------------------------------------------------------------------
+    if embeds_with_preview:
+        log(f"Группа: embed-превью, файлов: {len(embeds_with_preview)}")
+        offset += len(doc_formats)
+        _start, _done, _progress = _phase_callbacks(offset)
+        for idx, it in enumerate(embeds_with_preview):
+            item_id = it["id"]
+            preview_url = (it.get("data") or {}).get("previewUrl", "")
+            final_path = id_to_final[item_id]
+            fp = _start(item_id, final_path.name)
+
+            got_path = download_resource_with_redirect(
+                preview_url, final_path, token,
+                overwrite_when_guessing_ext=(strategy == "overwrite"),
+            )
+            if got_path:
+                it["local_name"] = got_path.name
+                _done(item_id)
+            else:
+                on_file_fail(item_id, "embed preview: скачивание не удалось")
+            _progress(idx + 1, len(embeds_with_preview))
 
     # ------------------------------------------------------------------
     # 7. Сохраняем JSON
