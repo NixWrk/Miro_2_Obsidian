@@ -17,19 +17,48 @@ class ViewProfile:
     min_node_h: int = 40      # минимальная высота узла в Canvas, px
     min_font_px: int = 8      # минимальный кегль текста после масштабирования
 
+# Типы, исключаемые из расчёта mnw/mnh (и bbox).
+# Категория 1: Read ❌ в Miro REST API — контент недоступен, в canvas не попадают.
+# Категория 2: есть в JSON, но не несут смысловой нагрузки в итоговом canvas.
+_SCALE_EXCLUDE_TYPES: frozenset[str] = frozenset({
+    # Категория 1: Read ❌ в Miro REST API
+    "comment",    # только Enterprise Board Export API
+    "emoji",      # Read ❌
+    "kanban",     # Read ❌
+    "mindmap",    # Read ❌
+    "stroke",     # Read ❌
+    "svg",        # Read ❌
+    "grid",       # Read ❌
+    "usm",        # Read ❌
+    "webscreen",  # Read ❌
+    "wireframe",  # Read ❌
+    # Категория 2: есть в JSON, не несут смысловой нагрузки в canvas
+    "board",        # метаданные доски, не визуальный элемент
+    "board_member", # участник доски, не контент
+    "preview",      # превью-иконка доски, Read ❌, в canvas не идёт
+    "table_text",   # внутренние ячейки таблицы (beta widget) — в canvas не идут как ноды
+})
+
 # ===== Базовая аналитика по доске =====
 def analyze_board_from_items(items: Iterable[Dict[str, Any]]) -> Dict[str, float]:
     """
-    Аналитика по НОДАМ (без коннекторов):
+    Аналитика по НОДАМ (без коннекторов и служебных типов):
       - bbox (ширина/высота)
       - минимальный W/H узла
+
+    Из расчёта mnw/mnh исключаются типы из _SCALE_EXCLUDE_TYPES —
+    элементы, недоступные через Miro REST API (Read ❌) или не несущие
+    смысловой нагрузки в итоговом canvas-файле.
     """
     minx = miny = inf
     maxx = maxy = -inf
     mnw = mnh = inf
 
     for it in items:
-        if (it.get("type") or "").lower() == "connector":
+        itype = (it.get("type") or "").lower()
+        if itype == "connector":
+            continue
+        if itype in _SCALE_EXCLUDE_TYPES:
             continue
         pos, geom = it.get("position", {}) or {}, it.get("geometry", {}) or {}
         try:
