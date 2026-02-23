@@ -108,6 +108,11 @@ LI_RE = re.compile(r"<li\b", re.I)
 PCT_RE = re.compile(r"^\s*([+-]?\d+(?:\.\d+)?)\s*%\s*$")
 COLOR_PROP_RE   = re.compile(r"(color\s*:\s*)(#[0-9a-fA-F]{3,8}|rgb\s*\(\s*\d+\s*,\s*\d+\s*,\s*\d+\s*\))", re.I)
 SPAN_BGCOLOR_RE = re.compile(r"<span\b[^>]*background-color\s*:", re.I)  # span с background-color
+# Матчит открывающий тег span или strong с атрибутом style
+_HIGHLIGHT_TAG_RE = re.compile(
+    r'(<(?:span|strong)\b[^>]*\bstyle\s*=\s*"([^"]*)"[^>]*>)',
+    re.I,
+)
 
 # =========================
 # Small utilities
@@ -162,6 +167,55 @@ def _strip_inline_black_color(html: str) -> str:
         prefix, val = m.group(1), m.group(2)
         return "" if _is_miro_black_color(val) else m.group(0)
     return COLOR_PROP_RE.sub(_repl, html or "")
+
+def _contrast_color(r: int, g: int, b: int) -> str:
+    """Возвращает '#000000' или '#ffffff' — контрастный цвет по W3C relative luminance."""
+    def _lin(c: int) -> float:
+        s = c / 255.0
+        return s / 12.92 if s <= 0.04045 else ((s + 0.055) / 1.055) ** 2.4
+    lum = 0.2126 * _lin(r) + 0.7152 * _lin(g) + 0.0722 * _lin(b)
+    return "#000000" if lum > 0.179 else "#ffffff"
+
+
+def _inject_contrast_color_on_bgcolor_spans(html: str) -> str:
+    """
+    Для каждого <span> и <strong> с background-color в style, но без color —
+    дописывает контрастный color в атрибут style.
+    Срабатывает только при наличии background-color (highlight/маркер).
+    """
+    _RGB_RE = re.compile(r"background-color\s*:\s*rgb\s*\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\)", re.I)
+    _HEX_RE = re.compile(r"background-color\s*:\s*(#[0-9a-fA-F]{3,8})", re.I)
+    _HAS_COLOR_RE = re.compile(r"(?<![a-z-])color\s*:", re.I)  # есть color (не background-color)
+
+    def _repl(m: re.Match) -> str:
+        full_tag, style_val = m.group(1), m.group(2)
+        # Только если есть background-color
+        has_bg = bool(_RGB_RE.search(style_val) or _HEX_RE.search(style_val))
+        if not has_bg:
+            return full_tag
+        # Уже есть color — не трогаем
+        if _HAS_COLOR_RE.search(style_val):
+            return full_tag
+        # Определяем контрастный цвет
+        rgb_m = _RGB_RE.search(style_val)
+        if rgb_m:
+            r, g, b = int(rgb_m.group(1)), int(rgb_m.group(2)), int(rgb_m.group(3))
+        else:
+            hex_m = _HEX_RE.search(style_val)
+            if not hex_m:
+                return full_tag
+            h = _norm_hex(hex_m.group(1))
+            try:
+                r = int(h[1:3], 16); g = int(h[3:5], 16); b = int(h[5:7], 16)
+            except Exception:
+                return full_tag
+        contrast = _contrast_color(r, g, b)
+        # Вставляем color в конец style="..."
+        new_style = style_val.rstrip(";") + f"; color:{contrast}"
+        return full_tag.replace(f'style="{style_val}"', f'style="{new_style}"', 1)
+
+    return _HIGHLIGHT_TAG_RE.sub(_repl, html)
+
 
 def posix_path(p: str) -> str:
     return p.replace("\\", "/")
@@ -1118,9 +1172,11 @@ def convert_item_to_canvas_node(
             # Есть выделение (background-color на span/strong).
             # style.color из Miro — это цвет «по умолчанию» для всего блока,
             # но он конфликтует с тёмной темой для невыделенного текста.
-            # Не ставим wrapper color вообще — пусть невыделенный текст наследует тему,
-            # а выделенные span'ы сами задают свой фон и цвет.
+            # Не ставим wrapper color — невыделенный текст наследует тему Obsidian.
+            # Для каждого span/strong с background-color без явного color —
+            # добавляем контрастный цвет (#000 или #fff) по W3C luminance.
             wrapper_extra_color = None
+            content_html = _inject_contrast_color_on_bgcolor_spans(raw_content)
         elif _is_html(raw_content):
             inline_color = _extract_inline_color(raw_content)
             if inline_color and theme.lower() == "dark" and _is_miro_black_color(inline_color):
