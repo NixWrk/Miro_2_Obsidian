@@ -1,4 +1,4 @@
-﻿# Jsone_2_Canvas.py
+# Jsone_2_Canvas.py
 from typing import Dict, Any, Iterable, List
 
 import customtkinter as ctk
@@ -12,7 +12,8 @@ from Converter import convert_miro_to_canvas, find_vault_roots_upwards, OBSIDIAN
 from Scale_engine import (
     ViewProfile,
     compute_scale_preview,
-    recompute_from_font,
+    recompute_from_font_max,
+    recompute_from_font_min,
     recompute_from_min_node_width,
     preview_values,
 )
@@ -51,7 +52,9 @@ class App(ctk.CTk):
         self.profile = ViewProfile()            # 1920x1080, min_zoom=0.12, min_node 60x40, min_font 8px
         self.scale_ctx = None                   # контекст метрик доски
         self.scale_value = 1.0                  # текущий S
-        self.min_font_value = self.profile.min_font_px  # floor (минимальный кегль)
+        # диапазон кеглей (показывается пользователю, пересчитываются из ctx × S)
+        self.font_max_value = self.profile.min_font_px
+        self.font_min_value = self.profile.min_font_px
 
         # --- Quantization for Scale ---
         self.S_SHOW_DECIMALS  = 1   # показываем 0.1
@@ -59,18 +62,20 @@ class App(ctk.CTk):
 
         # --- UX flags: commit-only и защита от рекурсий ---
         self._updating = False
-        self._editing_scale = False
-        self._editing_font  = False
-        self._editing_minw  = False
+        self._editing_scale     = False
+        self._editing_font_max  = False
+        self._editing_font_min  = False
+        self._editing_minw      = False
 
         # "последние зафиксированные" значения (для стабильного сравнения)
         self._last_scale_value = self.scale_value
         self._last_minw_value  = None  # появится после первого расчёта
 
         # снапшоты значений на FocusIn (чтобы не коммитить без реального ввода)
-        self._scale_at_focus: str | None = None
-        self._font_at_focus:  str | None = None
-        self._minw_at_focus:  str | None = None
+        self._scale_at_focus:     str | None = None
+        self._font_max_at_focus:  str | None = None
+        self._font_min_at_focus:  str | None = None
+        self._minw_at_focus:      str | None = None
 
         # Режим вычислений: False = оптимум по кнопке; True = ручной режим без fit
         self._user_mode = False
@@ -104,17 +109,17 @@ class App(ctk.CTk):
         self.scale_frame = ctk.CTkFrame(self)
         self.scale_frame.grid(row=4, column=0, columnspan=3, padx=pad_x, pady=(8, 6), sticky="we")
 
-        for c in range(6):
+        for c in range(8):
             self.scale_frame.grid_columnconfigure(c, weight=0)
-        self.scale_frame.grid_columnconfigure(5, weight=1)  # под будущий превью-виджет
+        self.scale_frame.grid_columnconfigure(7, weight=1)
 
         ctk.CTkLabel(
             self.scale_frame,
             text="— Масштаб и превью —",
             font=ctk.CTkFont(size=16, weight="bold")
-        ).grid(row=0, column=0, columnspan=6, padx=8, pady=(6, 6), sticky="w")
+        ).grid(row=0, column=0, columnspan=8, padx=8, pady=(6, 6), sticky="w")
 
-        # Row 4.1: Кнопка, Scale, Кегль (целевой)
+        # Row 4.1: Кнопка, Scale, Кегль max, Кегль min
         self.btn_recommend = ctk.CTkButton(
             self.scale_frame, text="Рассчитать масштаб (FHD)",
             width=180, command=self.on_recommend_scale
@@ -130,14 +135,23 @@ class App(ctk.CTk):
         self.scale_entry.bind("<Return>",   self._enter_scale)
         self.scale_entry.bind("<KP_Enter>", self._enter_scale)
 
-        ctk.CTkLabel(self.scale_frame, text="Кегль (px):").grid(row=1, column=3, padx=(8, 6), pady=4, sticky="e")
-        self.minfont_entry = ctk.CTkEntry(self.scale_frame, width=80)
-        self.minfont_entry.grid(row=1, column=4, padx=(0, 8), pady=4, sticky="w")
-        self.minfont_entry.insert(0, str(self.min_font_value))  # будет заменён расчётным
-        self.minfont_entry.bind("<FocusIn>",  lambda e: self._set_editing('font', True))
-        self.minfont_entry.bind("<FocusOut>", lambda e: self._commit_font_edit())
-        self.minfont_entry.bind("<Return>",   self._enter_font)
-        self.minfont_entry.bind("<KP_Enter>", self._enter_font)
+        ctk.CTkLabel(self.scale_frame, text="Кегль max:").grid(row=1, column=3, padx=(8, 6), pady=4, sticky="e")
+        self.font_max_entry = ctk.CTkEntry(self.scale_frame, width=70)
+        self.font_max_entry.grid(row=1, column=4, padx=(0, 8), pady=4, sticky="w")
+        self.font_max_entry.insert(0, str(self.font_max_value))
+        self.font_max_entry.bind("<FocusIn>",  lambda e: self._set_editing('font_max', True))
+        self.font_max_entry.bind("<FocusOut>", lambda e: self._commit_font_max_edit())
+        self.font_max_entry.bind("<Return>",   self._enter_font_max)
+        self.font_max_entry.bind("<KP_Enter>", self._enter_font_max)
+
+        ctk.CTkLabel(self.scale_frame, text="min:").grid(row=1, column=5, padx=(4, 6), pady=4, sticky="e")
+        self.font_min_entry = ctk.CTkEntry(self.scale_frame, width=70)
+        self.font_min_entry.grid(row=1, column=6, padx=(0, 8), pady=4, sticky="w")
+        self.font_min_entry.insert(0, str(self.font_min_value))
+        self.font_min_entry.bind("<FocusIn>",  lambda e: self._set_editing('font_min', True))
+        self.font_min_entry.bind("<FocusOut>", lambda e: self._commit_font_min_edit())
+        self.font_min_entry.bind("<Return>",   self._enter_font_min)
+        self.font_min_entry.bind("<KP_Enter>", self._enter_font_min)
 
         # Row 4.2: Минимальный объект W×H
         ctk.CTkLabel(self.scale_frame, text="Мин. объект (W×H px):")\
@@ -157,7 +171,7 @@ class App(ctk.CTk):
         self.minh_entry.grid(row=2, column=4, padx=(4, 8), pady=(0, 6), sticky="w")
         self.minh_entry.configure(state="disabled")  # H нередактируемое
 
-        # Блокируем Enter на кнопке рекомендаций (чтобы фокус на ней не срабатывал от Enter)
+        # Блокируем Enter на кнопке рекомендаций
         self.btn_recommend.bind("<Return>",   lambda e: "break")
         self.btn_recommend.bind("<KP_Enter>", lambda e: "break")
 
@@ -270,8 +284,10 @@ class App(ctk.CTk):
             if not self._editing_minw:
                 self._set_entry_value(self.minw_entry, str(prev['Wmin']))
             self._set_entry_disabled(self.minh_entry, str(prev['Hmin']))
-            if not self._editing_font:
-                self._set_entry_value(self.minfont_entry, str(prev['font_px']))
+            if not self._editing_font_max:
+                self._set_entry_value(self.font_max_entry, str(prev['font_max_px']))
+            if not self._editing_font_min:
+                self._set_entry_value(self.font_min_entry, str(prev['font_min_px']))
         finally:
             self._updating = False
 
@@ -281,9 +297,12 @@ class App(ctk.CTk):
         if which == 'scale':
             self._editing_scale = val
             if val: self._scale_at_focus = (self.scale_entry.get() or "").strip()
-        elif which == 'font':
-            self._editing_font = val
-            if val: self._font_at_focus = (self.minfont_entry.get() or "").strip()
+        elif which == 'font_max':
+            self._editing_font_max = val
+            if val: self._font_max_at_focus = (self.font_max_entry.get() or "").strip()
+        elif which == 'font_min':
+            self._editing_font_min = val
+            if val: self._font_min_at_focus = (self.font_min_entry.get() or "").strip()
         elif which == 'minw':
             self._editing_minw = val
             if val: self._minw_at_focus = (self.minw_entry.get() or "").strip()
@@ -297,14 +316,23 @@ class App(ctk.CTk):
         self._editing_scale = False; self._scale_at_focus = None
         self.on_scale_changed()
 
-    def _commit_font_edit(self):
-        cur = (self.minfont_entry.get() or "").strip()
-        if self._font_at_focus is not None and cur == self._font_at_focus:
-            self._editing_font = False; self._font_at_focus = None
+    def _commit_font_max_edit(self):
+        cur = (self.font_max_entry.get() or "").strip()
+        if self._font_max_at_focus is not None and cur == self._font_max_at_focus:
+            self._editing_font_max = False; self._font_max_at_focus = None
             return
         self._user_mode = True
-        self._editing_font = False; self._font_at_focus = None
-        self.on_min_font_changed()
+        self._editing_font_max = False; self._font_max_at_focus = None
+        self.on_font_max_changed()
+
+    def _commit_font_min_edit(self):
+        cur = (self.font_min_entry.get() or "").strip()
+        if self._font_min_at_focus is not None and cur == self._font_min_at_focus:
+            self._editing_font_min = False; self._font_min_at_focus = None
+            return
+        self._user_mode = True
+        self._editing_font_min = False; self._font_min_at_focus = None
+        self.on_font_min_changed()
 
     def _commit_minw_edit(self):
         cur = (self.minw_entry.get() or "").strip()
@@ -320,8 +348,12 @@ class App(ctk.CTk):
         self._commit_scale_edit()
         return "break"
 
-    def _enter_font(self, e):
-        self._commit_font_edit()
+    def _enter_font_max(self, e):
+        self._commit_font_max_edit()
+        return "break"
+
+    def _enter_font_min(self, e):
+        self._commit_font_min_edit()
         return "break"
 
     def _enter_minw(self, e):
@@ -347,16 +379,18 @@ class App(ctk.CTk):
 
             # Квантизуем и применяем S
             self.scale_value = self._qS_store(float(info["scale"]))
-            # floor не трогаем (оставляем profile.min_font_px)
-            self.min_font_value = int(self.profile.min_font_px)
 
-            # Превью уже с квантизованным S
-            prev = preview_values(self.scale_value, self.scale_ctx, OBSIDIAN_FONT_SIZE, self.min_font_value)
+            # Превью с квантизованным S
+            prev = preview_values(self.scale_value, self.scale_ctx, OBSIDIAN_FONT_SIZE, self.profile.min_font_px)
+            self.font_max_value = prev["font_max_px"]
+            self.font_min_value = prev["font_min_px"]
+
             self._set_entries_from_preview({
-                "scale": self.scale_value,
-                "Wmin":  prev["Wmin"],
-                "Hmin":  prev["Hmin"],
-                "font_px": prev["font_px"],
+                "scale":       self.scale_value,
+                "Wmin":        prev["Wmin"],
+                "Hmin":        prev["Hmin"],
+                "font_max_px": prev["font_max_px"],
+                "font_min_px": prev["font_min_px"],
             })
 
             # синхронизация «последних»
@@ -367,17 +401,27 @@ class App(ctk.CTk):
         except Exception as e:
             messagebox.showerror("Ошибка расчёта масштаба", str(e))
 
-    # --- Font snap helper: подобрать S так, чтобы round(base_px * S) == desired_font_px ---
-    def _snap_S_for_font(self, desired_font_px: int, base_px: int = OBSIDIAN_FONT_SIZE) -> float:
-        b = max(1, int(base_px))
-        d = max(1, int(desired_font_px))
-        # интервал S, при котором round(b*S) == d  →  S ∈ [(d-0.5)/b, (d+0.5)/b)
-        lo = (d - 0.5) / b
-        hi = (d + 0.5) / b
-        center = (lo + hi) / 2.0
-        return self._qS_store(center)   # квантизуем для внутреннего хранения
-
     # --- Manual edits (commit-on-change) ---
+
+    def _apply_scale(self, S: float, status_msg: str = ""):
+        """Применяет новый S: сохраняет, пересчитывает превью, обновляет UI."""
+        self.scale_value       = self._qS_store(S)
+        self._last_scale_value = self.scale_value
+        if self.scale_ctx:
+            prev = preview_values(self.scale_value, self.scale_ctx, OBSIDIAN_FONT_SIZE, self.profile.min_font_px)
+        else:
+            font_max_miro = float(self.scale_ctx.get("font_max_miro", OBSIDIAN_FONT_SIZE)) if self.scale_ctx else OBSIDIAN_FONT_SIZE
+            font_min_miro = float(self.scale_ctx.get("font_min_miro", OBSIDIAN_FONT_SIZE)) if self.scale_ctx else OBSIDIAN_FONT_SIZE
+            prev = {
+                "scale":       self.scale_value,
+                "Wmin":        0,
+                "Hmin":        0,
+                "font_max_px": max(self.profile.min_font_px, int(round(font_max_miro * S))),
+                "font_min_px": max(self.profile.min_font_px, int(round(font_min_miro * S))),
+            }
+        self._set_entries_from_preview(prev)
+        if status_msg:
+            self.status.configure(text=status_msg)
 
     def on_scale_changed(self):
         if self._updating: return
@@ -385,77 +429,57 @@ class App(ctk.CTk):
         val = self._parse_float(raw, self.scale_value)
         if val is None: return
         if self._sameS_ui(val, self._last_scale_value): return
+        self._apply_scale(val)
 
-        self.scale_value       = self._qS_store(val)
-        self._last_scale_value = self.scale_value
+    def on_font_max_changed(self):
+        if self._updating: return
+        desired = self._parse_int(self.font_max_entry.get(), None)
+        if desired is None: return
+        desired = max(1, desired)
 
         if not self.scale_ctx:
-            prev = {
-                "scale":   self.scale_value,
-                "Wmin":    0,
-                "Hmin":    0,
-                "font_px": max(self.min_font_value, int(round(OBSIDIAN_FONT_SIZE * self.scale_value))),
-            }
-        else:
-            prev = preview_values(self.scale_value, self.scale_ctx, OBSIDIAN_FONT_SIZE, self.min_font_value)
-
-        self._set_entries_from_preview(prev)
-
-    def on_min_font_changed(self):
-        if self._updating:
+            # нет контекста — простой snap
+            font_max_miro = float(OBSIDIAN_FONT_SIZE)
+            S = self._qS_store(desired / font_max_miro)
+            self._apply_scale(S, f"Кегль max → S≈{self._qS_show(S):.1f}")
             return
 
-        raw = self.minfont_entry.get()
-        desired = self._parse_int(raw, None)  # целевой кегль
-        if desired is None:
-            return
-        desired = max(1, int(desired))
-
-        # floor НЕ меняем
-        if not self.scale_ctx:
-            S = self._snap_S_for_font(desired, OBSIDIAN_FONT_SIZE)
-            self.scale_value       = S
-            self._last_scale_value = S
-            prev = {
-                "scale":   S,
-                "Wmin":    0,
-                "Hmin":    0,
-                "font_px": max(self.min_font_value, int(round(OBSIDIAN_FONT_SIZE * S))),
-            }
-            self._set_entries_from_preview(prev)
-            self.status.configure(text=f"Кегль → S≈{self._qS_show(S):.1f}")
-            return
-
-        # контекст есть → считаем барьер узла
-        try:
-            mnw = float(self.scale_ctx.get("mnw", 0.0) or 0.0)
-            mnh = float(self.scale_ctx.get("mnh", 0.0) or 0.0)
-        except Exception:
-            mnw = mnh = 0.0
-
-        s_node = max(self.profile.min_node_w / mnw, self.profile.min_node_h / mnh) if (mnw > 0 and mnh > 0) else 0.0
-        s_snap = self._snap_S_for_font(desired, OBSIDIAN_FONT_SIZE)
-
+        S_raw = recompute_from_font_max(desired, self.scale_ctx, self.profile)
         if self._user_mode:
-            S = max(s_snap, s_node)  # без fit
-        else:
-            s_fit = float(self.scale_ctx.get("scale_fit", 0.0) or 0.0)
-            S = max(s_snap, s_node, s_fit)
+            # без fit-барьера
+            from Scale_engine import compute_scale_min_node, OBSIDIAN_FONT_SIZE as _BFP
+            font_max_miro = max(1.0, self.scale_ctx.get("font_max_miro", float(_BFP)))
+            s_font = desired / font_max_miro
+            s_node = compute_scale_min_node(self.scale_ctx["mnw"], self.scale_ctx["mnh"], self.profile)
+            S_raw = max(s_font, s_node)
 
-        self.scale_value       = self._qS_store(S)
-        self._last_scale_value = self.scale_value
+        S = self._qS_store(S_raw)
+        msg = f"Кегль max → S≈{self._qS_show(S):.1f}"
+        self._apply_scale(S, msg)
 
-        prev = preview_values(self.scale_value, self.scale_ctx, OBSIDIAN_FONT_SIZE, self.min_font_value)
-        self._set_entries_from_preview(prev)
+    def on_font_min_changed(self):
+        if self._updating: return
+        desired = self._parse_int(self.font_min_entry.get(), None)
+        if desired is None: return
+        desired = max(1, desired)
 
-        # Подсказка в статус: показуем причину клампа (если был)
-        msg = f"Кегль → S≈{self._qS_show(S):.1f}"
-        if S > s_snap + 1e-9:          # подняли масштаб из-за барьера
-            if S <= s_node + 1e-3 or self._user_mode:
-                msg += f" (ограничение: min node, Snode≈{self._qS_show(s_node):.1f})"
-            else:
-                msg += f" (fit≈{self._qS_show(self.scale_ctx.get('scale_fit', 0.0) or 0.0):.1f})"
-        self.status.configure(text=msg)
+        if not self.scale_ctx:
+            font_min_miro = float(OBSIDIAN_FONT_SIZE)
+            S = self._qS_store(desired / font_min_miro)
+            self._apply_scale(S, f"Кегль min → S≈{self._qS_show(S):.1f}")
+            return
+
+        S_raw = recompute_from_font_min(desired, self.scale_ctx, self.profile)
+        if self._user_mode:
+            from Scale_engine import compute_scale_min_node, OBSIDIAN_FONT_SIZE as _BFP
+            font_min_miro = max(1.0, self.scale_ctx.get("font_min_miro", float(_BFP)))
+            s_font = desired / font_min_miro
+            s_node = compute_scale_min_node(self.scale_ctx["mnw"], self.scale_ctx["mnh"], self.profile)
+            S_raw = max(s_font, s_node)
+
+        S = self._qS_store(S_raw)
+        msg = f"Кегль min → S≈{self._qS_show(S):.1f}"
+        self._apply_scale(S, msg)
 
     def on_min_node_w_changed(self):
         if self._updating: return
@@ -475,18 +499,11 @@ class App(ctk.CTk):
         if mnw <= 0: return
 
         if self._user_mode:
-            S = Wt / mnw                  # БЕЗ fit / БЕЗ кеглевого барьера
+            S = Wt / mnw
         else:
-            s_fit  = float(self.scale_ctx.get("scale_fit", 0.0) or 0.0)
-            s_node = Wt / mnw
-            s_font = self.profile.min_font_px / max(1, OBSIDIAN_FONT_SIZE)
-            S = max(s_fit, s_node, s_font)
+            S = recompute_from_min_node_width(float(Wt), self.scale_ctx, self.profile)
 
-        self.scale_value       = self._qS_store(S)
-        self._last_scale_value = self.scale_value
-
-        prev = preview_values(self.scale_value, self.scale_ctx, OBSIDIAN_FONT_SIZE, self.min_font_value)
-        self._set_entries_from_preview(prev)
+        self._apply_scale(S)
 
     def on_convert(self):
         # валидация входа
@@ -512,7 +529,7 @@ class App(ctk.CTk):
                 delete_json=self.delete_json_var.get(),
                 delete_src_files=self.delete_src_var.get(),
                 scale=self.scale_value,
-                min_font_px=self.min_font_value,
+                min_font_px=self.profile.min_font_px,
                 theme=theme_value,
             )
             self.status.configure(text=f"Готово: {canvas_path}")

@@ -5,7 +5,10 @@ from dataclasses import dataclass
 from math import inf
 from typing import Any, Dict, Iterable, Tuple
 
-from Converter import iter_objects
+from Converter import iter_objects, _extract_font_base_px, OBSIDIAN_FONT_SIZE
+
+# Типы элементов, у которых есть шрифт
+_FONT_TYPES: frozenset[str] = frozenset({"text", "shape", "sticky_note"})
 
 # ===== Профиль целевого экрана/ограничений =====
 @dataclass
@@ -53,6 +56,7 @@ def analyze_board_from_items(items: Iterable[Dict[str, Any]]) -> Dict[str, float
     minx = miny = inf
     maxx = maxy = -inf
     mnw = mnh = inf
+    font_min = font_max = None  # реальные кегли из доски (Miro px)
 
     for it in items:
         itype = (it.get("type") or "").lower()
@@ -83,15 +87,27 @@ def analyze_board_from_items(items: Iterable[Dict[str, Any]]) -> Dict[str, float
         if w < mnw: mnw = w
         if h < mnh: mnh = h
 
+        # Собираем диапазон кеглей по text/shape/sticky_note
+        if itype in _FONT_TYPES:
+            fp = _extract_font_base_px(it, fallback=OBSIDIAN_FONT_SIZE)
+            if font_min is None or fp < font_min:
+                font_min = fp
+            if font_max is None or fp > font_max:
+                font_max = fp
+
     if minx is inf:
-        return {"bbox_w": 0.0, "bbox_h": 0.0, "mnw": 0.0, "mnh": 0.0}
+        return {"bbox_w": 0.0, "bbox_h": 0.0, "mnw": 0.0, "mnh": 0.0,
+                "font_min_miro": float(OBSIDIAN_FONT_SIZE), "font_max_miro": float(OBSIDIAN_FONT_SIZE)}
 
     bbox_w = max(1.0, maxx - minx)
     bbox_h = max(1.0, maxy - miny)
     if mnw is inf: mnw = 0.0
     if mnh is inf: mnh = 0.0
+    if font_min is None: font_min = float(OBSIDIAN_FONT_SIZE)
+    if font_max is None: font_max = float(OBSIDIAN_FONT_SIZE)
 
-    return {"bbox_w": bbox_w, "bbox_h": bbox_h, "mnw": mnw, "mnh": mnh}
+    return {"bbox_w": bbox_w, "bbox_h": bbox_h, "mnw": mnw, "mnh": mnh,
+            "font_min_miro": font_min, "font_max_miro": font_max}
 
 def analyze_board(miro_root: Any) -> Dict[str, float]:
     return analyze_board_from_items(iter_objects(miro_root))
@@ -126,27 +142,40 @@ def pick_recommended_scale(miro_root: Any, profile: ViewProfile, base_font_px: i
     return S, ctx
 
 # ===== Превью и взаимные пересчёты =====
-def preview_values(scale: float, ctx: Dict[str, float], base_font_px: int, min_font_threshold: int) -> Dict[str, int]:
+def preview_values(scale: float, ctx: Dict[str, float], base_font_px: int, min_font_threshold: int) -> Dict[str, Any]:
     mnw = ctx.get("mnw", 0.0)
     mnh = ctx.get("mnh", 0.0)
-    Wmin = int(round(mnw * scale)) if mnw > 0 else 0
-    Hmin = int(round(mnh * scale)) if mnh > 0 else 0
-    font_px = max(min_font_threshold, int(round(base_font_px * scale)))
-    return {"scale": scale, "Wmin": Wmin, "Hmin": Hmin, "font_px": font_px}
+    font_min_miro = ctx.get("font_min_miro", float(base_font_px))
+    font_max_miro = ctx.get("font_max_miro", float(base_font_px))
+    Wmin  = int(round(mnw * scale)) if mnw > 0 else 0
+    Hmin  = int(round(mnh * scale)) if mnh > 0 else 0
+    font_max_px = max(min_font_threshold, int(round(font_max_miro * scale)))
+    font_min_px = max(min_font_threshold, int(round(font_min_miro * scale)))
+    return {"scale": scale, "Wmin": Wmin, "Hmin": Hmin,
+            "font_max_px": font_max_px, "font_min_px": font_min_px}
 
-def recompute_from_font(font_target: int, ctx: Dict[str, float], base_font_px: int, profile: ViewProfile) -> float:
-    s_font = font_target / max(1, base_font_px)
+def recompute_from_font_max(font_target: int, ctx: Dict[str, float], profile: ViewProfile) -> float:
+    font_max_miro = max(1.0, ctx.get("font_max_miro", float(OBSIDIAN_FONT_SIZE)))
+    s_font = font_target / font_max_miro
     s_node = compute_scale_min_node(ctx["mnw"], ctx["mnh"], profile)
     return max(ctx["scale_fit"], s_node, s_font)
 
-def recompute_from_min_node_width(Wtarget: float, ctx: Dict[str, float], profile: ViewProfile, base_font_px: int) -> float:
-    s_node = Wtarget / max(0.0001, ctx["mnw"])
-    s_font = compute_scale_min_font(base_font_px, profile)
+def recompute_from_font_min(font_target: int, ctx: Dict[str, float], profile: ViewProfile) -> float:
+    font_min_miro = max(1.0, ctx.get("font_min_miro", float(OBSIDIAN_FONT_SIZE)))
+    s_font = font_target / font_min_miro
+    s_node = compute_scale_min_node(ctx["mnw"], ctx["mnh"], profile)
     return max(ctx["scale_fit"], s_node, s_font)
 
-def recompute_from_min_node_height(Htarget: float, ctx: Dict[str, float], profile: ViewProfile, base_font_px: int) -> float:
+def recompute_from_min_node_width(Wtarget: float, ctx: Dict[str, float], profile: ViewProfile) -> float:
+    s_node = Wtarget / max(0.0001, ctx["mnw"])
+    font_max_miro = max(1.0, ctx.get("font_max_miro", float(OBSIDIAN_FONT_SIZE)))
+    s_font = profile.min_font_px / font_max_miro
+    return max(ctx["scale_fit"], s_node, s_font)
+
+def recompute_from_min_node_height(Htarget: float, ctx: Dict[str, float], profile: ViewProfile) -> float:
     s_node = Htarget / max(0.0001, ctx["mnh"])
-    s_font = compute_scale_min_font(base_font_px, profile)
+    font_max_miro = max(1.0, ctx.get("font_max_miro", float(OBSIDIAN_FONT_SIZE)))
+    s_font = profile.min_font_px / font_max_miro
     return max(ctx["scale_fit"], s_node, s_font)
 
 # ===== Сервис для GUI (чтобы быстро получить превью из JSON-файла) =====
