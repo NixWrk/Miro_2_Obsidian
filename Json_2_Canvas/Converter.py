@@ -989,7 +989,6 @@ def convert_item_to_canvas_node(
         sa["border"] = map_node_border(item.get("style") or {})
 
         is_sticky = (item_type == "sticky_note")
-        is_shape  = (item_type == "shape")  # NEW: фигуры подгоняем как стикеры
 
         if item_type == "sticky_note":
             fill = (item.get("style") or {}).get("fillColor")
@@ -1028,7 +1027,7 @@ def convert_item_to_canvas_node(
         raw_node_px = int(base_font_px * scale)
         start_px = max(min_font_px, raw_node_px)
 
-        if is_sticky or is_shape:
+        if is_sticky:
             # Вписываем текст внутрь бокса: полезная область
             avail_w = max(1.0, base_w - 2 * STICKY_TEXT_PADDING)
             avail_h = max(1.0, base_h - 2 * STICKY_TEXT_PADDING)
