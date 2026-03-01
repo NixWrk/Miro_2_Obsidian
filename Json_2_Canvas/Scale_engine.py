@@ -36,11 +36,41 @@ _SCALE_EXCLUDE_TYPES: frozenset[str] = frozenset({
     "webscreen",  # Read ❌
     "wireframe",  # Read ❌
     # Категория 2: есть в JSON, не несут смысловой нагрузки в canvas
-    "board",        # метаданные доски, не визуальный элемент
-    "board_member", # участник доски, не контент
-    "preview",      # превью-иконка доски, Read ❌, в canvas не идёт
-    "table_text",   # внутренние ячейки таблицы (beta widget) — в canvas не идут как ноды
+    "board",           # метаданные доски, не визуальный элемент
+    "board_member",    # участник доски, не контент
+    "preview",         # превью-иконка доски, Read ❌, в canvas не идёт
+    "table_text",      # внутренние ячейки таблицы (beta widget)
+    "slide_container", # слайды — нет geometry/ordering в JSON, в canvas не идут
 })
+
+
+def _filter_slide_descendants(items: list[Dict[str, Any]]) -> list[Dict[str, Any]]:
+    """Исключает все потомки slide_container (рекурсивно)."""
+    deck_ids = {
+        str(it.get("id", ""))
+        for it in items
+        if (it.get("type") or "").lower() == "slide_container"
+    }
+    if not deck_ids:
+        return items
+
+    id_to_parent: Dict[str, str] = {}
+    for it in items:
+        par = it.get("parent") or {}
+        pid = str(par.get("id") or "") if isinstance(par, dict) else ""
+        if pid:
+            id_to_parent[str(it.get("id", ""))] = pid
+
+    descendants: set = set()
+    queue = list(deck_ids)
+    while queue:
+        pid = queue.pop()
+        for iid, par_id in id_to_parent.items():
+            if par_id == pid and iid not in descendants:
+                descendants.add(iid)
+                queue.append(iid)
+
+    return [it for it in items if str(it.get("id", "")) not in descendants]
 
 # ===== Базовая аналитика по доске =====
 def analyze_board_from_items(items: Iterable[Dict[str, Any]]) -> Dict[str, float]:
@@ -49,10 +79,11 @@ def analyze_board_from_items(items: Iterable[Dict[str, Any]]) -> Dict[str, float
       - bbox (ширина/высота)
       - минимальный W/H узла
 
-    Из расчёта mnw/mnh исключаются типы из _SCALE_EXCLUDE_TYPES —
-    элементы, недоступные через Miro REST API (Read ❌) или не несущие
-    смысловой нагрузки в итоговом canvas-файле.
+    Из расчёта исключаются:
+      - типы из _SCALE_EXCLUDE_TYPES (Read ❌ или не несут нагрузки в canvas)
+      - все потомки slide_container (слайды и их содержимое)
     """
+    items = _filter_slide_descendants(list(items))
     minx = miny = inf
     maxx = maxy = -inf
     mnw = mnh = inf
