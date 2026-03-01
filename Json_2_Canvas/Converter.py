@@ -1265,9 +1265,9 @@ def convert_item_to_canvas_node(
             solo_url = _extract_solo_url(raw_content)
             if solo_url:
                 solo_url = _html_unescape(solo_url)
-                # Фиксированный размер: 560×315 (16:9) × scale
-                _lw = max(round(560 * scale), 560)
-                _lh = max(round(315 * scale), 315)
+                # Ширина = miro_width × scale, высота = 16:9, минимум 560×315
+                _lw = max(base["width"], 560)
+                _lh = max(round(_lw * 9 / 16), 315)
                 link_node = {
                     "id":     base["id"],
                     "type":   "link",
@@ -1405,9 +1405,10 @@ def convert_item_to_canvas_node(
         title      = (data.get("title")        or "").strip()
         provider   = (data.get("providerName") or "").strip()
 
-        # Единый размер для всех type:link нод: 560×315 (16:9) × scale
-        content_w = max(round(560 * scale), 560)
-        content_h = max(round(315 * scale), 315)
+        # Ширина = miro_width × scale (уже в base["width"]), высота = 16:9
+        # Минимум 560×315
+        content_w = max(base["width"], 560)
+        content_h = max(round(content_w * 9 / 16), 315)
 
         # Допустимые расширения изображений для embed-превью
         _EMBED_IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".svg"}
