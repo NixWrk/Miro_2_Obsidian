@@ -1598,6 +1598,90 @@ def _is_slide_frame(
     return False
 
 
+def _resolve_relative_positions_to_canvas_center(by_id: Dict[str, Any]) -> None:
+    """
+    In-place разрешение позиций parent_top_left / parent_center для узлов,
+    чей родитель НЕ является стандартным контейнером (frame/group/diagram/slide_container).
+    Обрабатывает деревья mindmap_node, ячейки таблиц (table_text) и любые будущие типы.
+
+    Модифицирует item["position"] напрямую — поскольку by_id хранит те же объекты dict,
+    что и all_items, изменения видны везде.
+    """
+    def abs_center(
+        item_id: str,
+        _stack: frozenset = frozenset(),
+    ) -> Optional[tuple]:
+        """Возвращает (cx, cy) абсолютного центра узла в координатах canvas_center."""
+        if item_id in _stack:
+            return None  # защита от циклических ссылок
+        item = by_id.get(item_id)
+        if not item:
+            return None
+
+        pos    = item.get("position") or {}
+        rel    = str(pos.get("relativeTo") or "canvas_center").lower()
+        x      = float(pos.get("x") or 0.0)
+        y      = float(pos.get("y") or 0.0)
+        origin = str(pos.get("origin") or "center").lower()
+        geom   = item.get("geometry") or {}
+        w      = float(geom.get("width") or 0.0)
+        h      = float(geom.get("height") or 0.0)
+
+        if rel == "canvas_center":
+            cx = x if origin == "center" else x + w / 2.0
+            cy = y if origin == "center" else y + h / 2.0
+            return cx, cy
+
+        par_id = str((item.get("parent") or {}).get("id") or "")
+        if not par_id:
+            return x, y  # нет родителя — считаем позицию абсолютной
+
+        par_pos = abs_center(par_id, _stack | {item_id})
+        if par_pos is None:
+            return x, y  # не удалось разрешить → fallback
+
+        par_item = by_id.get(par_id)
+        p_geom   = (par_item.get("geometry") or {}) if par_item else {}
+        p_w      = float(p_geom.get("width") or 0.0)
+        p_h      = float(p_geom.get("height") or 0.0)
+        p_cx, p_cy   = par_pos
+        p_tl_x = p_cx - p_w / 2.0
+        p_tl_y = p_cy - p_h / 2.0
+
+        base_x = p_tl_x if rel == "parent_top_left" else p_cx
+        base_y = p_tl_y if rel == "parent_top_left" else p_cy
+
+        cx = base_x + x if origin == "center" else base_x + x + w / 2.0
+        cy = base_y + y if origin == "center" else base_y + y + h / 2.0
+        return cx, cy
+
+    for item in by_id.values():
+        pos = item.get("position") or {}
+        rel = str(pos.get("relativeTo") or "canvas_center").lower()
+        if rel not in ("parent_top_left", "parent_center"):
+            continue
+
+        par_id   = str((item.get("parent") or {}).get("id") or "")
+        par_item = by_id.get(par_id)
+        par_type = str((par_item.get("type") or "") if par_item else "").lower()
+
+        # Стандартные контейнеры обрабатывает _normalize_child_pos_to_canvas — не трогаем
+        if par_type in CONTAINER_TYPES:
+            continue
+
+        result = abs_center(str(item.get("id") or ""))
+        if result is None:
+            continue
+
+        item["position"] = dict(pos)
+        item["position"].update({
+            "x": result[0],
+            "y": result[1],
+            "relativeTo": "canvas_center",
+            "origin": "center",
+        })
+
+
 def convert_miro_to_canvas(
     json_path: str,
     target_dir: str,
@@ -1661,6 +1745,10 @@ def convert_miro_to_canvas(
             pid = str(par.get("id"))
             children.setdefault(pid, []).append(iid)
 
+
+    # --- разрешение parent_top_left/parent_center для не-контейнерных родителей
+    # (mindmap_node, table_text и пр.) — до всех дальнейших вычислений позиций
+    _resolve_relative_positions_to_canvas_center(by_id)
 
     # --- нормализация rect вложенных фреймов (relativeTo: parent_top_left/parent_center)
     # Фреймы-слайды внутри slide_container имеют position.relativeTo="parent_top_left",
