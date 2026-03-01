@@ -1405,10 +1405,15 @@ def convert_item_to_canvas_node(
         title      = (data.get("title")        or "").strip()
         provider   = (data.get("providerName") or "").strip()
 
-        # Фиксированный размер для всех type:link нод: 560×315 (16:9) × scale
-        LINK_BASE_W, LINK_BASE_H = 560, 315
-        content_w = max(round(LINK_BASE_W * scale), LINK_BASE_W)
-        content_h = max(round(LINK_BASE_H * scale), LINK_BASE_H)
+        # Размер ноды: из iframe если реальный (> 100px), иначе 560×315
+        _LINK_FALLBACK_W, _LINK_FALLBACK_H = 560, 315
+        iframe_size = _extract_iframe_size(data.get("html") or "")
+        if iframe_size and iframe_size[0] > 100 and iframe_size[1] > 100:
+            content_w = max(round(iframe_size[0] * scale), _LINK_FALLBACK_W)
+            content_h = max(round(iframe_size[1] * scale), _LINK_FALLBACK_H)
+        else:
+            content_w = max(round(_LINK_FALLBACK_W * scale), _LINK_FALLBACK_W)
+            content_h = max(round(_LINK_FALLBACK_H * scale), _LINK_FALLBACK_H)
 
         # Допустимые расширения изображений для embed-превью
         _EMBED_IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".svg"}
