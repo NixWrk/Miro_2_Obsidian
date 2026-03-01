@@ -1457,8 +1457,31 @@ def convert_item_to_canvas_node(
             node["height"] = need_h
         return node
 
-    # прочие типы пропускаем
-    return None
+    # ---------- UNSUPPORTED → ЗАГЛУШКА ----------
+    # Мета-элементы без контента на доске — молча дропаем
+    _META_TYPES = {"board", "board_member"}
+    if item_type in _META_TYPES:
+        return None
+
+    # Если нет geometry — нет позиции на доске, дропаем
+    if not item.get("geometry"):
+        return None
+
+    # Есть geometry → создаём текстовую заглушку с указанием типа
+    label = item_type.replace("_", " ")
+    title = (item.get("data") or {}).get("title", "")
+    title_part = f": {_html_escape(title, False)}" if title else ""
+    placeholder_html = (
+        f'<p><em>[{label}{title_part}]</em></p>'
+        f'<p style="font-size:0.8em; opacity:0.6;">Тип не поддерживается API Miro</p>'
+    )
+    node = {**base, "type": "text", "text": ""}
+    node.setdefault("styleAttributes", {})["fontSize"] = min_font_px
+    node["text"] = (
+        f'<div style="font-size:{min_font_px}px; line-height:1.4">'
+        f'{placeholder_html}</div>'
+    )
+    return node
 
 def convert_item_to_edge(item: Dict[str, Any], theme: str = "light") -> Optional[Dict[str, Any]]:
     if (item.get("type") or "").lower() != "connector":
