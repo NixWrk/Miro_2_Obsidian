@@ -1744,11 +1744,36 @@ def convert_miro_to_canvas(
                 seen.add(fid)
 
 
+    # --- собираем все ID потомков slide_container (рекурсивно)
+    def _collect_descendants(root_ids: set, id_to_parent_id: Dict[str, str]) -> set:
+        result: set = set()
+        queue = list(root_ids)
+        while queue:
+            pid = queue.pop()
+            for iid, par_id in id_to_parent_id.items():
+                if par_id == pid and iid not in result:
+                    result.add(iid)
+                    queue.append(iid)
+        return result
+
+    _id_to_parent_id: Dict[str, str] = {}
+    for it in all_items:
+        par = it.get("parent") or {}
+        pid = str(par.get("id") or "") if isinstance(par, dict) else ""
+        if pid:
+            _id_to_parent_id[str(it.get("id", ""))] = pid
+
+    slide_descendant_ids = _collect_descendants(deck_ids, _id_to_parent_id)
+
     # --- второй проход: сначала обычные узлы/рёбра (кроме контейнеров)
     node_map: Dict[str, Dict[str, Any]] = {}
     for item in all_items:
         t = (item.get("type") or "").lower()
         if t in CONTAINER_TYPES:  # {"group", "frame", "diagram"}
+            continue
+
+        # пропускаем все потомки slide_container (слайды и их содержимое)
+        if str(item.get("id", "")) in slide_descendant_ids:
             continue
 
         # 1) Нормализация по реальному родителю-контейнеру (frame/diagram)
