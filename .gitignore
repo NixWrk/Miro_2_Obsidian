@@ -32,3 +32,6 @@ tmp_src.txt
 
 # Canvas test outputs (в web_test)
 *_TEST.canvas
+
+# Claude Code local settings
+.claude/
