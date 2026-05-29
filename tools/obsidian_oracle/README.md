@@ -64,6 +64,13 @@ python tools\obsidian_oracle\check_environment.py --strict-runtime
 python tools\obsidian_oracle\init_local_vault.py --plugin-source "<local-test-data>\.obsidian\plugins"
 ```
 
+Если существующего vault нет, runtime можно скачать из GitHub release:
+
+```powershell
+python tools\obsidian_oracle\install_plugin_runtime.py advanced-canvas
+python tools\obsidian_oracle\check_environment.py --strict-runtime
+```
+
 Сконвертировать fixture и положить `.canvas` в oracle-папку vault:
 
 ```powershell
