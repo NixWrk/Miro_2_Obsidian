@@ -1,0 +1,9 @@
+{
+  "vault_path": "<local-test-data>",
+  "work_folder": "MIRO2OBSIDIAN",
+  "oracle_subfolder": "_oracle",
+  "required_plugins": {
+    "advanced-canvas": "6.0.1"
+  }
+}
+

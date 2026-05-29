@@ -43,6 +43,28 @@ advanced-canvas
 
 Для oracle-проверок Advanced Canvas должен оставаться включённым. Если тест запускается на другом vault, он должен повторить это состояние или явно зафиксировать отличие.
 
+## Команды
+
+Проверить локальную oracle-среду:
+
+```powershell
+python tools\obsidian_oracle\check_environment.py
+```
+
+Сконвертировать fixture и положить `.canvas` в oracle-папку vault:
+
+```powershell
+python tools\obsidian_oracle\stage_fixture.py basic_text
+```
+
+Результат будет создан в:
+
+```text
+<local-test-data>\MIRO2OBSIDIAN\_oracle\<fixture>\
+```
+
+После staging нужно открыть полученный `.canvas` в Obsidian и сделать/сравнить screenshot с `expected.obsidian.png`.
+
 ## Правило при расхождении
 
 Если диагностический web-render и Obsidian показывают разное поведение, источником истины считается Obsidian.
