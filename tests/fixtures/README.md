@@ -7,6 +7,7 @@
 ```text
 tests/fixtures/<case_name>/
   input.miro.json
+  case.json
   expected.canvas.json
   expected.render.png
   expected.obsidian.png
@@ -15,6 +16,7 @@ tests/fixtures/<case_name>/
 
 Минимально обязательны:
 - `input.miro.json` — входной пример;
+- `case.json` — параметры конвертации и автоматизированные assertions;
 - `notes.md` — какое правило или проблему проверяет кейс.
 
 `expected.canvas.json` используется для строгих structural/semantic/geometry проверок.

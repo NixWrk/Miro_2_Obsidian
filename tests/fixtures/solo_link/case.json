@@ -1,0 +1,22 @@
+{
+  "description": "A text node containing only one URL becomes a Canvas link node.",
+  "converter": {
+    "scale": 1.0,
+    "min_font_px": 8,
+    "theme": "dark"
+  },
+  "assertions": {
+    "node_count": 1,
+    "edge_count": 0,
+    "nodes": [
+      {
+        "id": "solo-link",
+        "type": "link",
+        "url": "https://example.com/resource",
+        "width": 320,
+        "height": 180
+      }
+    ]
+  }
+}
+

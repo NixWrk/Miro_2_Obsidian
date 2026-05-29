@@ -1,0 +1,26 @@
+[
+  {
+    "id": "shape-circle",
+    "type": "shape",
+    "position": {
+      "x": 0,
+      "y": 0,
+      "origin": "center",
+      "relativeTo": "canvas_center"
+    },
+    "geometry": {
+      "width": 120,
+      "height": 120
+    },
+    "style": {
+      "fontSize": "18",
+      "fillColor": "#ffffff",
+      "color": "#1a1a1a"
+    },
+    "data": {
+      "content": "<p>Decision</p>",
+      "shape": "circle"
+    }
+  }
+]
+

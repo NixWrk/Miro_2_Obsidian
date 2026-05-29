@@ -1,0 +1,21 @@
+{
+  "description": "A Miro circle shape maps to the Canvas circle shape.",
+  "converter": {
+    "scale": 1.0,
+    "min_font_px": 8,
+    "theme": "dark"
+  },
+  "assertions": {
+    "node_count": 1,
+    "edge_count": 0,
+    "nodes": [
+      {
+        "id": "shape-circle",
+        "type": "text",
+        "shape": "circle",
+        "text_contains": "Decision"
+      }
+    ]
+  }
+}
+

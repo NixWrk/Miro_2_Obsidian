@@ -1,0 +1,20 @@
+{
+  "description": "A single Miro text item becomes one Canvas text node.",
+  "converter": {
+    "scale": 1.0,
+    "min_font_px": 8,
+    "theme": "dark"
+  },
+  "assertions": {
+    "node_count": 1,
+    "edge_count": 0,
+    "nodes": [
+      {
+        "id": "text-basic",
+        "type": "text",
+        "text_contains": "Hello from Miro"
+      }
+    ]
+  }
+}
+
