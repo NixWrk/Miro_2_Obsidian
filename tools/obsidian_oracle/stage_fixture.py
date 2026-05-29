@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import argparse
-import json
 import shutil
 import sys
 import tempfile
@@ -11,22 +10,13 @@ from typing import Any
 
 TOOL_DIR = Path(__file__).resolve().parent
 REPO_ROOT = TOOL_DIR.parents[1]
-CONFIG_PATH = TOOL_DIR / "oracle_config.json"
 FIXTURES_DIR = REPO_ROOT / "tests" / "fixtures"
 CONVERTER_DIR = REPO_ROOT / "Json_2_Canvas"
 
 sys.path.insert(0, str(CONVERTER_DIR))
 
 from Converter import convert_miro_to_canvas  # noqa: E402
-
-
-def load_json(path: Path) -> Any:
-    with path.open("r", encoding="utf-8-sig") as f:
-        return json.load(f)
-
-
-def load_config() -> dict[str, Any]:
-    return load_json(CONFIG_PATH)
+from common import load_config, load_json, vault_path
 
 
 def fixture_dir(name: str) -> Path:
@@ -42,7 +32,7 @@ def stage_fixture(name: str) -> Path:
     manifest = load_json(fixture / "case.json")
     converter_cfg = manifest.get("converter", {})
 
-    vault_root = Path(config["vault_path"])
+    vault_root = vault_path(config)
     target_dir = vault_root / config["work_folder"] / config.get("oracle_subfolder", "_oracle") / name
     target_dir.mkdir(parents=True, exist_ok=True)
 
@@ -79,4 +69,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

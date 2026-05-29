@@ -35,6 +35,7 @@ tmp_src.txt
 
 # Local render/oracle outputs
 tools/canvas_render/.out/
+_obsidian_oracle_vault/
 
 # Claude Code local settings
 .claude/

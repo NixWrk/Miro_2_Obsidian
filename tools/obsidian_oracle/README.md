@@ -19,13 +19,13 @@
 Текущий тестовый vault:
 
 ```text
-<local-test-data>
+_obsidian_oracle_vault
 ```
 
 Рабочая папка внутри vault:
 
 ```text
-<local-test-data>\MIRO2OBSIDIAN
+_obsidian_oracle_vault\MIRO2OBSIDIAN
 ```
 
 Обязательный community plugin:
@@ -35,20 +35,27 @@ advanced-canvas
 ```
 
 Проверенное состояние:
-- plugin folder: `<local-test-data>\.obsidian\plugins\advanced-canvas`;
+- plugin folder: `_obsidian_oracle_vault\.obsidian\plugins\advanced-canvas`;
 - manifest id: `advanced-canvas`;
 - manifest name: `Advanced Canvas`;
 - manifest version: `6.0.1`;
-- plugin включён в `<local-test-data>\.obsidian\community-plugins.json`.
+- plugin включён в `_obsidian_oracle_vault\.obsidian\community-plugins.json`.
 
-Для oracle-проверок Advanced Canvas должен оставаться включённым. Если тест запускается на другом vault, он должен повторить это состояние или явно зафиксировать отличие.
+Для быстрых local checks достаточно project-local vault. Для финальных Obsidian screenshots Advanced Canvas должен быть установлен настоящими plugin-файлами (`main.js`, `styles.css`), а не только включён в manifest/community plugins.
 
 ## Команды
 
 Проверить локальную oracle-среду:
 
 ```powershell
+python tools\obsidian_oracle\init_local_vault.py
 python tools\obsidian_oracle\check_environment.py
+```
+
+Если есть существующий vault с установленным Advanced Canvas, можно скопировать runtime:
+
+```powershell
+python tools\obsidian_oracle\init_local_vault.py --plugin-source "<local-test-data>\.obsidian\plugins"
 ```
 
 Сконвертировать fixture и положить `.canvas` в oracle-папку vault:
@@ -60,7 +67,7 @@ python tools\obsidian_oracle\stage_fixture.py basic_text
 Результат будет создан в:
 
 ```text
-<local-test-data>\MIRO2OBSIDIAN\_oracle\<fixture>\
+_obsidian_oracle_vault\MIRO2OBSIDIAN\_oracle\<fixture>\
 ```
 
 После staging нужно открыть полученный `.canvas` в Obsidian и сделать/сравнить screenshot с `expected.obsidian.png`.

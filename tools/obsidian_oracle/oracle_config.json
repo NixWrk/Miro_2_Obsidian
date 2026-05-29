@@ -1,9 +1,9 @@
 {
-  "vault_path": "<local-test-data>",
+  "vault_path": "${repo_root}\\_obsidian_oracle_vault",
   "work_folder": "MIRO2OBSIDIAN",
   "oracle_subfolder": "_oracle",
+  "require_plugin_runtime": false,
   "required_plugins": {
     "advanced-canvas": "6.0.1"
   }
 }
-

@@ -1,18 +1,8 @@
 from __future__ import annotations
 
 import json
-import sys
-from pathlib import Path
-from typing import Any
 
-
-TOOL_DIR = Path(__file__).resolve().parent
-CONFIG_PATH = TOOL_DIR / "oracle_config.json"
-
-
-def load_config() -> dict[str, Any]:
-    with CONFIG_PATH.open("r", encoding="utf-8") as f:
-        return json.load(f)
+from common import load_config, obsidian_dir, vault_path, work_dir
 
 
 def fail(message: str) -> None:
@@ -22,18 +12,18 @@ def fail(message: str) -> None:
 
 def main() -> int:
     config = load_config()
-    vault_path = Path(config["vault_path"])
-    work_dir = vault_path / config["work_folder"]
-    obsidian_dir = vault_path / ".obsidian"
-    plugins_file = obsidian_dir / "community-plugins.json"
-    plugins_dir = obsidian_dir / "plugins"
+    vault = vault_path(config)
+    work = work_dir(config)
+    obsidian = obsidian_dir(config)
+    plugins_file = obsidian / "community-plugins.json"
+    plugins_dir = obsidian / "plugins"
 
-    if not vault_path.exists():
-        fail(f"Vault does not exist: {vault_path}")
-    if not obsidian_dir.exists():
-        fail(f"Missing .obsidian directory: {obsidian_dir}")
-    if not work_dir.exists():
-        fail(f"Missing oracle work folder: {work_dir}")
+    if not vault.exists():
+        fail(f"Vault does not exist: {vault}")
+    if not obsidian.exists():
+        fail(f"Missing .obsidian directory: {obsidian}")
+    if not work.exists():
+        fail(f"Missing oracle work folder: {work}")
     if not plugins_file.exists():
         fail(f"Missing community plugins file: {plugins_file}")
 
@@ -58,12 +48,16 @@ def main() -> int:
             )
 
         print(f"OK: {plugin_id} {actual_version} is enabled")
+        if config.get("require_plugin_runtime", False):
+            if not (plugins_dir / plugin_id / "main.js").exists():
+                fail(f"Missing plugin runtime main.js for {plugin_id}")
+        elif not (plugins_dir / plugin_id / "main.js").exists():
+            print(f"WARN: {plugin_id} runtime main.js is not installed; final Obsidian screenshots need the real plugin")
 
-    print(f"OK: vault={vault_path}")
-    print(f"OK: work_dir={work_dir}")
+    print(f"OK: vault={vault}")
+    print(f"OK: work_dir={work}")
     return 0
 
 
 if __name__ == "__main__":
     raise SystemExit(main())
-
