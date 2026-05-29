@@ -42,6 +42,8 @@
   function setMessage(text, isError) {
     messages.textContent = text;
     messages.style.color = isError ? "#ffb4ab" : "";
+    document.body.dataset.renderStatus = isError ? "error" : "ready";
+    document.body.dataset.renderMessage = text;
   }
 
   function renderNode(node, offset) {
@@ -128,6 +130,8 @@
 
     nodeCount.textContent = String(nodes.length);
     edgeCount.textContent = String(edges.length);
+    document.body.dataset.nodeCount = String(nodes.length);
+    document.body.dataset.edgeCount = String(edges.length);
     bboxValue.textContent = `${Math.round(bbox.width)} x ${Math.round(bbox.height)}`;
     setMessage("Rendered successfully.", false);
   }
@@ -150,5 +154,31 @@
       setMessage(error instanceof Error ? error.message : String(error), true);
     }
   });
-})();
 
+  async function loadCanvasFromUrl(url) {
+    const response = await fetch(url);
+    if (!response.ok) {
+      throw new Error(`Failed to load canvas: ${response.status} ${response.statusText}`);
+    }
+    return response.json();
+  }
+
+  async function bootFromQueryParam() {
+    const params = new URLSearchParams(window.location.search);
+    const canvasUrl = params.get("canvas");
+    if (!canvasUrl) {
+      return;
+    }
+
+    try {
+      setMessage(`Loading ${canvasUrl}`, false);
+      const canvas = await loadCanvasFromUrl(canvasUrl);
+      renderCanvas(canvas);
+    } catch (error) {
+      clear();
+      setMessage(error instanceof Error ? error.message : String(error), true);
+    }
+  }
+
+  bootFromQueryParam();
+})();
