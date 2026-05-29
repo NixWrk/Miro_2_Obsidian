@@ -33,5 +33,8 @@ tmp_src.txt
 # Canvas test outputs (в web_test)
 *_TEST.canvas
 
+# Local render/oracle outputs
+tools/canvas_render/.out/
+
 # Claude Code local settings
 .claude/

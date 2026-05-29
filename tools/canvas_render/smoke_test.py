@@ -9,6 +9,8 @@ import threading
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
+from playwright.sync_api import sync_playwright
+
 
 TOOL_DIR = Path(__file__).resolve().parent
 EDGE_PATH = Path(r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe")
@@ -95,9 +97,30 @@ def run_edge(url: str, edge_path: Path) -> str:
     return result.stdout
 
 
+def run_playwright(url: str) -> str:
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        page = browser.new_page(viewport={"width": 1000, "height": 700}, device_scale_factor=1)
+        try:
+            page.goto(url)
+            page.wait_for_function(
+                "document.body.dataset.renderStatus === 'ready'",
+                timeout=5000,
+            )
+            return page.content()
+        finally:
+            browser.close()
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Headless smoke test for the diagnostic canvas renderer.")
     parser.add_argument("--edge", default=str(EDGE_PATH), help="Path to msedge.exe")
+    parser.add_argument(
+        "--browser",
+        choices=("playwright", "edge"),
+        default="playwright",
+        help="Headless browser runner to use.",
+    )
     args = parser.parse_args()
 
     with tempfile.TemporaryDirectory(prefix="canvas_render_smoke_") as tmp:
@@ -106,7 +129,7 @@ def main() -> int:
         server, port = run_server(root)
         try:
             url = f"http://127.0.0.1:{port}/index.html?canvas=/sample.canvas"
-            dom = run_edge(url, Path(args.edge))
+            dom = run_edge(url, Path(args.edge)) if args.browser == "edge" else run_playwright(url)
         finally:
             server.shutdown()
 
@@ -128,4 +151,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

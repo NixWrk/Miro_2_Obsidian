@@ -28,7 +28,27 @@ Headless smoke-test:
 python tools\canvas_render\smoke_test.py
 ```
 
-Текущая реализация является diagnostic harness: она рисует nodes/groups/edges и показывает базовую статистику. Автоматическое снятие screenshot и сравнение с baseline добавляются отдельным слоем поверх этого renderer.
+По умолчанию smoke-test использует Playwright Chromium. Для проверки системного Edge:
+
+```powershell
+python tools\canvas_render\smoke_test.py --browser edge
+```
+
+Снять screenshots для всех fixtures и обновить baselines:
+
+```powershell
+python tools\canvas_render\capture_fixture.py --all --update-baseline
+```
+
+Сравнить текущий renderer с baselines:
+
+```powershell
+python tools\canvas_render\capture_fixture.py --all
+```
+
+Actual screenshots пишутся в `tools/canvas_render/.out/`.
+
+Текущая реализация является diagnostic harness: она рисует nodes/groups/edges, показывает базовую статистику и поддерживает screenshot/baseline сравнение для fixtures.
 
 Renderer не обязан полностью повторять Obsidian. Его задача — ловить регрессии конвертера: пустой canvas, неверные координаты, схлопнутые nodes, пропавший текст, ошибки размеров и связей.
 
