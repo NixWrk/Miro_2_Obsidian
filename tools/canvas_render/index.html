@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Canvas Render Harness</title>
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <header class="toolbar">
+    <div>
+      <h1>Canvas Render Harness</h1>
+      <p>Diagnostic renderer for Obsidian Canvas JSON.</p>
+    </div>
+    <label class="file-picker">
+      <span>Open .canvas</span>
+      <input id="canvas-file" type="file" accept=".canvas,.json,application/json">
+    </label>
+  </header>
+
+  <main class="workspace">
+    <aside class="inspector">
+      <dl>
+        <dt>Nodes</dt>
+        <dd id="node-count">0</dd>
+        <dt>Edges</dt>
+        <dd id="edge-count">0</dd>
+        <dt>BBox</dt>
+        <dd id="bbox-value">-</dd>
+      </dl>
+      <div id="messages" class="messages">Choose a .canvas file to render.</div>
+    </aside>
+
+    <section class="viewport" id="viewport">
+      <div class="stage" id="stage">
+        <svg class="edges" id="edges" aria-hidden="true"></svg>
+        <div class="nodes" id="nodes"></div>
+      </div>
+    </section>
+  </main>
+
+  <script src="./render.js"></script>
+</body>
+</html>
+
