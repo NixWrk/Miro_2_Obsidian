@@ -52,6 +52,12 @@ python tools\obsidian_oracle\init_local_vault.py
 python tools\obsidian_oracle\check_environment.py
 ```
 
+Проверить, что установлен настоящий runtime плагина:
+
+```powershell
+python tools\obsidian_oracle\check_environment.py --strict-runtime
+```
+
 Если есть существующий vault с установленным Advanced Canvas, можно скопировать runtime:
 
 ```powershell
@@ -71,6 +77,26 @@ _obsidian_oracle_vault\MIRO2OBSIDIAN\_oracle\<fixture>\
 ```
 
 После staging нужно открыть полученный `.canvas` в Obsidian и сделать/сравнить screenshot с `expected.obsidian.png`.
+
+Принять уже снятый скриншот как baseline:
+
+```powershell
+python tools\obsidian_oracle\snapshot_fixture.py app_card_fields --actual path\to\screenshot.png --update-baseline
+```
+
+Сравнить уже снятый скриншот с baseline:
+
+```powershell
+python tools\obsidian_oracle\snapshot_fixture.py app_card_fields --actual path\to\screenshot.png
+```
+
+В интерактивной desktop-сессии можно staged fixture и снять весь экран:
+
+```powershell
+python tools\obsidian_oracle\snapshot_fixture.py app_card_fields --capture-screen --update-baseline
+```
+
+Actual screenshots пишутся в `tools/obsidian_oracle/.out/`.
 
 ## Правило при расхождении
 

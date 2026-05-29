@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import json
 
 from common import load_config, obsidian_dir, vault_path, work_dir
@@ -11,6 +12,14 @@ def fail(message: str) -> None:
 
 
 def main() -> int:
+    parser = argparse.ArgumentParser(description="Check the Obsidian oracle vault environment.")
+    parser.add_argument(
+        "--strict-runtime",
+        action="store_true",
+        help="Require real plugin runtime files such as main.js, not just manifests.",
+    )
+    args = parser.parse_args()
+
     config = load_config()
     vault = vault_path(config)
     work = work_dir(config)
@@ -48,7 +57,8 @@ def main() -> int:
             )
 
         print(f"OK: {plugin_id} {actual_version} is enabled")
-        if config.get("require_plugin_runtime", False):
+        require_runtime = args.strict_runtime or config.get("require_plugin_runtime", False)
+        if require_runtime:
             if not (plugins_dir / plugin_id / "main.js").exists():
                 fail(f"Missing plugin runtime main.js for {plugin_id}")
         elif not (plugins_dir / plugin_id / "main.js").exists():
