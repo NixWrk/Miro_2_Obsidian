@@ -1,0 +1,35 @@
+{
+  "description": "An app_card preserves meaningful integration fields.",
+  "converter": {
+    "scale": 1.0,
+    "min_font_px": 8,
+    "theme": "dark"
+  },
+  "assertions": {
+    "node_count": 1,
+    "edge_count": 0,
+    "nodes": [
+      {
+        "id": "app-card-1",
+        "type": "text",
+        "text_contains": "Status"
+      },
+      {
+        "id": "app-card-1",
+        "type": "text",
+        "text_contains": "In Progress"
+      },
+      {
+        "id": "app-card-1",
+        "type": "text",
+        "text_contains": "Assignee"
+      },
+      {
+        "id": "app-card-1",
+        "type": "text",
+        "text_contains": "Ada Lovelace"
+      }
+    ]
+  }
+}
+

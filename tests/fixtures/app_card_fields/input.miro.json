@@ -1,0 +1,41 @@
+[
+  {
+    "id": "app-card-1",
+    "type": "app_card",
+    "position": {
+      "x": 0,
+      "y": 0,
+      "origin": "center",
+      "relativeTo": "canvas_center"
+    },
+    "geometry": {
+      "width": 360,
+      "height": 180
+    },
+    "style": {
+      "fontSize": "16"
+    },
+    "data": {
+      "title": "Migrate board export",
+      "description": "Track conversion edge cases.",
+      "url": "https://example.com/task/123",
+      "fields": [
+        {
+          "label": "Status",
+          "value": "In Progress"
+        },
+        {
+          "label": "Assignee",
+          "value": {
+            "name": "Ada Lovelace"
+          }
+        },
+        {
+          "label": "Priority",
+          "value": "High"
+        }
+      ]
+    }
+  }
+]
+

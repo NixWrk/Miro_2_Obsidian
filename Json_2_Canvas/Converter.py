@@ -172,6 +172,83 @@ def _extract_solo_url(html_or_plain: str) -> str | None:
     return None
 
 
+def _plain_field_text(value: Any) -> str:
+    """Best-effort compact text rendering for app_card field values."""
+    if value is None:
+        return ""
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, (int, float)):
+        return str(value)
+    if isinstance(value, str):
+        return _html_unescape(HTML_TAG_RE.sub("", value)).strip()
+    if isinstance(value, list):
+        parts = [_plain_field_text(v) for v in value]
+        return ", ".join(p for p in parts if p)
+    if isinstance(value, dict):
+        for key in ("displayValue", "display_value", "text", "title", "name", "value", "url"):
+            if key in value:
+                text = _plain_field_text(value.get(key))
+                if text:
+                    return text
+
+        parts = []
+        for key, sub_value in value.items():
+            text = _plain_field_text(sub_value)
+            if text:
+                parts.append(f"{key}: {text}")
+        return "; ".join(parts)
+    return str(value).strip()
+
+
+def _format_app_card_fields(fields: Any) -> List[str]:
+    """Returns HTML paragraphs for meaningful Miro app_card data.fields entries."""
+    if not isinstance(fields, list):
+        return []
+
+    rendered: List[str] = []
+    label_keys = ("label", "name", "title", "key", "type")
+    value_keys = ("value", "displayValue", "display_value", "text", "content")
+
+    for field in fields:
+        if isinstance(field, dict):
+            label = ""
+            for key in label_keys:
+                candidate = _plain_field_text(field.get(key))
+                if candidate:
+                    label = candidate
+                    break
+
+            value = ""
+            for key in value_keys:
+                if key in field:
+                    candidate = _plain_field_text(field.get(key))
+                    if candidate:
+                        value = candidate
+                        break
+
+            if not value:
+                rest = {
+                    k: v for k, v in field.items()
+                    if k not in set(label_keys) and k not in set(value_keys)
+                }
+                value = _plain_field_text(rest)
+
+            if label and value:
+                rendered.append(
+                    f"<p><strong>{_html_escape(label, False)}:</strong> "
+                    f"{_html_escape(value, False)}</p>"
+                )
+            elif value:
+                rendered.append(f"<p>{_html_escape(value, False)}</p>")
+        else:
+            value = _plain_field_text(field)
+            if value:
+                rendered.append(f"<p>{_html_escape(value, False)}</p>")
+
+    return rendered
+
+
 # =========================
 # Small utilities
 # =========================
@@ -1291,6 +1368,8 @@ def convert_item_to_canvas_node(
             parts.append(f"<p>{_html_escape(str(data.get('title')), False)}</p>")
         if data.get("description"):
             parts.append(f"<p>{_html_escape(str(data.get('description')), False)}</p>")
+        if item_type == "app_card":
+            parts.extend(_format_app_card_fields(data.get("fields")))
         if data.get("url"):
             parts.append(f"<p>{_html_escape(str(data.get('url')), False)}</p>")
         html = "".join(parts) if parts else ""
