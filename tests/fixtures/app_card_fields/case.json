@@ -28,8 +28,12 @@
         "id": "app-card-1",
         "type": "text",
         "text_contains": "Ada Lovelace"
+      },
+      {
+        "id": "app-card-1",
+        "type": "text",
+        "min_height": 260
       }
     ]
   }
 }
-

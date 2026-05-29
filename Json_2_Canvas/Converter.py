@@ -1381,8 +1381,9 @@ def convert_item_to_canvas_node(
         node.setdefault("styleAttributes", {})["fontSize"] = font_px
         node["text"] = f'<div style="font-size:{font_px}px; line-height:{lh}">{html}</div>'
 
-        # грубая оценка высоты
-        need_h = _estimate_render_height(html or "", width_px=base_w, font_px=font_px, line_height=lh)
+        # Obsidian adds paragraph margins/padding inside text nodes; use a conservative
+        # estimate so app_card fields do not end up behind an internal scrollbar.
+        need_h = _estimate_render_height(html or "", width_px=base_w, font_px=font_px, line_height=lh, padding=72)
         if need_h > node["height"]:
             node["height"] = need_h
         return node

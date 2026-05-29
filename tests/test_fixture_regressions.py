@@ -124,6 +124,8 @@ def _assert_node(testcase: unittest.TestCase, canvas: dict[str, Any], expected: 
         testcase.assertAlmostEqual(float(node["width"]), float(expected["width"]), places=4)
     if "height" in expected:
         testcase.assertAlmostEqual(float(node["height"]), float(expected["height"]), places=4)
+    if "min_height" in expected:
+        testcase.assertGreaterEqual(float(node["height"]), float(expected["min_height"]))
     if "shape" in expected:
         testcase.assertEqual((node.get("styleAttributes") or {}).get("shape"), expected["shape"])
 
@@ -169,4 +171,3 @@ class FixtureRegressionTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-
