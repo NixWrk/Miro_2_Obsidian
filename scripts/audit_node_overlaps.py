@@ -27,6 +27,7 @@ class NodeRect:
     width: float
     height: float
     label: str = ""
+    estimated: bool = False
 
     @property
     def right(self) -> float:
@@ -110,11 +111,37 @@ def node_rect(node: dict[str, Any]) -> NodeRect | None:
     )
 
 
+def estimate_missing_text_height(item: dict[str, Any], *, width: float) -> float:
+    sys.path.insert(0, str(CONVERTER_DIR))
+    from Converter import (  # noqa: WPS433
+        OBSIDIAN_FONT_SIZE,
+        _estimate_render_height,
+        _extract_font_base_px,
+        _extract_line_height,
+        _strip_edge_empty_paragraphs,
+    )
+
+    content_html = ((item.get("data") or {}).get("content")) or (item.get("plain_text") or "")
+    content_html = _strip_edge_empty_paragraphs(content_html)
+    base_font_px = _extract_font_base_px(item, fallback=OBSIDIAN_FONT_SIZE)
+    line_height = _extract_line_height(item.get("style") or {}, default=1.35)
+    return float(
+        _estimate_render_height(
+            content_html,
+            width_px=width,
+            font_px=base_font_px,
+            line_height=line_height,
+        )
+    )
+
+
 def miro_source_rect_for_item(item: dict[str, Any], *, scale: float) -> tuple[NodeRect | None, str]:
     item_id = str(item.get("id") or "")
+    item_type = str(item.get("type") or "").lower()
     geom = item.get("geometry") if isinstance(item.get("geometry"), dict) else {}
     pos = item.get("position") if isinstance(item.get("position"), dict) else {}
     missing: list[str] = []
+    estimated = False
 
     try:
         width = float(geom.get("width"))
@@ -124,6 +151,9 @@ def miro_source_rect_for_item(item: dict[str, Any], *, scale: float) -> tuple[No
         height = float(geom.get("height"))
     except (TypeError, ValueError):
         height = 0.0
+    if height <= 0 and item_type == "text" and width > 0:
+        height = estimate_missing_text_height(item, width=width)
+        estimated = height > 0
     try:
         center_x = float(pos.get("x"))
     except (TypeError, ValueError):
@@ -151,8 +181,9 @@ def miro_source_rect_for_item(item: dict[str, Any], *, scale: float) -> tuple[No
             width=width * scale,
             height=height * scale,
             label=text_snippet(item),
+            estimated=estimated,
         ),
-        "",
+        "estimated_geometry.height" if estimated else "",
     )
 
 
@@ -321,9 +352,12 @@ def classify_source_overlap(
 
     source_w = min(left_source.right, right_source.right) - max(left_source.x, right_source.x)
     source_h = min(left_source.bottom, right_source.bottom) - max(left_source.y, right_source.y)
+    estimated = left_source.estimated or right_source.estimated
+    reason = "estimated_source_geometry" if estimated else ""
     if source_w > min_overlap_width and source_h > min_overlap_height:
-        return "source_overlap", source_w, source_h, ""
-    return "generated_overlap", max(source_w, 0.0), max(source_h, 0.0), ""
+        status = "source_estimated_overlap" if estimated else "source_overlap"
+        return status, source_w, source_h, reason
+    return "generated_overlap", max(source_w, 0.0), max(source_h, 0.0), reason
 
 
 def audit_nodes(

@@ -10,7 +10,7 @@ SCRIPTS_DIR = REPO_ROOT / "scripts"
 
 sys.path.insert(0, str(SCRIPTS_DIR))
 
-from audit_node_overlaps import NodeRect, audit_nodes  # noqa: E402
+from audit_node_overlaps import NodeRect, audit_nodes, miro_source_rect_for_item  # noqa: E402
 
 
 class NodeOverlapAuditTests(unittest.TestCase):
@@ -103,6 +103,44 @@ class NodeOverlapAuditTests(unittest.TestCase):
         self.assertEqual(overlaps[0].source_status, "generated_overlap")
         self.assertEqual(overlaps[0].source_width, 0)
         self.assertEqual(overlaps[0].source_height, 0)
+
+    def test_classifies_estimated_source_overlap(self) -> None:
+        canvas = {
+            "nodes": [
+                {"id": "a", "type": "text", "x": 0, "y": 0, "width": 100, "height": 100},
+                {"id": "b", "type": "file", "x": 50, "y": 50, "width": 100, "height": 100},
+            ],
+            "edges": [],
+        }
+        source_rects = {
+            "a": NodeRect("a", "text", 0, 0, 100, 100, estimated=True),
+            "b": NodeRect("b", "file", 75, 75, 100, 100),
+        }
+
+        overlaps = audit_nodes(canvas, source_rects=source_rects, source_missing={})
+
+        self.assertEqual(overlaps[0].source_status, "source_estimated_overlap")
+        self.assertEqual(overlaps[0].source_reason, "estimated_source_geometry")
+        self.assertEqual(overlaps[0].source_width, 25)
+        self.assertEqual(overlaps[0].source_height, 25)
+
+    def test_estimates_missing_miro_text_height(self) -> None:
+        item = {
+            "id": "text-without-height",
+            "type": "text",
+            "position": {"x": 50, "y": 50},
+            "geometry": {"width": 100},
+            "style": {"fontSize": "10"},
+            "data": {"content": "<p>Long enough text to wrap onto several lines.</p>"},
+        }
+
+        rect, reason = miro_source_rect_for_item(item, scale=1.0)
+
+        self.assertIsNotNone(rect)
+        assert rect is not None
+        self.assertTrue(rect.estimated)
+        self.assertEqual(reason, "estimated_geometry.height")
+        self.assertGreater(rect.height, 0)
 
     def test_reports_unknown_source_geometry(self) -> None:
         canvas = {
