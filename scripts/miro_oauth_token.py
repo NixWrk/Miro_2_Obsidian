@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import socket
 import threading
 import webbrowser
 from dataclasses import dataclass
@@ -75,7 +76,9 @@ def format_callback_timeout_message(config: OAuthConfig, authorize_url: str) -> 
             config.redirect_uri,
             "Then open or retry this authorization URL in the same browser session:",
             authorize_url,
-            "If localhost is blocked or resolves oddly, add http://127.0.0.1:8000/callback to the Miro app and rerun with:",
+            "If localhost is blocked or resolves oddly, register this exact additional Redirect URI in the Miro app before using it:",
+            "http://127.0.0.1:8000/callback",
+            "Then rerun with:",
             "--oauth-redirect-uri http://127.0.0.1:8000/callback",
         ]
     )
@@ -155,6 +158,22 @@ def _make_callback_handler(
     return OAuthCallbackHandler
 
 
+def callback_bind_hosts(redirect_hostname: str) -> tuple[str, ...]:
+    normalized = redirect_hostname.strip("[]").lower()
+    if normalized == "localhost":
+        return ("127.0.0.1", "::1")
+    return (redirect_hostname,)
+
+
+class IPv6ThreadingHTTPServer(ThreadingHTTPServer):
+    address_family = socket.AF_INET6
+
+
+def _make_callback_server(host: str, port: int, handler: type[BaseHTTPRequestHandler]) -> ThreadingHTTPServer:
+    server_type: type[ThreadingHTTPServer] = IPv6ThreadingHTTPServer if ":" in host else ThreadingHTTPServer
+    return server_type((host, port), handler)
+
+
 def exchange_access_token(config: OAuthConfig, code: str, *, session: Any | None = None) -> str:
     if session is None:
         import requests
@@ -198,9 +217,22 @@ def authorize_and_get_token(
     handler = _make_callback_handler(callback_path=redirect.path, result=result, event=event)
     port = redirect.port or 80
 
-    with ThreadingHTTPServer((redirect.hostname, port), handler) as server:
-        thread = threading.Thread(target=server.serve_forever, daemon=True)
-        thread.start()
+    servers: list[ThreadingHTTPServer] = []
+    for bind_host in callback_bind_hosts(redirect.hostname):
+        try:
+            servers.append(_make_callback_server(bind_host, port, handler))
+        except OSError:
+            continue
+    if not servers:
+        raise OSError(f"Could not start local OAuth callback server on port {port}")
+
+    try:
+        for server in servers:
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+
+        bind_hosts = ", ".join(callback_bind_hosts(redirect.hostname))
+        print(f"listening_on={bind_hosts}:{port}")
 
         authorize_url = build_authorize_url(config)
         print(f"authorization_url={authorize_url}")
@@ -209,10 +241,11 @@ def authorize_and_get_token(
             webbrowser.open(authorize_url)
 
         if not event.wait(timeout_seconds):
-            server.shutdown()
             raise TimeoutError(format_callback_timeout_message(config, authorize_url))
-
-        server.shutdown()
+    finally:
+        for server in servers:
+            server.shutdown()
+            server.server_close()
 
     if result.error:
         raise RuntimeError(f"Miro OAuth callback returned error: {result.error}")

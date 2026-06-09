@@ -15,6 +15,7 @@ sys.path.insert(0, str(SCRIPTS_DIR))
 from miro_oauth_token import (  # noqa: E402
     OAuthConfig,
     build_authorize_url,
+    callback_bind_hosts,
     config_from_env,
     exchange_access_token,
     exchange_manual_authorization,
@@ -60,6 +61,10 @@ class MiroOAuthTokenTests(unittest.TestCase):
         self.assertIn("redirect_uri=http%3A%2F%2Flocalhost%3A8000%2Fcallback", url)
         self.assertIn("scope=boards%3Aread+boards%3Awrite", url)
         self.assertIn("state=state-1", url)
+
+    def test_callback_bind_hosts_handles_localhost_ipv4_and_ipv6(self) -> None:
+        self.assertEqual(callback_bind_hosts("localhost"), ("127.0.0.1", "::1"))
+        self.assertEqual(callback_bind_hosts("127.0.0.1"), ("127.0.0.1",))
 
     def test_timeout_message_contains_retry_diagnostics_without_secret(self) -> None:
         config = OAuthConfig(
