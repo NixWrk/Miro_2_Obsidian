@@ -1,0 +1,48 @@
+[
+  {
+    "id": "<redacted-long-id>",
+    "type": "text",
+    "position": {
+      "x": 0,
+      "y": 0,
+      "origin": "center",
+      "relativeTo": "canvas_center"
+    },
+    "geometry": {
+      "width": 329
+    },
+    "style": {
+      "fontSize": "20",
+      "fontFamily": "noto_sans",
+      "fillOpacity": "0.0",
+      "textAlign": "left",
+      "color": "#1a1a1a"
+    },
+    "data": {
+      "content": "<p><strong>Приоритезация через метрики</strong></p>"
+    }
+  },
+  {
+    "id": "distant-neighbor",
+    "type": "text",
+    "position": {
+      "x": 0,
+      "y": 180,
+      "origin": "center",
+      "relativeTo": "canvas_center"
+    },
+    "geometry": {
+      "width": 220
+    },
+    "style": {
+      "fontSize": "18",
+      "fontFamily": "noto_sans",
+      "fillOpacity": "0.0",
+      "textAlign": "left",
+      "color": "#1a1a1a"
+    },
+    "data": {
+      "content": "<p><strong>Соседняя подпись</strong></p>"
+    }
+  }
+]

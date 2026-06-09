@@ -11,6 +11,7 @@ sys.path.insert(0, str(CONVERTER_DIR))
 from Converter import (  # noqa: E402
     _compact_short_label_html,
     _estimate_render_height,
+    _expand_short_inline_label_widths,
     _is_short_text_label,
     _resolve_short_label_visual_vertical_overlaps,
     _resolve_text_visual_horizontal_overlaps,
@@ -108,6 +109,135 @@ class TextLayoutTests(unittest.TestCase):
 
         self.assertEqual(nodes[0]["y"], -273)
         self.assertLessEqual(nodes[0]["y"] + nodes[0]["height"], nodes[1]["y"] - 16)
+
+    def test_short_inline_label_width_expands_without_visual_neighbor(self) -> None:
+        nodes = [
+            {
+                "id": "priority-label",
+                "type": "text",
+                "x": -6219,
+                "y": -853,
+                "width": 329,
+                "height": 51,
+                "text": '<div style="font-size:20px; line-height:1.35"><strong>Приоритезация через метрики</strong></div>',
+                "styleAttributes": {"border": "invisible", "fontSize": 20, "textAlign": "left"},
+            },
+            {
+                "id": "distant-label",
+                "type": "text",
+                "x": -6219,
+                "y": -700,
+                "width": 200,
+                "height": 50,
+                "text": '<span style="font-size:20px; line-height:1.35">Другая подпись</span>',
+                "styleAttributes": {"border": "invisible", "fontSize": 20},
+            },
+        ]
+
+        _expand_short_inline_label_widths(nodes)
+
+        self.assertEqual(nodes[0]["x"], -6219)
+        self.assertGreaterEqual(nodes[0]["width"], 360)
+
+    def test_very_short_label_width_is_not_expanded(self) -> None:
+        nodes = [
+            {
+                "id": "rice-label",
+                "type": "text",
+                "x": -5005,
+                "y": -273,
+                "width": 63,
+                "height": 102,
+                "text": '<span style="font-size:29px; line-height:1.35">RICE</span>',
+                "styleAttributes": {"border": "invisible", "fontSize": 29},
+            },
+            {
+                "id": "rice-image",
+                "type": "file",
+                "x": -5005,
+                "y": -155,
+                "width": 410,
+                "height": 300,
+            },
+        ]
+
+        _expand_short_inline_label_widths(nodes)
+
+        self.assertEqual(nodes[0]["width"], 63)
+
+    def test_short_label_width_does_not_expand_over_neighbor(self) -> None:
+        nodes = [
+            {
+                "id": "priority-label",
+                "type": "text",
+                "x": 0,
+                "y": -66,
+                "width": 200,
+                "height": 50,
+                "text": '<div style="font-size:20px; line-height:1.35"><strong>Приоритезация через метрики</strong></div>',
+                "styleAttributes": {"border": "invisible", "fontSize": 20, "textAlign": "left"},
+            },
+            {
+                "id": "neighbor-label",
+                "type": "text",
+                "x": 250,
+                "y": -66,
+                "width": 100,
+                "height": 50,
+                "text": '<span style="font-size:20px; line-height:1.35">Сосед</span>',
+                "styleAttributes": {"border": "invisible", "fontSize": 20},
+            },
+        ]
+
+        _expand_short_inline_label_widths(nodes)
+
+        self.assertEqual(nodes[0]["width"], 200)
+
+    def test_short_label_width_tolerates_tiny_edge_overlap(self) -> None:
+        nodes = [
+            {
+                "id": "priority-label",
+                "type": "text",
+                "x": -6219,
+                "y": -853,
+                "width": 329,
+                "height": 51,
+                "text": '<div style="font-size:20px; line-height:1.35"><strong>Приоритезация через метрики</strong></div>',
+                "styleAttributes": {"border": "invisible", "fontSize": 20, "textAlign": "left"},
+            },
+            {
+                "id": "edge-neighbor",
+                "type": "text",
+                "x": -5947,
+                "y": -1033,
+                "width": 382,
+                "height": 186,
+                "text": '<span style="font-size:20px; line-height:1.35">Сосед сверху</span>',
+                "styleAttributes": {"border": "invisible", "fontSize": 20},
+            },
+        ]
+
+        _expand_short_inline_label_widths(nodes)
+
+        self.assertGreaterEqual(nodes[0]["width"], 360)
+
+    def test_short_inline_label_width_does_not_expand_when_current_width_fits(self) -> None:
+        nodes = [
+            {
+                "id": "heading-label",
+                "type": "text",
+                "x": 0,
+                "y": 0,
+                "width": 520,
+                "height": 79,
+                "text": '<div style="font-size:40px; line-height:1.35"><strong>Приоритезация и оценка</strong></div>',
+                "styleAttributes": {"border": "invisible", "fontSize": 40, "textAlign": "left"},
+            },
+        ]
+
+        _expand_short_inline_label_widths(nodes)
+
+        self.assertEqual(nodes[0]["width"], 520)
 
 
 if __name__ == "__main__":

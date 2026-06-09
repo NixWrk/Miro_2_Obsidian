@@ -1,0 +1,35 @@
+{
+  "description": "Short inline labels without paragraph wrappers may expand to a single-line width when clear of neighboring nodes.",
+  "converter": {
+    "scale": 1.0,
+    "min_font_px": 8,
+    "theme": "dark"
+  },
+  "assertions": {
+    "node_count": 2,
+    "edge_count": 0,
+    "nodes": [
+      {
+        "id": "<redacted-long-id>",
+        "type": "text",
+        "min_width": 360,
+        "height": 51,
+        "font_size": 20,
+        "text_contains": "Приоритезация через метрики",
+        "text_not_contains": "<p"
+      },
+      {
+        "id": "distant-neighbor",
+        "type": "text",
+        "text_contains": "Соседняя подпись",
+        "text_not_contains": "<p"
+      }
+    ],
+    "non_overlapping_pairs": [
+      [
+        "<redacted-long-id>",
+        "distant-neighbor"
+      ]
+    ]
+  }
+}

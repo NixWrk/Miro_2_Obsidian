@@ -25,6 +25,11 @@ FLOW_PREFIX = "flow_chart_"
 SHORT_LABEL_RENDER_PADDING = 24
 TEXT_VISUAL_CLEARANCE_PX = 16
 MIN_TEXT_WIDTH_AFTER_CLEARANCE = 64
+SHORT_LABEL_SINGLE_LINE_PADDING = 64
+SHORT_LABEL_SINGLE_LINE_AVG_CHAR_WIDTH = 0.50
+SHORT_LABEL_WIDTH_MIN_GROW = 32
+SHORT_LABEL_WIDTH_EXPANSION_MIN_CHARS = 12
+SHORT_LABEL_WIDTH_OVERLAP_TOLERANCE = 8
 
 # Цвета стикеров Miro
 MIRO_STICKY_HEX: Dict[str, str] = {
@@ -1004,6 +1009,75 @@ def _refit_text_node_after_width_change(node: Dict[str, Any], *, min_font_px: in
     )
     if font_px != target_px:
         _set_canvas_text_font_px(node, font_px)
+
+
+def _estimate_short_label_single_line_width(html_or_text: str, font_px: int) -> int:
+    plain = _html_unescape(strip_html(html_or_text or "")).replace("\xa0", " ")
+    plain = re.sub(r"\s+", " ", plain).strip()
+    if not plain:
+        return SHORT_LABEL_SINGLE_LINE_PADDING
+    return int(round(len(plain) * font_px * SHORT_LABEL_SINGLE_LINE_AVG_CHAR_WIDTH + SHORT_LABEL_SINGLE_LINE_PADDING))
+
+
+def _candidate_rect_overlaps_any_node(
+    nodes: List[Dict[str, Any]],
+    candidate_rect: tuple[float, float, float, float],
+    *,
+    skip_id: str,
+    overlap_tolerance_px: float = SHORT_LABEL_WIDTH_OVERLAP_TOLERANCE,
+) -> bool:
+    for node in nodes:
+        if str(node.get("id", "")) == skip_id:
+            continue
+        rect = _node_rect(node)
+        if not rect:
+            continue
+        overlap_w, overlap_h = _rect_overlap(candidate_rect, rect)
+        if overlap_w > overlap_tolerance_px and overlap_h > overlap_tolerance_px:
+            return True
+    return False
+
+
+def _expand_short_inline_label_widths(
+    nodes: List[Dict[str, Any]],
+) -> None:
+    for label_node in nodes:
+        if not _is_short_clearance_label_node(label_node):
+            continue
+
+        text = str(label_node.get("text") or "")
+        plain = _html_unescape(strip_html(text)).replace("\xa0", " ")
+        plain = re.sub(r"\s+", " ", plain).strip()
+        if len(plain) < SHORT_LABEL_WIDTH_EXPANSION_MIN_CHARS:
+            continue
+
+        sa = label_node.get("styleAttributes") or {}
+        font_px = int(round(float(sa.get("fontSize") or OBSIDIAN_FONT_SIZE)))
+        need_w = _estimate_short_label_single_line_width(text, font_px)
+        label_rect = _node_rect(label_node)
+        if not label_rect:
+            continue
+
+        lx0, ly0, lx1, ly1 = label_rect
+        current_w = lx1 - lx0
+        if need_w <= current_w:
+            continue
+        need_w = max(need_w, int(round(current_w + SHORT_LABEL_WIDTH_MIN_GROW)))
+
+        text_align = str(sa.get("textAlign") or "center").lower()
+        if text_align == "left":
+            new_x = lx0
+        elif text_align == "right":
+            new_x = lx1 - need_w
+        else:
+            new_x = ((lx0 + lx1) / 2.0) - need_w / 2.0
+
+        candidate_rect = (new_x, ly0, new_x + need_w, ly1)
+        if _candidate_rect_overlaps_any_node(nodes, candidate_rect, skip_id=str(label_node.get("id", ""))):
+            continue
+
+        label_node["x"] = new_x
+        label_node["width"] = need_w
 
 
 def _resolve_text_visual_horizontal_overlaps(
@@ -2314,6 +2388,7 @@ def convert_miro_to_canvas(
 
     _resolve_text_visual_horizontal_overlaps(nodes, min_font_px=min_font_px)
     _resolve_short_label_visual_vertical_overlaps(nodes)
+    _expand_short_inline_label_widths(nodes)
 
 
     # --- третий проход: строим контейнеры (Miro group / frame / diagram) как Canvas group

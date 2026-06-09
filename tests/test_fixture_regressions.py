@@ -128,6 +128,8 @@ def _assert_node(testcase: unittest.TestCase, canvas: dict[str, Any], expected: 
         testcase.assertNotIn(expected["text_not_contains"], node.get("text", ""))
     if "width" in expected:
         testcase.assertAlmostEqual(float(node["width"]), float(expected["width"]), places=4)
+    if "min_width" in expected:
+        testcase.assertGreaterEqual(float(node["width"]), float(expected["min_width"]))
     if "height" in expected:
         testcase.assertAlmostEqual(float(node["height"]), float(expected["height"]), places=4)
     if "min_height" in expected:

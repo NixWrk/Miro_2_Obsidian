@@ -22,6 +22,7 @@
         "type": "text",
         "text_contains": "Приоритезация и оценка",
         "text_not_contains": "<p",
+        "width": 520,
         "font_size": 40,
         "min_height": 78
       }
