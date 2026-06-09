@@ -1,0 +1,20 @@
+[
+  {
+    "id": "<redacted-long-id>",
+    "type": "image",
+    "local_name": "Публичная_uXjVLargeFixture=_<redacted-long-id>.png",
+    "position": {
+      "x": 0,
+      "y": 0,
+      "origin": "center",
+      "relativeTo": "canvas_center"
+    },
+    "geometry": {
+      "width": 320,
+      "height": 180
+    },
+    "data": {
+      "imageUrl": "https://example.invalid/image.png"
+    }
+  }
+]

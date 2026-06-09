@@ -118,6 +118,10 @@ def _assert_node(testcase: unittest.TestCase, canvas: dict[str, Any], expected: 
         testcase.assertEqual(node.get("type"), expected["type"])
     if "url" in expected:
         testcase.assertEqual(node.get("url"), expected["url"])
+    if "file_contains" in expected:
+        testcase.assertIn(expected["file_contains"], node.get("file", ""))
+    if "file_not_contains" in expected:
+        testcase.assertNotIn(expected["file_not_contains"], node.get("file", ""))
     if "text_contains" in expected:
         testcase.assertIn(expected["text_contains"], node.get("text", ""))
     if "text_not_contains" in expected:

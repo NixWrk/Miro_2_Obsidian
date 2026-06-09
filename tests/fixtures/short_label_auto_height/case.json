@@ -15,14 +15,14 @@
         "text_contains": "4. Revenue / Monetisation",
         "text_not_contains": "<p><br /></p>",
         "font_size": 8,
-        "min_height": 37
+        "min_height": 45
       },
       {
         "id": "heading-label",
         "type": "text",
         "text_contains": "Приоритезация и оценка",
         "font_size": 40,
-        "min_height": 70
+        "min_height": 78
       }
     ]
   }

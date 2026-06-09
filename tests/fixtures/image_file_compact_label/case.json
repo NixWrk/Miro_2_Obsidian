@@ -1,0 +1,20 @@
+{
+  "description": "Image file nodes use compact attachment names so Obsidian's file-preview title does not dominate nearby labels.",
+  "converter": {
+    "scale": 1.0,
+    "min_font_px": 8,
+    "theme": "dark"
+  },
+  "assertions": {
+    "node_count": 1,
+    "edge_count": 0,
+    "nodes": [
+      {
+        "id": "<redacted-long-id>",
+        "type": "file",
+        "file_contains": "img_1100752501.png",
+        "file_not_contains": "Публичная_uXjVLargeFixture"
+      }
+    ]
+  }
+}

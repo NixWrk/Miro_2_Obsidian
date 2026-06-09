@@ -22,6 +22,7 @@ FRAME_LIKE_TYPES = {"frame", "diagram"}  # строим как рамку
 
 OBSIDIAN_FONT_SIZE = 18  # px
 FLOW_PREFIX = "flow_chart_"
+SHORT_LABEL_RENDER_PADDING = 24
 
 # Цвета стикеров Miro
 MIRO_STICKY_HEX: Dict[str, str] = {
@@ -507,6 +508,30 @@ def resolve_local_file_name(item: Dict[str, Any], fallback_id: str) -> str:
     data = item.get("data", {}) or {}
     name = item.get("local_name") or os.path.basename(data.get("title") or "")
     return name or f"file_{fallback_id}.bin"
+
+
+def compact_attachment_name(local_name: str, fallback_id: str, prefix: str) -> str:
+    suffix = Path(local_name or "").suffix or ".bin"
+    clean_id = re.sub(r"[^0-9A-Za-z_-]+", "", str(fallback_id)) or "file"
+    short_id = clean_id[-10:]
+    return f"{prefix}_{short_id}{suffix.lower()}"
+
+
+def prepare_compact_attachment_reference(
+    files_folder: str,
+    local_name: str,
+    fallback_id: str,
+    prefix: str,
+) -> str:
+    compact_name = compact_attachment_name(local_name, fallback_id, prefix)
+    if not local_name or local_name == compact_name:
+        return compact_name
+
+    src = os.path.join(files_folder, local_name)
+    dst = os.path.join(files_folder, compact_name)
+    if os.path.exists(src) and not os.path.exists(dst):
+        shutil.copy2(src, dst)
+    return compact_name
 
 def extract_bg_color(item: Dict[str, Any]) -> Optional[str]:
     """
@@ -1320,6 +1345,7 @@ def convert_item_to_canvas_node(
                 width_px=avail_w,
                 font_px=target_px,
                 line_height=lh,
+                padding=SHORT_LABEL_RENDER_PADDING,
             )
             if need_h > avail_h:
                 cy = float(node["y"]) + float(node["height"]) / 2.0
@@ -1458,6 +1484,13 @@ def convert_item_to_canvas_node(
             return None
 
         local_name = resolve_local_file_name(item, base["id"])
+        if item_type == "image":
+            local_name = prepare_compact_attachment_reference(
+                new_files_folder,
+                local_name,
+                base["id"],
+                "img",
+            )
         abs_path = os.path.join(new_files_folder, local_name)
         rel = relpath_from_vault(abs_path, vault_root)
         node = {**base, "type": "file", "file": rel}
@@ -1553,6 +1586,12 @@ def convert_item_to_canvas_node(
 
         if local_name_is_image:
             # Скачанное превью — реальное изображение → нода-файл
+            local_name = prepare_compact_attachment_reference(
+                new_files_folder,
+                local_name,
+                base["id"],
+                "embed",
+            )
             abs_path = os.path.join(new_files_folder, local_name)
             rel = relpath_from_vault(abs_path, vault_root)
             node = {**base, "type": "file", "file": rel}
