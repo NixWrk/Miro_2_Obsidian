@@ -1,0 +1,84 @@
+[
+  {
+    "id": "<redacted-long-id>",
+    "type": "text",
+    "position": {
+      "x": 0,
+      "y": -80,
+      "origin": "center",
+      "relativeTo": "canvas_center"
+    },
+    "geometry": {
+      "width": 63
+    },
+    "style": {
+      "fontSize": "29",
+      "fontFamily": "noto_sans",
+      "fillOpacity": "0.0",
+      "textAlign": "left",
+      "color": "#1a1a1a"
+    },
+    "data": {
+      "content": "<p>RICE</p>"
+    }
+  },
+  {
+    "id": "<redacted-long-id>",
+    "type": "image",
+    "local_name": "sample_<redacted-long-id>.png",
+    "position": {
+      "x": 0,
+      "y": 0,
+      "origin": "center",
+      "relativeTo": "canvas_center"
+    },
+    "geometry": {
+      "width": 200,
+      "height": 120
+    },
+    "data": {
+      "imageUrl": "https://example.invalid/rice.png"
+    }
+  },
+  {
+    "id": "<redacted-long-id>",
+    "type": "text",
+    "position": {
+      "x": 280,
+      "y": -70,
+      "origin": "center",
+      "relativeTo": "canvas_center"
+    },
+    "geometry": {
+      "width": 55
+    },
+    "style": {
+      "fontSize": "22",
+      "fontFamily": "noto_sans",
+      "fillOpacity": "0.0",
+      "textAlign": "left",
+      "color": "#1a1a1a"
+    },
+    "data": {
+      "content": "<p>Кано</p>"
+    }
+  },
+  {
+    "id": "<redacted-long-id>",
+    "type": "image",
+    "local_name": "sample_<redacted-long-id>.png",
+    "position": {
+      "x": 280,
+      "y": 0,
+      "origin": "center",
+      "relativeTo": "canvas_center"
+    },
+    "geometry": {
+      "width": 180,
+      "height": 120
+    },
+    "data": {
+      "imageUrl": "https://example.invalid/kano.png"
+    }
+  }
+]

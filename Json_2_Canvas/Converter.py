@@ -946,6 +946,18 @@ def _is_visual_neighbor_node(node: Dict[str, Any]) -> bool:
     return node.get("type") in ("file", "link")
 
 
+def _is_short_clearance_label_node(node: Dict[str, Any]) -> bool:
+    if not _is_clearance_text_node(node):
+        return False
+    text = node.get("text")
+    if not isinstance(text, str):
+        return False
+    if re.search(r"<(?:ol|ul|table|li)\b", text, re.I):
+        return False
+    plain = _html_unescape(strip_html(text)).replace("\xa0", " ").strip()
+    return bool(plain) and len(plain) <= 80 and "\n" not in plain
+
+
 def _line_height_from_canvas_text(text: str, default: float = 1.35) -> float:
     m = LINE_HEIGHT_STYLE_RE.search(text or "")
     if not m:
@@ -1039,6 +1051,40 @@ def _resolve_text_visual_horizontal_overlaps(
 
         if changed:
             _refit_text_node_after_width_change(text_node, min_font_px=min_font_px)
+
+
+def _resolve_short_label_visual_vertical_overlaps(
+    nodes: List[Dict[str, Any]],
+    *,
+    clearance_px: int = TEXT_VISUAL_CLEARANCE_PX,
+) -> None:
+    visuals = [n for n in nodes if _is_visual_neighbor_node(n)]
+    if not visuals:
+        return
+
+    for label_node in nodes:
+        if not _is_short_clearance_label_node(label_node):
+            continue
+
+        for visual_node in visuals:
+            label_rect = _node_rect(label_node)
+            visual_rect = _node_rect(visual_node)
+            if not label_rect or not visual_rect:
+                continue
+
+            overlap_w, overlap_h = _rect_overlap(label_rect, visual_rect)
+            if overlap_w <= 0 or overlap_h <= 0:
+                continue
+
+            _lx0, ly0, _lx1, ly1 = label_rect
+            _vx0, vy0, _vx1, vy1 = visual_rect
+            label_center_y = (ly0 + ly1) / 2.0
+            label_h = ly1 - ly0
+
+            if label_center_y < vy0:
+                label_node["y"] = vy0 - clearance_px - label_h
+            elif label_center_y > vy1:
+                label_node["y"] = vy1 + clearance_px
 
 
 # === GROUPS / FRAMES helpers ===
@@ -2267,6 +2313,7 @@ def convert_miro_to_canvas(
 
 
     _resolve_text_visual_horizontal_overlaps(nodes, min_font_px=min_font_px)
+    _resolve_short_label_visual_vertical_overlaps(nodes)
 
 
     # --- третий проход: строим контейнеры (Miro group / frame / diagram) как Canvas group

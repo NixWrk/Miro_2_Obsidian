@@ -12,6 +12,7 @@ from Converter import (  # noqa: E402
     _compact_short_label_html,
     _estimate_render_height,
     _is_short_text_label,
+    _resolve_short_label_visual_vertical_overlaps,
     _resolve_text_visual_horizontal_overlaps,
     _strip_edge_empty_paragraphs,
 )
@@ -80,6 +81,33 @@ class TextLayoutTests(unittest.TestCase):
         self.assertEqual(nodes[0]["x"], -274)
         self.assertEqual(nodes[0]["width"], 494)
         self.assertLessEqual(nodes[0]["x"] + nodes[0]["width"], nodes[1]["x"] - 16)
+
+    def test_short_label_visual_clearance_moves_label_above_neighbor(self) -> None:
+        nodes = [
+            {
+                "id": "rice-label",
+                "type": "text",
+                "x": -5005,
+                "y": -227,
+                "width": 63,
+                "height": 102,
+                "text": '<span style="font-size:29px; line-height:1.35">RICE</span>',
+                "styleAttributes": {"border": "invisible", "fontSize": 29},
+            },
+            {
+                "id": "rice-image",
+                "type": "file",
+                "x": -5005,
+                "y": -155,
+                "width": 410,
+                "height": 300,
+            },
+        ]
+
+        _resolve_short_label_visual_vertical_overlaps(nodes)
+
+        self.assertEqual(nodes[0]["y"], -273)
+        self.assertLessEqual(nodes[0]["y"] + nodes[0]["height"], nodes[1]["y"] - 16)
 
 
 if __name__ == "__main__":

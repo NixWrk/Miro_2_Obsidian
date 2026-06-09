@@ -1,0 +1,44 @@
+{
+  "description": "Short labels above images keep a vertical clearance instead of overlapping image previews.",
+  "converter": {
+    "scale": 1.0,
+    "min_font_px": 8,
+    "theme": "dark"
+  },
+  "assertions": {
+    "node_count": 4,
+    "edge_count": 0,
+    "nodes": [
+      {
+        "id": "<redacted-long-id>",
+        "type": "text",
+        "text_contains": "RICE"
+      },
+      {
+        "id": "<redacted-long-id>",
+        "type": "text",
+        "text_contains": "Кано"
+      },
+      {
+        "id": "<redacted-long-id>",
+        "type": "file",
+        "file_contains": "img_1100871516.png"
+      },
+      {
+        "id": "<redacted-long-id>",
+        "type": "file",
+        "file_contains": "img_1100871519.png"
+      }
+    ],
+    "non_overlapping_pairs": [
+      [
+        "<redacted-long-id>",
+        "<redacted-long-id>"
+      ],
+      [
+        "<redacted-long-id>",
+        "<redacted-long-id>"
+      ]
+    ]
+  }
+}
