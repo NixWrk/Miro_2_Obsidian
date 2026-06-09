@@ -1,0 +1,39 @@
+{
+  "description": "Minimum-size native link cards move away from neighboring visual nodes instead of covering them.",
+  "converter": {
+    "scale": 1.0,
+    "min_font_px": 8,
+    "theme": "dark"
+  },
+  "assertions": {
+    "node_count": 2,
+    "edge_count": 0,
+    "nodes": [
+      {
+        "id": "neighbor-image",
+        "type": "file"
+      },
+      {
+        "id": "tiny-video",
+        "type": "link",
+        "url": "https://www.youtube.com/watch?v=Example0003",
+        "min_width": 320,
+        "min_height": 180
+      }
+    ],
+    "non_overlapping_pairs": [
+      [
+        "neighbor-image",
+        "tiny-video"
+      ]
+    ],
+    "no_overlapping_nodes": [
+      {
+        "types": [
+          "file",
+          "link"
+        ]
+      }
+    ]
+  }
+}

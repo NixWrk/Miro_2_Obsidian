@@ -1,0 +1,41 @@
+[
+  {
+    "id": "neighbor-image",
+    "type": "image",
+    "local_name": "neighbor.png",
+    "position": {
+      "x": 0,
+      "y": 0,
+      "origin": "center",
+      "relativeTo": "canvas_center"
+    },
+    "geometry": {
+      "width": 480,
+      "height": 260
+    },
+    "data": {
+      "imageUrl": "https://example.invalid/image.png"
+    }
+  },
+  {
+    "id": "tiny-video",
+    "type": "embed",
+    "data": {
+      "contentType": "video",
+      "html": "<iframe width=\"854\" height=\"480\" src=\"https://www.youtube.com/embed/Example0003\"></iframe>",
+      "providerName": "YouTube",
+      "title": "Video",
+      "url": "https://www.youtube.com/watch?v=Example0003"
+    },
+    "position": {
+      "x": 210,
+      "y": -150,
+      "origin": "center",
+      "relativeTo": "canvas_center"
+    },
+    "geometry": {
+      "width": 30,
+      "height": 20
+    }
+  }
+]

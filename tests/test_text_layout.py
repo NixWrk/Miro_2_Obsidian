@@ -13,6 +13,7 @@ from Converter import (  # noqa: E402
     _estimate_render_height,
     _expand_short_inline_label_widths,
     _is_short_text_label,
+    _resolve_link_visual_overlaps,
     _resolve_short_label_visual_vertical_overlaps,
     _resolve_text_text_vertical_overlaps,
     _resolve_text_visual_horizontal_overlaps,
@@ -112,6 +113,32 @@ class TextLayoutTests(unittest.TestCase):
 
         self.assertEqual(nodes[0]["y"], -820)
         self.assertGreaterEqual(nodes[1]["y"], nodes[0]["y"] + nodes[0]["height"] + 16)
+
+    def test_link_visual_clearance_moves_link_away_from_file(self) -> None:
+        nodes = [
+            {
+                "id": "image",
+                "type": "file",
+                "x": -190,
+                "y": -2637,
+                "width": 660,
+                "height": 346,
+            },
+            {
+                "id": "video",
+                "type": "link",
+                "x": 95,
+                "y": -2647,
+                "width": 320,
+                "height": 180,
+                "url": "https://example.com/video",
+            },
+        ]
+
+        _resolve_link_visual_overlaps(nodes)
+
+        self.assertEqual(nodes[0]["x"], -190)
+        self.assertLessEqual(nodes[1]["y"] + nodes[1]["height"], nodes[0]["y"] - 16)
 
     def test_short_label_visual_clearance_moves_label_above_neighbor(self) -> None:
         nodes = [
