@@ -1,0 +1,30 @@
+from __future__ import annotations
+
+import unittest
+from pathlib import Path
+
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+EXPORTER_DIR = REPO_ROOT / "tools" / "miro_websdk_exporter"
+
+
+class MiroWebsdkExporterAssetTests(unittest.TestCase):
+    def test_exporter_calls_board_and_selection_apis(self) -> None:
+        js = (EXPORTER_DIR / "exporter.js").read_text(encoding="utf-8")
+
+        self.assertIn("miro.board.get()", js)
+        self.assertIn("miro.board.getSelection()", js)
+        self.assertIn('source_surface: "web_sdk"', js)
+        self.assertIn("function toPlain", js)
+
+    def test_index_loads_miro_sdk_and_local_exporter(self) -> None:
+        html = (EXPORTER_DIR / "index.html").read_text(encoding="utf-8")
+
+        self.assertIn("https://miro.com/app/static/sdk/v2/miro.js", html)
+        self.assertIn("./exporter.js", html)
+        self.assertIn("export-board", html)
+        self.assertIn("export-selection", html)
+
+
+if __name__ == "__main__":
+    unittest.main()
