@@ -1,0 +1,31 @@
+{
+  "description": "Transparent multiline text is narrowed when its Miro bbox slightly overlaps a neighboring visual node.",
+  "converter": {
+    "scale": 1.0,
+    "min_font_px": 8,
+    "theme": "dark"
+  },
+  "assertions": {
+    "node_count": 2,
+    "edge_count": 0,
+    "nodes": [
+      {
+        "id": "<redacted-long-id>",
+        "type": "text",
+        "width": 494,
+        "text_contains": "New feature"
+      },
+      {
+        "id": "<redacted-long-id>",
+        "type": "file",
+        "file_contains": "img_1100752497.png"
+      }
+    ],
+    "non_overlapping_pairs": [
+      [
+        "<redacted-long-id>",
+        "<redacted-long-id>"
+      ]
+    ]
+  }
+}

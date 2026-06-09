@@ -23,6 +23,8 @@ FRAME_LIKE_TYPES = {"frame", "diagram"}  # строим как рамку
 OBSIDIAN_FONT_SIZE = 18  # px
 FLOW_PREFIX = "flow_chart_"
 SHORT_LABEL_RENDER_PADDING = 24
+TEXT_VISUAL_CLEARANCE_PX = 16
+MIN_TEXT_WIDTH_AFTER_CLEARANCE = 64
 
 # Цвета стикеров Miro
 MIRO_STICKY_HEX: Dict[str, str] = {
@@ -113,6 +115,8 @@ LI_RE = re.compile(r"<li\b", re.I)
 PCT_RE = re.compile(r"^\s*([+-]?\d+(?:\.\d+)?)\s*%\s*$")
 COLOR_PROP_RE   = re.compile(r"(color\s*:\s*)(#[0-9a-fA-F]{3,8}|rgb\s*\(\s*\d+\s*,\s*\d+\s*,\s*\d+\s*\))", re.I)
 SPAN_BGCOLOR_RE = re.compile(r"<span\b[^>]*background-color\s*:", re.I)  # span с background-color
+FONT_SIZE_STYLE_RE = re.compile(r"(font-size\s*:\s*)\d+(?:\.\d+)?px", re.I)
+LINE_HEIGHT_STYLE_RE = re.compile(r"line-height\s*:\s*([0-9]+(?:\.[0-9]+)?)", re.I)
 # Матчит открывающий тег span или strong с атрибутом style
 _HIGHLIGHT_TAG_RE = re.compile(
     r'(<(?:span|strong)\b[^>]*\bstyle\s*=\s*"([^"]*)"[^>]*>)',
@@ -906,6 +910,135 @@ def _fit_font_px(
 
     # Шаг 3: даже min_font_px не влезает
     return min_font_px, True
+
+
+def _node_rect(node: Dict[str, Any]) -> Optional[tuple[float, float, float, float]]:
+    try:
+        x = float(node["x"])
+        y = float(node["y"])
+        w = float(node["width"])
+        h = float(node["height"])
+    except Exception:
+        return None
+    if w <= 0 or h <= 0:
+        return None
+    return x, y, x + w, y + h
+
+
+def _rect_overlap(a: tuple[float, float, float, float], b: tuple[float, float, float, float]) -> tuple[float, float]:
+    overlap_w = min(a[2], b[2]) - max(a[0], b[0])
+    overlap_h = min(a[3], b[3]) - max(a[1], b[1])
+    return overlap_w, overlap_h
+
+
+def _is_clearance_text_node(node: Dict[str, Any]) -> bool:
+    if node.get("type") != "text":
+        return False
+    if not isinstance(node.get("text"), str) or not node.get("text"):
+        return False
+    if node.get("color"):
+        return False
+    sa = node.get("styleAttributes") or {}
+    return sa.get("border") in (None, "invisible")
+
+
+def _is_visual_neighbor_node(node: Dict[str, Any]) -> bool:
+    return node.get("type") in ("file", "link")
+
+
+def _line_height_from_canvas_text(text: str, default: float = 1.35) -> float:
+    m = LINE_HEIGHT_STYLE_RE.search(text or "")
+    if not m:
+        return default
+    try:
+        value = float(m.group(1))
+    except Exception:
+        return default
+    return value if value > 0 else default
+
+
+def _set_canvas_text_font_px(node: Dict[str, Any], font_px: int) -> None:
+    node.setdefault("styleAttributes", {})["fontSize"] = font_px
+    text = node.get("text")
+    if isinstance(text, str):
+        node["text"] = FONT_SIZE_STYLE_RE.sub(
+            lambda m: f"{m.group(1)}{font_px}px",
+            text,
+            count=1,
+        )
+
+
+def _refit_text_node_after_width_change(node: Dict[str, Any], *, min_font_px: int) -> None:
+    text = node.get("text")
+    if not isinstance(text, str) or not text:
+        return
+
+    sa = node.get("styleAttributes") or {}
+    try:
+        target_px = int(round(float(sa.get("fontSize") or min_font_px)))
+        width = float(node["width"])
+        height = float(node["height"])
+    except Exception:
+        return
+
+    line_height = _line_height_from_canvas_text(text)
+    font_px, _needs_grow = _fit_font_px(
+        text,
+        width,
+        height,
+        target_px=target_px,
+        min_font_px=min_font_px,
+        line_height=line_height,
+    )
+    if font_px != target_px:
+        _set_canvas_text_font_px(node, font_px)
+
+
+def _resolve_text_visual_horizontal_overlaps(
+    nodes: List[Dict[str, Any]],
+    *,
+    min_font_px: int,
+    clearance_px: int = TEXT_VISUAL_CLEARANCE_PX,
+) -> None:
+    visuals = [n for n in nodes if _is_visual_neighbor_node(n)]
+    if not visuals:
+        return
+
+    for text_node in nodes:
+        if not _is_clearance_text_node(text_node):
+            continue
+
+        changed = False
+        for visual_node in visuals:
+            text_rect = _node_rect(text_node)
+            visual_rect = _node_rect(visual_node)
+            if not text_rect or not visual_rect:
+                continue
+
+            overlap_w, overlap_h = _rect_overlap(text_rect, visual_rect)
+            if overlap_w <= 0 or overlap_h <= 0:
+                continue
+
+            tx0, _ty0, tx1, _ty1 = text_rect
+            vx0, _vy0, vx1, _vy1 = visual_rect
+            text_center_x = (tx0 + tx1) / 2.0
+            visual_center_x = (vx0 + vx1) / 2.0
+
+            if text_center_x <= visual_center_x and tx0 < vx0:
+                new_width = (vx0 - clearance_px) - tx0
+                if MIN_TEXT_WIDTH_AFTER_CLEARANCE <= new_width < (tx1 - tx0):
+                    text_node["width"] = new_width
+                    changed = True
+            elif text_center_x > visual_center_x and tx1 > vx1:
+                new_left = vx1 + clearance_px
+                new_width = tx1 - new_left
+                if MIN_TEXT_WIDTH_AFTER_CLEARANCE <= new_width < (tx1 - tx0):
+                    text_node["x"] = new_left
+                    text_node["width"] = new_width
+                    changed = True
+
+        if changed:
+            _refit_text_node_after_width_change(text_node, min_font_px=min_font_px)
 
 
 # === GROUPS / FRAMES helpers ===
@@ -2132,6 +2265,8 @@ def convert_miro_to_canvas(
             if nid:
                 node_map[nid] = node
 
+
+    _resolve_text_visual_horizontal_overlaps(nodes, min_font_px=min_font_px)
 
 
     # --- третий проход: строим контейнеры (Miro group / frame / diagram) как Canvas group

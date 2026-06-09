@@ -12,6 +12,7 @@ from Converter import (  # noqa: E402
     _compact_short_label_html,
     _estimate_render_height,
     _is_short_text_label,
+    _resolve_text_visual_horizontal_overlaps,
     _strip_edge_empty_paragraphs,
 )
 
@@ -51,6 +52,34 @@ class TextLayoutTests(unittest.TestCase):
         )
 
         self.assertEqual(two - one, int(20 * 1.4))
+
+    def test_text_visual_clearance_shrinks_conflicting_edge(self) -> None:
+        nodes = [
+            {
+                "id": "wide-text",
+                "type": "text",
+                "x": -274,
+                "y": -132,
+                "width": 548,
+                "height": 264,
+                "text": '<div style="font-size:23px; line-height:1.35"><p>Long multiline text that should clear the visual neighbor.</p></div>',
+                "styleAttributes": {"border": "invisible", "fontSize": 23},
+            },
+            {
+                "id": "right-image",
+                "type": "file",
+                "x": 236,
+                "y": -197.5,
+                "width": 548,
+                "height": 395,
+            },
+        ]
+
+        _resolve_text_visual_horizontal_overlaps(nodes, min_font_px=8)
+
+        self.assertEqual(nodes[0]["x"], -274)
+        self.assertEqual(nodes[0]["width"], 494)
+        self.assertLessEqual(nodes[0]["x"] + nodes[0]["width"], nodes[1]["x"] - 16)
 
 
 if __name__ == "__main__":

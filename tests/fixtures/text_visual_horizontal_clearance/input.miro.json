@@ -1,0 +1,43 @@
+[
+  {
+    "id": "<redacted-long-id>",
+    "type": "text",
+    "position": {
+      "x": 0,
+      "y": 0,
+      "origin": "center",
+      "relativeTo": "canvas_center"
+    },
+    "geometry": {
+      "width": 548
+    },
+    "style": {
+      "fontSize": "23",
+      "fontFamily": "noto_sans",
+      "fillOpacity": "0.0",
+      "textAlign": "left",
+      "color": "#1a1a1a"
+    },
+    "data": {
+      "content": "<p><strong>New feature = which pyramid metric it affects and how close it is to the primary metric</strong></p><p><br /></p><p>The closer the new feature is to the top, the higher the chance that it brings more value.</p>"
+    }
+  },
+  {
+    "id": "<redacted-long-id>",
+    "type": "image",
+    "local_name": "sample_<redacted-long-id>.png",
+    "position": {
+      "x": 510,
+      "y": 0,
+      "origin": "center",
+      "relativeTo": "canvas_center"
+    },
+    "geometry": {
+      "width": 548,
+      "height": 395
+    },
+    "data": {
+      "imageUrl": "https://example.invalid/image.png"
+    }
+  }
+]
