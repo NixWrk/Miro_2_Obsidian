@@ -66,6 +66,21 @@ def build_authorize_url(config: OAuthConfig, *, state: str | None = None) -> str
     return f"{config.authorize_url}?{urlencode(query)}"
 
 
+def format_callback_timeout_message(config: OAuthConfig, authorize_url: str) -> str:
+    return "\n".join(
+        [
+            f"Timed out waiting for Miro OAuth callback at {config.redirect_uri}.",
+            "The authorization page did not redirect back to the local callback server.",
+            "Check that the Miro app has this exact Redirect URI for OAuth2.0:",
+            config.redirect_uri,
+            "Then open or retry this authorization URL in the same browser session:",
+            authorize_url,
+            "If localhost is blocked or resolves oddly, add http://127.0.0.1:8000/callback to the Miro app and rerun with:",
+            "--oauth-redirect-uri http://127.0.0.1:8000/callback",
+        ]
+    )
+
+
 def parse_callback_path(path: str) -> CallbackResult:
     parsed = urlparse(path)
     params = parse_qs(parsed.query)
@@ -74,6 +89,22 @@ def parse_callback_path(path: str) -> CallbackResult:
         error=(params.get("error") or [None])[0],
         state=(params.get("state") or [None])[0],
     )
+
+
+def extract_authorization_code(value: str) -> str:
+    candidate = value.strip()
+    if not candidate:
+        raise ValueError("Authorization code or callback URL is empty")
+
+    if "?" in candidate or candidate.startswith(("http://", "https://")):
+        result = parse_callback_path(candidate)
+        if result.error:
+            raise RuntimeError(f"Miro OAuth callback returned error: {result.error}")
+        if not result.code:
+            raise ValueError("Callback URL did not include a code query parameter")
+        return result.code
+
+    return candidate
 
 
 def _callback_page(result: CallbackResult) -> bytes:
@@ -172,14 +203,14 @@ def authorize_and_get_token(
         thread.start()
 
         authorize_url = build_authorize_url(config)
+        print(f"authorization_url={authorize_url}")
+        print(f"waiting_for_callback={config.redirect_uri}")
         if open_browser:
             webbrowser.open(authorize_url)
-        else:
-            print(f"authorization_url={authorize_url}")
 
         if not event.wait(timeout_seconds):
             server.shutdown()
-            raise TimeoutError("Timed out waiting for Miro OAuth callback")
+            raise TimeoutError(format_callback_timeout_message(config, authorize_url))
 
         server.shutdown()
 
@@ -190,6 +221,19 @@ def authorize_and_get_token(
     return exchange_access_token(config, result.code, session=session)
 
 
+def exchange_manual_authorization(
+    config: OAuthConfig,
+    *,
+    code: str | None = None,
+    callback_url: str | None = None,
+    session: Any | None = None,
+) -> str:
+    if bool(code) == bool(callback_url):
+        raise ValueError("Pass exactly one of code or callback_url")
+    authorization_code = extract_authorization_code(code or callback_url or "")
+    return exchange_access_token(config, authorization_code, session=session)
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run a local Miro OAuth flow and obtain an access token.")
     parser.add_argument("--client-id-env", default="MIRO_CLIENT_ID")
@@ -198,6 +242,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--scopes", default=DEFAULT_SCOPES)
     parser.add_argument("--timeout-seconds", type=int, default=DEFAULT_TIMEOUT_SECONDS)
     parser.add_argument("--no-open-browser", action="store_true")
+    parser.add_argument("--code", help="Exchange an already obtained authorization code.")
+    parser.add_argument("--callback-url", help="Exchange a copied localhost callback URL containing ?code=...")
     parser.add_argument("--print-token", action="store_true", help="Print the token to stdout. Avoid in shared logs.")
     return parser.parse_args()
 
@@ -210,11 +256,14 @@ def main() -> int:
         redirect_uri=args.redirect_uri,
         scopes=args.scopes,
     )
-    token = authorize_and_get_token(
-        config,
-        timeout_seconds=args.timeout_seconds,
-        open_browser=not args.no_open_browser,
-    )
+    if args.code or args.callback_url:
+        token = exchange_manual_authorization(config, code=args.code, callback_url=args.callback_url)
+    else:
+        token = authorize_and_get_token(
+            config,
+            timeout_seconds=args.timeout_seconds,
+            open_browser=not args.no_open_browser,
+        )
     if args.print_token:
         print(token)
     else:

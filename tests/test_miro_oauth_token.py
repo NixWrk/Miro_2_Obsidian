@@ -17,6 +17,9 @@ from miro_oauth_token import (  # noqa: E402
     build_authorize_url,
     config_from_env,
     exchange_access_token,
+    exchange_manual_authorization,
+    extract_authorization_code,
+    format_callback_timeout_message,
     parse_callback_path,
 )
 
@@ -58,6 +61,20 @@ class MiroOAuthTokenTests(unittest.TestCase):
         self.assertIn("scope=boards%3Aread+boards%3Awrite", url)
         self.assertIn("state=state-1", url)
 
+    def test_timeout_message_contains_retry_diagnostics_without_secret(self) -> None:
+        config = OAuthConfig(
+            client_id="client-1",
+            client_secret="secret-1",
+            redirect_uri="http://localhost:8000/callback",
+        )
+
+        message = format_callback_timeout_message(config, "https://miro.com/oauth/authorize?client_id=client-1")
+
+        self.assertIn("http://localhost:8000/callback", message)
+        self.assertIn("authorization URL", message)
+        self.assertIn("--oauth-redirect-uri http://127.0.0.1:8000/callback", message)
+        self.assertNotIn("secret-1", message)
+
     def test_config_from_env_requires_client_credentials(self) -> None:
         with patch.dict(os.environ, {}, clear=True):
             with self.assertRaisesRegex(ValueError, "MIRO_CLIENT_ID, MIRO_CLIENT_SECRET"):
@@ -76,6 +93,38 @@ class MiroOAuthTokenTests(unittest.TestCase):
         self.assertEqual(result.code, "code-1")
         self.assertIsNone(result.error)
         self.assertEqual(result.state, "state-1")
+
+    def test_extract_authorization_code_accepts_raw_code_or_callback_url(self) -> None:
+        self.assertEqual(extract_authorization_code("code-1"), "code-1")
+        self.assertEqual(
+            extract_authorization_code("http://localhost:8000/callback?code=code-2&state=state-1"),
+            "code-2",
+        )
+
+    def test_exchange_manual_authorization_requires_one_source(self) -> None:
+        config = OAuthConfig(client_id="client-1", client_secret="secret-1")
+
+        with self.assertRaisesRegex(ValueError, "exactly one"):
+            exchange_manual_authorization(config)
+        with self.assertRaisesRegex(ValueError, "exactly one"):
+            exchange_manual_authorization(
+                config,
+                code="code-1",
+                callback_url="http://localhost:8000/callback?code=code-2",
+            )
+
+    def test_exchange_manual_authorization_exchanges_callback_url(self) -> None:
+        config = OAuthConfig(client_id="client-1", client_secret="secret-1")
+        session = FakeSession()
+
+        token = exchange_manual_authorization(
+            config,
+            callback_url="http://localhost:8000/callback?code=code-1",
+            session=session,
+        )
+
+        self.assertEqual(token, "token-1")
+        self.assertEqual(session.calls[0]["data"]["code"], "code-1")
 
     def test_exchange_access_token_posts_oauth_payload(self) -> None:
         config = OAuthConfig(

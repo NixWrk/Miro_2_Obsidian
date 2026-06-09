@@ -217,6 +217,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--oauth-scopes", default="boards:read boards:write team:read")
     parser.add_argument("--oauth-timeout-seconds", type=int, default=300)
     parser.add_argument("--oauth-no-open-browser", action="store_true")
+    parser.add_argument("--oauth-code", help="Exchange an already obtained authorization code.")
+    parser.add_argument("--oauth-callback-url", help="Exchange a copied localhost callback URL containing ?code=...")
     parser.add_argument("--base-url", default=DEFAULT_BASE_URL)
     parser.add_argument("--output", type=Path, help="Write manifest/result JSON to this path.")
     return parser.parse_args()
@@ -224,7 +226,7 @@ def parse_args() -> argparse.Namespace:
 
 def resolve_token_from_args(args: argparse.Namespace) -> str:
     if args.oauth:
-        from miro_oauth_token import authorize_and_get_token, config_from_env
+        from miro_oauth_token import authorize_and_get_token, config_from_env, exchange_manual_authorization
 
         config = config_from_env(
             client_id_env=args.oauth_client_id_env,
@@ -232,6 +234,12 @@ def resolve_token_from_args(args: argparse.Namespace) -> str:
             redirect_uri=args.oauth_redirect_uri,
             scopes=args.oauth_scopes,
         )
+        if args.oauth_code or args.oauth_callback_url:
+            return exchange_manual_authorization(
+                config,
+                code=args.oauth_code,
+                callback_url=args.oauth_callback_url,
+            )
         return authorize_and_get_token(
             config,
             timeout_seconds=args.oauth_timeout_seconds,
@@ -248,7 +256,10 @@ def main() -> int:
     args = parse_args()
     manifest = build_manifest(args.board_name)
     if args.execute:
-        token = resolve_token_from_args(args)
+        try:
+            token = resolve_token_from_args(args)
+        except TimeoutError as exc:
+            raise SystemExit(str(exc)) from exc
         output = execute_manifest(manifest, token, board_id=args.board_id, base_url=args.base_url)
     else:
         output = manifest
