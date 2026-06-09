@@ -28,7 +28,6 @@ MIN_TEXT_WIDTH_AFTER_CLEARANCE = 64
 SHORT_LABEL_SINGLE_LINE_PADDING = 64
 SHORT_LABEL_SINGLE_LINE_AVG_CHAR_WIDTH = 0.50
 SHORT_LABEL_WIDTH_MIN_GROW = 32
-SHORT_LABEL_WIDTH_EXPANSION_MIN_CHARS = 12
 SHORT_LABEL_WIDTH_OVERLAP_TOLERANCE = 8
 
 # Цвета стикеров Miro
@@ -1048,7 +1047,7 @@ def _expand_short_inline_label_widths(
         text = str(label_node.get("text") or "")
         plain = _html_unescape(strip_html(text)).replace("\xa0", " ")
         plain = re.sub(r"\s+", " ", plain).strip()
-        if len(plain) < SHORT_LABEL_WIDTH_EXPANSION_MIN_CHARS:
+        if not plain:
             continue
 
         sa = label_node.get("styleAttributes") or {}

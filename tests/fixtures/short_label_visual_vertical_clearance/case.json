@@ -12,11 +12,13 @@
       {
         "id": "<redacted-long-id>",
         "type": "text",
+        "min_width": 120,
         "text_contains": "RICE"
       },
       {
         "id": "<redacted-long-id>",
         "type": "text",
+        "min_width": 108,
         "text_contains": "Кано"
       },
       {

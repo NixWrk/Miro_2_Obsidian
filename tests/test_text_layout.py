@@ -139,7 +139,7 @@ class TextLayoutTests(unittest.TestCase):
         self.assertEqual(nodes[0]["x"], -6219)
         self.assertGreaterEqual(nodes[0]["width"], 360)
 
-    def test_very_short_label_width_is_not_expanded(self) -> None:
+    def test_very_short_label_width_expands_to_readable_width(self) -> None:
         nodes = [
             {
                 "id": "rice-label",
@@ -159,11 +159,30 @@ class TextLayoutTests(unittest.TestCase):
                 "width": 410,
                 "height": 300,
             },
+            {
+                "id": "kano-label",
+                "type": "text",
+                "x": -4072,
+                "y": -243,
+                "width": 55,
+                "height": 83,
+                "text": '<span style="font-size:22px; line-height:1.35">\u041a\u0430\u043d\u043e</span>',
+                "styleAttributes": {"border": "invisible", "fontSize": 22},
+            },
+            {
+                "id": "kano-image",
+                "type": "file",
+                "x": -4072,
+                "y": -144,
+                "width": 410,
+                "height": 300,
+            },
         ]
 
         _expand_short_inline_label_widths(nodes)
 
-        self.assertEqual(nodes[0]["width"], 63)
+        self.assertGreaterEqual(nodes[0]["width"], 120)
+        self.assertGreaterEqual(nodes[2]["width"], 108)
 
     def test_short_label_width_does_not_expand_over_neighbor(self) -> None:
         nodes = [
