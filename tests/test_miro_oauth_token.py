@@ -57,6 +57,7 @@ class MiroOAuthTokenTests(unittest.TestCase):
             client_secret="secret-1",
             redirect_uri="http://localhost:8000/callback",
             scopes="boards:read boards:write",
+            authorize_url="https://miro.com/oauth/authorize",
         )
 
         url = build_authorize_url(config, state="state-1")
@@ -93,10 +94,11 @@ class MiroOAuthTokenTests(unittest.TestCase):
 
     def test_config_from_env_reads_credentials_without_printing_them(self) -> None:
         with patch.dict(os.environ, {"MIRO_CLIENT_ID": "client-1", "MIRO_CLIENT_SECRET": "secret-1"}):
-            config = config_from_env()
+            config = config_from_env(authorize_url="https://example.invalid/authorize")
 
         self.assertEqual(config.client_id, "client-1")
         self.assertEqual(config.client_secret, "secret-1")
+        self.assertEqual(config.authorize_url, "https://example.invalid/authorize")
 
     def test_parse_callback_path_extracts_code_error_and_state(self) -> None:
         result = parse_callback_path("/callback?code=code-1&state=state-1")

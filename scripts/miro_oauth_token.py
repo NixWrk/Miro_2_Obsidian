@@ -11,7 +11,7 @@ from typing import Any
 from urllib.parse import parse_qs, urlencode, urlparse
 
 
-DEFAULT_AUTHORIZE_URL = "https://miro.com/oauth/authorize"
+DEFAULT_AUTHORIZE_URL = "https://miro.com/app-install/"
 DEFAULT_TOKEN_URL = "https://api.miro.com/v1/oauth/token"
 DEFAULT_REDIRECT_URI = "http://localhost:8000/callback"
 DEFAULT_SCOPES = "boards:read boards:write team:read"
@@ -45,6 +45,8 @@ def config_from_env(
     client_secret_env: str = "MIRO_CLIENT_SECRET",
     redirect_uri: str | None = None,
     scopes: str | None = None,
+    authorize_url: str | None = None,
+    token_url: str | None = None,
 ) -> OAuthConfig:
     client_id = os.environ.get(client_id_env)
     client_secret = os.environ.get(client_secret_env)
@@ -56,6 +58,8 @@ def config_from_env(
         client_secret=str(client_secret),
         redirect_uri=redirect_uri or DEFAULT_REDIRECT_URI,
         scopes=scopes or DEFAULT_SCOPES,
+        authorize_url=authorize_url or DEFAULT_AUTHORIZE_URL,
+        token_url=token_url or DEFAULT_TOKEN_URL,
     )
 
 
@@ -312,6 +316,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--client-secret-env", default="MIRO_CLIENT_SECRET")
     parser.add_argument("--redirect-uri", default=DEFAULT_REDIRECT_URI)
     parser.add_argument("--scopes", default=DEFAULT_SCOPES)
+    parser.add_argument("--authorize-url", default=DEFAULT_AUTHORIZE_URL)
+    parser.add_argument("--token-url", default=DEFAULT_TOKEN_URL)
     parser.add_argument("--timeout-seconds", type=int, default=DEFAULT_TIMEOUT_SECONDS)
     parser.add_argument("--no-open-browser", action="store_true")
     parser.add_argument("--code", help="Exchange an already obtained authorization code.")
@@ -327,6 +333,8 @@ def main() -> int:
         client_secret_env=args.client_secret_env,
         redirect_uri=args.redirect_uri,
         scopes=args.scopes,
+        authorize_url=args.authorize_url,
+        token_url=args.token_url,
     )
     if args.code or args.callback_url:
         token = exchange_manual_authorization(config, code=args.code, callback_url=args.callback_url)

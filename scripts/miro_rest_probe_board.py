@@ -215,6 +215,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--oauth-client-secret-env", default="MIRO_CLIENT_SECRET")
     parser.add_argument("--oauth-redirect-uri", default="http://localhost:8000/callback")
     parser.add_argument("--oauth-scopes", default="boards:read boards:write team:read")
+    parser.add_argument("--oauth-authorize-url", default="https://miro.com/app-install/")
+    parser.add_argument("--oauth-token-url", default="https://api.miro.com/v1/oauth/token")
     parser.add_argument("--oauth-timeout-seconds", type=int, default=300)
     parser.add_argument("--oauth-no-open-browser", action="store_true")
     parser.add_argument("--oauth-code", help="Exchange an already obtained authorization code.")
@@ -233,6 +235,8 @@ def resolve_token_from_args(args: argparse.Namespace) -> str:
             client_secret_env=args.oauth_client_secret_env,
             redirect_uri=args.oauth_redirect_uri,
             scopes=args.oauth_scopes,
+            authorize_url=args.oauth_authorize_url,
+            token_url=args.oauth_token_url,
         )
         if args.oauth_code or args.oauth_callback_url:
             return exchange_manual_authorization(
