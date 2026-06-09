@@ -27,6 +27,7 @@ from Scale_engine import (  # noqa: E402
     OBSIDIAN_FONT_SIZE,
     ViewProfile,
     compute_scale_preview,
+    normalize_scale_mode,
 )
 
 
@@ -186,14 +187,21 @@ def check_canvas_fit(canvas: dict[str, Any], profile: ViewProfile) -> dict[str, 
     bbox = canvas_bbox(canvas)
     screen_w = bbox["width"] * profile.min_zoom
     screen_h = bbox["height"] * profile.min_zoom
-    if screen_w > profile.width or screen_h > profile.height:
+    fits = screen_w <= profile.width and screen_h <= profile.height
+    mode = normalize_scale_mode(profile.scale_mode)
+    if not fits and mode != "readable":
         raise SampleError(
             "Canvas does not fit target viewport at min zoom: "
             f"bbox={bbox['width']:.2f}x{bbox['height']:.2f}, "
             f"screen@{profile.min_zoom:g}={screen_w:.2f}x{screen_h:.2f}, "
             f"target={profile.width}x{profile.height}"
         )
-    return bbox
+    return {
+        **bbox,
+        "screen_width": screen_w,
+        "screen_height": screen_h,
+        "fits": 1.0 if fits else 0.0,
+    }
 
 
 def resolve_scale(sample_json: Path, explicit_scale: float | None, profile: ViewProfile) -> float:
@@ -237,10 +245,11 @@ def run_sample(
     strict_files: bool,
     stage_vault: bool,
     fit_render: bool,
+    scale_profile: ViewProfile,
     fit_profile: ViewProfile | None,
 ) -> tuple[Path, Counter[str], float, dict[str, float] | None]:
     sample_key = safe_name(sample_json)
-    scale_used = resolve_scale(sample_json, scale, fit_profile or ViewProfile())
+    scale_used = resolve_scale(sample_json, scale, scale_profile)
 
     if stage_vault:
         vault_root, target_dir = oracle_target(sample_key)
@@ -313,6 +322,12 @@ def main() -> int:
     parser.add_argument("--viewport-height", type=int, default=1080)
     parser.add_argument("--min-zoom", type=float, default=0.12)
     parser.add_argument("--fit-margin", type=float, default=0.95)
+    parser.add_argument(
+        "--scale-mode",
+        choices=["balanced", "overview", "readable"],
+        default="balanced",
+        help="Scale policy: balanced caps readability by fit, overview always fits, readable prioritizes readability.",
+    )
     parser.add_argument("--skip-fit-check", action="store_true")
     parser.add_argument("--skip-render", action="store_true")
     parser.add_argument("--include-miro-json", action="store_true", help="Also discover work/MIRO2OBSIDIAN/Miro_2_JSON.")
@@ -325,12 +340,14 @@ def main() -> int:
     if not samples:
         raise SystemExit(f"No local Miro JSON samples found under {args.sample_root}")
     selected = select_samples(samples, args.samples)
-    fit_profile = None if args.skip_fit_check else ViewProfile(
+    scale_profile = ViewProfile(
         width=args.viewport_width,
         height=args.viewport_height,
         min_zoom=args.min_zoom,
         fit_margin=args.fit_margin,
+        scale_mode=args.scale_mode,
     )
+    fit_profile = None if args.skip_fit_check else scale_profile
 
     ok = True
     for sample in selected:
@@ -345,13 +362,21 @@ def main() -> int:
                 strict_files=not args.allow_missing_files,
                 stage_vault=args.stage_vault,
                 fit_render=not args.raw_render,
+                scale_profile=scale_profile,
                 fit_profile=fit_profile,
             )
             summary = ", ".join(f"{k}:{v}" for k, v in sorted(node_types.items()))
             fit_summary = ""
             if fit_bbox:
-                fit_summary = f"; bbox={fit_bbox['width']:.2f}x{fit_bbox['height']:.2f}"
-            print(f"OK {sample.name}: scale={scale_used:.6f}; {summary}{fit_summary}; canvas={canvas_path}")
+                fit_summary = (
+                    f"; bbox={fit_bbox['width']:.2f}x{fit_bbox['height']:.2f}"
+                    f"; screen@{args.min_zoom:g}={fit_bbox['screen_width']:.2f}x{fit_bbox['screen_height']:.2f}"
+                    f"; fit={'yes' if fit_bbox['fits'] else 'no'}"
+                )
+            print(
+                f"OK {sample.name}: mode={args.scale_mode}; scale={scale_used:.6f}; "
+                f"{summary}{fit_summary}; canvas={canvas_path}"
+            )
         except Exception as exc:  # noqa: BLE001
             ok = False
             print(f"FAIL {sample.name}: {exc}")

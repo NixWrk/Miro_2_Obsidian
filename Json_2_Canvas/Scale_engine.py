@@ -9,6 +9,7 @@ from Converter import iter_objects, _extract_font_base_px, OBSIDIAN_FONT_SIZE
 
 # Типы элементов, у которых есть шрифт
 _FONT_TYPES: frozenset[str] = frozenset({"text", "shape", "sticky_note"})
+SCALE_MODES: frozenset[str] = frozenset({"overview", "readable", "balanced"})
 
 # ===== Профиль целевого экрана/ограничений =====
 @dataclass
@@ -20,6 +21,7 @@ class ViewProfile:
     min_node_w: int = 60      # минимальная ширина узла в Canvas, px
     min_node_h: int = 40      # минимальная высота узла в Canvas, px
     min_font_px: int = 8      # минимальный кегль текста после масштабирования
+    scale_mode: str = "balanced"  # overview | readable | balanced
 
 # Типы, исключаемые из расчёта mnw/mnh (и bbox).
 # Категория 1: Read ❌ в Miro REST API — контент недоступен, в canvas не попадают.
@@ -168,6 +170,22 @@ def _cap_to_fit(scale: float, fit_cap: float) -> float:
         return scale
     return min(scale, fit_cap)
 
+
+def normalize_scale_mode(mode: str | None) -> str:
+    mode_value = (mode or "balanced").strip().lower()
+    if mode_value not in SCALE_MODES:
+        raise ValueError(f"Unknown scale mode: {mode!r}. Expected one of: {', '.join(sorted(SCALE_MODES))}")
+    return mode_value
+
+
+def _select_scale_for_mode(readability_scale: float, fit_cap: float, profile: ViewProfile) -> float:
+    mode = normalize_scale_mode(profile.scale_mode)
+    if mode == "overview":
+        return fit_cap
+    if mode == "readable":
+        return readability_scale
+    return _cap_to_fit(readability_scale, fit_cap)
+
 def compute_scale_min_node(mnw: float, mnh: float, profile: ViewProfile) -> float:
     if mnw > 0 and mnh > 0:
         return max(profile.min_node_w / mnw, profile.min_node_h / mnh)
@@ -176,7 +194,7 @@ def compute_scale_min_node(mnw: float, mnh: float, profile: ViewProfile) -> floa
 def compute_scale_min_font(base_font_px: int, profile: ViewProfile) -> float:
     return profile.min_font_px / max(1, base_font_px)
 
-def pick_recommended_scale(miro_root: Any, profile: ViewProfile, base_font_px: int) -> Tuple[float, Dict[str, float]]:
+def pick_recommended_scale(miro_root: Any, profile: ViewProfile, base_font_px: int) -> Tuple[float, Dict[str, Any]]:
     """
     Возвращает (scale, ctx), где ctx — метрики для превью и дальнейших пересчётов.
     """
@@ -185,19 +203,24 @@ def pick_recommended_scale(miro_root: Any, profile: ViewProfile, base_font_px: i
     s_node = compute_scale_min_node(a["mnw"], a["mnh"], profile)
     s_font = compute_scale_min_font(base_font_px, profile)
     s_readability = max(s_node, s_font)
-    S = _cap_to_fit(s_readability, s_fit)
+    mode = normalize_scale_mode(profile.scale_mode)
+    S = _select_scale_for_mode(s_readability, s_fit, profile)
+    conflict = s_readability > s_fit
     ctx = {
         **a,
+        "scale_mode": mode,
         "scale_fit": s_fit,
         "scale_min_node": s_node,
         "scale_min_font": s_font,
         "scale_readability": s_readability,
-        "scale_limited_by_fit": 1.0 if s_readability > s_fit else 0.0,
+        "scale_conflict_fit_vs_readability": 1.0 if conflict else 0.0,
+        "scale_limited_by_fit": 1.0 if S < s_readability else 0.0,
+        "scale_exceeds_fit": 1.0 if S > s_fit else 0.0,
     }
     return S, ctx
 
 # ===== Превью и взаимные пересчёты =====
-def preview_values(scale: float, ctx: Dict[str, float], base_font_px: int, min_font_threshold: int) -> Dict[str, Any]:
+def preview_values(scale: float, ctx: Dict[str, Any], base_font_px: int, min_font_threshold: int) -> Dict[str, Any]:
     mnw = ctx.get("mnw", 0.0)
     mnh = ctx.get("mnh", 0.0)
     font_min_miro = ctx.get("font_min_miro", float(base_font_px))
@@ -209,29 +232,29 @@ def preview_values(scale: float, ctx: Dict[str, float], base_font_px: int, min_f
     return {"scale": scale, "Wmin": Wmin, "Hmin": Hmin,
             "font_max_px": font_max_px, "font_min_px": font_min_px}
 
-def recompute_from_font_max(font_target: int, ctx: Dict[str, float], profile: ViewProfile) -> float:
+def recompute_from_font_max(font_target: int, ctx: Dict[str, Any], profile: ViewProfile) -> float:
     font_max_miro = max(1.0, ctx.get("font_max_miro", float(OBSIDIAN_FONT_SIZE)))
     s_font = font_target / font_max_miro
     s_node = compute_scale_min_node(ctx["mnw"], ctx["mnh"], profile)
-    return _cap_to_fit(max(s_node, s_font), ctx["scale_fit"])
+    return _select_scale_for_mode(max(s_node, s_font), ctx["scale_fit"], profile)
 
-def recompute_from_font_min(font_target: int, ctx: Dict[str, float], profile: ViewProfile) -> float:
+def recompute_from_font_min(font_target: int, ctx: Dict[str, Any], profile: ViewProfile) -> float:
     font_min_miro = max(1.0, ctx.get("font_min_miro", float(OBSIDIAN_FONT_SIZE)))
     s_font = font_target / font_min_miro
     s_node = compute_scale_min_node(ctx["mnw"], ctx["mnh"], profile)
-    return _cap_to_fit(max(s_node, s_font), ctx["scale_fit"])
+    return _select_scale_for_mode(max(s_node, s_font), ctx["scale_fit"], profile)
 
-def recompute_from_min_node_width(Wtarget: float, ctx: Dict[str, float], profile: ViewProfile) -> float:
+def recompute_from_min_node_width(Wtarget: float, ctx: Dict[str, Any], profile: ViewProfile) -> float:
     s_node = Wtarget / max(0.0001, ctx["mnw"])
     font_max_miro = max(1.0, ctx.get("font_max_miro", float(OBSIDIAN_FONT_SIZE)))
     s_font = profile.min_font_px / font_max_miro
-    return _cap_to_fit(max(s_node, s_font), ctx["scale_fit"])
+    return _select_scale_for_mode(max(s_node, s_font), ctx["scale_fit"], profile)
 
-def recompute_from_min_node_height(Htarget: float, ctx: Dict[str, float], profile: ViewProfile) -> float:
+def recompute_from_min_node_height(Htarget: float, ctx: Dict[str, Any], profile: ViewProfile) -> float:
     s_node = Htarget / max(0.0001, ctx["mnh"])
     font_max_miro = max(1.0, ctx.get("font_max_miro", float(OBSIDIAN_FONT_SIZE)))
     s_font = profile.min_font_px / font_max_miro
-    return _cap_to_fit(max(s_node, s_font), ctx["scale_fit"])
+    return _select_scale_for_mode(max(s_node, s_font), ctx["scale_fit"], profile)
 
 # ===== Сервис для GUI (чтобы быстро получить превью из JSON-файла) =====
 def compute_scale_preview(json_path: str,

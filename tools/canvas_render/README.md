@@ -48,7 +48,7 @@ python tools\canvas_render\capture_fixture.py --all
 
 Actual screenshots пишутся в `tools/canvas_render/.out/`.
 
-`capture_fixture.py` keeps full-stage screenshots for stable fixture baselines. Local work samples use Scale_engine auto-fit plus fitted viewport screenshots through `scripts\run_local_samples.py`, so large boards are inspectable without changing committed `expected.render.png` baselines.
+`capture_fixture.py` keeps full-stage screenshots for stable fixture baselines. Local work samples use Scale_engine scale modes plus fitted viewport screenshots through `scripts\run_local_samples.py`, so large boards are inspectable without changing committed `expected.render.png` baselines.
 
 Текущая реализация является diagnostic harness: она рисует nodes/groups/edges, показывает базовую статистику и поддерживает screenshot/baseline сравнение для fixtures.
 
