@@ -746,8 +746,8 @@ def _estimate_render_height(html_or_text: str, *, width_px: float, font_px: floa
     lis   = len(LI_RE.findall(html_or_text or ""))
     nls   = plain.count("\n")
 
-    base_lines  = max(1, paras + lis + brs + nls + 1)
-    wrap_extra  = max(0, int(len(plain) / max(1, max_cols)) - 1)
+    base_lines = max(1, paras, lis) + brs + nls
+    wrap_extra = max(0, (len(plain) - 1) // max(1, max_cols))
     total_lines = base_lines + wrap_extra
     return int(total_lines * line_height * font_px + padding)
 
@@ -1159,14 +1159,16 @@ def convert_item_to_canvas_node(
     vault_root: str,
     scale: float = 1.0,
     min_font_px: int = 8,
-    theme: str = "light"
+    theme: str = "light",
+    grow_text_nodes: bool = False,
 ) -> Optional[Dict[str, Any]]:
     """
     Размеры и позиция = геометрия Miro * scale.
     Шрифт = (font из Miro) * scale, но не ниже min_font_px.
     Текст сохраняется как HTML (при наличии).
     Для document: ограничение 500x700 (уменьшаем с сохранением пропорций).
-    Если высоты узла не хватает, увеличиваем node["height"].
+    Generic Miro text/shape/sticky nodes preserve source geometry by default.
+    If min-font text no longer fits, Obsidian handles the internal overflow.
     """
     item_type = (item.get("type") or "").lower()
     pos = (item.get("position") or {}) if isinstance(item.get("position"), dict) else {}
@@ -1284,8 +1286,9 @@ def convert_item_to_canvas_node(
 
         sa["fontSize"] = font_px
 
-        # Увеличиваем ноду пропорционально если даже min_font_px не вписался
-        if needs_grow:
+        # Generic Miro text should not silently expand over neighboring nodes in
+        # fit-oriented conversions. The old growth behavior remains opt-in.
+        if needs_grow and grow_text_nodes:
             need_h = _estimate_render_height(raw_content, width_px=avail_w,
                                              font_px=font_px, line_height=lh)
             if need_h > avail_h and avail_h > 0:
@@ -1770,7 +1773,8 @@ def convert_miro_to_canvas(
     delete_src_files: bool = False,
     scale: float = 1.0,
     min_font_px: int = 8,
-    theme: str = "light"
+    theme: str = "light",
+    grow_text_nodes: bool = False,
 ) -> str:
     """
     Основной конвейер конвертации Miro JSON → Obsidian Canvas.
@@ -2011,7 +2015,10 @@ def convert_miro_to_canvas(
         # 4) Конвертация остальных элементов в ноды
         node = convert_item_to_canvas_node(
             item, new_files_folder, vault_root,
-            scale=scale, min_font_px=min_font_px, theme=theme
+            scale=scale,
+            min_font_px=min_font_px,
+            theme=theme,
+            grow_text_nodes=grow_text_nodes,
         )
         if node:
             nodes.append(node)

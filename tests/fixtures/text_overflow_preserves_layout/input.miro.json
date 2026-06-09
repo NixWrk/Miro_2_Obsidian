@@ -1,0 +1,42 @@
+[
+  {
+    "id": "overflow-left",
+    "type": "text",
+    "position": {
+      "x": 0,
+      "y": 0,
+      "origin": "center",
+      "relativeTo": "canvas_center"
+    },
+    "geometry": {
+      "width": 240
+    },
+    "style": {
+      "fontSize": "18",
+      "color": "#1a1a1a"
+    },
+    "data": {
+      "content": "<p>Left text block with deliberately long content. It should keep the source box width when converted at a tiny fit scale, even when the minimum font size means the text will overflow internally.</p>"
+    }
+  },
+  {
+    "id": "overflow-right",
+    "type": "text",
+    "position": {
+      "x": 500,
+      "y": 0,
+      "origin": "center",
+      "relativeTo": "canvas_center"
+    },
+    "geometry": {
+      "width": 240
+    },
+    "style": {
+      "fontSize": "18",
+      "color": "#1a1a1a"
+    },
+    "data": {
+      "content": "<p>Right text block with deliberately long content. It protects the rule that preserving the source layout is more important than growing a node over its neighbor in fit-oriented conversions.</p>"
+    }
+  }
+]

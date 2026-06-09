@@ -1,0 +1,32 @@
+{
+  "description": "Generic text nodes at fit scale preserve source geometry instead of growing into neighbors.",
+  "converter": {
+    "scale": 0.02,
+    "min_font_px": 8,
+    "theme": "dark"
+  },
+  "assertions": {
+    "node_count": 2,
+    "edge_count": 0,
+    "nodes": [
+      {
+        "id": "overflow-left",
+        "type": "text",
+        "width": 4.8,
+        "text_contains": "Left text block"
+      },
+      {
+        "id": "overflow-right",
+        "type": "text",
+        "width": 4.8,
+        "text_contains": "Right text block"
+      }
+    ],
+    "non_overlapping_pairs": [
+      [
+        "overflow-left",
+        "overflow-right"
+      ]
+    ]
+  }
+}

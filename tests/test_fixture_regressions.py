@@ -130,6 +130,28 @@ def _assert_node(testcase: unittest.TestCase, canvas: dict[str, Any], expected: 
         testcase.assertEqual((node.get("styleAttributes") or {}).get("shape"), expected["shape"])
 
 
+def _assert_non_overlapping_pair(testcase: unittest.TestCase, canvas: dict[str, Any], pair: list[str]) -> None:
+    testcase.assertEqual(len(pair), 2)
+    left = _node_by_id(canvas, str(pair[0]))
+    right = _node_by_id(canvas, str(pair[1]))
+
+    lx = float(left["x"])
+    ly = float(left["y"])
+    lw = float(left["width"])
+    lh = float(left["height"])
+    rx = float(right["x"])
+    ry = float(right["y"])
+    rw = float(right["width"])
+    rh = float(right["height"])
+
+    overlap_w = min(lx + lw, rx + rw) - max(lx, rx)
+    overlap_h = min(ly + lh, ry + rh) - max(ly, ry)
+    testcase.assertTrue(
+        overlap_w <= 0 or overlap_h <= 0,
+        f"Nodes {pair[0]!r} and {pair[1]!r} overlap by {overlap_w}x{overlap_h}",
+    )
+
+
 class FixtureRegressionTests(unittest.TestCase):
     maxDiff = None
 
@@ -160,6 +182,9 @@ class FixtureRegressionTests(unittest.TestCase):
 
                 for expected_node in assertions.get("nodes", []):
                     _assert_node(self, canvas, expected_node)
+
+                for pair in assertions.get("non_overlapping_pairs", []):
+                    _assert_non_overlapping_pair(self, canvas, pair)
 
     def test_fixture_conversion_is_deterministic(self) -> None:
         for fixture_dir in _fixture_dirs():
