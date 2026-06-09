@@ -35,6 +35,10 @@ class CallbackResult:
     state: str | None = None
 
 
+class OAuthTokenExchangeError(RuntimeError):
+    pass
+
+
 def config_from_env(
     *,
     client_id_env: str = "MIRO_CLIENT_ID",
@@ -110,6 +114,34 @@ def extract_authorization_code(value: str) -> str:
         return result.code
 
     return candidate
+
+
+def _safe_response_payload(response: Any, *, config: OAuthConfig, code: str) -> str:
+    try:
+        payload = response.json()
+    except ValueError:
+        payload = getattr(response, "text", "")
+
+    text = str(payload)
+    for sensitive in (config.client_secret, code):
+        if sensitive:
+            text = text.replace(sensitive, "[redacted]")
+    return text
+
+
+def format_token_exchange_error(response: Any, *, config: OAuthConfig, code: str) -> str:
+    status_code = getattr(response, "status_code", "unknown")
+    payload = _safe_response_payload(response, config=config, code=code)
+    hints = [
+        "Miro OAuth token exchange failed.",
+        f"HTTP status: {status_code}",
+        f"Response: {payload}",
+        "Most common causes:",
+        "- invalid_client: check MIRO_CLIENT_ID/MIRO_CLIENT_SECRET and rotate the secret if it was exposed.",
+        "- invalid_grant: request a fresh authorization code; codes are short-lived and single-use.",
+        "- redirect_uri mismatch: exchange must use the same redirect_uri that was used for authorization.",
+    ]
+    return "\n".join(hints)
 
 
 def _callback_page(result: CallbackResult) -> bytes:
@@ -193,7 +225,8 @@ def exchange_access_token(config: OAuthConfig, code: str, *, session: Any | None
         },
         timeout=30,
     )
-    response.raise_for_status()
+    if not getattr(response, "ok", False):
+        raise OAuthTokenExchangeError(format_token_exchange_error(response, config=config, code=code))
     payload = response.json()
     token = payload.get("access_token")
     if not token:

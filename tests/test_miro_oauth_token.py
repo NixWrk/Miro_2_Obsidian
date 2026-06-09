@@ -14,6 +14,7 @@ sys.path.insert(0, str(SCRIPTS_DIR))
 
 from miro_oauth_token import (  # noqa: E402
     OAuthConfig,
+    OAuthTokenExchangeError,
     build_authorize_url,
     callback_bind_hosts,
     config_from_env,
@@ -21,13 +22,16 @@ from miro_oauth_token import (  # noqa: E402
     exchange_manual_authorization,
     extract_authorization_code,
     format_callback_timeout_message,
+    format_token_exchange_error,
     parse_callback_path,
 )
 
 
 class FakeResponse:
-    def __init__(self, payload: dict[str, str]) -> None:
+    def __init__(self, payload: dict[str, str], *, ok: bool = True, status_code: int = 200) -> None:
         self.payload = payload
+        self.ok = ok
+        self.status_code = status_code
 
     def raise_for_status(self) -> None:
         return None
@@ -37,12 +41,13 @@ class FakeResponse:
 
 
 class FakeSession:
-    def __init__(self) -> None:
+    def __init__(self, response: FakeResponse | None = None) -> None:
         self.calls: list[dict[str, object]] = []
+        self.response = response or FakeResponse({"access_token": "token-1"})
 
     def post(self, url: str, *, data: dict[str, str], timeout: int) -> FakeResponse:
         self.calls.append({"url": url, "data": data, "timeout": timeout})
-        return FakeResponse({"access_token": "token-1"})
+        return self.response
 
 
 class MiroOAuthTokenTests(unittest.TestCase):
@@ -131,6 +136,29 @@ class MiroOAuthTokenTests(unittest.TestCase):
 
         self.assertEqual(token, "token-1")
         self.assertEqual(session.calls[0]["data"]["code"], "code-1")
+
+    def test_token_exchange_error_sanitizes_secret_and_code(self) -> None:
+        config = OAuthConfig(client_id="client-1", client_secret="secret-1")
+        response = FakeResponse(
+            {"error": "invalid_grant", "error_description": "code-1 secret-1"},
+            ok=False,
+            status_code=401,
+        )
+
+        message = format_token_exchange_error(response, config=config, code="code-1")
+
+        self.assertIn("HTTP status: 401", message)
+        self.assertIn("invalid_grant", message)
+        self.assertIn("[redacted]", message)
+        self.assertNotIn("secret-1", message)
+        self.assertNotIn("code-1", message)
+
+    def test_exchange_access_token_reports_sanitized_oauth_error(self) -> None:
+        config = OAuthConfig(client_id="client-1", client_secret="secret-1")
+        session = FakeSession(FakeResponse({"error": "invalid_client"}, ok=False, status_code=401))
+
+        with self.assertRaisesRegex(OAuthTokenExchangeError, "invalid_client"):
+            exchange_access_token(config, "code-1", session=session)
 
     def test_exchange_access_token_posts_oauth_payload(self) -> None:
         config = OAuthConfig(

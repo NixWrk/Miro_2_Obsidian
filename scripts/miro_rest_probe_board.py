@@ -258,7 +258,7 @@ def main() -> int:
     if args.execute:
         try:
             token = resolve_token_from_args(args)
-        except TimeoutError as exc:
+        except (TimeoutError, RuntimeError) as exc:
             raise SystemExit(str(exc)) from exc
         output = execute_manifest(manifest, token, board_id=args.board_id, base_url=args.base_url)
     else:
