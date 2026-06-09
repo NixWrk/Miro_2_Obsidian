@@ -25,6 +25,13 @@
         "deadline-heading",
         "deadline-notes"
       ]
+    ],
+    "no_overlapping_nodes": [
+      {
+        "types": [
+          "text"
+        ]
+      }
     ]
   }
 }

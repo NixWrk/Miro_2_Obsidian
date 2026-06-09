@@ -162,6 +162,48 @@ def _assert_non_overlapping_pair(testcase: unittest.TestCase, canvas: dict[str, 
     )
 
 
+def _rect_for_node(node: dict[str, Any]) -> tuple[float, float, float, float]:
+    x = float(node["x"])
+    y = float(node["y"])
+    width = float(node["width"])
+    height = float(node["height"])
+    return x, y, x + width, y + height
+
+
+def _overlap_size(left: dict[str, Any], right: dict[str, Any]) -> tuple[float, float]:
+    lx0, ly0, lx1, ly1 = _rect_for_node(left)
+    rx0, ry0, rx1, ry1 = _rect_for_node(right)
+    return min(lx1, rx1) - max(lx0, rx0), min(ly1, ry1) - max(ly0, ry0)
+
+
+def _assert_no_overlapping_nodes(testcase: unittest.TestCase, canvas: dict[str, Any], rule: dict[str, Any]) -> None:
+    allowed_types = {str(t) for t in rule.get("types", ["text", "file", "link"])}
+    excluded_ids = {str(node_id) for node_id in rule.get("exclude_node_ids", [])}
+    min_overlap_width = float(rule.get("min_overlap_width", 0.0))
+    min_overlap_height = float(rule.get("min_overlap_height", 0.0))
+
+    nodes = [
+        node for node in canvas["nodes"]
+        if str(node.get("type")) in allowed_types and str(node.get("id")) not in excluded_ids
+    ]
+    overlaps: list[str] = []
+
+    for idx, left in enumerate(nodes):
+        for right in nodes[idx + 1:]:
+            overlap_w, overlap_h = _overlap_size(left, right)
+            if overlap_w > min_overlap_width and overlap_h > min_overlap_height:
+                overlaps.append(
+                    f"{left.get('id')}:{left.get('type')} <-> "
+                    f"{right.get('id')}:{right.get('type')} "
+                    f"overlap={overlap_w:.4f}x{overlap_h:.4f}"
+                )
+
+    testcase.assertFalse(
+        overlaps,
+        "Unexpected node overlaps:\n" + "\n".join(overlaps[:20]),
+    )
+
+
 class FixtureRegressionTests(unittest.TestCase):
     maxDiff = None
 
@@ -195,6 +237,9 @@ class FixtureRegressionTests(unittest.TestCase):
 
                 for pair in assertions.get("non_overlapping_pairs", []):
                     _assert_non_overlapping_pair(self, canvas, pair)
+
+                for rule in assertions.get("no_overlapping_nodes", []):
+                    _assert_no_overlapping_nodes(self, canvas, rule)
 
     def test_fixture_conversion_is_deterministic(self) -> None:
         for fixture_dir in _fixture_dirs():
