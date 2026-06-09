@@ -8,7 +8,12 @@ CONVERTER_DIR = REPO_ROOT / "Json_2_Canvas"
 
 sys.path.insert(0, str(CONVERTER_DIR))
 
-from Converter import _estimate_render_height, _is_short_text_label, _strip_edge_empty_paragraphs  # noqa: E402
+from Converter import (  # noqa: E402
+    _compact_short_label_html,
+    _estimate_render_height,
+    _is_short_text_label,
+    _strip_edge_empty_paragraphs,
+)
 
 
 class TextLayoutTests(unittest.TestCase):
@@ -23,6 +28,12 @@ class TextLayoutTests(unittest.TestCase):
     def test_short_label_detection_rejects_long_list_content(self) -> None:
         self.assertTrue(_is_short_text_label("<p><strong>Приоритезация и оценка</strong></p>"))
         self.assertFalse(_is_short_text_label("<ol><li>One</li><li>Two</li></ol>"))
+
+    def test_short_label_html_unwraps_paragraph_margins(self) -> None:
+        self.assertEqual(
+            _compact_short_label_html("<p><strong>Приоритезация по ROI</strong></p>"),
+            "<strong>Приоритезация по ROI</strong>",
+        )
 
     def test_single_html_paragraph_does_not_add_an_extra_line(self) -> None:
         plain = _estimate_render_height("Short title", width_px=400, font_px=20, line_height=1.4)

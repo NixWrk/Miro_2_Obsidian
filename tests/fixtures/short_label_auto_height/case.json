@@ -13,7 +13,7 @@
         "id": "edge-empty-label",
         "type": "text",
         "text_contains": "4. Revenue / Monetisation",
-        "text_not_contains": "<p><br /></p>",
+        "text_not_contains": "<p",
         "font_size": 8,
         "min_height": 45
       },
@@ -21,6 +21,7 @@
         "id": "heading-label",
         "type": "text",
         "text_contains": "Приоритезация и оценка",
+        "text_not_contains": "<p",
         "font_size": 40,
         "min_height": 78
       }

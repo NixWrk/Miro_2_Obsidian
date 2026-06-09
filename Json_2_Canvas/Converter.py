@@ -445,6 +445,18 @@ def _is_short_text_label(html_or_text: str) -> bool:
     return _non_empty_paragraph_count(html_or_text) <= 2
 
 
+def _compact_short_label_html(html_or_text: str) -> str:
+    if not _is_html(html_or_text):
+        return html_or_text or ""
+    paragraphs = P_BLOCK_RE.findall(html_or_text or "")
+    if not paragraphs:
+        return html_or_text or ""
+    visible = [fragment.strip() for fragment in paragraphs if not _empty_html_fragment(fragment)]
+    if not visible:
+        return html_or_text or ""
+    return "<br>".join(visible)
+
+
 def _extract_line_height(style: Dict[str, Any], default: float = 1.35) -> float:
     v = (style or {}).get("lineHeight") or (style or {}).get("line_height")
     if v is None:
@@ -1326,6 +1338,9 @@ def convert_item_to_canvas_node(
         base_font_px = _extract_font_base_px(item, fallback=OBSIDIAN_FONT_SIZE)
         lh = _extract_line_height(item.get("style") or {}, default=1.35)
         target_px = max(min_font_px, int(round(base_font_px * scale)))
+        is_short_label = item_type == "text" and raw_h is None and _is_short_text_label(raw_content)
+        if is_short_label:
+            raw_content = _compact_short_label_html(raw_content)
 
         # Доступная область для вписывания текста
         if is_sticky:
@@ -1339,7 +1354,7 @@ def convert_item_to_canvas_node(
             avail_w = base_w
             avail_h = base_h
 
-        if item_type == "text" and raw_h is None and _is_short_text_label(raw_content):
+        if is_short_label:
             need_h = _estimate_render_height(
                 raw_content,
                 width_px=avail_w,
