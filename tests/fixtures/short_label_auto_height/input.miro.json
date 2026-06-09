@@ -1,0 +1,42 @@
+[
+  {
+    "id": "edge-empty-label",
+    "type": "text",
+    "position": {
+      "x": 0,
+      "y": 0,
+      "origin": "center",
+      "relativeTo": "canvas_center"
+    },
+    "geometry": {
+      "width": 5000
+    },
+    "style": {
+      "fontSize": "400",
+      "color": "#1a1a1a"
+    },
+    "data": {
+      "content": "<p><br /></p><p><strong>4. Revenue / Monetisation</strong></p><p><br /></p>"
+    }
+  },
+  {
+    "id": "heading-label",
+    "type": "text",
+    "position": {
+      "x": 0,
+      "y": 5000,
+      "origin": "center",
+      "relativeTo": "canvas_center"
+    },
+    "geometry": {
+      "width": 26000
+    },
+    "style": {
+      "fontSize": "2000",
+      "color": "#1a1a1a"
+    },
+    "data": {
+      "content": "<p><strong>Приоритезация и оценка</strong></p>"
+    }
+  }
+]

@@ -1,0 +1,29 @@
+{
+  "description": "Short text labels without Miro geometry.height get enough Canvas height instead of scroll/shrink artifacts.",
+  "converter": {
+    "scale": 0.02,
+    "min_font_px": 8,
+    "theme": "dark"
+  },
+  "assertions": {
+    "node_count": 2,
+    "edge_count": 0,
+    "nodes": [
+      {
+        "id": "edge-empty-label",
+        "type": "text",
+        "text_contains": "4. Revenue / Monetisation",
+        "text_not_contains": "<p><br /></p>",
+        "font_size": 8,
+        "min_height": 37
+      },
+      {
+        "id": "heading-label",
+        "type": "text",
+        "text_contains": "Приоритезация и оценка",
+        "font_size": 40,
+        "min_height": 70
+      }
+    ]
+  }
+}

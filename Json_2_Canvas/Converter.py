@@ -104,6 +104,9 @@ VALID_SIDES = {"left", "right", "top", "bottom"}
 HTML_TAG_RE = re.compile(r"<[^>]+>")
 HAS_TAG_RE = re.compile(r"<[a-zA-Z/][^>]*>")
 P_CLOSE_RE = re.compile(r"</p\s*>", re.I)
+P_BLOCK_RE = re.compile(r"<p\b[^>]*>(.*?)</p\s*>", re.I | re.S)
+EDGE_EMPTY_P_RE = re.compile(r"^\s*(?:<p\b[^>]*>\s*(?:<br\s*/?>|&nbsp;|\s)*</p\s*>\s*)+", re.I)
+TRAILING_EMPTY_P_RE = re.compile(r"(?:\s*<p\b[^>]*>\s*(?:<br\s*/?>|&nbsp;|\s)*</p\s*>\s*)+\s*$", re.I)
 BR_RE = re.compile(r"<br\s*/?>", re.I)
 LI_RE = re.compile(r"<li\b", re.I)
 PCT_RE = re.compile(r"^\s*([+-]?\d+(?:\.\d+)?)\s*%\s*$")
@@ -406,6 +409,39 @@ def strip_html(text: str) -> str:
 def _is_html(s: str) -> bool:
     return bool(s) and bool(HAS_TAG_RE.search(s))
 
+
+def _strip_edge_empty_paragraphs(html_or_text: str) -> str:
+    if not _is_html(html_or_text):
+        return html_or_text or ""
+    stripped = EDGE_EMPTY_P_RE.sub("", html_or_text or "")
+    stripped = TRAILING_EMPTY_P_RE.sub("", stripped)
+    return stripped or html_or_text or ""
+
+
+def _empty_html_fragment(fragment: str) -> bool:
+    without_breaks = BR_RE.sub("", fragment or "")
+    plain = _html_unescape(HTML_TAG_RE.sub("", without_breaks)).replace("\xa0", " ").strip()
+    return not plain
+
+
+def _non_empty_paragraph_count(html_or_text: str) -> int:
+    if not _is_html(html_or_text):
+        return 1 if strip_html(html_or_text).strip() else 0
+    paragraphs = P_BLOCK_RE.findall(html_or_text or "")
+    if not paragraphs:
+        return 1 if strip_html(html_or_text).strip() else 0
+    return sum(1 for paragraph in paragraphs if not _empty_html_fragment(paragraph))
+
+
+def _is_short_text_label(html_or_text: str) -> bool:
+    if not html_or_text:
+        return False
+    if LI_RE.search(html_or_text) or re.search(r"<(?:ol|ul|table)\b", html_or_text, re.I):
+        return False
+    plain = _html_unescape(strip_html(html_or_text)).replace("\xa0", " ").strip()
+    if not plain or len(plain) > 120:
+        return False
+    return _non_empty_paragraph_count(html_or_text) <= 2
 
 
 def _extract_line_height(style: Dict[str, Any], default: float = 1.35) -> float:
@@ -1182,6 +1218,7 @@ def convert_item_to_canvas_node(
         base_font_px0 = _extract_font_base_px(item, fallback=OBSIDIAN_FONT_SIZE)
         lh0 = _extract_line_height(item.get("style") or {}, default=1.35)
         content_html = ((item.get("data") or {}).get("content")) or (item.get("plain_text") or "")
+        content_html = _strip_edge_empty_paragraphs(content_html)
 
         height = _estimate_render_height(content_html, width_px=width, font_px=base_font_px0, line_height=lh0)
     else:
@@ -1220,6 +1257,7 @@ def convert_item_to_canvas_node(
         raw_content = ((item.get("data") or {}).get("content")
                        or item.get("plain_text")
                        or "")
+        raw_content = _strip_edge_empty_paragraphs(raw_content)
         subtype = get_miro_subtype(item)
 
         node: Dict[str, Any] = {**base, "type": "text", "text": ""}
@@ -1275,6 +1313,20 @@ def convert_item_to_canvas_node(
             # text / shape: _estimate_render_height сам вычитает 12px внутри
             avail_w = base_w
             avail_h = base_h
+
+        if item_type == "text" and raw_h is None and _is_short_text_label(raw_content):
+            need_h = _estimate_render_height(
+                raw_content,
+                width_px=avail_w,
+                font_px=target_px,
+                line_height=lh,
+            )
+            if need_h > avail_h:
+                cy = float(node["y"]) + float(node["height"]) / 2.0
+                node["height"] = need_h
+                node["y"] = cy - need_h / 2.0
+                base_h = need_h
+                avail_h = need_h
 
         # Подбор кегля: берём target из Miro, уменьшаем только если не влезает
         font_px, needs_grow = _fit_font_px(

@@ -120,12 +120,16 @@ def _assert_node(testcase: unittest.TestCase, canvas: dict[str, Any], expected: 
         testcase.assertEqual(node.get("url"), expected["url"])
     if "text_contains" in expected:
         testcase.assertIn(expected["text_contains"], node.get("text", ""))
+    if "text_not_contains" in expected:
+        testcase.assertNotIn(expected["text_not_contains"], node.get("text", ""))
     if "width" in expected:
         testcase.assertAlmostEqual(float(node["width"]), float(expected["width"]), places=4)
     if "height" in expected:
         testcase.assertAlmostEqual(float(node["height"]), float(expected["height"]), places=4)
     if "min_height" in expected:
         testcase.assertGreaterEqual(float(node["height"]), float(expected["min_height"]))
+    if "font_size" in expected:
+        testcase.assertEqual((node.get("styleAttributes") or {}).get("fontSize"), expected["font_size"])
     if "shape" in expected:
         testcase.assertEqual((node.get("styleAttributes") or {}).get("shape"), expected["shape"])
 
