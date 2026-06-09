@@ -27,6 +27,8 @@ TEXT_VISUAL_CLEARANCE_PX = 16
 MIN_TEXT_WIDTH_AFTER_CLEARANCE = 64
 TEXT_TEXT_VERTICAL_OVERLAP_MIN_RATIO = 0.45
 TEXT_TEXT_VERTICAL_MAX_PASSES = 8
+TEXT_TEXT_HORIZONTAL_EDGE_MAX_RATIO = 0.15
+TEXT_TEXT_HORIZONTAL_EDGE_MAX_PASSES = 16
 LINK_VISUAL_MAX_PASSES = 8
 SHORT_LABEL_VISUAL_MAX_PASSES = 32
 TEXT_VISUAL_VERTICAL_MAX_PASSES = 32
@@ -1595,6 +1597,74 @@ def _resolve_text_text_vertical_overlaps(
             return
 
 
+def _resolve_text_text_horizontal_edge_overlaps(
+    nodes: List[Dict[str, Any]],
+    *,
+    clearance_px: int = TEXT_VISUAL_CLEARANCE_PX,
+    max_horizontal_overlap_ratio: float = TEXT_TEXT_HORIZONTAL_EDGE_MAX_RATIO,
+    max_passes: int = TEXT_TEXT_HORIZONTAL_EDGE_MAX_PASSES,
+) -> None:
+    text_nodes = [n for n in nodes if _is_clearance_text_node(n)]
+    if len(text_nodes) < 2:
+        return
+
+    for _ in range(max_passes):
+        changed = False
+        text_nodes.sort(key=lambda n: (float(n.get("x", 0) or 0), float(n.get("y", 0) or 0)))
+
+        for idx, left_node in enumerate(text_nodes):
+            left_rect = _node_rect(left_node)
+            if not left_rect:
+                continue
+            lx0, ly0, lx1, ly1 = left_rect
+            left_w = lx1 - lx0
+            left_center_x = (lx0 + lx1) / 2.0
+
+            for right_node in text_nodes[idx + 1:]:
+                right_rect = _node_rect(right_node)
+                if not right_rect:
+                    continue
+                rx0, ry0, rx1, ry1 = right_rect
+                right_w = rx1 - rx0
+                right_center_x = (rx0 + rx1) / 2.0
+                if right_center_x <= left_center_x:
+                    continue
+
+                overlap_w, overlap_h = _rect_overlap(left_rect, right_rect)
+                if overlap_w <= 0 or overlap_h <= 0:
+                    continue
+
+                min_w = min(left_w, right_w)
+                if min_w <= 0 or overlap_w > min_w * max_horizontal_overlap_ratio:
+                    continue
+
+                candidates = [
+                    (abs((lx1 + clearance_px) - rx0), right_node, lx1 + clearance_px, ry0, right_w, ry1 - ry0),
+                    (abs((rx0 - clearance_px - left_w) - lx0), left_node, rx0 - clearance_px - left_w, ly0, left_w, ly1 - ly0),
+                ]
+                for _distance, moved_node, new_x, new_y, moved_w, moved_h in sorted(candidates, key=lambda c: c[0]):
+                    candidate_rect = (new_x, new_y, new_x + moved_w, new_y + moved_h)
+                    if _candidate_rect_overlaps_any_node(
+                        nodes,
+                        candidate_rect,
+                        skip_id=str(moved_node.get("id", "")),
+                        overlap_tolerance_px=1.0,
+                    ):
+                        continue
+                    moved_node["x"] = new_x
+                    changed = True
+                    break
+
+                if changed:
+                    break
+
+            if changed:
+                break
+
+        if not changed:
+            return
+
+
 def _resolve_link_visual_overlaps(
     nodes: List[Dict[str, Any]],
     *,
@@ -2895,6 +2965,7 @@ def convert_miro_to_canvas(
     _resolve_short_label_visual_vertical_overlaps(nodes)
     _resolve_text_visual_vertical_stack_overlaps(nodes)
     _resolve_text_text_vertical_overlaps(nodes)
+    _resolve_text_text_horizontal_edge_overlaps(nodes)
     _resolve_short_label_visual_vertical_overlaps(nodes)
     for _ in range(4):
         _compact_short_inline_label_heights(nodes)
@@ -2902,6 +2973,7 @@ def convert_miro_to_canvas(
         _resolve_short_label_visual_vertical_overlaps(nodes)
         _resolve_text_visual_vertical_stack_overlaps(nodes)
         _resolve_text_text_vertical_overlaps(nodes)
+        _resolve_text_text_horizontal_edge_overlaps(nodes)
 
 
     # --- третий проход: строим контейнеры (Miro group / frame / diagram) как Canvas group

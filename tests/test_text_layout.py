@@ -15,6 +15,7 @@ from Converter import (  # noqa: E402
     _expand_short_inline_label_widths,
     _is_short_text_label,
     _resolve_link_visual_overlaps,
+    _resolve_text_text_horizontal_edge_overlaps,
     _resolve_short_label_visual_vertical_overlaps,
     _resolve_text_text_vertical_overlaps,
     _resolve_text_visual_horizontal_overlaps,
@@ -116,6 +117,34 @@ class TextLayoutTests(unittest.TestCase):
 
         self.assertEqual(nodes[0]["y"], -820)
         self.assertGreaterEqual(nodes[1]["y"], nodes[0]["y"] + nodes[0]["height"] + 16)
+
+    def test_text_text_horizontal_edge_clearance_moves_right_text_sideways(self) -> None:
+        nodes = [
+            {
+                "id": "left-title",
+                "type": "text",
+                "x": 0,
+                "y": 0,
+                "width": 400,
+                "height": 88,
+                "text": '<div style="font-size:24px; line-height:1.35">GPT trainer management section</div>',
+                "styleAttributes": {"border": "invisible", "fontSize": 24},
+            },
+            {
+                "id": "right-title",
+                "type": "text",
+                "x": 382,
+                "y": 0,
+                "width": 360,
+                "height": 88,
+                "text": '<div style="font-size:24px; line-height:1.35">GPT trainer product section</div>',
+                "styleAttributes": {"border": "invisible", "fontSize": 24},
+            },
+        ]
+
+        _resolve_text_text_horizontal_edge_overlaps(nodes)
+
+        self.assertGreaterEqual(nodes[1]["x"], nodes[0]["x"] + nodes[0]["width"] + 16)
 
     def test_link_visual_clearance_moves_link_away_from_file(self) -> None:
         nodes = [
