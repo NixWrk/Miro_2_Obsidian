@@ -1,0 +1,19 @@
+[
+  {
+    "id": "mindmap-websdk-only",
+    "type": "mindmap",
+    "source": "web_sdk",
+    "source_surfaces": ["web_sdk"],
+    "position": {
+      "x": 180,
+      "y": 120
+    },
+    "geometry": {
+      "width": 260,
+      "height": 120
+    },
+    "data": {
+      "title": "Web SDK mind map"
+    }
+  }
+]

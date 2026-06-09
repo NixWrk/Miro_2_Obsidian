@@ -1,0 +1,22 @@
+{
+  "description": "Web SDK-only unsupported items with geometry render as diagnostic placeholders.",
+  "converter": {
+    "scale": 1.0,
+    "min_font_px": 8,
+    "theme": "dark"
+  },
+  "assertions": {
+    "node_count": 1,
+    "edge_count": 0,
+    "nodes": [
+      {
+        "id": "mindmap-websdk-only",
+        "type": "text",
+        "text_contains": "Web SDK mind map",
+        "min_width": 260,
+        "min_height": 120,
+        "font_size": 8
+      }
+    ]
+  }
+}
