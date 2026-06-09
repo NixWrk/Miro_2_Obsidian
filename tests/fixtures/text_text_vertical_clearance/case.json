@@ -1,0 +1,30 @@
+{
+  "description": "Stacked transparent text nodes keep vertical clearance after auto-height changes.",
+  "converter": {
+    "scale": 0.013799,
+    "min_font_px": 8,
+    "theme": "dark"
+  },
+  "assertions": {
+    "node_count": 2,
+    "edge_count": 0,
+    "nodes": [
+      {
+        "id": "deadline-heading",
+        "type": "text",
+        "text_contains": "Deadline"
+      },
+      {
+        "id": "deadline-notes",
+        "type": "text",
+        "text_contains": "Mini cheat sheet"
+      }
+    ],
+    "non_overlapping_pairs": [
+      [
+        "deadline-heading",
+        "deadline-notes"
+      ]
+    ]
+  }
+}

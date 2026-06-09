@@ -14,6 +14,7 @@ from Converter import (  # noqa: E402
     _expand_short_inline_label_widths,
     _is_short_text_label,
     _resolve_short_label_visual_vertical_overlaps,
+    _resolve_text_text_vertical_overlaps,
     _resolve_text_visual_horizontal_overlaps,
     _strip_edge_empty_paragraphs,
 )
@@ -82,6 +83,35 @@ class TextLayoutTests(unittest.TestCase):
         self.assertEqual(nodes[0]["x"], -274)
         self.assertEqual(nodes[0]["width"], 494)
         self.assertLessEqual(nodes[0]["x"] + nodes[0]["width"], nodes[1]["x"] - 16)
+
+    def test_text_text_vertical_clearance_moves_lower_text_down(self) -> None:
+        nodes = [
+            {
+                "id": "deadline-heading",
+                "type": "text",
+                "x": -2147,
+                "y": -820,
+                "width": 345,
+                "height": 137,
+                "text": '<div style="font-size:28px; line-height:1.35">Deadline</div>',
+                "styleAttributes": {"border": "invisible", "fontSize": 28},
+            },
+            {
+                "id": "deadline-notes",
+                "type": "text",
+                "x": -2147,
+                "y": -745,
+                "width": 714,
+                "height": 235,
+                "text": '<div style="font-size:16px; line-height:1.35"><ol><li>Scope</li></ol></div>',
+                "styleAttributes": {"border": "invisible", "fontSize": 16},
+            },
+        ]
+
+        _resolve_text_text_vertical_overlaps(nodes)
+
+        self.assertEqual(nodes[0]["y"], -820)
+        self.assertGreaterEqual(nodes[1]["y"], nodes[0]["y"] + nodes[0]["height"] + 16)
 
     def test_short_label_visual_clearance_moves_label_above_neighbor(self) -> None:
         nodes = [

@@ -1,0 +1,50 @@
+[
+  {
+    "id": "deadline-heading",
+    "type": "text",
+    "data": {
+      "content": "<p>Deadline work</p><p><strong>Tom DeMarco. Deadline.</strong></p>"
+    },
+    "style": {
+      "fillColor": "#ffffff",
+      "fillOpacity": "0.0",
+      "fontFamily": "noto_sans",
+      "fontSize": "2009",
+      "textAlign": "left",
+      "color": "#1a1a1a"
+    },
+    "geometry": {
+      "width": 24973.31851614819
+    },
+    "position": {
+      "x": 0,
+      "y": 0,
+      "origin": "center",
+      "relativeTo": "canvas_center"
+    }
+  },
+  {
+    "id": "deadline-notes",
+    "type": "text",
+    "data": {
+      "content": "<p><br /></p><p><strong>Mini cheat sheet</strong></p><p><br /></p><ol><li data-list=\"ordered\"><span class=\"ql-ui\"></span><strong>Hard deadline</strong> means cut scope, not quality.</li><li data-list=\"ordered\"><span class=\"ql-ui\"></span><strong>Write an early spike</strong> for risky assumptions.</li></ol>"
+    },
+    "style": {
+      "fillColor": "#ffffff",
+      "fillOpacity": "0.0",
+      "fontFamily": "noto_sans",
+      "fontSize": "1259",
+      "textAlign": "left",
+      "color": "#1a1a1a"
+    },
+    "geometry": {
+      "width": 51744.33033253729
+    },
+    "position": {
+      "x": 13385.505908194551,
+      "y": 8947.400487542618,
+      "origin": "center",
+      "relativeTo": "canvas_center"
+    }
+  }
+]

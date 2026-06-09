@@ -25,6 +25,8 @@ FLOW_PREFIX = "flow_chart_"
 SHORT_LABEL_RENDER_PADDING = 24
 TEXT_VISUAL_CLEARANCE_PX = 16
 MIN_TEXT_WIDTH_AFTER_CLEARANCE = 64
+TEXT_TEXT_VERTICAL_OVERLAP_MIN_RATIO = 0.45
+TEXT_TEXT_VERTICAL_MAX_PASSES = 8
 SHORT_LABEL_SINGLE_LINE_PADDING = 64
 SHORT_LABEL_SINGLE_LINE_AVG_CHAR_WIDTH = 0.50
 SHORT_LABEL_WIDTH_MIN_GROW = 32
@@ -1164,6 +1166,54 @@ def _resolve_short_label_visual_vertical_overlaps(
                 label_node["y"] = vy0 - clearance_px - label_h
             elif label_center_y > vy1:
                 label_node["y"] = vy1 + clearance_px
+
+
+def _resolve_text_text_vertical_overlaps(
+    nodes: List[Dict[str, Any]],
+    *,
+    clearance_px: int = TEXT_VISUAL_CLEARANCE_PX,
+    min_horizontal_overlap_ratio: float = TEXT_TEXT_VERTICAL_OVERLAP_MIN_RATIO,
+    max_passes: int = TEXT_TEXT_VERTICAL_MAX_PASSES,
+) -> None:
+    text_nodes = [n for n in nodes if _is_clearance_text_node(n)]
+    if len(text_nodes) < 2:
+        return
+
+    for _ in range(max_passes):
+        changed = False
+        text_nodes.sort(key=lambda n: (float(n.get("y", 0) or 0), float(n.get("x", 0) or 0)))
+
+        for i, upper_node in enumerate(text_nodes):
+            upper_rect = _node_rect(upper_node)
+            if not upper_rect:
+                continue
+            ux0, uy0, ux1, uy1 = upper_rect
+            upper_center_y = (uy0 + uy1) / 2.0
+            upper_w = ux1 - ux0
+
+            for lower_node in text_nodes[i + 1:]:
+                lower_rect = _node_rect(lower_node)
+                if not lower_rect:
+                    continue
+                lx0, ly0, lx1, ly1 = lower_rect
+                lower_center_y = (ly0 + ly1) / 2.0
+                if lower_center_y <= upper_center_y:
+                    continue
+
+                overlap_w, _overlap_h = _rect_overlap(upper_rect, lower_rect)
+                min_w = min(upper_w, lx1 - lx0)
+                if min_w <= 0 or overlap_w < min_w * min_horizontal_overlap_ratio:
+                    continue
+
+                required_y = uy1 + clearance_px
+                if ly0 >= required_y:
+                    continue
+
+                lower_node["y"] = required_y
+                changed = True
+
+        if not changed:
+            return
 
 
 # === GROUPS / FRAMES helpers ===
@@ -2393,6 +2443,7 @@ def convert_miro_to_canvas(
     _resolve_text_visual_horizontal_overlaps(nodes, min_font_px=min_font_px)
     _resolve_short_label_visual_vertical_overlaps(nodes)
     _expand_short_inline_label_widths(nodes)
+    _resolve_text_text_vertical_overlaps(nodes)
 
 
     # --- третий проход: строим контейнеры (Miro group / frame / diagram) как Canvas group
