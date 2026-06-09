@@ -71,7 +71,7 @@ def convert_fixture(fixture: Path, work_dir: Path) -> Path:
     return Path(canvas_path)
 
 
-def capture_canvas(canvas_path: Path, screenshot_path: Path) -> None:
+def capture_canvas(canvas_path: Path, screenshot_path: Path, *, fit_viewport: bool = False) -> None:
     index_url = (TOOL_DIR / "index.html").resolve().as_uri()
     screenshot_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -88,7 +88,34 @@ def capture_canvas(canvas_path: Path, screenshot_path: Path) -> None:
                 "document.body.dataset.renderStatus === 'ready'",
                 timeout=5000,
             )
-            page.locator("#stage").screenshot(path=str(screenshot_path))
+            if fit_viewport:
+                page.evaluate(
+                    """
+                    () => {
+                      const viewport = document.getElementById("viewport");
+                      const stage = document.getElementById("stage");
+                      const stageWidth = Math.max(1, Number.parseFloat(stage.style.width) || stage.scrollWidth);
+                      const stageHeight = Math.max(1, Number.parseFloat(stage.style.height) || stage.scrollHeight);
+                      const rect = viewport.getBoundingClientRect();
+                      const targetWidth = Math.max(1, window.innerWidth - rect.left);
+                      const targetHeight = Math.max(1, window.innerHeight - rect.top);
+                      viewport.style.width = `${targetWidth}px`;
+                      viewport.style.height = `${targetHeight}px`;
+                      viewport.style.overflow = "hidden";
+                      const scale = Math.min(
+                        1,
+                        targetWidth / stageWidth,
+                        targetHeight / stageHeight
+                      );
+                      stage.style.transformOrigin = "0 0";
+                      stage.style.transform = `scale(${scale})`;
+                      document.body.dataset.renderScale = String(scale);
+                    }
+                    """
+                )
+                page.locator("#viewport").screenshot(path=str(screenshot_path))
+            else:
+                page.locator("#stage").screenshot(path=str(screenshot_path))
         except PlaywrightTimeoutError as exc:
             state = page.locator("#messages").text_content(timeout=1000)
             raise RuntimeError(f"Renderer did not become ready. Message: {state}") from exc
@@ -171,4 +198,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

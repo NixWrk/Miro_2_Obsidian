@@ -34,6 +34,7 @@ tmp_src.txt
 *_TEST.canvas
 
 # Local render/oracle outputs
+work/
 tools/canvas_render/.out/
 tools/obsidian_oracle/.out/
 _obsidian_oracle_vault/

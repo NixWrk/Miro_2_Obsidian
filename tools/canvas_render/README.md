@@ -48,6 +48,8 @@ python tools\canvas_render\capture_fixture.py --all
 
 Actual screenshots пишутся в `tools/canvas_render/.out/`.
 
+`capture_fixture.py` keeps full-stage screenshots for stable fixture baselines. Local work samples use fitted viewport screenshots through `scripts\run_local_samples.py`, so large boards are inspectable without changing committed `expected.render.png` baselines.
+
 Текущая реализация является diagnostic harness: она рисует nodes/groups/edges, показывает базовую статистику и поддерживает screenshot/baseline сравнение для fixtures.
 
 Renderer не обязан полностью повторять Obsidian. Его задача — ловить регрессии конвертера: пустой canvas, неверные координаты, схлопнутые nodes, пропавший текст, ошибки размеров и связей.
