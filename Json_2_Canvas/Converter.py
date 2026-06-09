@@ -1842,6 +1842,8 @@ def convert_item_to_canvas_node(
         if data.get("url"):
             parts.append(f"<p>{_html_escape(str(data.get('url')), False)}</p>")
         html = "".join(parts) if parts else ""
+        if not html:
+            return None
 
         node = {**base, "type": "text", "text": ""}
         base_font_px = _extract_font_base_px(item, fallback=OBSIDIAN_FONT_SIZE)

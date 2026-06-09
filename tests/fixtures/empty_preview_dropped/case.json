@@ -1,0 +1,15 @@
+{
+  "description": "Unsupported preview items without visible content are dropped instead of becoming empty text nodes.",
+  "converter": {
+    "scale": 1.0,
+    "min_font_px": 8,
+    "theme": "dark"
+  },
+  "assertions": {
+    "node_count": 0,
+    "edge_count": 0,
+    "absent_node_ids": [
+      "empty-preview"
+    ]
+  }
+}

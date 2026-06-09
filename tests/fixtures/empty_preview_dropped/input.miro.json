@@ -1,0 +1,18 @@
+[
+  {
+    "id": "empty-preview",
+    "type": "preview",
+    "isSupported": false,
+    "position": {
+      "x": 0,
+      "y": 0,
+      "origin": "center",
+      "relativeTo": "canvas_center"
+    },
+    "geometry": {
+      "width": 250,
+      "height": 159
+    },
+    "data": {}
+  }
+]
