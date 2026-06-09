@@ -9,6 +9,7 @@ import shutil
 from html import escape as _html_escape, unescape as _html_unescape
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
+from urllib.parse import parse_qs, unquote, urlparse
 
 
 # =========================
@@ -163,6 +164,53 @@ def _extract_iframe_size(html: str) -> tuple[int, int] | None:
     h_m = re.search(r'<iframe\b[^>]*\bheight=["\']?(\d+)', html, re.I)
     if w_m and h_m:
         return int(w_m.group(1)), int(h_m.group(1))
+    return None
+
+
+def _normalize_external_url(value: str) -> str | None:
+    url = _html_unescape(str(value or "")).strip()
+    if not url:
+        return None
+    url = unquote(url)
+    if url.startswith("//"):
+        url = "https:" + url
+    if url.startswith(("http://", "https://")):
+        return url
+    return None
+
+
+def _recover_embed_url(data: Dict[str, Any]) -> str | None:
+    direct_url = _normalize_external_url(str((data or {}).get("url") or ""))
+    if direct_url:
+        return direct_url
+
+    html_value = _html_unescape(str((data or {}).get("html") or ""))
+    if not html_value:
+        return None
+
+    candidates = [
+        match.group(1)
+        for match in re.finditer(r'\b(?:src|href)\s*=\s*["\']([^"\']+)["\']', html_value, re.I)
+    ]
+    candidates.extend(
+        match.group(0)
+        for match in re.finditer(r"https?://[^\s\"'<>]+|//[^\s\"'<>]+", html_value, re.I)
+    )
+
+    for candidate in candidates:
+        url = _normalize_external_url(candidate)
+        if not url:
+            continue
+        parsed = urlparse(url)
+        query = parse_qs(parsed.query)
+        for key in ("url", "href", "u"):
+            for value in query.get(key, []):
+                recovered = _normalize_external_url(value)
+                if recovered:
+                    return recovered
+        if "embedly.com" not in parsed.netloc.lower():
+            return url
+
     return None
 
 
@@ -2407,7 +2455,7 @@ def convert_item_to_canvas_node(
     if item_type == "embed":
         data = item.get("data") or {}
         local_name = item.get("local_name") or ""
-        url        = (data.get("url")          or "").strip()
+        url        = _recover_embed_url(data) or ""
         title      = (data.get("title")        or "").strip()
         provider   = (data.get("providerName") or "").strip()
 
@@ -2442,6 +2490,20 @@ def convert_item_to_canvas_node(
             node.pop("text", None)
             node["width"]  = content_w
             node["height"] = content_h
+            return node
+        elif title or provider or data.get("html") or data.get("previewUrl"):
+            parts = []
+            if title:
+                parts.append(f"<p><strong>{_html_escape(title, False)}</strong></p>")
+            if provider:
+                parts.append(f"<p>{_html_escape(provider, False)}</p>")
+            parts.append("<p><em>Embed URL could not be recovered.</em></p>")
+            html = "".join(parts)
+            node = {**base, "type": "text", "text": ""}
+            node.setdefault("styleAttributes", {})["fontSize"] = min_font_px
+            node["text"] = f'<div style="font-size:{min_font_px}px; line-height:1.35">{html}</div>'
+            node["width"] = content_w
+            node["height"] = max(content_h, _estimate_render_height(html, width_px=content_w, font_px=min_font_px))
             return node
         else:
             return None

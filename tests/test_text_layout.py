@@ -14,6 +14,7 @@ from Converter import (  # noqa: E402
     _estimate_render_height,
     _expand_short_inline_label_widths,
     _is_short_text_label,
+    _recover_embed_url,
     _resolve_link_visual_overlaps,
     _resolve_text_text_horizontal_edge_overlaps,
     _resolve_short_label_visual_vertical_overlaps,
@@ -32,6 +33,19 @@ class TextLayoutTests(unittest.TestCase):
         self.assertEqual(
             _strip_edge_empty_paragraphs(html),
             "<p><strong>4. Revenue / Monetisation</strong></p>",
+        )
+
+    def test_embed_url_recovers_from_embedly_iframe_query(self) -> None:
+        html = (
+            '<iframe src="//cdn.embedly.com/widgets/media.html?'
+            'src=http%3A%2F%2Fwww.youtube.com%2Fembed%2Fvideoseries%3Flist%3DPL-example'
+            '&url=https%3A%2F%2Fwww.youtube.com%2Fplaylist%3Flist%3DPL-example'
+            '&schema=youtube"></iframe>'
+        )
+
+        self.assertEqual(
+            _recover_embed_url({"url": "", "html": html}),
+            "https://www.youtube.com/playlist?list=PL-example",
         )
 
     def test_short_label_detection_rejects_long_list_content(self) -> None:

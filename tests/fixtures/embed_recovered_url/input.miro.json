@@ -1,0 +1,26 @@
+[
+  {
+    "id": "embedly-playlist",
+    "type": "embed",
+    "data": {
+      "contentType": "video",
+      "description": "Playlist embed with an empty Miro data.url field.",
+      "html": "<iframe class=\"embedly-embed\" src=\"//cdn.embedly.com/widgets/media.html?src=http%3A%2F%2Fwww.youtube.com%2Fembed%2Fvideoseries%3Flist%3DPL-example&display_name=YouTube&url=https%3A%2F%2Fwww.youtube.com%2Fplaylist%3Flist%3DPL-example&image=https%3A%2F%2Fi.ytimg.com%2Fvi%2Fexample%2Fhqdefault.jpg&type=text%2Fhtml&schema=youtube\" width=\"853\" height=\"480\" scrolling=\"no\" title=\"YouTube embed\"></iframe>",
+      "mode": "inline",
+      "previewUrl": "https://i.ytimg.com/vi/example/hqdefault.jpg",
+      "providerName": "YouTube",
+      "title": "Recovered playlist",
+      "url": ""
+    },
+    "geometry": {
+      "width": 450.0,
+      "height": 337.5
+    },
+    "position": {
+      "x": 0,
+      "y": 0,
+      "origin": "center",
+      "relativeTo": "canvas_center"
+    }
+  }
+]

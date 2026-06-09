@@ -1,0 +1,21 @@
+{
+  "description": "Embedly iframe metadata recovers a native Canvas link when Miro data.url is empty.",
+  "converter": {
+    "scale": 0.013799,
+    "min_font_px": 8,
+    "theme": "dark"
+  },
+  "assertions": {
+    "node_count": 1,
+    "edge_count": 0,
+    "nodes": [
+      {
+        "id": "embedly-playlist",
+        "type": "link",
+        "url": "https://www.youtube.com/playlist?list=PL-example",
+        "min_width": 320,
+        "min_height": 180
+      }
+    ]
+  }
+}
