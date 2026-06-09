@@ -10,7 +10,7 @@ SCRIPTS_DIR = REPO_ROOT / "scripts"
 
 sys.path.insert(0, str(SCRIPTS_DIR))
 
-from audit_node_overlaps import audit_nodes  # noqa: E402
+from audit_node_overlaps import NodeRect, audit_nodes  # noqa: E402
 
 
 class NodeOverlapAuditTests(unittest.TestCase):
@@ -65,6 +65,62 @@ class NodeOverlapAuditTests(unittest.TestCase):
         }
 
         self.assertEqual(audit_nodes(canvas, exclude_node_ids=["b"]), [])
+
+    def test_classifies_overlap_that_already_exists_in_source(self) -> None:
+        canvas = {
+            "nodes": [
+                {"id": "a", "type": "text", "x": 0, "y": 0, "width": 100, "height": 100},
+                {"id": "b", "type": "text", "x": 50, "y": 50, "width": 100, "height": 100},
+            ],
+            "edges": [],
+        }
+        source_rects = {
+            "a": NodeRect("a", "text", 0, 0, 100, 100),
+            "b": NodeRect("b", "text", 75, 75, 100, 100),
+        }
+
+        overlaps = audit_nodes(canvas, source_rects=source_rects, source_missing={})
+
+        self.assertEqual(overlaps[0].source_status, "source_overlap")
+        self.assertEqual(overlaps[0].source_width, 25)
+        self.assertEqual(overlaps[0].source_height, 25)
+
+    def test_classifies_converter_generated_overlap(self) -> None:
+        canvas = {
+            "nodes": [
+                {"id": "a", "type": "text", "x": 0, "y": 0, "width": 100, "height": 100},
+                {"id": "b", "type": "text", "x": 50, "y": 50, "width": 100, "height": 100},
+            ],
+            "edges": [],
+        }
+        source_rects = {
+            "a": NodeRect("a", "text", 0, 0, 25, 25),
+            "b": NodeRect("b", "text", 75, 75, 25, 25),
+        }
+
+        overlaps = audit_nodes(canvas, source_rects=source_rects, source_missing={})
+
+        self.assertEqual(overlaps[0].source_status, "generated_overlap")
+        self.assertEqual(overlaps[0].source_width, 0)
+        self.assertEqual(overlaps[0].source_height, 0)
+
+    def test_reports_unknown_source_geometry(self) -> None:
+        canvas = {
+            "nodes": [
+                {"id": "a", "type": "text", "x": 0, "y": 0, "width": 100, "height": 100},
+                {"id": "b", "type": "text", "x": 50, "y": 50, "width": 100, "height": 100},
+            ],
+            "edges": [],
+        }
+
+        overlaps = audit_nodes(
+            canvas,
+            source_rects={"a": NodeRect("a", "text", 0, 0, 100, 100)},
+            source_missing={"b": "missing_geometry.height"},
+        )
+
+        self.assertEqual(overlaps[0].source_status, "source_geometry_unknown")
+        self.assertIn("b:missing_geometry.height", overlaps[0].source_reason)
 
 
 if __name__ == "__main__":
