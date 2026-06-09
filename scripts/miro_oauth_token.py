@@ -76,6 +76,8 @@ def format_callback_timeout_message(config: OAuthConfig, authorize_url: str) -> 
             config.redirect_uri,
             "Then open or retry this authorization URL in the same browser session:",
             authorize_url,
+            "If the browser shows {'error': 'Not found.'} at localhost while this script is still waiting,",
+            "copy the full callback URL and replace only the host with 127.0.0.1, keeping the same path and ?code=...",
             "If localhost is blocked or resolves oddly, register this exact additional Redirect URI in the Miro app before using it:",
             "http://127.0.0.1:8000/callback",
             "Then rerun with:",
@@ -217,22 +219,26 @@ def authorize_and_get_token(
     handler = _make_callback_handler(callback_path=redirect.path, result=result, event=event)
     port = redirect.port or 80
 
-    servers: list[ThreadingHTTPServer] = []
+    servers: list[tuple[str, ThreadingHTTPServer]] = []
+    bind_failures: list[tuple[str, str]] = []
     for bind_host in callback_bind_hosts(redirect.hostname):
         try:
-            servers.append(_make_callback_server(bind_host, port, handler))
-        except OSError:
+            servers.append((bind_host, _make_callback_server(bind_host, port, handler)))
+        except OSError as exc:
+            bind_failures.append((bind_host, str(exc)))
             continue
     if not servers:
         raise OSError(f"Could not start local OAuth callback server on port {port}")
 
     try:
-        for server in servers:
+        for _, server in servers:
             thread = threading.Thread(target=server.serve_forever, daemon=True)
             thread.start()
 
-        bind_hosts = ", ".join(callback_bind_hosts(redirect.hostname))
+        bind_hosts = ", ".join(host for host, _ in servers)
         print(f"listening_on={bind_hosts}:{port}")
+        for host, error in bind_failures:
+            print(f"callback_bind_skipped={host}:{port} ({error})")
 
         authorize_url = build_authorize_url(config)
         print(f"authorization_url={authorize_url}")
@@ -243,7 +249,7 @@ def authorize_and_get_token(
         if not event.wait(timeout_seconds):
             raise TimeoutError(format_callback_timeout_message(config, authorize_url))
     finally:
-        for server in servers:
+        for _, server in servers:
             server.shutdown()
             server.server_close()
 

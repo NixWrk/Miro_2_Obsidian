@@ -77,6 +77,7 @@ class MiroOAuthTokenTests(unittest.TestCase):
 
         self.assertIn("http://localhost:8000/callback", message)
         self.assertIn("authorization URL", message)
+        self.assertIn("replace only the host with 127.0.0.1", message)
         self.assertIn("--oauth-redirect-uri http://127.0.0.1:8000/callback", message)
         self.assertNotIn("secret-1", message)
 
