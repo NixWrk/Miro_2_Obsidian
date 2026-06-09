@@ -10,6 +10,7 @@ sys.path.insert(0, str(CONVERTER_DIR))
 
 from Converter import (  # noqa: E402
     _compact_short_label_html,
+    _compact_short_inline_label_heights,
     _estimate_render_height,
     _expand_short_inline_label_widths,
     _is_short_text_label,
@@ -17,6 +18,8 @@ from Converter import (  # noqa: E402
     _resolve_short_label_visual_vertical_overlaps,
     _resolve_text_text_vertical_overlaps,
     _resolve_text_visual_horizontal_overlaps,
+    _resolve_text_visual_vertical_stack_overlaps,
+    _resolve_ultra_narrow_label_visual_overlaps,
     _strip_edge_empty_paragraphs,
 )
 
@@ -166,6 +169,239 @@ class TextLayoutTests(unittest.TestCase):
 
         self.assertEqual(nodes[0]["y"], -273)
         self.assertLessEqual(nodes[0]["y"] + nodes[0]["height"], nodes[1]["y"] - 16)
+
+    def test_short_label_visual_clearance_moves_label_below_when_center_is_inside_neighbor(self) -> None:
+        nodes = [
+            {
+                "id": "metric-label",
+                "type": "text",
+                "x": -5092,
+                "y": 827,
+                "width": 106,
+                "height": 45,
+                "text": '<span style="font-size:8px; line-height:1.35">4. Revenue / Monetisation</span>',
+                "styleAttributes": {"border": "invisible", "fontSize": 8},
+            },
+            {
+                "id": "metric-video",
+                "type": "link",
+                "x": -5183,
+                "y": 688,
+                "width": 320,
+                "height": 180,
+                "url": "https://example.com/video",
+            },
+        ]
+
+        _resolve_short_label_visual_vertical_overlaps(nodes)
+
+        self.assertGreaterEqual(nodes[0]["y"], nodes[1]["y"] + nodes[1]["height"] + 16)
+
+    def test_text_visual_vertical_stack_moves_lower_visual_down(self) -> None:
+        nodes = [
+            {
+                "id": "long-text",
+                "type": "text",
+                "x": 0,
+                "y": 0,
+                "width": 300,
+                "height": 120,
+                "text": '<div style="font-size:8px; line-height:1.35"><p>Long text that grew after min font fitting and now needs a separate vertical stack clearance rule.</p></div>',
+                "styleAttributes": {"border": "invisible", "fontSize": 8},
+            },
+            {
+                "id": "below-image",
+                "type": "file",
+                "x": 0,
+                "y": 90,
+                "width": 300,
+                "height": 180,
+            },
+        ]
+
+        _resolve_text_visual_vertical_stack_overlaps(nodes)
+
+        self.assertGreaterEqual(nodes[1]["y"], nodes[0]["y"] + nodes[0]["height"] + 16)
+
+    def test_text_visual_vertical_stack_ignores_group_container(self) -> None:
+        nodes = [
+            {
+                "id": "container",
+                "type": "group",
+                "x": -20,
+                "y": -20,
+                "width": 360,
+                "height": 360,
+            },
+            {
+                "id": "long-text",
+                "type": "text",
+                "x": 0,
+                "y": 0,
+                "width": 300,
+                "height": 120,
+                "text": '<div style="font-size:8px; line-height:1.35"><p>Long text that grew after min font fitting and now needs a separate vertical stack clearance rule.</p></div>',
+                "styleAttributes": {"border": "invisible", "fontSize": 8},
+            },
+            {
+                "id": "below-image",
+                "type": "file",
+                "x": 0,
+                "y": 90,
+                "width": 300,
+                "height": 180,
+            },
+        ]
+
+        _resolve_text_visual_vertical_stack_overlaps(nodes)
+
+        self.assertGreaterEqual(nodes[2]["y"], nodes[1]["y"] + nodes[1]["height"] + 16)
+
+    def test_text_visual_vertical_stack_pushes_blocking_lower_nodes_down(self) -> None:
+        nodes = [
+            {
+                "id": "above-blocker",
+                "type": "text",
+                "x": 0,
+                "y": -126,
+                "width": 300,
+                "height": 110,
+                "text": '<div style="font-size:8px; line-height:1.35">Earlier text block</div>',
+                "styleAttributes": {"border": "invisible", "fontSize": 8},
+            },
+            {
+                "id": "long-text",
+                "type": "text",
+                "x": 0,
+                "y": 0,
+                "width": 300,
+                "height": 120,
+                "text": '<div style="font-size:8px; line-height:1.35"><p>Long text that grew after min font fitting and now needs a separate vertical stack clearance rule.</p></div>',
+                "styleAttributes": {"border": "invisible", "fontSize": 8},
+            },
+            {
+                "id": "below-image",
+                "type": "file",
+                "x": 0,
+                "y": 90,
+                "width": 300,
+                "height": 180,
+            },
+            {
+                "id": "below-blocker",
+                "type": "file",
+                "x": 0,
+                "y": 286,
+                "width": 300,
+                "height": 120,
+            },
+        ]
+
+        _resolve_text_visual_vertical_stack_overlaps(nodes)
+
+        self.assertGreaterEqual(nodes[2]["y"], nodes[1]["y"] + nodes[1]["height"] + 16)
+        self.assertGreaterEqual(nodes[3]["y"], nodes[2]["y"] + nodes[2]["height"] + 16)
+
+    def test_short_label_visual_clearance_can_push_lower_visual_down(self) -> None:
+        nodes = [
+            {
+                "id": "label",
+                "type": "text",
+                "x": 0,
+                "y": 0,
+                "width": 140,
+                "height": 45,
+                "text": '<span style="font-size:11px; line-height:1.35">Interviews</span>',
+                "styleAttributes": {"border": "invisible", "fontSize": 11},
+            },
+            {
+                "id": "lower-image",
+                "type": "file",
+                "x": 0,
+                "y": 38,
+                "width": 140,
+                "height": 50,
+            },
+            {
+                "id": "upper-blocker",
+                "type": "file",
+                "x": 0,
+                "y": -23,
+                "width": 140,
+                "height": 45,
+            },
+            {
+                "id": "lower-blocker",
+                "type": "file",
+                "x": 0,
+                "y": 104,
+                "width": 140,
+                "height": 45,
+            },
+        ]
+
+        _resolve_short_label_visual_vertical_overlaps(nodes)
+
+        self.assertGreaterEqual(nodes[1]["y"], nodes[0]["y"] + nodes[0]["height"] + 16)
+        self.assertGreaterEqual(nodes[3]["y"], nodes[1]["y"] + nodes[1]["height"] + 16)
+
+    def test_short_inline_label_height_compacts_to_single_line_need(self) -> None:
+        nodes = [
+            {
+                "id": "interview-label",
+                "type": "text",
+                "x": -3944,
+                "y": -1813,
+                "width": 100,
+                "height": 46,
+                "text": '<div style="font-size:11px; line-height:1.35"><strong>Interviews</strong></div>',
+                "styleAttributes": {"border": "invisible", "fontSize": 11},
+            },
+            {
+                "id": "below-image",
+                "type": "file",
+                "x": -3944,
+                "y": -1776,
+                "width": 100,
+                "height": 42,
+            },
+        ]
+
+        _compact_short_inline_label_heights(nodes)
+
+        self.assertLess(nodes[0]["height"], 46)
+        self.assertGreaterEqual(nodes[0]["height"], 30)
+
+    def test_ultra_narrow_label_moves_to_readable_free_slot_around_visual(self) -> None:
+        nodes = [
+            {
+                "id": "visual",
+                "type": "file",
+                "x": 0,
+                "y": 0,
+                "width": 400,
+                "height": 260,
+            },
+            {
+                "id": "label",
+                "type": "text",
+                "x": 398,
+                "y": 30,
+                "width": 2,
+                "height": 180,
+                "text": '<span style="font-size:8px; line-height:1.35">Customer Development</span>',
+                "styleAttributes": {"border": "invisible", "fontSize": 8},
+            },
+        ]
+
+        _resolve_ultra_narrow_label_visual_overlaps(nodes)
+
+        self.assertGreaterEqual(nodes[1]["width"], 64)
+        overlap_w, overlap_h = (
+            min(nodes[0]["x"] + nodes[0]["width"], nodes[1]["x"] + nodes[1]["width"]) - max(nodes[0]["x"], nodes[1]["x"]),
+            min(nodes[0]["y"] + nodes[0]["height"], nodes[1]["y"] + nodes[1]["height"]) - max(nodes[0]["y"], nodes[1]["y"]),
+        )
+        self.assertTrue(overlap_w <= 0 or overlap_h <= 0)
 
     def test_short_inline_label_width_expands_without_visual_neighbor(self) -> None:
         nodes = [

@@ -28,6 +28,13 @@ MIN_TEXT_WIDTH_AFTER_CLEARANCE = 64
 TEXT_TEXT_VERTICAL_OVERLAP_MIN_RATIO = 0.45
 TEXT_TEXT_VERTICAL_MAX_PASSES = 8
 LINK_VISUAL_MAX_PASSES = 8
+SHORT_LABEL_VISUAL_MAX_PASSES = 32
+TEXT_VISUAL_VERTICAL_MAX_PASSES = 32
+TEXT_VISUAL_VERTICAL_MIN_RATIO = 0.25
+TEXT_VISUAL_CASCADE_MAX_PASSES = 64
+SHORT_LABEL_COMPACT_PADDING = 16
+ULTRA_NARROW_LABEL_WIDTH_PX = 16
+ULTRA_NARROW_LABEL_FALLBACK_WIDTHS = (176, 128, 96, 64, 32)
 SHORT_LABEL_SINGLE_LINE_PADDING = 64
 SHORT_LABEL_SINGLE_LINE_AVG_CHAR_WIDTH = 0.50
 SHORT_LABEL_WIDTH_MIN_GROW = 32
@@ -1037,6 +1044,8 @@ def _candidate_rect_overlaps_any_node(
     for node in nodes:
         if str(node.get("id", "")) == skip_id:
             continue
+        if node.get("type") not in ("text", "file", "link"):
+            continue
         rect = _node_rect(node)
         if not rect:
             continue
@@ -1044,6 +1053,65 @@ def _candidate_rect_overlaps_any_node(
         if overlap_w > overlap_tolerance_px and overlap_h > overlap_tolerance_px:
             return True
     return False
+
+
+def _move_node_down_with_cascade(
+    nodes: List[Dict[str, Any]],
+    moved_node: Dict[str, Any],
+    new_y: float,
+    *,
+    clearance_px: int = TEXT_VISUAL_CLEARANCE_PX,
+    max_passes: int = TEXT_VISUAL_CASCADE_MAX_PASSES,
+) -> bool:
+    try:
+        current_y = float(moved_node.get("y", 0) or 0)
+    except Exception:
+        return False
+    if new_y <= current_y:
+        return False
+
+    moved_node["y"] = new_y
+    moved_ids = {str(moved_node.get("id", ""))}
+
+    for _ in range(max_passes):
+        changed = False
+        moved_rects = [
+            (str(node.get("id", "")), _node_rect(node))
+            for node in nodes
+            if str(node.get("id", "")) in moved_ids
+        ]
+
+        for node in nodes:
+            node_id = str(node.get("id", ""))
+            if node_id in moved_ids:
+                continue
+            if node.get("type") not in ("text", "file", "link"):
+                continue
+            rect = _node_rect(node)
+            if not rect:
+                continue
+
+            required_y: float | None = None
+            for _moved_id, moved_rect in moved_rects:
+                if not moved_rect:
+                    continue
+                overlap_w, overlap_h = _rect_overlap(rect, moved_rect)
+                if overlap_w <= 1.0 or overlap_h <= 1.0:
+                    continue
+                candidate_y = moved_rect[3] + clearance_px
+                if required_y is None or candidate_y > required_y:
+                    required_y = candidate_y
+
+            if required_y is None or rect[1] >= required_y:
+                continue
+            node["y"] = required_y
+            moved_ids.add(node_id)
+            changed = True
+
+        if not changed:
+            return True
+
+    return True
 
 
 def _expand_short_inline_label_widths(
@@ -1086,6 +1154,147 @@ def _expand_short_inline_label_widths(
 
         label_node["x"] = new_x
         label_node["width"] = need_w
+
+
+def _compact_short_inline_label_heights(
+    nodes: List[Dict[str, Any]],
+) -> None:
+    visuals = [n for n in nodes if _is_visual_neighbor_node(n)]
+    if not visuals:
+        return
+
+    for label_node in nodes:
+        if not _is_short_clearance_label_node(label_node):
+            continue
+
+        text = str(label_node.get("text") or "")
+        if not text:
+            continue
+
+        sa = label_node.get("styleAttributes") or {}
+        try:
+            font_px = int(round(float(sa.get("fontSize") or OBSIDIAN_FONT_SIZE)))
+            width = float(label_node["width"])
+            current_h = float(label_node["height"])
+        except Exception:
+            continue
+
+        label_rect = _node_rect(label_node)
+        if not label_rect:
+            continue
+        if not any(
+            _rect_overlap(label_rect, visual_rect)[0] > 0 and _rect_overlap(label_rect, visual_rect)[1] > 0
+            for visual in visuals
+            for visual_rect in [_node_rect(visual)]
+            if visual_rect
+        ):
+            continue
+
+        line_height = _line_height_from_canvas_text(text)
+        need_h = _estimate_render_height(
+            text,
+            width_px=width,
+            font_px=font_px,
+            line_height=line_height,
+            padding=SHORT_LABEL_COMPACT_PADDING,
+        )
+        if 0 < need_h < current_h:
+            label_node["height"] = need_h
+
+
+def _resolve_ultra_narrow_label_visual_overlaps(
+    nodes: List[Dict[str, Any]],
+    *,
+    clearance_px: int = TEXT_VISUAL_CLEARANCE_PX,
+) -> None:
+    visuals = [n for n in nodes if _is_visual_neighbor_node(n)]
+    if not visuals:
+        return
+
+    for label_node in nodes:
+        if not _is_short_clearance_label_node(label_node):
+            continue
+
+        label_rect = _node_rect(label_node)
+        if not label_rect:
+            continue
+        lx0, ly0, lx1, ly1 = label_rect
+        current_w = lx1 - lx0
+        current_h = ly1 - ly0
+        if current_w > ULTRA_NARROW_LABEL_WIDTH_PX:
+            continue
+
+        text = str(label_node.get("text") or "")
+        sa = label_node.get("styleAttributes") or {}
+        try:
+            font_px = int(round(float(sa.get("fontSize") or OBSIDIAN_FONT_SIZE)))
+        except Exception:
+            font_px = OBSIDIAN_FONT_SIZE
+        line_height = _line_height_from_canvas_text(text)
+        need_w = _estimate_short_label_single_line_width(text, font_px)
+        widths = sorted(
+            {
+                float(max(current_w, min(need_w, width)))
+                for width in (need_w, *ULTRA_NARROW_LABEL_FALLBACK_WIDTHS, current_w)
+            },
+            reverse=True,
+        )
+
+        for visual_node in visuals:
+            visual_rect = _node_rect(visual_node)
+            if not visual_rect:
+                continue
+            overlap_w, overlap_h = _rect_overlap(label_rect, visual_rect)
+            if overlap_w <= 0 or overlap_h <= 0:
+                continue
+
+            vx0, vy0, vx1, vy1 = visual_rect
+            candidates: list[tuple[float, float, float, float, float]] = []
+            for width in widths:
+                height = min(
+                    current_h,
+                    float(
+                        _estimate_render_height(
+                            text,
+                            width_px=width,
+                            font_px=font_px,
+                            line_height=line_height,
+                            padding=SHORT_LABEL_COMPACT_PADDING,
+                        )
+                    ),
+                )
+                positions = [
+                    (vx0, vy1 + clearance_px),
+                    (lx0, vy1 + clearance_px),
+                    ((vx0 + vx1) / 2.0 - width / 2.0, vy1 + clearance_px),
+                    (vx0, vy0 - clearance_px - height),
+                    (lx0, vy0 - clearance_px - height),
+                    ((vx0 + vx1) / 2.0 - width / 2.0, vy0 - clearance_px - height),
+                    (vx1 + clearance_px, ly0),
+                    (vx0 - clearance_px - width, ly0),
+                ]
+                for new_x, new_y in positions:
+                    distance = abs(new_x - lx0) + abs(new_y - ly0)
+                    candidates.append((width, distance, new_x, new_y, height))
+
+            for width, _distance, new_x, new_y, height in sorted(candidates, key=lambda c: (-c[0], c[1])):
+                candidate_rect = (new_x, new_y, new_x + width, new_y + height)
+                if _candidate_rect_overlaps_any_node(
+                    nodes,
+                    candidate_rect,
+                    skip_id=str(label_node.get("id", "")),
+                    overlap_tolerance_px=1.0,
+                ):
+                    continue
+                label_node["x"] = new_x
+                label_node["y"] = new_y
+                label_node["width"] = width
+                label_node["height"] = height
+                break
+
+            label_rect = _node_rect(label_node)
+            if not label_rect:
+                break
 
 
 def _resolve_text_visual_horizontal_overlaps(
@@ -1139,34 +1348,203 @@ def _resolve_short_label_visual_vertical_overlaps(
     nodes: List[Dict[str, Any]],
     *,
     clearance_px: int = TEXT_VISUAL_CLEARANCE_PX,
+    max_passes: int = SHORT_LABEL_VISUAL_MAX_PASSES,
 ) -> None:
-    visuals = [n for n in nodes if _is_visual_neighbor_node(n)]
-    if not visuals:
-        return
+    for _ in range(max_passes):
+        changed = False
+        visuals = [n for n in nodes if _is_visual_neighbor_node(n)]
+        if not visuals:
+            return
 
-    for label_node in nodes:
-        if not _is_short_clearance_label_node(label_node):
-            continue
-
-        for visual_node in visuals:
-            label_rect = _node_rect(label_node)
-            visual_rect = _node_rect(visual_node)
-            if not label_rect or not visual_rect:
+        for label_node in nodes:
+            if not _is_short_clearance_label_node(label_node):
                 continue
 
-            overlap_w, overlap_h = _rect_overlap(label_rect, visual_rect)
-            if overlap_w <= 0 or overlap_h <= 0:
+            for visual_node in visuals:
+                label_rect = _node_rect(label_node)
+                visual_rect = _node_rect(visual_node)
+                if not label_rect or not visual_rect:
+                    continue
+
+                overlap_w, overlap_h = _rect_overlap(label_rect, visual_rect)
+                if overlap_w <= 0 or overlap_h <= 0:
+                    continue
+
+                lx0, ly0, lx1, ly1 = label_rect
+                _vx0, vy0, _vx1, vy1 = visual_rect
+                label_center_y = (ly0 + ly1) / 2.0
+                visual_center_y = (vy0 + vy1) / 2.0
+                label_h = ly1 - ly0
+                label_w = lx1 - lx0
+
+                above_y = vy0 - clearance_px - label_h
+                below_y = vy1 + clearance_px
+                candidates = [(abs(above_y - ly0), above_y), (abs(below_y - ly0), below_y)]
+                if label_center_y > visual_center_y:
+                    candidates.reverse()
+
+                for _distance, new_y in candidates:
+                    candidate_rect = (lx0, new_y, lx0 + label_w, new_y + label_h)
+                    if _candidate_rect_overlaps_any_node(
+                        nodes,
+                        candidate_rect,
+                        skip_id=str(label_node.get("id", "")),
+                        overlap_tolerance_px=1.0,
+                    ):
+                        continue
+                    if abs(new_y - ly0) <= 1e-9:
+                        continue
+                    label_node["y"] = new_y
+                    changed = True
+                    break
+
+                if not changed and label_center_y <= visual_center_y:
+                    new_visual_y = ly1 + clearance_px
+                    if _move_node_down_with_cascade(nodes, visual_node, new_visual_y, clearance_px=clearance_px):
+                        changed = True
+
+                if changed:
+                    break
+
+        if not changed:
+            return
+
+
+def _resolve_text_visual_vertical_stack_overlaps(
+    nodes: List[Dict[str, Any]],
+    *,
+    clearance_px: int = TEXT_VISUAL_CLEARANCE_PX,
+    min_horizontal_overlap_ratio: float = TEXT_VISUAL_VERTICAL_MIN_RATIO,
+    max_passes: int = TEXT_VISUAL_VERTICAL_MAX_PASSES,
+) -> None:
+    for _ in range(max_passes):
+        changed = False
+        texts = [
+            n for n in nodes
+            if _is_clearance_text_node(n) and not _is_short_clearance_label_node(n)
+        ]
+        visuals = [n for n in nodes if _is_visual_neighbor_node(n)]
+        if not texts or not visuals:
+            return
+
+        for text_node in texts:
+            text_rect = _node_rect(text_node)
+            if not text_rect:
                 continue
+            tx0, ty0, tx1, ty1 = text_rect
+            text_w = tx1 - tx0
+            text_center_y = (ty0 + ty1) / 2.0
 
-            _lx0, ly0, _lx1, ly1 = label_rect
-            _vx0, vy0, _vx1, vy1 = visual_rect
-            label_center_y = (ly0 + ly1) / 2.0
-            label_h = ly1 - ly0
+            for visual_node in visuals:
+                visual_rect = _node_rect(visual_node)
+                if not visual_rect:
+                    continue
+                vx0, vy0, vx1, vy1 = visual_rect
+                visual_w = vx1 - vx0
+                visual_h = vy1 - vy0
+                overlap_w, overlap_h = _rect_overlap(text_rect, visual_rect)
+                if overlap_w <= 0 or overlap_h <= 0:
+                    continue
 
-            if label_center_y < vy0:
-                label_node["y"] = vy0 - clearance_px - label_h
-            elif label_center_y > vy1:
-                label_node["y"] = vy1 + clearance_px
+                min_w = min(text_w, visual_w)
+                if min_w <= 0 or overlap_w < min_w * min_horizontal_overlap_ratio:
+                    continue
+
+                visual_center_y = (vy0 + vy1) / 2.0
+                text_h = ty1 - ty0
+                candidates: list[tuple[float, Dict[str, Any], float, float, float, float]] = []
+                if text_center_y <= visual_center_y:
+                    candidates.extend(
+                        [
+                            (abs((ty1 + clearance_px) - vy0), visual_node, vx0, ty1 + clearance_px, visual_w, visual_h),
+                            (abs((vy0 - clearance_px - text_h) - ty0), text_node, tx0, vy0 - clearance_px - text_h, text_w, text_h),
+                        ]
+                    )
+                else:
+                    candidates.extend(
+                        [
+                            (abs((vy1 + clearance_px) - ty0), text_node, tx0, vy1 + clearance_px, text_w, text_h),
+                            (abs((ty0 - clearance_px - visual_h) - vy0), visual_node, vx0, ty0 - clearance_px - visual_h, visual_w, visual_h),
+                        ]
+                    )
+
+                candidates.extend(
+                    [
+                        (
+                            abs((vx0 - clearance_px - text_w) - tx0),
+                            text_node,
+                            vx0 - clearance_px - text_w,
+                            ty0,
+                            text_w,
+                            text_h,
+                        ),
+                        (
+                            abs((vx1 + clearance_px) - tx0),
+                            text_node,
+                            vx1 + clearance_px,
+                            ty0,
+                            text_w,
+                            text_h,
+                        ),
+                        (
+                            abs((tx0 - clearance_px - visual_w) - vx0),
+                            visual_node,
+                            tx0 - clearance_px - visual_w,
+                            vy0,
+                            visual_w,
+                            visual_h,
+                        ),
+                        (
+                            abs((tx1 + clearance_px) - vx0),
+                            visual_node,
+                            tx1 + clearance_px,
+                            vy0,
+                            visual_w,
+                            visual_h,
+                        ),
+                    ]
+                )
+
+                for _distance, moved_node, new_x, new_y, moved_w, moved_h in sorted(candidates, key=lambda c: c[0]):
+                    candidate_rect = (new_x, new_y, new_x + moved_w, new_y + moved_h)
+                    if _candidate_rect_overlaps_any_node(
+                        nodes,
+                        candidate_rect,
+                        skip_id=str(moved_node.get("id", "")),
+                        overlap_tolerance_px=1.0,
+                    ):
+                        try:
+                            current_y = float(moved_node.get("y", 0) or 0)
+                        except Exception:
+                            current_y = new_y
+                        if (
+                            abs(float(moved_node.get("x", 0) or 0) - new_x) <= 1e-9
+                            and new_y > current_y
+                            and _move_node_down_with_cascade(nodes, moved_node, new_y, clearance_px=clearance_px)
+                        ):
+                            changed = True
+                            break
+                        continue
+
+                    if (
+                        abs(float(moved_node.get("x", 0) or 0) - new_x) <= 1e-9
+                        and abs(float(moved_node.get("y", 0) or 0) - new_y) <= 1e-9
+                    ):
+                        continue
+                    moved_node["x"] = new_x
+                    moved_node["y"] = new_y
+                    changed = True
+                    break
+
+                if not changed:
+                    continue
+                break
+
+            if changed:
+                break
+
+        if not changed:
+            return
 
 
 def _resolve_text_text_vertical_overlaps(
@@ -2511,8 +2889,19 @@ def convert_miro_to_canvas(
     _resolve_text_visual_horizontal_overlaps(nodes, min_font_px=min_font_px)
     _resolve_short_label_visual_vertical_overlaps(nodes)
     _expand_short_inline_label_widths(nodes)
+    _compact_short_inline_label_heights(nodes)
+    _resolve_ultra_narrow_label_visual_overlaps(nodes)
     _resolve_link_visual_overlaps(nodes)
+    _resolve_short_label_visual_vertical_overlaps(nodes)
+    _resolve_text_visual_vertical_stack_overlaps(nodes)
     _resolve_text_text_vertical_overlaps(nodes)
+    _resolve_short_label_visual_vertical_overlaps(nodes)
+    for _ in range(4):
+        _compact_short_inline_label_heights(nodes)
+        _resolve_ultra_narrow_label_visual_overlaps(nodes)
+        _resolve_short_label_visual_vertical_overlaps(nodes)
+        _resolve_text_visual_vertical_stack_overlaps(nodes)
+        _resolve_text_text_vertical_overlaps(nodes)
 
 
     # --- третий проход: строим контейнеры (Miro group / frame / diagram) как Canvas group
