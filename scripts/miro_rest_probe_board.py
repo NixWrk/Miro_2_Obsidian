@@ -210,18 +210,45 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--board-id", help="Existing board id. If omitted with --execute, the script creates a board.")
     parser.add_argument("--execute", action="store_true", help="Actually call the Miro REST API. Default is dry-run.")
     parser.add_argument("--token-env", default="MIRO_ACCESS_TOKEN", help="Environment variable containing a Miro token.")
+    parser.add_argument("--oauth", action="store_true", help="Run local OAuth flow instead of reading --token-env.")
+    parser.add_argument("--oauth-client-id-env", default="MIRO_CLIENT_ID")
+    parser.add_argument("--oauth-client-secret-env", default="MIRO_CLIENT_SECRET")
+    parser.add_argument("--oauth-redirect-uri", default="http://localhost:8000/callback")
+    parser.add_argument("--oauth-scopes", default="boards:read boards:write team:read")
+    parser.add_argument("--oauth-timeout-seconds", type=int, default=300)
+    parser.add_argument("--oauth-no-open-browser", action="store_true")
     parser.add_argument("--base-url", default=DEFAULT_BASE_URL)
     parser.add_argument("--output", type=Path, help="Write manifest/result JSON to this path.")
     return parser.parse_args()
+
+
+def resolve_token_from_args(args: argparse.Namespace) -> str:
+    if args.oauth:
+        from miro_oauth_token import authorize_and_get_token, config_from_env
+
+        config = config_from_env(
+            client_id_env=args.oauth_client_id_env,
+            client_secret_env=args.oauth_client_secret_env,
+            redirect_uri=args.oauth_redirect_uri,
+            scopes=args.oauth_scopes,
+        )
+        return authorize_and_get_token(
+            config,
+            timeout_seconds=args.oauth_timeout_seconds,
+            open_browser=not args.oauth_no_open_browser,
+        )
+
+    token = os.environ.get(args.token_env)
+    if not token:
+        raise SystemExit(f"{args.token_env} is not set. Set it or pass --oauth.")
+    return token
 
 
 def main() -> int:
     args = parse_args()
     manifest = build_manifest(args.board_name)
     if args.execute:
-        token = os.environ.get(args.token_env)
-        if not token:
-            raise SystemExit(f"{args.token_env} is not set")
+        token = resolve_token_from_args(args)
         output = execute_manifest(manifest, token, board_id=args.board_id, base_url=args.base_url)
     else:
         output = manifest
