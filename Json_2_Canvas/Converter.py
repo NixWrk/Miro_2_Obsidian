@@ -29,6 +29,7 @@ SHORT_LABEL_SINGLE_LINE_PADDING = 64
 SHORT_LABEL_SINGLE_LINE_AVG_CHAR_WIDTH = 0.50
 SHORT_LABEL_WIDTH_MIN_GROW = 32
 SHORT_LABEL_WIDTH_OVERLAP_TOLERANCE = 8
+EMBED_LINK_MIN_WIDTH = 320
 
 # Цвета стикеров Miro
 MIRO_STICKY_HEX: Dict[str, str] = {
@@ -1018,6 +1019,11 @@ def _estimate_short_label_single_line_width(html_or_text: str, font_px: int) -> 
     return int(round(len(plain) * font_px * SHORT_LABEL_SINGLE_LINE_AVG_CHAR_WIDTH + SHORT_LABEL_SINGLE_LINE_PADDING))
 
 
+def _link_card_16x9_size(width_px: float) -> tuple[float, int]:
+    width = max(float(width_px), float(EMBED_LINK_MIN_WIDTH))
+    return width, round(width * 9 / 16)
+
+
 def _candidate_rect_overlaps_any_node(
     nodes: List[Dict[str, Any]],
     candidate_rect: tuple[float, float, float, float],
@@ -1690,9 +1696,8 @@ def convert_item_to_canvas_node(
             solo_url = _extract_solo_url(raw_content)
             if solo_url:
                 solo_url = _html_unescape(solo_url)
-                # Ширина = miro_width × scale, высота = 16:9
-                _lw = base["width"]
-                _lh = round(_lw * 9 / 16)
+                # Canvas renders tiny native link nodes as nearly invisible cards.
+                _lw, _lh = _link_card_16x9_size(base["width"])
                 link_node = {
                     "id":     base["id"],
                     "type":   "link",
@@ -1840,9 +1845,9 @@ def convert_item_to_canvas_node(
         title      = (data.get("title")        or "").strip()
         provider   = (data.get("providerName") or "").strip()
 
-        # Ширина = miro_width × scale (уже в base["width"]), высота = 16:9
-        content_w = base["width"]
-        content_h = round(content_w * 9 / 16)
+        # Ширина = miro_width × scale (уже в base["width"]), высота = 16:9.
+        # Tiny embed geometry from Miro still needs a visible Canvas link card.
+        content_w, content_h = _link_card_16x9_size(base["width"])
 
         # Допустимые расширения изображений для embed-превью
         _EMBED_IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".svg"}

@@ -1,0 +1,21 @@
+{
+  "description": "Tiny Miro embeds still become visible native Canvas link cards after fit scaling.",
+  "converter": {
+    "scale": 0.013799,
+    "min_font_px": 8,
+    "theme": "dark"
+  },
+  "assertions": {
+    "node_count": 1,
+    "edge_count": 0,
+    "nodes": [
+      {
+        "id": "tiny-youtube-embed",
+        "type": "link",
+        "url": "https://www.youtube.com/watch?v=Example0002",
+        "min_width": 320,
+        "min_height": 180
+      }
+    ]
+  }
+}
