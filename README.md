@@ -86,16 +86,22 @@ font_canvas   = font_miro   × Scale
 
 ### Три барьера
 
-Рекомендуемый Scale = `max(s_fit, s_node, s_font)` — наибольший из трёх:
+Рекомендуемый Scale = `min(max(s_node, s_font), s_fit)`:
+
+- `max(s_node, s_font)` — желательный масштаб читаемости;
+- `s_fit` — обязательный верхний предел, чтобы доска помещалась во FullHD при минимальном zoom Obsidian;
+- если читаемость конфликтует с FullHD-fit, побеждает `s_fit`.
 
 #### s_fit — барьер видимости
 Гарантирует, что вся доска видна при минимальном зуме Obsidian Canvas (≈12%).
 ```
 s_fit = min(
-    (viewport_w × min_zoom) / bbox_w,   # 1920 × 0.12 / ширина_доски
-    (viewport_h × min_zoom) / bbox_h    # 1080 × 0.12 / высота_доски
+    (viewport_w × fit_margin) / (bbox_w × min_zoom),
+    (viewport_h × fit_margin) / (bbox_h × min_zoom)
 )
 ```
+
+По умолчанию `fit_margin = 0.95`, чтобы оставить запас под post-conversion рост нод и UI-рамки.
 
 #### s_node — барьер минимальной ноды
 Гарантирует, что наименьший элемент доски ≥ минимально взаимодействуемому размеру (60×40 px).

@@ -23,6 +23,11 @@ DEFAULT_OUT_DIR = RENDER_DIR / ".out" / "local_samples"
 sys.path.insert(0, str(CONVERTER_DIR))
 
 from Converter import convert_miro_to_canvas  # noqa: E402
+from Scale_engine import (  # noqa: E402
+    OBSIDIAN_FONT_SIZE,
+    ViewProfile,
+    compute_scale_preview,
+)
 
 
 class SampleError(RuntimeError):
@@ -154,6 +159,50 @@ def validate_canvas(canvas: dict[str, Any], vault_root: Path, *, strict_files: b
     return node_types
 
 
+def canvas_bbox(canvas: dict[str, Any]) -> dict[str, float]:
+    xs: list[float] = []
+    ys: list[float] = []
+    xe: list[float] = []
+    ye: list[float] = []
+    for node in canvas.get("nodes", []):
+        try:
+            x = float(node["x"])
+            y = float(node["y"])
+            width = float(node["width"])
+            height = float(node["height"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        xs.append(x)
+        ys.append(y)
+        xe.append(x + width)
+        ye.append(y + height)
+
+    if not xs:
+        return {"width": 0.0, "height": 0.0}
+    return {"width": max(xe) - min(xs), "height": max(ye) - min(ys)}
+
+
+def check_canvas_fit(canvas: dict[str, Any], profile: ViewProfile) -> dict[str, float]:
+    bbox = canvas_bbox(canvas)
+    screen_w = bbox["width"] * profile.min_zoom
+    screen_h = bbox["height"] * profile.min_zoom
+    if screen_w > profile.width or screen_h > profile.height:
+        raise SampleError(
+            "Canvas does not fit target viewport at min zoom: "
+            f"bbox={bbox['width']:.2f}x{bbox['height']:.2f}, "
+            f"screen@{profile.min_zoom:g}={screen_w:.2f}x{screen_h:.2f}, "
+            f"target={profile.width}x{profile.height}"
+        )
+    return bbox
+
+
+def resolve_scale(sample_json: Path, explicit_scale: float | None, profile: ViewProfile) -> float:
+    if explicit_scale is not None:
+        return float(explicit_scale)
+    info = compute_scale_preview(str(sample_json), profile, OBSIDIAN_FONT_SIZE)
+    return float(info["scale"])
+
+
 def oracle_target(sample_key: str) -> tuple[Path, Path]:
     sys.path.insert(0, str(ORACLE_DIR))
     from common import load_config, vault_path  # noqa: WPS433
@@ -181,15 +230,17 @@ def run_sample(
     sample_json: Path,
     *,
     out_dir: Path,
-    scale: float,
+    scale: float | None,
     min_font_px: int,
     theme: str,
     skip_render: bool,
     strict_files: bool,
     stage_vault: bool,
     fit_render: bool,
-) -> tuple[Path, Counter[str]]:
+    fit_profile: ViewProfile | None,
+) -> tuple[Path, Counter[str], float, dict[str, float] | None]:
     sample_key = safe_name(sample_json)
+    scale_used = resolve_scale(sample_json, scale, fit_profile or ViewProfile())
 
     if stage_vault:
         vault_root, target_dir = oracle_target(sample_key)
@@ -201,7 +252,7 @@ def run_sample(
                 str(work_json),
                 str(target_dir),
                 str(vault_root),
-                scale=scale,
+                scale=scale_used,
                 min_font_px=min_font_px,
                 theme=theme,
             ))
@@ -219,13 +270,14 @@ def run_sample(
                 str(work_json),
                 str(target_dir),
                 str(vault_root),
-                scale=scale,
+                scale=scale_used,
                 min_font_px=min_font_px,
                 theme=theme,
             ))
 
             canvas = load_json(canvas_path)
             node_types = validate_canvas(canvas, vault_root, strict_files=strict_files)
+            fit_bbox = check_canvas_fit(canvas, fit_profile) if fit_profile else None
 
             debug_dir = out_dir / sample_key
             debug_dir.mkdir(parents=True, exist_ok=True)
@@ -235,17 +287,18 @@ def run_sample(
             if not skip_render:
                 render_canvas(canvas_path, debug_dir / f"{canvas_path.stem}.render.png", fit_viewport=fit_render)
 
-            return debug_canvas, node_types
+            return debug_canvas, node_types, scale_used, fit_bbox
 
     canvas = load_json(canvas_path)
     node_types = validate_canvas(canvas, vault_root, strict_files=strict_files)
+    fit_bbox = check_canvas_fit(canvas, fit_profile) if fit_profile else None
 
     if not skip_render:
         debug_dir = out_dir / sample_key
         debug_dir.mkdir(parents=True, exist_ok=True)
         render_canvas(canvas_path, debug_dir / f"{canvas_path.stem}.render.png", fit_viewport=fit_render)
 
-    return canvas_path, node_types
+    return canvas_path, node_types, scale_used, fit_bbox
 
 
 def main() -> int:
@@ -253,9 +306,14 @@ def main() -> int:
     parser.add_argument("samples", nargs="*", help="Sample filename/path fragments. Defaults to all discovered JSON files.")
     parser.add_argument("--sample-root", type=Path, default=DEFAULT_SAMPLE_ROOT)
     parser.add_argument("--out-dir", type=Path, default=DEFAULT_OUT_DIR)
-    parser.add_argument("--scale", type=float, default=1.0)
+    parser.add_argument("--scale", type=float, default=None, help="Explicit scale. Defaults to Scale_engine auto-fit.")
     parser.add_argument("--min-font-px", type=int, default=8)
     parser.add_argument("--theme", default="dark")
+    parser.add_argument("--viewport-width", type=int, default=1920)
+    parser.add_argument("--viewport-height", type=int, default=1080)
+    parser.add_argument("--min-zoom", type=float, default=0.12)
+    parser.add_argument("--fit-margin", type=float, default=0.95)
+    parser.add_argument("--skip-fit-check", action="store_true")
     parser.add_argument("--skip-render", action="store_true")
     parser.add_argument("--include-miro-json", action="store_true", help="Also discover work/MIRO2OBSIDIAN/Miro_2_JSON.")
     parser.add_argument("--allow-missing-files", action="store_true")
@@ -267,11 +325,17 @@ def main() -> int:
     if not samples:
         raise SystemExit(f"No local Miro JSON samples found under {args.sample_root}")
     selected = select_samples(samples, args.samples)
+    fit_profile = None if args.skip_fit_check else ViewProfile(
+        width=args.viewport_width,
+        height=args.viewport_height,
+        min_zoom=args.min_zoom,
+        fit_margin=args.fit_margin,
+    )
 
     ok = True
     for sample in selected:
         try:
-            canvas_path, node_types = run_sample(
+            canvas_path, node_types, scale_used, fit_bbox = run_sample(
                 sample,
                 out_dir=args.out_dir,
                 scale=args.scale,
@@ -281,9 +345,13 @@ def main() -> int:
                 strict_files=not args.allow_missing_files,
                 stage_vault=args.stage_vault,
                 fit_render=not args.raw_render,
+                fit_profile=fit_profile,
             )
             summary = ", ".join(f"{k}:{v}" for k, v in sorted(node_types.items()))
-            print(f"OK {sample.name}: {summary}; canvas={canvas_path}")
+            fit_summary = ""
+            if fit_bbox:
+                fit_summary = f"; bbox={fit_bbox['width']:.2f}x{fit_bbox['height']:.2f}"
+            print(f"OK {sample.name}: scale={scale_used:.6f}; {summary}{fit_summary}; canvas={canvas_path}")
         except Exception as exc:  # noqa: BLE001
             ok = False
             print(f"FAIL {sample.name}: {exc}")

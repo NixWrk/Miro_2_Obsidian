@@ -16,6 +16,7 @@ class ViewProfile:
     width: int = 1920         # целевой viewport ширина (px)
     height: int = 1080        # целевой viewport высота (px)
     min_zoom: float = 0.12    # минимальный зум Obsidian Canvas (оценочный параметр)
+    fit_margin: float = 0.95  # запас под post-conversion рост nodes и UI-рамки
     min_node_w: int = 60      # минимальная ширина узла в Canvas, px
     min_node_h: int = 40      # минимальная высота узла в Canvas, px
     min_font_px: int = 8      # минимальный кегль текста после масштабирования
@@ -145,12 +146,27 @@ def analyze_board(miro_root: Any) -> Dict[str, float]:
 
 # ===== Расчёт масштабов =====
 def compute_scale_fit(bbox_w: float, bbox_h: float, profile: ViewProfile) -> float:
+    """
+    Верхний предел масштаба, при котором bbox помещается в viewport на min_zoom.
+
+    Для Obsidian zoom screen_px = canvas_px * min_zoom, поэтому:
+    bbox * scale * min_zoom <= viewport.
+    """
     if bbox_w <= 0 or bbox_h <= 0:
         return 1.0
+    target_w = max(1.0, profile.width * profile.fit_margin)
+    target_h = max(1.0, profile.height * profile.fit_margin)
+    zoom = max(0.0001, profile.min_zoom)
     return min(
-        (profile.width  * profile.min_zoom) / bbox_w,
-        (profile.height * profile.min_zoom) / bbox_h
+        target_w / (bbox_w * zoom),
+        target_h / (bbox_h * zoom)
     )
+
+
+def _cap_to_fit(scale: float, fit_cap: float) -> float:
+    if fit_cap <= 0:
+        return scale
+    return min(scale, fit_cap)
 
 def compute_scale_min_node(mnw: float, mnh: float, profile: ViewProfile) -> float:
     if mnw > 0 and mnh > 0:
@@ -168,8 +184,16 @@ def pick_recommended_scale(miro_root: Any, profile: ViewProfile, base_font_px: i
     s_fit  = compute_scale_fit(a["bbox_w"], a["bbox_h"], profile)
     s_node = compute_scale_min_node(a["mnw"], a["mnh"], profile)
     s_font = compute_scale_min_font(base_font_px, profile)
-    S = max(s_fit, s_node, s_font)
-    ctx = {**a, "scale_fit": s_fit, "scale_min_node": s_node, "scale_min_font": s_font}
+    s_readability = max(s_node, s_font)
+    S = _cap_to_fit(s_readability, s_fit)
+    ctx = {
+        **a,
+        "scale_fit": s_fit,
+        "scale_min_node": s_node,
+        "scale_min_font": s_font,
+        "scale_readability": s_readability,
+        "scale_limited_by_fit": 1.0 if s_readability > s_fit else 0.0,
+    }
     return S, ctx
 
 # ===== Превью и взаимные пересчёты =====
@@ -189,25 +213,25 @@ def recompute_from_font_max(font_target: int, ctx: Dict[str, float], profile: Vi
     font_max_miro = max(1.0, ctx.get("font_max_miro", float(OBSIDIAN_FONT_SIZE)))
     s_font = font_target / font_max_miro
     s_node = compute_scale_min_node(ctx["mnw"], ctx["mnh"], profile)
-    return max(ctx["scale_fit"], s_node, s_font)
+    return _cap_to_fit(max(s_node, s_font), ctx["scale_fit"])
 
 def recompute_from_font_min(font_target: int, ctx: Dict[str, float], profile: ViewProfile) -> float:
     font_min_miro = max(1.0, ctx.get("font_min_miro", float(OBSIDIAN_FONT_SIZE)))
     s_font = font_target / font_min_miro
     s_node = compute_scale_min_node(ctx["mnw"], ctx["mnh"], profile)
-    return max(ctx["scale_fit"], s_node, s_font)
+    return _cap_to_fit(max(s_node, s_font), ctx["scale_fit"])
 
 def recompute_from_min_node_width(Wtarget: float, ctx: Dict[str, float], profile: ViewProfile) -> float:
     s_node = Wtarget / max(0.0001, ctx["mnw"])
     font_max_miro = max(1.0, ctx.get("font_max_miro", float(OBSIDIAN_FONT_SIZE)))
     s_font = profile.min_font_px / font_max_miro
-    return max(ctx["scale_fit"], s_node, s_font)
+    return _cap_to_fit(max(s_node, s_font), ctx["scale_fit"])
 
 def recompute_from_min_node_height(Htarget: float, ctx: Dict[str, float], profile: ViewProfile) -> float:
     s_node = Htarget / max(0.0001, ctx["mnh"])
     font_max_miro = max(1.0, ctx.get("font_max_miro", float(OBSIDIAN_FONT_SIZE)))
     s_font = profile.min_font_px / font_max_miro
-    return max(ctx["scale_fit"], s_node, s_font)
+    return _cap_to_fit(max(s_node, s_font), ctx["scale_fit"])
 
 # ===== Сервис для GUI (чтобы быстро получить превью из JSON-файла) =====
 def compute_scale_preview(json_path: str,
