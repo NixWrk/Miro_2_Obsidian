@@ -110,6 +110,7 @@ def _candidate_rows(rows: list[Any]) -> list[Any]:
         "websdk_export_candidate",
         "needs_probe",
         "separate_source",
+        "source_limited",
     }
     return [row for row in rows if row.action in interesting_actions]
 
@@ -139,6 +140,7 @@ def render_next_actions(rows: list[Any]) -> str:
             "- `generated_probe_candidate`: add a generated REST/Web SDK probe before changing converter code.",
             "- `websdk_export_candidate`: preserve/export through Web SDK first, then decide converter behavior.",
             "- `needs_probe`: create or manually inspect a source sample before changing converter code.",
+            "- `source_limited`: create a manual source fixture/export first; do not treat it as a converter bug yet.",
             "- `separate_source`: treat as a separate API/export pipeline.",
         ]
     )
