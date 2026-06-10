@@ -59,11 +59,13 @@ class MiroRestProbeBoardTests(unittest.TestCase):
 
         self.assertEqual(sticky["payload"]["geometry"], {"width": 220})
 
-    def test_app_card_probe_fields_use_exported_label_schema(self) -> None:
+    def test_app_card_probe_omits_fields_because_rest_create_rejects_them(self) -> None:
         manifest = build_manifest()
         app_card = next(operation for operation in manifest["operations"] if operation["item_type"] == "app_card")
 
-        self.assertEqual(app_card["payload"]["data"]["fields"][0], {"label": "Status", "value": "Probe"})
+        self.assertEqual(app_card["key"], "app_card_basic")
+        self.assertNotIn("fields", app_card["payload"]["data"])
+
 
     def test_resolves_nested_placeholders(self) -> None:
         payload = {"startItem": {"id": "$shape_round_rect.id"}, "labels": ["$sticky_note.id"]}

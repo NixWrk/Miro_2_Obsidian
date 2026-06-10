@@ -94,7 +94,7 @@ def build_probe_operations() -> list[ProbeOperation]:
             },
         ),
         ProbeOperation(
-            key="app_card_fields",
+            key="app_card_basic",
             item_type="app_card",
             method="POST",
             path="/boards/{board_id}/app_cards",
@@ -102,10 +102,6 @@ def build_probe_operations() -> list[ProbeOperation]:
                 "data": {
                     "title": "REST app card probe",
                     "description": "App card description should survive export.",
-                    "fields": [
-                        {"label": "Status", "value": "Probe"},
-                        {"label": "Priority", "value": "High"},
-                    ],
                 },
                 "position": _position(1, 1),
             },
