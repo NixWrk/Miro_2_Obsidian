@@ -92,6 +92,30 @@ class MiroCapabilityProbeTests(unittest.TestCase):
         self.assertEqual(rows["board"].coverage, "rest_only")
         self.assertEqual(rows["board"].action, "metadata")
 
+    def test_mindmap_node_is_generated_probe_candidate(self) -> None:
+        rows = {row.item_type: row for row in build_coverage_rows([], [])}
+
+        self.assertEqual(rows["mindmap_node"].coverage, "not_seen")
+        self.assertEqual(rows["mindmap_node"].action, "generated_probe_candidate")
+
+    def test_mindmap_node_content_is_read_from_node_view(self) -> None:
+        summary = summarize_items(
+            [
+                {
+                    "id": "mind-1",
+                    "type": "mindmap_node",
+                    "x": 10,
+                    "y": 20,
+                    "width": 180,
+                    "height": 60,
+                    "nodeView": {"content": "<p>Root</p>"},
+                }
+            ]
+        )
+
+        self.assertEqual(summary["mindmap_node"].with_geometry, 1)
+        self.assertEqual(summary["mindmap_node"].with_content, 1)
+
     def test_report_contains_actionable_candidate_rows(self) -> None:
         rows = build_coverage_rows([], [{"id": "tag-1", "type": "tag", "x": 0, "y": 0, "width": 80, "height": 24}])
 

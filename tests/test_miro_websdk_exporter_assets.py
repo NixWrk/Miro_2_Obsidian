@@ -20,6 +20,8 @@ class MiroWebsdkExporterAssetTests(unittest.TestCase):
         self.assertIn('requireBoardMethod("createPreview")', js)
         self.assertIn('requireBoardMethod("createTag")', js)
         self.assertIn('requireBoardMethod("group")', js)
+        self.assertIn("function requireExperimentalMethod", js)
+        self.assertIn('requireExperimentalMethod("createMindmapNode")', js)
         self.assertIn('source_surface: "web_sdk"', js)
         self.assertIn("function toPlain", js)
 

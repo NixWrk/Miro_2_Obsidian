@@ -63,6 +63,7 @@ CAPABILITIES: tuple[Capability, ...] = (
     Capability("group", OBSERVED, YES, UNKNOWN, "createGroup", "structural", "observed"),
     Capability("connector", YES, YES, "POST /connectors", "createConnector", "edge", "supported"),
     Capability("tag", OBSERVED, YES, UNKNOWN, "createTag", "text label", "observed"),
+    Capability("mindmap_node", NO, YES, NO, "experimental.createMindmapNode", "drop/placeholder", "supported"),
     Capability("board", META, META, "POST /boards", NO, "drop", "metadata"),
     Capability("board_member", META, META, NO, NO, "drop", "metadata"),
     Capability("member", META, META, NO, NO, "drop", "metadata"),
@@ -70,7 +71,7 @@ CAPABILITIES: tuple[Capability, ...] = (
     Capability("slide_container", OBSERVED, UNKNOWN, UNKNOWN, UNKNOWN, "drop descendants", "source_limited"),
     Capability("emoji", NO, LIMITED, NO, NO, "drop/placeholder", "source_limited"),
     Capability("kanban", NO, LIMITED, NO, NO, "drop/placeholder", "source_limited"),
-    Capability("mindmap", NO, LIMITED, NO, "experimental", "drop/placeholder", "source_limited"),
+    Capability("mindmap", NO, LIMITED, NO, NO, "drop/placeholder", "source_limited", "Legacy/unsupported family; Web SDK experimental emits mindmap_node."),
     Capability("mockup", NO, LIMITED, NO, NO, "drop/placeholder", "source_limited"),
     Capability("stroke", NO, LIMITED, NO, NO, "drop/placeholder", "source_limited"),
     Capability("table", NO, LIMITED, NO, NO, "drop/placeholder", "source_limited"),
@@ -186,7 +187,18 @@ def has_content(item: dict[str, Any]) -> bool:
         if value:
             return True
 
-    for nested_key in ("text", "shape", "sticky_note", "card", "app_card", "document", "image", "embed", "preview"):
+    for nested_key in (
+        "text",
+        "shape",
+        "sticky_note",
+        "card",
+        "app_card",
+        "document",
+        "image",
+        "embed",
+        "preview",
+        "nodeView",
+    ):
         nested = item.get(nested_key)
         if not isinstance(nested, dict):
             continue

@@ -70,6 +70,13 @@
     return miro.board[name].bind(miro.board);
   }
 
+  function requireExperimentalMethod(name) {
+    if (!miro.board.experimental || typeof miro.board.experimental[name] !== "function") {
+      throw new Error(`miro.board.experimental.${name} is not available in this Web SDK runtime`);
+    }
+    return miro.board.experimental[name].bind(miro.board.experimental);
+  }
+
   async function getBoardInfo() {
     if (typeof miro.board.getInfo !== "function") {
       return null;
@@ -111,6 +118,19 @@
           error: String(error && error.message ? error.message : error),
         });
         return null;
+      }
+    }
+
+    async function attempt(probeType, action) {
+      try {
+        await action();
+        return true;
+      } catch (error) {
+        failures.push({
+          probe_type: probeType,
+          error: String(error && error.message ? error.message : error),
+        });
+        return false;
       }
     }
 
@@ -159,6 +179,45 @@
         width: 400,
       })
     );
+
+    const mindmapRoot = await create("mindmap_node_root", () =>
+      requireExperimentalMethod("createMindmapNode")({
+        nodeView: {
+          type: "shape",
+          content: "<p>Mind map root</p>",
+          shape: "round_rectangle",
+          style: { color: "#1a85ff", fillOpacity: 0.12 },
+        },
+        x,
+        y: y + 1060,
+      })
+    );
+    const mindmapChildA = await create("mindmap_node_child_a", () =>
+      requireExperimentalMethod("createMindmapNode")({
+        nodeView: {
+          type: "text",
+          content: "<p>Mind map child A</p>",
+        },
+        x: x - 260,
+        y: y + 1260,
+      })
+    );
+    const mindmapChildB = await create("mindmap_node_child_b", () =>
+      requireExperimentalMethod("createMindmapNode")({
+        nodeView: {
+          type: "text",
+          content: "<p>Mind map child B</p>",
+        },
+        x: x + 260,
+        y: y + 1260,
+      })
+    );
+    if (mindmapRoot && mindmapChildA) {
+      await attempt("mindmap_node_add_child_a", () => mindmapRoot.add(mindmapChildA));
+    }
+    if (mindmapRoot && mindmapChildB) {
+      await attempt("mindmap_node_add_child_b", () => mindmapRoot.add(mindmapChildB));
+    }
 
     const shape = await create("group_shape", () =>
       requireBoardMethod("createShape")({
