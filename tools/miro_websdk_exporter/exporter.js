@@ -1,5 +1,6 @@
 (function () {
   const output = document.getElementById("output");
+  const createGeneratedProbeButton = document.getElementById("create-generated-probe");
   const exportBoardButton = document.getElementById("export-board");
   const exportSelectionButton = document.getElementById("export-selection");
   const downloadButton = document.getElementById("download-json");
@@ -62,6 +63,13 @@
     }
   }
 
+  function requireBoardMethod(name) {
+    if (typeof miro.board[name] !== "function") {
+      throw new Error(`miro.board.${name} is not available in this Web SDK runtime`);
+    }
+    return miro.board[name].bind(miro.board);
+  }
+
   async function getBoardInfo() {
     if (typeof miro.board.getInfo !== "function") {
       return null;
@@ -82,6 +90,118 @@
       board: await getBoardInfo(),
       items: plainItems,
       selection: selection.map((item) => toPlain(item)),
+      summary: summarize(plainItems),
+    };
+    setPayload(payload);
+  }
+
+  async function createGeneratedProbeItems() {
+    assertMiroReady();
+    const created = [];
+    const failures = [];
+
+    async function create(probeType, action) {
+      try {
+        const item = await action();
+        created.push({ probe_type: probeType, item: toPlain(item) });
+        return item;
+      } catch (error) {
+        failures.push({
+          probe_type: probeType,
+          error: String(error && error.message ? error.message : error),
+        });
+        return null;
+      }
+    }
+
+    const x = 0;
+    const y = 2600;
+    const tag = await create("tag", () =>
+      requireBoardMethod("createTag")({
+        title: "miro2obsidian-probe",
+        color: "yellow",
+      })
+    );
+    await create("tagged_sticky_note", () =>
+      requireBoardMethod("createStickyNote")({
+        content: "Sticky note with a Web SDK-created tag",
+        tagIds: tag ? [tag.id] : [],
+        x,
+        y,
+        width: 260,
+      })
+    );
+    await create("embed", () =>
+      requireBoardMethod("createEmbed")({
+        url: "https://youtu.be/aqz-KE-bpKQ",
+        previewUrl: "https://miro.com/blog/wp-content/uploads/2020/10/organize-their-Miro-boards-for-trainings-and-workshops-FB.png",
+        mode: "modal",
+        width: 640,
+        height: 360,
+        x: x + 460,
+        y,
+      })
+    );
+    await create("image", () =>
+      requireBoardMethod("createImage")({
+        title: "miro2obsidian image probe",
+        url: "https://miro.com/blog/wp-content/uploads/2023/10/Frame-12772209-1536x806.png",
+        x: x + 1120,
+        y,
+        width: 420,
+      })
+    );
+    await create("preview", () =>
+      requireBoardMethod("createPreview")({
+        url: "https://miro.com/",
+        x: x + 1640,
+        y,
+        width: 400,
+      })
+    );
+
+    const shape = await create("group_shape", () =>
+      requireBoardMethod("createShape")({
+        content: "Grouped shape",
+        x,
+        y: y + 520,
+        width: 220,
+        height: 120,
+      })
+    );
+    const card = await create("group_card", () =>
+      requireBoardMethod("createCard")({
+        title: "Grouped card",
+        x: x + 280,
+        y: y + 520,
+        width: 260,
+      })
+    );
+    const text = await create("group_text", () =>
+      requireBoardMethod("createText")({
+        content: "<p>Grouped text</p>",
+        x: x + 620,
+        y: y + 520,
+        width: 260,
+      })
+    );
+    const groupItems = [shape, card, text].filter(Boolean);
+    if (groupItems.length >= 2) {
+      await create("group", () => requireBoardMethod("group")({ items: groupItems }));
+    }
+
+    const plainItems = created.map((entry) => ({
+      probe_type: entry.probe_type,
+      ...entry.item,
+    }));
+    const payload = {
+      schema_version: 1,
+      source_surface: "web_sdk",
+      export_scope: "generated_probe",
+      exported_at: new Date().toISOString(),
+      board: await getBoardInfo(),
+      items: plainItems,
+      failures,
       summary: summarize(plainItems),
     };
     setPayload(payload);
@@ -141,6 +261,7 @@
     }
   }
 
+  createGeneratedProbeButton.addEventListener("click", () => run(createGeneratedProbeItems));
   exportBoardButton.addEventListener("click", () => run(exportBoard));
   exportSelectionButton.addEventListener("click", () => run(exportSelection));
   downloadButton.addEventListener("click", downloadJson);

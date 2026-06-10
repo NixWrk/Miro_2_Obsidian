@@ -76,6 +76,8 @@ def build_workflow_plan(output_dir: Path, *, board_id: str | None = None) -> str
             "",
             "Register/open `http://localhost:8765/index.html` as a Miro app URL, export the board, and save the JSON as:",
             "",
+            "For generated candidates, click `Create probe items` in the app before exporting the board.",
+            "",
             f"`{_path_for_markdown(websdk_export)}`",
             "",
             "## 5. Analyze and merge",

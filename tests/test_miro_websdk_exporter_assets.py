@@ -14,6 +14,12 @@ class MiroWebsdkExporterAssetTests(unittest.TestCase):
 
         self.assertIn("miro.board.get()", js)
         self.assertIn("miro.board.getSelection()", js)
+        self.assertIn("function createGeneratedProbeItems", js)
+        self.assertIn('requireBoardMethod("createEmbed")', js)
+        self.assertIn('requireBoardMethod("createImage")', js)
+        self.assertIn('requireBoardMethod("createPreview")', js)
+        self.assertIn('requireBoardMethod("createTag")', js)
+        self.assertIn('requireBoardMethod("group")', js)
         self.assertIn('source_surface: "web_sdk"', js)
         self.assertIn("function toPlain", js)
 
@@ -22,6 +28,7 @@ class MiroWebsdkExporterAssetTests(unittest.TestCase):
 
         self.assertIn("https://miro.com/app/static/sdk/v2/miro.js", html)
         self.assertIn("./exporter.js", html)
+        self.assertIn("create-generated-probe", html)
         self.assertIn("export-board", html)
         self.assertIn("export-selection", html)
 

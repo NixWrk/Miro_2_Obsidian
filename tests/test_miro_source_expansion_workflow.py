@@ -23,6 +23,7 @@ class MiroSourceExpansionWorkflowTests(unittest.TestCase):
         self.assertIn("miro_rest_probe_board.py --output", plan)
         self.assertIn("MIRO_ACCESS_TOKEN", plan)
         self.assertIn("--board-id board-1", plan)
+        self.assertIn("Create probe items", plan)
         self.assertIn("miro_source_expansion_workflow.py analyze", plan)
         self.assertNotIn("Bearer ", plan)
 
