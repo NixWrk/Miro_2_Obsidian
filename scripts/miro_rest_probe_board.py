@@ -8,6 +8,8 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
+from miro_oauth_token import DEFAULT_BROWSER, DEFAULT_REDIRECT_URI
+
 
 DEFAULT_BOARD_NAME = "Miro2Obsidian REST Capability Probe"
 DEFAULT_BASE_URL = "https://api.miro.com/v2"
@@ -637,11 +639,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--oauth", action="store_true", help="Run local OAuth flow instead of reading --token-env.")
     parser.add_argument("--oauth-client-id-env", default="MIRO_CLIENT_ID")
     parser.add_argument("--oauth-client-secret-env", default="MIRO_CLIENT_SECRET")
-    parser.add_argument("--oauth-redirect-uri", default="http://localhost:8000/callback")
+    parser.add_argument("--oauth-redirect-uri", default=DEFAULT_REDIRECT_URI)
     parser.add_argument("--oauth-scopes", default="boards:read boards:write team:read")
     parser.add_argument("--oauth-authorize-url", default="https://miro.com/app-install/")
     parser.add_argument("--oauth-token-url", default="https://api.miro.com/v1/oauth/token")
     parser.add_argument("--oauth-timeout-seconds", type=int, default=300)
+    parser.add_argument("--oauth-browser", default=DEFAULT_BROWSER, help="Browser to open for OAuth. Default: yandex.")
     parser.add_argument("--oauth-no-open-browser", action="store_true")
     parser.add_argument("--oauth-code", help="Exchange an already obtained authorization code.")
     parser.add_argument("--oauth-callback-url", help="Exchange a copied localhost callback URL containing ?code=...")
@@ -672,6 +675,7 @@ def resolve_token_from_args(args: argparse.Namespace) -> str:
             config,
             timeout_seconds=args.oauth_timeout_seconds,
             open_browser=not args.oauth_no_open_browser,
+            browser=args.oauth_browser,
         )
 
     token = os.environ.get(args.token_env)

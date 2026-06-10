@@ -13,6 +13,7 @@ SCRIPTS_DIR = REPO_ROOT / "scripts"
 sys.path.insert(0, str(SCRIPTS_DIR))
 
 from miro_oauth_token import (  # noqa: E402
+    DEFAULT_REDIRECT_URI,
     OAuthConfig,
     OAuthTokenExchangeError,
     build_authorize_url,
@@ -23,7 +24,9 @@ from miro_oauth_token import (  # noqa: E402
     extract_authorization_code,
     format_callback_timeout_message,
     format_token_exchange_error,
+    open_authorize_url,
     parse_callback_path,
+    resolve_browser_executable,
 )
 
 
@@ -76,15 +79,14 @@ class MiroOAuthTokenTests(unittest.TestCase):
         config = OAuthConfig(
             client_id="client-1",
             client_secret="secret-1",
-            redirect_uri="http://localhost:8000/callback",
+            redirect_uri=DEFAULT_REDIRECT_URI,
         )
 
         message = format_callback_timeout_message(config, "https://miro.com/oauth/authorize?client_id=client-1")
 
-        self.assertIn("http://localhost:8000/callback", message)
+        self.assertIn("http://127.0.0.1:8000/callback", message)
         self.assertIn("authorization URL", message)
-        self.assertIn("replace only the host with 127.0.0.1", message)
-        self.assertIn("--oauth-redirect-uri http://127.0.0.1:8000/callback", message)
+        self.assertIn("old localhost redirect", message)
         self.assertNotIn("secret-1", message)
 
     def test_config_from_env_requires_client_credentials(self) -> None:
@@ -98,7 +100,30 @@ class MiroOAuthTokenTests(unittest.TestCase):
 
         self.assertEqual(config.client_id, "client-1")
         self.assertEqual(config.client_secret, "secret-1")
+        self.assertEqual(config.redirect_uri, "http://127.0.0.1:8000/callback")
         self.assertEqual(config.authorize_url, "https://example.invalid/authorize")
+
+    def test_resolves_yandex_browser_from_local_app_data(self) -> None:
+        expected = str(Path("C:/Users/me/AppData/Local/Yandex/YandexBrowser/Application/browser.exe"))
+        with patch.dict(os.environ, {"LOCALAPPDATA": str(Path("C:/Users/me/AppData/Local"))}, clear=True):
+            with patch("miro_oauth_token.os.path.isfile", side_effect=lambda path: path == expected):
+                self.assertEqual(resolve_browser_executable("yandex"), expected)
+
+    def test_open_authorize_url_uses_resolved_browser_without_system_fallback(self) -> None:
+        browser = str(Path("C:/Yandex/browser.exe"))
+        with patch("miro_oauth_token.resolve_browser_executable", return_value=browser):
+            with patch("miro_oauth_token.subprocess.Popen") as popen:
+                self.assertTrue(open_authorize_url("https://example.invalid/oauth", browser="yandex"))
+
+        popen.assert_called_once()
+        self.assertEqual(popen.call_args.args[0], [browser, "https://example.invalid/oauth"])
+
+    def test_open_authorize_url_skips_when_yandex_is_missing(self) -> None:
+        with patch("miro_oauth_token.resolve_browser_executable", return_value=None):
+            with patch("miro_oauth_token.subprocess.Popen") as popen:
+                self.assertFalse(open_authorize_url("https://example.invalid/oauth", browser="yandex"))
+
+        popen.assert_not_called()
 
     def test_parse_callback_path_extracts_code_error_and_state(self) -> None:
         result = parse_callback_path("/callback?code=code-1&state=state-1")

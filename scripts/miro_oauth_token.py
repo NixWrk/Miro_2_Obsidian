@@ -3,8 +3,8 @@ from __future__ import annotations
 import argparse
 import os
 import socket
+import subprocess
 import threading
-import webbrowser
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
@@ -13,9 +13,10 @@ from urllib.parse import parse_qs, urlencode, urlparse
 
 DEFAULT_AUTHORIZE_URL = "https://miro.com/app-install/"
 DEFAULT_TOKEN_URL = "https://api.miro.com/v1/oauth/token"
-DEFAULT_REDIRECT_URI = "http://localhost:8000/callback"
+DEFAULT_REDIRECT_URI = "http://127.0.0.1:8000/callback"
 DEFAULT_SCOPES = "boards:read boards:write team:read"
 DEFAULT_TIMEOUT_SECONDS = 300
+DEFAULT_BROWSER = "yandex"
 
 
 @dataclass(frozen=True)
@@ -84,12 +85,8 @@ def format_callback_timeout_message(config: OAuthConfig, authorize_url: str) -> 
             config.redirect_uri,
             "Then open or retry this authorization URL in the same browser session:",
             authorize_url,
-            "If the browser shows {'error': 'Not found.'} at localhost while this script is still waiting,",
-            "copy the full callback URL and replace only the host with 127.0.0.1, keeping the same path and ?code=...",
-            "If localhost is blocked or resolves oddly, register this exact additional Redirect URI in the Miro app before using it:",
-            "http://127.0.0.1:8000/callback",
-            "Then rerun with:",
-            "--oauth-redirect-uri http://127.0.0.1:8000/callback",
+            "If this app still has only the old localhost redirect registered, add this exact URI too:",
+            DEFAULT_REDIRECT_URI,
         ]
     )
 
@@ -212,6 +209,46 @@ def _make_callback_server(host: str, port: int, handler: type[BaseHTTPRequestHan
     return server_type((host, port), handler)
 
 
+def yandex_browser_candidates() -> tuple[str, ...]:
+    local_app_data = os.environ.get("LOCALAPPDATA", "")
+    program_files = os.environ.get("ProgramFiles", "")
+    program_files_x86 = os.environ.get("ProgramFiles(x86)", "")
+    return tuple(
+        path
+        for path in (
+            os.environ.get("YANDEX_BROWSER_PATH", ""),
+            os.path.join(local_app_data, "Yandex", "YandexBrowser", "Application", "browser.exe"),
+            os.path.join(program_files, "Yandex", "YandexBrowser", "Application", "browser.exe"),
+            os.path.join(program_files_x86, "Yandex", "YandexBrowser", "Application", "browser.exe"),
+        )
+        if path
+    )
+
+
+def resolve_browser_executable(browser: str) -> str | None:
+    normalized = browser.strip().lower()
+    if normalized in {"", "manual", "none"}:
+        return None
+    if normalized in {"yandex", "yandex-browser", "yandexbrowser"}:
+        for candidate in yandex_browser_candidates():
+            if os.path.isfile(candidate):
+                return candidate
+        return None
+    if os.path.isfile(browser):
+        return browser
+    return None
+
+
+def open_authorize_url(authorize_url: str, *, browser: str = DEFAULT_BROWSER) -> bool:
+    executable = resolve_browser_executable(browser)
+    if not executable:
+        print(f"browser_open_skipped={browser}: executable not found")
+        return False
+    subprocess.Popen([executable, authorize_url], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    print(f"browser_opened={browser}")
+    return True
+
+
 def exchange_access_token(config: OAuthConfig, code: str, *, session: Any | None = None) -> str:
     if session is None:
         import requests
@@ -243,6 +280,7 @@ def authorize_and_get_token(
     *,
     timeout_seconds: int = DEFAULT_TIMEOUT_SECONDS,
     open_browser: bool = True,
+    browser: str = DEFAULT_BROWSER,
     session: Any | None = None,
 ) -> str:
     redirect = urlparse(config.redirect_uri)
@@ -281,7 +319,7 @@ def authorize_and_get_token(
         print(f"authorization_url={authorize_url}")
         print(f"waiting_for_callback={config.redirect_uri}")
         if open_browser:
-            webbrowser.open(authorize_url)
+            open_authorize_url(authorize_url, browser=browser)
 
         if not event.wait(timeout_seconds):
             raise TimeoutError(format_callback_timeout_message(config, authorize_url))
@@ -319,6 +357,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--authorize-url", default=DEFAULT_AUTHORIZE_URL)
     parser.add_argument("--token-url", default=DEFAULT_TOKEN_URL)
     parser.add_argument("--timeout-seconds", type=int, default=DEFAULT_TIMEOUT_SECONDS)
+    parser.add_argument("--browser", default=DEFAULT_BROWSER, help="Browser to open for OAuth. Default: yandex.")
     parser.add_argument("--no-open-browser", action="store_true")
     parser.add_argument("--code", help="Exchange an already obtained authorization code.")
     parser.add_argument("--callback-url", help="Exchange a copied localhost callback URL containing ?code=...")
@@ -343,6 +382,7 @@ def main() -> int:
             config,
             timeout_seconds=args.timeout_seconds,
             open_browser=not args.no_open_browser,
+            browser=args.browser,
         )
     if args.print_token:
         print(token)
