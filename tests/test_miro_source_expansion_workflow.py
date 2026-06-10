@@ -34,6 +34,14 @@ class MiroSourceExpansionWorkflowTests(unittest.TestCase):
         self.assertIn("`tag`", report)
         self.assertIn("websdk_export_candidate", report)
 
+    def test_next_actions_reports_generated_probe_candidates(self) -> None:
+        rows = build_coverage_rows([], [])
+
+        report = render_next_actions(rows)
+
+        self.assertIn("`embed`", report)
+        self.assertIn("generated_probe_candidate", report)
+
     def test_analyze_writes_report_and_merged_json(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)

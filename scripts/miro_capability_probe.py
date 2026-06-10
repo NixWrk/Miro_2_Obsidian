@@ -122,9 +122,20 @@ def iter_items(value: Any) -> Iterable[dict[str, Any]]:
         yield value
         return
 
+    traversed_keys: set[str] = set()
     for key in ("items", "data", "children"):
         nested = value.get(key)
         if isinstance(nested, list):
+            yield from iter_items(nested)
+            traversed_keys.add(key)
+        elif isinstance(nested, dict):
+            yield from iter_items(nested)
+            traversed_keys.add(key)
+
+    for key, nested in value.items():
+        if key in traversed_keys:
+            continue
+        if isinstance(nested, (dict, list)):
             yield from iter_items(nested)
 
 
@@ -236,6 +247,8 @@ def classify_row(capability: Capability, rest: TypeStats, websdk: TypeStats) -> 
     else:
         coverage = "not_seen"
 
+    if capability.source_class == "metadata":
+        return coverage, "metadata"
     if observed_websdk and not observed_rest:
         return coverage, "websdk_export_candidate"
     if observed_rest and capability.converter_output.startswith(("drop", "not exported")):

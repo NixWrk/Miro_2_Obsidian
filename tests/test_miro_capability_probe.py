@@ -57,6 +57,25 @@ class MiroCapabilityProbeTests(unittest.TestCase):
 
         self.assertEqual(summary["text"].with_geometry, 1)
 
+    def test_summarizes_keyed_rest_probe_items(self) -> None:
+        root = {
+            "items": {
+                "text_probe": {
+                    "id": "text-1",
+                    "type": "text",
+                    "position": {"x": 10, "y": 20},
+                    "geometry": {"width": 100},
+                    "data": {"content": "<p>Hello</p>"},
+                }
+            }
+        }
+
+        summary = summarize_items(root)
+
+        self.assertEqual(summary["text"].count, 1)
+        self.assertEqual(summary["text"].with_geometry, 1)
+        self.assertEqual(summary["text"].with_content, 1)
+
     def test_marks_observed_dropped_rest_items_as_source_limited_when_no_geometry_or_content(self) -> None:
         rest_root = [{"id": "format-1", "type": "data_table_format", "position": {"x": 1, "y": 2}}]
 
@@ -64,6 +83,14 @@ class MiroCapabilityProbeTests(unittest.TestCase):
 
         self.assertEqual(rows["data_table_format"].coverage, "rest_only")
         self.assertEqual(rows["data_table_format"].action, "intentional_or_source_limited")
+
+    def test_board_metadata_is_not_a_converter_candidate(self) -> None:
+        rest_root = [{"id": "board-1", "type": "board", "name": "Probe board"}]
+
+        rows = {row.item_type: row for row in build_coverage_rows(rest_root, [])}
+
+        self.assertEqual(rows["board"].coverage, "rest_only")
+        self.assertEqual(rows["board"].action, "metadata")
 
     def test_report_contains_actionable_candidate_rows(self) -> None:
         rows = build_coverage_rows([], [{"id": "tag-1", "type": "tag", "x": 0, "y": 0, "width": 80, "height": 24}])

@@ -104,6 +104,7 @@ def build_workflow_plan(output_dir: Path, *, board_id: str | None = None) -> str
 def _candidate_rows(rows: list[Any]) -> list[Any]:
     interesting_actions = {
         "converter_candidate",
+        "generated_probe_candidate",
         "websdk_export_candidate",
         "needs_probe",
         "separate_source",
@@ -133,6 +134,7 @@ def render_next_actions(rows: list[Any]) -> str:
             "Policy:",
             "",
             "- `converter_candidate`: create a minimal fixture and a `CONV-*` problem.",
+            "- `generated_probe_candidate`: add a generated REST/Web SDK probe before changing converter code.",
             "- `websdk_export_candidate`: preserve/export through Web SDK first, then decide converter behavior.",
             "- `needs_probe`: create or manually inspect a source sample before changing converter code.",
             "- `separate_source`: treat as a separate API/export pipeline.",
