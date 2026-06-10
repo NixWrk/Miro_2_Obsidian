@@ -8,6 +8,83 @@
 
   let lastPayload = null;
 
+  const ONE_PIXEL_PNG_DATA_URL =
+    "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=";
+
+  const PROBE_IMAGE_URL = "https://miro.com/blog/wp-content/uploads/2023/10/Frame-12772209-1536x806.png";
+  const PROBE_PREVIEW_URL =
+    "https://miro.com/blog/wp-content/uploads/2020/10/organize-their-Miro-boards-for-trainings-and-workshops-FB.png";
+
+  const WEBSDK_SHAPE_TYPES = [
+    "rectangle",
+    "round_rectangle",
+    "circle",
+    "triangle",
+    "rhombus",
+    "parallelogram",
+    "trapezoid",
+    "pentagon",
+    "hexagon",
+    "octagon",
+    "wedge_round_rectangle_callout",
+    "star",
+    "flow_chart_predefined_process",
+    "cloud",
+    "cross",
+    "can",
+    "right_arrow",
+    "left_arrow",
+    "left_right_arrow",
+    "left_brace",
+    "right_brace",
+  ];
+
+  const STICKY_COLORS = [
+    "light_yellow",
+    "yellow",
+    "orange",
+    "red",
+    "light_pink",
+    "pink",
+    "light_blue",
+    "violet",
+    "blue",
+    "dark_blue",
+    "cyan",
+    "dark_green",
+    "light_green",
+    "green",
+    "white",
+    "black",
+  ];
+
+  const CONNECTOR_SHAPES = ["straight", "elbowed", "curved"];
+  const CONNECTOR_CAPS = [
+    "none",
+    "stealth",
+    "rounded_stealth",
+    "arrow",
+    "filled_triangle",
+    "triangle",
+    "filled_diamond",
+    "diamond",
+    "filled_oval",
+    "oval",
+    "erd_one",
+    "erd_many",
+    "erd_one_or_many",
+    "erd_only_one",
+    "erd_zero_or_many",
+    "erd_zero_or_one",
+  ];
+
+  function gridPosition(index, origin, columns, gapX, gapY) {
+    return {
+      x: origin.x + (index % columns) * gapX,
+      y: origin.y + Math.floor(index / columns) * gapY,
+    };
+  }
+
   function toPlain(value, seen) {
     if (value === null || typeof value !== "object") {
       if (typeof value === "function") {
@@ -134,48 +211,300 @@
       }
     }
 
-    const x = 0;
-    const y = 2600;
-    const tag = await create("tag", () =>
+    const rootX = -2400;
+    const rootY = 2600;
+    const tag = await create("tag_todo", () =>
       requireBoardMethod("createTag")({
-        title: "miro2obsidian-probe",
+        title: "miro2obsidian-todo",
         color: "yellow",
       })
     );
+    const urgentTag = await create("tag_urgent", () =>
+      requireBoardMethod("createTag")({
+        title: "miro2obsidian-urgent",
+        color: "magenta",
+      })
+    );
+
+    const textProbes = [
+      {
+        key: "text_plain",
+        content: "<p>Web SDK plain text probe</p>",
+        width: 320,
+        style: { fontSize: 20, textAlign: "left" },
+      },
+      {
+        key: "text_rich",
+        content:
+          "<p><strong>Rich text</strong><br/><em>italic</em>, <u>underline</u>, <s>strike</s>, <a href='https://miro.com/'>link</a></p>",
+        width: 420,
+        style: { fontSize: 18, textAlign: "left" },
+      },
+      {
+        key: "text_link_only",
+        content: "<p><a href='https://www.youtube.com/watch?v=aqz-KE-bpKQ'>YouTube link text probe</a></p>",
+        width: 380,
+        style: { fontSize: 18, textAlign: "left" },
+      },
+      {
+        key: "text_rotated",
+        content: "<p>Rotated text probe</p>",
+        width: 280,
+        rotation: 12,
+        style: { fontSize: 18, textAlign: "center" },
+      },
+    ];
+    for (const [index, probe] of textProbes.entries()) {
+      const position = gridPosition(index, { x: rootX, y: rootY }, 4, 460, 190);
+      await create(probe.key, () =>
+        requireBoardMethod("createText")({
+          content: probe.content,
+          x: position.x,
+          y: position.y,
+          width: probe.width,
+          rotation: probe.rotation || 0,
+          style: probe.style,
+        })
+      );
+    }
+
+    const frame = await create("frame_16x9", () =>
+      requireBoardMethod("createFrame")({
+        title: "Web SDK frame 16:9",
+        x: rootX + 1760,
+        y: rootY + 120,
+        width: 760,
+        height: 428,
+        style: { fillColor: "#ffffff" },
+      })
+    );
+    const frameChild = await create("frame_child_text", () =>
+      requireBoardMethod("createText")({
+        content: "<p>Child text added to a frame</p>",
+        x: rootX + 1540,
+        y: rootY + 70,
+        width: 300,
+      })
+    );
+    if (frame && frameChild) {
+      await attempt("frame_add_child_text", () => frame.add(frameChild));
+    }
+
+    const shapeItems = [];
+    for (const [index, shapeType] of WEBSDK_SHAPE_TYPES.entries()) {
+      const position = gridPosition(index, { x: rootX, y: rootY + 620 }, 7, 280, 180);
+      const item = await create(`shape_${shapeType}`, () =>
+        requireBoardMethod("createShape")({
+          content: `<p>${shapeType}</p>`,
+          shape: shapeType,
+          x: position.x,
+          y: position.y,
+          width: 220,
+          height: 120,
+          rotation: index === 0 ? 8 : 0,
+          style: {
+            color: "#1a1a1a",
+            fillColor: index % 2 === 0 ? "#FBE983" : "#D6EFFF",
+            fillOpacity: 0.9,
+            borderColor: "#4262ff",
+            borderWidth: 2,
+            textAlign: "center",
+            textAlignVertical: "middle",
+          },
+        })
+      );
+      if (item) {
+        shapeItems.push(item);
+      }
+    }
+
+    for (const [index, color] of STICKY_COLORS.entries()) {
+      const position = gridPosition(index, { x: rootX, y: rootY + 1280 }, 8, 260, 210);
+      await create(`sticky_${color}`, () =>
+        requireBoardMethod("createStickyNote")({
+          content: `Sticky ${color}`,
+          tagIds: tag ? [tag.id] : [],
+          shape: index % 2 === 0 ? "square" : "rectangle",
+          x: position.x,
+          y: position.y,
+          width: index % 2 === 0 ? 180 : 240,
+          style: {
+            fillColor: color,
+            textAlign: "center",
+            textAlignVertical: "middle",
+          },
+        })
+      );
+    }
+
+    const cardTagIds = [tag, urgentTag].filter(Boolean).map((item) => item.id);
+    await create("card_full", () =>
+      requireBoardMethod("createCard")({
+        title: "Web SDK card with status, dates, tags, fields",
+        description: "<p>Card description with <strong>HTML</strong> and list:</p><ul><li>one</li><li>two</li></ul>",
+        taskStatus: "in-progress",
+        startDate: "2026-06-10",
+        dueDate: "2026-06-30",
+        fields: [
+          { value: "High", fillColor: "#FBE983", textColor: "#503000", tooltip: "Priority" },
+          { value: "Owner", fillColor: "#bef2f2", textColor: "#0713FF", tooltip: "Role" },
+        ],
+        tagIds: cardTagIds,
+        x: rootX,
+        y: rootY + 1840,
+        width: 360,
+      })
+    );
+    await create("card_minimal", () =>
+      requireBoardMethod("createCard")({
+        title: "Minimal Web SDK card",
+        x: rootX + 420,
+        y: rootY + 1840,
+        width: 320,
+      })
+    );
+    await create("app_card_fields", () =>
+      requireBoardMethod("createAppCard")({
+        title: "Web SDK app card with fields",
+        description: "App card preview fields should be exported.",
+        status: "connected",
+        style: { cardTheme: "#2d9bf0" },
+        fields: [
+          {
+            value: "Owner",
+            iconUrl: "https://cdn-icons-png.flaticon.com/512/921/921124.png",
+            iconShape: "round",
+            fillColor: "#FBE983",
+            textColor: "#F83A22",
+            tooltip: "Owner field",
+          },
+          {
+            value: "Timeline",
+            iconUrl: "https://cdn-icons-png.flaticon.com/512/3094/3094861.png",
+            iconShape: "square",
+            fillColor: "#F8D878",
+            textColor: "#503000",
+            tooltip: "Timeline field",
+          },
+        ],
+        x: rootX + 820,
+        y: rootY + 1840,
+        width: 360,
+      })
+    );
+
+    const connectorStart = shapeItems[0];
+    const connectorEnd = shapeItems[1];
+    if (connectorStart && connectorEnd) {
+      for (const [index, connectorShape] of CONNECTOR_SHAPES.entries()) {
+        await create(`connector_${connectorShape}`, () =>
+          requireBoardMethod("createConnector")({
+            shape: connectorShape,
+            start: { item: connectorStart.id, snapTo: "right" },
+            end: { item: connectorEnd.id, snapTo: "left" },
+            captions: [
+              {
+                content: `${connectorShape} connector`,
+                position: 0.5,
+                textAlignVertical: "bottom",
+              },
+            ],
+            style: {
+              startStrokeCap: CONNECTOR_CAPS[index],
+              endStrokeCap: CONNECTOR_CAPS[index + 1],
+              strokeStyle: index === 1 ? "dashed" : index === 2 ? "dotted" : "normal",
+              strokeColor: index === 0 ? "#4262ff" : index === 1 ? "#ff00ff" : "#00aa55",
+              strokeWidth: 2 + index,
+            },
+          })
+        );
+      }
+    }
+    for (const [index, cap] of CONNECTOR_CAPS.entries()) {
+      const start = shapeItems[(index * 2) % shapeItems.length];
+      const end = shapeItems[(index * 2 + 1) % shapeItems.length];
+      if (!start || !end) {
+        continue;
+      }
+      await create(`connector_cap_${cap}`, () =>
+        requireBoardMethod("createConnector")({
+          shape: "curved",
+          start: { item: start.id, snapTo: "bottom" },
+          end: { item: end.id, snapTo: "top" },
+          style: {
+            startStrokeCap: cap,
+            endStrokeCap: cap,
+            strokeColor: "#555555",
+            strokeStyle: index % 2 === 0 ? "normal" : "dashed",
+            strokeWidth: 1,
+          },
+        })
+      );
+    }
+
     await create("tagged_sticky_note", () =>
       requireBoardMethod("createStickyNote")({
         content: "Sticky note with a Web SDK-created tag",
         tagIds: tag ? [tag.id] : [],
-        x,
-        y,
+        x: rootX + 1240,
+        y: rootY + 1840,
         width: 260,
       })
     );
-    await create("embed", () =>
+    await create("embed_modal", () =>
       requireBoardMethod("createEmbed")({
         url: "https://youtu.be/aqz-KE-bpKQ",
-        previewUrl: "https://miro.com/blog/wp-content/uploads/2020/10/organize-their-Miro-boards-for-trainings-and-workshops-FB.png",
+        previewUrl: PROBE_PREVIEW_URL,
         mode: "modal",
         width: 640,
         height: 360,
-        x: x + 460,
-        y,
+        x: rootX + 1600,
+        y: rootY + 1840,
       })
     );
-    await create("image", () =>
+    await create("embed_inline", () =>
+      requireBoardMethod("createEmbed")({
+        url: "https://miro.com/",
+        mode: "inline",
+        width: 480,
+        height: 270,
+        x: rootX + 2260,
+        y: rootY + 1840,
+      })
+    );
+    await create("image_url", () =>
       requireBoardMethod("createImage")({
         title: "miro2obsidian image probe",
-        url: "https://miro.com/blog/wp-content/uploads/2023/10/Frame-12772209-1536x806.png",
-        x: x + 1120,
-        y,
+        url: PROBE_IMAGE_URL,
+        alt: "Miro image probe from absolute URL",
+        x: rootX,
+        y: rootY + 2320,
         width: 420,
       })
     );
-    await create("preview", () =>
+    await create("image_data_url", () =>
+      requireBoardMethod("createImage")({
+        title: "miro2obsidian data URL image probe",
+        url: ONE_PIXEL_PNG_DATA_URL,
+        alt: "Miro image probe from data URL",
+        x: rootX + 520,
+        y: rootY + 2320,
+        width: 180,
+      })
+    );
+    await create("preview_miro", () =>
       requireBoardMethod("createPreview")({
         url: "https://miro.com/",
-        x: x + 1640,
-        y,
+        x: rootX + 920,
+        y: rootY + 2320,
+        width: 400,
+      })
+    );
+    await create("preview_youtube", () =>
+      requireBoardMethod("createPreview")({
+        url: "https://www.youtube.com/watch?v=aqz-KE-bpKQ",
+        x: rootX + 1420,
+        y: rootY + 2320,
         width: 400,
       })
     );
@@ -188,8 +517,8 @@
           shape: "round_rectangle",
           style: { color: "#1a85ff", fillOpacity: 0.12 },
         },
-        x,
-        y: y + 1060,
+        x: rootX + 2040,
+        y: rootY + 2320,
       })
     );
     const mindmapChildA = await create("mindmap_node_child_a", () =>
@@ -198,8 +527,8 @@
           type: "text",
           content: "<p>Mind map child A</p>",
         },
-        x: x - 260,
-        y: y + 1260,
+        x: rootX + 1780,
+        y: rootY + 2520,
       })
     );
     const mindmapChildB = await create("mindmap_node_child_b", () =>
@@ -208,8 +537,8 @@
           type: "text",
           content: "<p>Mind map child B</p>",
         },
-        x: x + 260,
-        y: y + 1260,
+        x: rootX + 2300,
+        y: rootY + 2520,
       })
     );
     if (mindmapRoot && mindmapChildA) {
@@ -222,8 +551,8 @@
     const shape = await create("group_shape", () =>
       requireBoardMethod("createShape")({
         content: "Grouped shape",
-        x,
-        y: y + 520,
+        x: rootX + 2720,
+        y: rootY + 2320,
         width: 220,
         height: 120,
       })
@@ -231,16 +560,16 @@
     const card = await create("group_card", () =>
       requireBoardMethod("createCard")({
         title: "Grouped card",
-        x: x + 280,
-        y: y + 520,
+        x: rootX + 3000,
+        y: rootY + 2320,
         width: 260,
       })
     );
     const text = await create("group_text", () =>
       requireBoardMethod("createText")({
         content: "<p>Grouped text</p>",
-        x: x + 620,
-        y: y + 520,
+        x: rootX + 3340,
+        y: rootY + 2320,
         width: 260,
       })
     );
