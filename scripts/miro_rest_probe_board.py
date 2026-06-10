@@ -103,8 +103,8 @@ def build_probe_operations() -> list[ProbeOperation]:
                     "title": "REST app card probe",
                     "description": "App card description should survive export.",
                     "fields": [
-                        {"name": "Status", "value": "Probe"},
-                        {"name": "Priority", "value": "High"},
+                        {"label": "Status", "value": "Probe"},
+                        {"label": "Priority", "value": "High"},
                     ],
                 },
                 "position": _position(1, 1),
