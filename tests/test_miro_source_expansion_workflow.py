@@ -20,8 +20,9 @@ class MiroSourceExpansionWorkflowTests(unittest.TestCase):
     def test_plan_contains_ordered_commands_without_secret_value(self) -> None:
         plan = build_workflow_plan(Path("probe_run"), board_id="board-1", websdk_port=8766)
 
-        self.assertIn("miro_rest_probe_board.py --output", plan)
+        self.assertIn("miro_rest_generate_probe_board.py --output", plan)
         self.assertIn("MIRO_ACCESS_TOKEN", plan)
+        self.assertIn("partial API failures", plan)
         self.assertIn("--board-id board-1", plan)
         self.assertIn("http://localhost:8766/index.html", plan)
         self.assertIn("Create probe items", plan)

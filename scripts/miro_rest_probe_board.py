@@ -11,6 +11,91 @@ from typing import Any
 
 DEFAULT_BOARD_NAME = "Miro2Obsidian REST Capability Probe"
 DEFAULT_BASE_URL = "https://api.miro.com/v2"
+ONE_PIXEL_PNG_DATA_URL = (
+    "data:image/png;base64,"
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII="
+)
+PROBE_IMAGE_URL = "https://miro.com/blog/wp-content/uploads/2023/10/Frame-12772209-1536x806.png"
+PROBE_DOCUMENT_URL = "https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf"
+PROBE_EMBED_URL = "https://www.youtube.com/watch?v=aqz-KE-bpKQ"
+
+REST_SHAPE_TYPES = (
+    "rectangle",
+    "round_rectangle",
+    "circle",
+    "triangle",
+    "rhombus",
+    "parallelogram",
+    "trapezoid",
+    "pentagon",
+    "hexagon",
+    "octagon",
+    "wedge_round_rectangle_callout",
+    "star",
+    "flow_chart_predefined_process",
+    "cloud",
+    "cross",
+    "can",
+    "right_arrow",
+    "left_arrow",
+    "left_right_arrow",
+    "left_brace",
+    "right_brace",
+)
+
+REST_STICKY_COLORS = (
+    "light_yellow",
+    "yellow",
+    "orange",
+    "red",
+    "light_pink",
+    "pink",
+    "light_blue",
+    "violet",
+    "blue",
+    "dark_blue",
+    "cyan",
+    "dark_green",
+    "light_green",
+    "green",
+    "white",
+    "black",
+)
+
+REST_TAG_COLORS = (
+    "red",
+    "light_green",
+    "cyan",
+    "yellow",
+    "magenta",
+    "green",
+    "blue",
+    "gray",
+    "violet",
+    "dark_green",
+    "dark_blue",
+    "black",
+)
+
+REST_CONNECTOR_SHAPES = ("straight", "elbowed", "curved")
+REST_CONNECTOR_CAPS = (
+    "none",
+    "stealth",
+    "rounded_stealth",
+    "arrow",
+    "filled_triangle",
+    "triangle",
+    "filled_diamond",
+    "diamond",
+    "filled_oval",
+    "oval",
+    "erd_one",
+    "erd_many",
+    "erd_one_or_many",
+    "erd_only_one",
+    "erd_zero_or_many",
+    "erd_zero_or_one",
+)
 
 
 class MiroRestRequestError(RuntimeError):
@@ -34,8 +119,29 @@ def _position(col: int, row: int) -> dict[str, int]:
     return {"x": -420 + col * 360, "y": -260 + row * 220}
 
 
+def _grid_position(index: int, *, origin_x: int, origin_y: int, columns: int, gap_x: int, gap_y: int) -> dict[str, int]:
+    return {
+        "x": origin_x + (index % columns) * gap_x,
+        "y": origin_y + (index // columns) * gap_y,
+    }
+
+
 def build_probe_operations() -> list[ProbeOperation]:
-    return [
+    operations: list[ProbeOperation] = [
+        ProbeOperation(
+            key="tag_todo",
+            item_type="tag",
+            method="POST",
+            path="/boards/{board_id}/tags",
+            payload={"title": "miro2obsidian-rest-todo", "fillColor": "yellow"},
+        ),
+        ProbeOperation(
+            key="tag_urgent",
+            item_type="tag",
+            method="POST",
+            path="/boards/{board_id}/tags",
+            payload={"title": "miro2obsidian-rest-urgent", "fillColor": "magenta"},
+        ),
         ProbeOperation(
             key="frame_main",
             item_type="frame",
@@ -43,7 +149,7 @@ def build_probe_operations() -> list[ProbeOperation]:
             path="/boards/{board_id}/frames",
             payload={
                 "data": {"title": "REST probe frame"},
-                "position": {"x": 0, "y": 0},
+                "position": {"x": 2600, "y": 0},
                 "geometry": {"width": 1050, "height": 720},
             },
         ),
@@ -59,14 +165,78 @@ def build_probe_operations() -> list[ProbeOperation]:
             },
         ),
         ProbeOperation(
+            key="text_rich",
+            item_type="text",
+            method="POST",
+            path="/boards/{board_id}/texts",
+            payload={
+                "data": {
+                    "content": (
+                        "<p><strong>REST rich text</strong><br/>"
+                        "<em>italic</em>, <u>underline</u>, <s>strike</s>, "
+                        "<a href='https://miro.com/'>link</a></p>"
+                    )
+                },
+                "position": _position(1, 0),
+                "geometry": {"width": 360},
+                "style": {"fontSize": "18", "textAlign": "left"},
+            },
+        ),
+        ProbeOperation(
+            key="text_link_only",
+            item_type="text",
+            method="POST",
+            path="/boards/{board_id}/texts",
+            payload={
+                "data": {"content": f"<p><a href='{PROBE_EMBED_URL}'>REST YouTube link probe</a></p>"},
+                "position": _position(2, 0),
+                "geometry": {"width": 360},
+            },
+        ),
+        ProbeOperation(
+            key="text_in_frame",
+            item_type="text",
+            method="POST",
+            path="/boards/{board_id}/texts",
+            payload={
+                "data": {"content": "<p>REST child text inside frame</p>"},
+                "position": {"x": 70, "y": 70},
+                "geometry": {"width": 300},
+                "parent": {"id": "$frame_main.id"},
+            },
+            depends_on=("frame_main",),
+        ),
+        ProbeOperation(
             key="shape_round_rect",
             item_type="shape",
             method="POST",
             path="/boards/{board_id}/shapes",
             payload={
                 "data": {"content": "<p>REST shape probe</p>", "shape": "round_rectangle"},
-                "position": _position(1, 0),
+                "position": _position(3, 0),
                 "geometry": {"width": 260, "height": 120},
+            },
+        ),
+        ProbeOperation(
+            key="shape_anchor_a",
+            item_type="shape",
+            method="POST",
+            path="/boards/{board_id}/shapes",
+            payload={
+                "data": {"content": "<p>REST connector anchor A</p>", "shape": "rectangle"},
+                "position": _position(4, 0),
+                "geometry": {"width": 220, "height": 100},
+            },
+        ),
+        ProbeOperation(
+            key="shape_anchor_b",
+            item_type="shape",
+            method="POST",
+            path="/boards/{board_id}/shapes",
+            payload={
+                "data": {"content": "<p>REST connector anchor B</p>", "shape": "circle"},
+                "position": _position(5, 0),
+                "geometry": {"width": 140, "height": 140},
             },
         ),
         ProbeOperation(
@@ -76,8 +246,20 @@ def build_probe_operations() -> list[ProbeOperation]:
             path="/boards/{board_id}/sticky_notes",
             payload={
                 "data": {"content": "REST sticky note probe"},
-                "position": _position(2, 0),
+                "position": _position(0, 1),
                 "geometry": {"width": 220},
+            },
+        ),
+        ProbeOperation(
+            key="sticky_rectangle",
+            item_type="sticky_note",
+            method="POST",
+            path="/boards/{board_id}/sticky_notes",
+            payload={
+                "data": {"content": "REST rectangle sticky note probe", "shape": "rectangle"},
+                "position": _position(1, 1),
+                "geometry": {"width": 280},
+                "style": {"fillColor": "light_blue"},
             },
         ),
         ProbeOperation(
@@ -90,7 +272,23 @@ def build_probe_operations() -> list[ProbeOperation]:
                     "title": "REST card probe",
                     "description": "Card description should survive export.",
                 },
-                "position": _position(0, 1),
+                "position": _position(2, 1),
+            },
+        ),
+        ProbeOperation(
+            key="card_dates",
+            item_type="card",
+            method="POST",
+            path="/boards/{board_id}/cards",
+            payload={
+                "data": {
+                    "title": "REST card with dates",
+                    "description": "Task metadata candidate for REST export.",
+                    "taskStatus": "in-progress",
+                    "startDate": "2026-06-10",
+                    "dueDate": "2026-06-30",
+                },
+                "position": _position(3, 1),
             },
         ),
         ProbeOperation(
@@ -103,7 +301,50 @@ def build_probe_operations() -> list[ProbeOperation]:
                     "title": "REST app card probe",
                     "description": "App card description should survive export.",
                 },
-                "position": _position(1, 1),
+                "position": _position(4, 1),
+            },
+        ),
+        ProbeOperation(
+            key="embed_youtube",
+            item_type="embed",
+            method="POST",
+            path="/boards/{board_id}/embeds",
+            payload={
+                "data": {"url": PROBE_EMBED_URL},
+                "position": _position(5, 1),
+                "geometry": {"width": 480, "height": 270},
+            },
+        ),
+        ProbeOperation(
+            key="image_url",
+            item_type="image",
+            method="POST",
+            path="/boards/{board_id}/images",
+            payload={
+                "data": {"url": PROBE_IMAGE_URL, "title": "REST image URL probe"},
+                "position": _position(0, 2),
+                "geometry": {"width": 420},
+            },
+        ),
+        ProbeOperation(
+            key="image_data_url",
+            item_type="image",
+            method="POST",
+            path="/boards/{board_id}/images",
+            payload={
+                "data": {"url": ONE_PIXEL_PNG_DATA_URL, "title": "REST image data URL probe"},
+                "position": _position(1, 2),
+                "geometry": {"width": 180},
+            },
+        ),
+        ProbeOperation(
+            key="document_url",
+            item_type="document",
+            method="POST",
+            path="/boards/{board_id}/documents",
+            payload={
+                "data": {"url": PROBE_DOCUMENT_URL, "title": "REST document URL probe"},
+                "position": _position(2, 2),
             },
         ),
         ProbeOperation(
@@ -120,6 +361,107 @@ def build_probe_operations() -> list[ProbeOperation]:
         ),
     ]
 
+    for index, shape_type in enumerate(REST_SHAPE_TYPES):
+        operations.append(
+            ProbeOperation(
+                key=f"shape_variant_{shape_type}",
+                item_type="shape",
+                method="POST",
+                path="/boards/{board_id}/shapes",
+                payload={
+                    "data": {"content": f"<p>{shape_type}</p>", "shape": shape_type},
+                    "position": _grid_position(index, origin_x=-1440, origin_y=520, columns=7, gap_x=280, gap_y=180),
+                    "geometry": {"width": 220, "height": 120},
+                    "style": {
+                        "fillColor": "#D6EFFF" if index % 2 else "#FBE983",
+                        "borderColor": "#4262ff",
+                        "borderWidth": "2",
+                        "textAlign": "center",
+                        "textAlignVertical": "middle",
+                    },
+                },
+            )
+        )
+
+    for index, color in enumerate(REST_STICKY_COLORS):
+        operations.append(
+            ProbeOperation(
+                key=f"sticky_color_{color}",
+                item_type="sticky_note",
+                method="POST",
+                path="/boards/{board_id}/sticky_notes",
+                payload={
+                    "data": {
+                        "content": f"REST sticky {color}",
+                        "shape": "square" if index % 2 == 0 else "rectangle",
+                    },
+                    "position": _grid_position(index, origin_x=-1440, origin_y=1160, columns=8, gap_x=260, gap_y=210),
+                    "geometry": {"width": 180 if index % 2 == 0 else 240},
+                    "style": {"fillColor": color, "textAlign": "center", "textAlignVertical": "middle"},
+                },
+            )
+        )
+
+    for index, color in enumerate(REST_TAG_COLORS):
+        operations.append(
+            ProbeOperation(
+                key=f"tag_color_{color}",
+                item_type="tag",
+                method="POST",
+                path="/boards/{board_id}/tags",
+                payload={"title": f"miro2obsidian-rest-{color}", "fillColor": color},
+            )
+        )
+
+    for index, connector_shape in enumerate(REST_CONNECTOR_SHAPES):
+        operations.append(
+            ProbeOperation(
+                key=f"connector_{connector_shape}",
+                item_type="connector",
+                method="POST",
+                path="/boards/{board_id}/connectors",
+                payload={
+                    "startItem": {"id": "$shape_anchor_a.id"},
+                    "endItem": {"id": "$shape_anchor_b.id"},
+                    "shape": connector_shape,
+                    "captions": [{"content": f"{connector_shape} REST connector", "position": 0.5}],
+                    "style": {
+                        "startStrokeCap": REST_CONNECTOR_CAPS[index],
+                        "endStrokeCap": REST_CONNECTOR_CAPS[index + 1],
+                        "strokeStyle": "normal" if index == 0 else "dashed",
+                        "strokeColor": "#4262ff",
+                        "strokeWidth": str(2 + index),
+                    },
+                },
+                depends_on=("shape_anchor_a", "shape_anchor_b"),
+            )
+        )
+
+    for index, cap in enumerate(REST_CONNECTOR_CAPS):
+        operations.append(
+            ProbeOperation(
+                key=f"connector_cap_{cap}",
+                item_type="connector",
+                method="POST",
+                path="/boards/{board_id}/connectors",
+                payload={
+                    "startItem": {"id": "$shape_anchor_a.id"},
+                    "endItem": {"id": "$shape_anchor_b.id"},
+                    "shape": "curved",
+                    "style": {
+                        "startStrokeCap": cap,
+                        "endStrokeCap": cap,
+                        "strokeStyle": "normal" if index % 2 == 0 else "dashed",
+                        "strokeColor": "#555555",
+                        "strokeWidth": "1",
+                    },
+                },
+                depends_on=("shape_anchor_a", "shape_anchor_b"),
+            )
+        )
+
+    return operations
+
 
 def build_manifest(board_name: str = DEFAULT_BOARD_NAME) -> dict[str, Any]:
     return {
@@ -127,7 +469,10 @@ def build_manifest(board_name: str = DEFAULT_BOARD_NAME) -> dict[str, Any]:
         "kind": "miro_rest_capability_probe",
         "board": {
             "name": board_name,
-            "description": "Generated by scripts/miro_rest_probe_board.py for Miro -> Obsidian source coverage tests.",
+            "description": (
+                "Generated by scripts/miro_rest_probe_board.py for Miro -> Obsidian source coverage tests. "
+                "This is the maximum generated REST fixture; unsupported variants are recorded as failures."
+            ),
         },
         "operations": [asdict(operation) for operation in build_probe_operations()],
     }
@@ -198,6 +543,7 @@ def execute_manifest(
     board_id: str | None = None,
     base_url: str = DEFAULT_BASE_URL,
     session: Any | None = None,
+    stop_on_error: bool = False,
 ) -> dict[str, Any]:
     if session is None:
         import requests
@@ -205,22 +551,36 @@ def execute_manifest(
         session = requests.Session()
 
     results: dict[str, dict[str, Any]] = {}
+    failures: list[dict[str, Any]] = []
     created_board = None
     if not board_id:
         created_board = _post_json(session, base_url.rstrip("/") + "/boards", token, manifest["board"])
         board_id = str(created_board["id"])
 
     for request in planned_requests(manifest, board_id, base_url=base_url):
+        missing_dependencies = [key for key in request["depends_on"] if key not in results]
+        if missing_dependencies:
+            failures.append(
+                {
+                    "key": request["key"],
+                    "item_type": request["item_type"],
+                    "method": request["method"],
+                    "url": request["url"],
+                    "payload": request["payload"],
+                    "status_code": "skipped",
+                    "response_body": f"Missing dependency result(s): {', '.join(missing_dependencies)}",
+                }
+            )
+            if stop_on_error:
+                break
+            continue
+
         payload = resolve_placeholders(request["payload"], results)
         try:
             results[request["key"]] = _post_json(session, request["url"], token, payload)
         except MiroRestRequestError as exc:
-            return {
-                "ok": False,
-                "board_id": board_id,
-                "created_board": created_board,
-                "items": results,
-                "failed_request": {
+            failures.append(
+                {
                     "key": request["key"],
                     "item_type": request["item_type"],
                     "method": request["method"],
@@ -228,15 +588,38 @@ def execute_manifest(
                     "payload": payload,
                     "status_code": exc.status_code,
                     "response_body": exc.response_body,
-                },
-            }
+                }
+            )
+            if stop_on_error:
+                break
 
-    return {
-        "ok": True,
+    output: dict[str, Any] = {
+        "ok": not failures,
         "board_id": board_id,
         "created_board": created_board,
         "items": results,
+        "failures": failures,
+        "summary": {
+            "planned": len(manifest.get("operations", [])),
+            "created": len(results),
+            "failed": sum(1 for failure in failures if failure.get("status_code") != "skipped"),
+            "skipped": sum(1 for failure in failures if failure.get("status_code") == "skipped"),
+            "created_by_type": {},
+            "failed_by_type": {},
+        },
     }
+    for operation in manifest.get("operations", []):
+        key = operation.get("key")
+        if key in results:
+            item_type = str(operation.get("item_type"))
+            output["summary"]["created_by_type"][item_type] = output["summary"]["created_by_type"].get(item_type, 0) + 1
+    for failure in failures:
+        item_type = str(failure.get("item_type"))
+        output["summary"]["failed_by_type"][item_type] = output["summary"]["failed_by_type"].get(item_type, 0) + 1
+
+    if failures:
+        output["failed_request"] = failures[0]
+    return output
 
 
 def parse_args() -> argparse.Namespace:
@@ -244,6 +627,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--board-name", default=DEFAULT_BOARD_NAME)
     parser.add_argument("--board-id", help="Existing board id. If omitted with --execute, the script creates a board.")
     parser.add_argument("--execute", action="store_true", help="Actually call the Miro REST API. Default is dry-run.")
+    parser.add_argument("--stop-on-error", action="store_true", help="Stop at the first REST item failure.")
+    parser.add_argument(
+        "--strict-failures",
+        action="store_true",
+        help="Return exit code 1 when item-level REST failures are recorded.",
+    )
     parser.add_argument("--token-env", default="MIRO_ACCESS_TOKEN", help="Environment variable containing a Miro token.")
     parser.add_argument("--oauth", action="store_true", help="Run local OAuth flow instead of reading --token-env.")
     parser.add_argument("--oauth-client-id-env", default="MIRO_CLIENT_ID")
@@ -299,7 +688,13 @@ def main() -> int:
             token = resolve_token_from_args(args)
         except (TimeoutError, RuntimeError) as exc:
             raise SystemExit(str(exc)) from exc
-        output = execute_manifest(manifest, token, board_id=args.board_id, base_url=args.base_url)
+        output = execute_manifest(
+            manifest,
+            token,
+            board_id=args.board_id,
+            base_url=args.base_url,
+            stop_on_error=args.stop_on_error,
+        )
     else:
         output = manifest
 
@@ -312,7 +707,8 @@ def main() -> int:
     if isinstance(output, dict) and output.get("ok") is False:
         failed = output.get("failed_request") or {}
         print(f"failed_request={failed.get('key')} status={failed.get('status_code')}")
-        return 1
+        if args.strict_failures:
+            return 1
     return 0
 
 

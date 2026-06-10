@@ -10,7 +10,17 @@ SCRIPTS_DIR = REPO_ROOT / "scripts"
 
 sys.path.insert(0, str(SCRIPTS_DIR))
 
-from miro_rest_probe_board import build_manifest, execute_manifest, planned_requests, resolve_placeholders  # noqa: E402
+from miro_rest_probe_board import (  # noqa: E402
+    REST_CONNECTOR_CAPS,
+    REST_CONNECTOR_SHAPES,
+    REST_SHAPE_TYPES,
+    REST_STICKY_COLORS,
+    REST_TAG_COLORS,
+    build_manifest,
+    execute_manifest,
+    planned_requests,
+    resolve_placeholders,
+)
 
 
 class FakeResponse:
@@ -42,8 +52,41 @@ class MiroRestProbeBoardTests(unittest.TestCase):
 
         self.assertEqual(
             item_types,
-            {"frame", "text", "shape", "sticky_note", "card", "app_card", "connector"},
+            {"tag", "frame", "text", "shape", "sticky_note", "card", "app_card", "embed", "image", "document", "connector"},
         )
+
+    def test_manifest_includes_maximum_rest_variants(self) -> None:
+        manifest = build_manifest()
+        operations_by_key = {operation["key"]: operation for operation in manifest["operations"]}
+
+        for shape_type in REST_SHAPE_TYPES:
+            self.assertIn(f"shape_variant_{shape_type}", operations_by_key)
+        for color in REST_STICKY_COLORS:
+            self.assertIn(f"sticky_color_{color}", operations_by_key)
+        for color in REST_TAG_COLORS:
+            self.assertIn(f"tag_color_{color}", operations_by_key)
+        for connector_shape in REST_CONNECTOR_SHAPES:
+            self.assertIn(f"connector_{connector_shape}", operations_by_key)
+        for cap in REST_CONNECTOR_CAPS:
+            self.assertIn(f"connector_cap_{cap}", operations_by_key)
+
+        self.assertIn("image_url", operations_by_key)
+        self.assertIn("image_data_url", operations_by_key)
+        self.assertIn("document_url", operations_by_key)
+        self.assertIn("embed_youtube", operations_by_key)
+
+    def test_manifest_positions_are_not_accidentally_reused(self) -> None:
+        manifest = build_manifest()
+        seen: dict[tuple[int, int], str] = {}
+
+        for operation in manifest["operations"]:
+            position = operation["payload"].get("position")
+            if not position:
+                continue
+            key = operation["key"]
+            pair = (position["x"], position["y"])
+            self.assertNotIn(pair, seen, f"{key} reuses position from {seen.get(pair)}")
+            seen[pair] = key
 
     def test_connector_uses_placeholders_for_created_item_ids(self) -> None:
         manifest = build_manifest()
@@ -61,10 +104,10 @@ class MiroRestProbeBoardTests(unittest.TestCase):
 
     def test_app_card_probe_omits_fields_because_rest_create_rejects_them(self) -> None:
         manifest = build_manifest()
-        app_card = next(operation for operation in manifest["operations"] if operation["item_type"] == "app_card")
+        app_cards = [operation for operation in manifest["operations"] if operation["item_type"] == "app_card"]
 
-        self.assertEqual(app_card["key"], "app_card_basic")
-        self.assertNotIn("fields", app_card["payload"]["data"])
+        self.assertEqual([operation["key"] for operation in app_cards], ["app_card_basic"])
+        self.assertNotIn("fields", app_cards[0]["payload"]["data"])
 
 
     def test_resolves_nested_placeholders(self) -> None:
@@ -119,6 +162,52 @@ class MiroRestProbeBoardTests(unittest.TestCase):
         self.assertEqual(result["items"]["text_ok"]["id"], "text-1")
         self.assertEqual(result["failed_request"]["key"], "sticky_bad")
         self.assertEqual(result["failed_request"]["status_code"], 400)
+        self.assertEqual(result["summary"]["created"], 1)
+        self.assertEqual(result["summary"]["failed"], 1)
+
+    def test_execute_manifest_continues_after_item_failure_and_skips_missing_dependencies(self) -> None:
+        manifest = {
+            "board": {"name": "probe"},
+            "operations": [
+                {
+                    "key": "shape_bad",
+                    "item_type": "shape",
+                    "method": "POST",
+                    "path": "/boards/{board_id}/shapes",
+                    "payload": {"data": {"content": "bad"}},
+                },
+                {
+                    "key": "text_ok",
+                    "item_type": "text",
+                    "method": "POST",
+                    "path": "/boards/{board_id}/texts",
+                    "payload": {"data": {"content": "ok"}},
+                },
+                {
+                    "key": "connector_skipped",
+                    "item_type": "connector",
+                    "method": "POST",
+                    "path": "/boards/{board_id}/connectors",
+                    "payload": {"startItem": {"id": "$shape_bad.id"}, "endItem": {"id": "$text_ok.id"}},
+                    "depends_on": ("shape_bad", "text_ok"),
+                },
+            ],
+        }
+        session = FakeSession(
+            [
+                FakeResponse({"id": "board-1"}),
+                FakeResponse({"message": "bad request"}, ok=False, status_code=400),
+                FakeResponse({"id": "text-1"}),
+            ]
+        )
+
+        result = execute_manifest(manifest, "token-1", session=session)
+
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["items"]["text_ok"]["id"], "text-1")
+        self.assertEqual([failure["key"] for failure in result["failures"]], ["shape_bad", "connector_skipped"])
+        self.assertEqual(result["summary"]["failed"], 1)
+        self.assertEqual(result["summary"]["skipped"], 1)
 
 
 if __name__ == "__main__":
