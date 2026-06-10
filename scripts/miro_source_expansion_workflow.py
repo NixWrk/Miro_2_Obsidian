@@ -27,7 +27,7 @@ def _path_for_markdown(path: Path) -> str:
     return str(path).replace("\\", "\\\\")
 
 
-def build_workflow_plan(output_dir: Path, *, board_id: str | None = None) -> str:
+def build_workflow_plan(output_dir: Path, *, board_id: str | None = None, websdk_port: int = 8765) -> str:
     rest_manifest = output_dir / "rest_probe_manifest.json"
     rest_result = output_dir / "rest_probe_result.json"
     rest_export = output_dir / "rest_export.json"
@@ -71,10 +71,10 @@ def build_workflow_plan(output_dir: Path, *, board_id: str | None = None) -> str
             "## 4. Export the same board through the Web SDK app",
             "",
             "```powershell",
-            "python -m http.server 8765 --directory tools\\miro_websdk_exporter",
+            f"python -m http.server {websdk_port} --directory tools\\miro_websdk_exporter",
             "```",
             "",
-            "Register/open `http://localhost:8765/index.html` as a Miro app URL, export the board, and save the JSON as:",
+            f"Register/open `http://localhost:{websdk_port}/index.html` as a Miro app URL, export the board, and save the JSON as:",
             "",
             "For generated candidates, click `Create probe items` in the app before exporting the board.",
             "",
@@ -145,10 +145,10 @@ def render_next_actions(rows: list[Any]) -> str:
     return "\n".join(lines)
 
 
-def write_workflow_plan(output_dir: Path, *, board_id: str | None = None) -> Path:
+def write_workflow_plan(output_dir: Path, *, board_id: str | None = None, websdk_port: int = 8765) -> Path:
     output_dir.mkdir(parents=True, exist_ok=True)
     path = output_dir / "workflow_plan.md"
-    path.write_text(build_workflow_plan(output_dir, board_id=board_id) + "\n", encoding="utf-8")
+    path.write_text(build_workflow_plan(output_dir, board_id=board_id, websdk_port=websdk_port) + "\n", encoding="utf-8")
     return path
 
 
@@ -188,6 +188,7 @@ def parse_args() -> argparse.Namespace:
     plan_parser = subparsers.add_parser("plan", help="Create a local workflow checklist.")
     plan_parser.add_argument("--output-dir", type=Path, default=DEFAULT_WORK_DIR)
     plan_parser.add_argument("--board-id")
+    plan_parser.add_argument("--websdk-port", type=int, default=8765)
 
     analyze_parser = subparsers.add_parser("analyze", help="Analyze REST/Web SDK exports and write merged source artifacts.")
     analyze_parser.add_argument("--rest-json", type=Path, required=True)
@@ -200,7 +201,7 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     args = parse_args()
     if args.command == "plan":
-        path = write_workflow_plan(args.output_dir, board_id=args.board_id)
+        path = write_workflow_plan(args.output_dir, board_id=args.board_id, websdk_port=args.websdk_port)
         print(f"workflow_plan={path}")
         return 0
 
