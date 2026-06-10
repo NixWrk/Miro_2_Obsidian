@@ -13,6 +13,13 @@ DEFAULT_BOARD_NAME = "Miro2Obsidian REST Capability Probe"
 DEFAULT_BASE_URL = "https://api.miro.com/v2"
 
 
+class MiroRestRequestError(RuntimeError):
+    def __init__(self, message: str, *, status_code: int | str, response_body: str) -> None:
+        super().__init__(message)
+        self.status_code = status_code
+        self.response_body = response_body
+
+
 @dataclass(frozen=True)
 class ProbeOperation:
     key: str
@@ -70,7 +77,7 @@ def build_probe_operations() -> list[ProbeOperation]:
             payload={
                 "data": {"content": "REST sticky note probe"},
                 "position": _position(2, 0),
-                "geometry": {"width": 220, "height": 220},
+                "geometry": {"width": 220},
             },
         ),
         ProbeOperation(
@@ -163,6 +170,13 @@ def planned_requests(manifest: dict[str, Any], board_id: str, base_url: str = DE
     return requests
 
 
+def _response_body(response: Any) -> str:
+    try:
+        return json.dumps(response.json(), ensure_ascii=False)
+    except ValueError:
+        return str(getattr(response, "text", ""))
+
+
 def _post_json(session: Any, url: str, token: str, payload: dict[str, Any]) -> dict[str, Any]:
     response = session.post(
         url,
@@ -170,7 +184,14 @@ def _post_json(session: Any, url: str, token: str, payload: dict[str, Any]) -> d
         json=payload,
         timeout=30,
     )
-    response.raise_for_status()
+    if not getattr(response, "ok", False):
+        status_code = getattr(response, "status_code", "unknown")
+        body = _response_body(response)
+        raise MiroRestRequestError(
+            f"Miro REST request failed with HTTP {status_code}: {body}",
+            status_code=status_code,
+            response_body=body,
+        )
     return response.json()
 
 
@@ -195,9 +216,27 @@ def execute_manifest(
 
     for request in planned_requests(manifest, board_id, base_url=base_url):
         payload = resolve_placeholders(request["payload"], results)
-        results[request["key"]] = _post_json(session, request["url"], token, payload)
+        try:
+            results[request["key"]] = _post_json(session, request["url"], token, payload)
+        except MiroRestRequestError as exc:
+            return {
+                "ok": False,
+                "board_id": board_id,
+                "created_board": created_board,
+                "items": results,
+                "failed_request": {
+                    "key": request["key"],
+                    "item_type": request["item_type"],
+                    "method": request["method"],
+                    "url": request["url"],
+                    "payload": payload,
+                    "status_code": exc.status_code,
+                    "response_body": exc.response_body,
+                },
+            }
 
     return {
+        "ok": True,
         "board_id": board_id,
         "created_board": created_board,
         "items": results,
@@ -274,6 +313,10 @@ def main() -> int:
         args.output.write_text(text + "\n", encoding="utf-8")
     else:
         print(text)
+    if isinstance(output, dict) and output.get("ok") is False:
+        failed = output.get("failed_request") or {}
+        print(f"failed_request={failed.get('key')} status={failed.get('status_code')}")
+        return 1
     return 0
 
 
