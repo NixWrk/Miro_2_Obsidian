@@ -63,6 +63,8 @@ class MiroRestProbeBoardTests(unittest.TestCase):
             self.assertIn(f"shape_variant_{shape_type}", operations_by_key)
         for color in REST_STICKY_COLORS:
             self.assertIn(f"sticky_color_{color}", operations_by_key)
+        self.assertIn("sticky_color_gray", operations_by_key)
+        self.assertNotIn("sticky_color_white", operations_by_key)
         for color in REST_TAG_COLORS:
             self.assertIn(f"tag_color_{color}", operations_by_key)
         for connector_shape in REST_CONNECTOR_SHAPES:
@@ -71,7 +73,7 @@ class MiroRestProbeBoardTests(unittest.TestCase):
             self.assertIn(f"connector_cap_{cap}", operations_by_key)
 
         self.assertIn("image_url", operations_by_key)
-        self.assertIn("image_data_url", operations_by_key)
+        self.assertNotIn("image_data_url", operations_by_key)
         self.assertIn("document_url", operations_by_key)
         self.assertIn("embed_youtube", operations_by_key)
 

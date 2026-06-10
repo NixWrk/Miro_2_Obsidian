@@ -13,10 +13,6 @@ from miro_oauth_token import DEFAULT_BROWSER, DEFAULT_REDIRECT_URI
 
 DEFAULT_BOARD_NAME = "Miro2Obsidian REST Capability Probe"
 DEFAULT_BASE_URL = "https://api.miro.com/v2"
-ONE_PIXEL_PNG_DATA_URL = (
-    "data:image/png;base64,"
-    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII="
-)
 PROBE_IMAGE_URL = "https://miro.com/blog/wp-content/uploads/2023/10/Frame-12772209-1536x806.png"
 PROBE_DOCUMENT_URL = "https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf"
 PROBE_EMBED_URL = "https://www.youtube.com/watch?v=aqz-KE-bpKQ"
@@ -60,7 +56,7 @@ REST_STICKY_COLORS = (
     "dark_green",
     "light_green",
     "green",
-    "white",
+    "gray",
     "black",
 )
 
@@ -284,11 +280,8 @@ def build_probe_operations() -> list[ProbeOperation]:
             path="/boards/{board_id}/cards",
             payload={
                 "data": {
-                    "title": "REST card with dates",
-                    "description": "Task metadata candidate for REST export.",
-                    "taskStatus": "in-progress",
-                    "startDate": "2026-06-10",
-                    "dueDate": "2026-06-30",
+                    "title": "REST secondary card",
+                    "description": "Second card variant for REST export.",
                 },
                 "position": _position(3, 1),
             },
@@ -314,7 +307,7 @@ def build_probe_operations() -> list[ProbeOperation]:
             payload={
                 "data": {"url": PROBE_EMBED_URL},
                 "position": _position(5, 1),
-                "geometry": {"width": 480, "height": 270},
+                "geometry": {"width": 480},
             },
         ),
         ProbeOperation(
@@ -329,24 +322,13 @@ def build_probe_operations() -> list[ProbeOperation]:
             },
         ),
         ProbeOperation(
-            key="image_data_url",
-            item_type="image",
-            method="POST",
-            path="/boards/{board_id}/images",
-            payload={
-                "data": {"url": ONE_PIXEL_PNG_DATA_URL, "title": "REST image data URL probe"},
-                "position": _position(1, 2),
-                "geometry": {"width": 180},
-            },
-        ),
-        ProbeOperation(
             key="document_url",
             item_type="document",
             method="POST",
             path="/boards/{board_id}/documents",
             payload={
                 "data": {"url": PROBE_DOCUMENT_URL, "title": "REST document URL probe"},
-                "position": _position(2, 2),
+                "position": _position(1, 2),
             },
         ),
         ProbeOperation(
@@ -426,7 +408,7 @@ def build_probe_operations() -> list[ProbeOperation]:
                     "startItem": {"id": "$shape_anchor_a.id"},
                     "endItem": {"id": "$shape_anchor_b.id"},
                     "shape": connector_shape,
-                    "captions": [{"content": f"{connector_shape} REST connector", "position": 0.5}],
+                    "captions": [{"content": f"{connector_shape} REST connector", "position": "50%"}],
                     "style": {
                         "startStrokeCap": REST_CONNECTOR_CAPS[index],
                         "endStrokeCap": REST_CONNECTOR_CAPS[index + 1],
