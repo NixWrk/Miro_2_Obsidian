@@ -43,6 +43,7 @@ app-visible team and pass that board id to the REST probe generator with
 The exported payload has:
 
 - `schema_version: 1`;
+- `exporter_version`, used to detect stale cached panels during experiments;
 - `source_surface: "web_sdk"`;
 - `items[]` from `miro.board.get()`;
 - `selection[]` from `miro.board.getSelection()`;
@@ -59,12 +60,18 @@ This tool does not call the REST API and does not need a token. REST enrichment 
 ## Local hosting
 
 ```powershell
-python -m http.server 8766 --directory tools\miro_websdk_exporter
+python tools\miro_websdk_exporter\serve_no_cache.py --port 8766
 ```
 
 Use `http://localhost:8766/index.html` as the app URL while developing. Keep the
 URL as `localhost` in Miro settings because Miro explicitly allows local HTTP
-for localhost development.
+for localhost development. The no-cache server is preferred over
+`python -m http.server` because Miro and the browser can keep an older panel
+loaded while Web SDK experiments are changing quickly.
+
+Every fresh export should include `exporter_version`. If the field is missing,
+close the app panel, reload the Miro board, and open the app again before using
+the JSON as evidence.
 
 The local manifest sketch is stored in `manifest.example.yml`. If the Miro UI
 offers manifest editing, keep the same values:

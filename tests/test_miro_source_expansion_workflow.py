@@ -30,6 +30,8 @@ class MiroSourceExpansionWorkflowTests(unittest.TestCase):
         self.assertIn("--board-id", plan)
         self.assertIn("--board-id board-1", plan)
         self.assertIn("http://localhost:8766/index.html", plan)
+        self.assertIn("serve_no_cache.py --port 8766", plan)
+        self.assertIn("exporter_version", plan)
         self.assertIn("same Miro team as the target board", plan)
         self.assertIn("If several `export to Json` apps exist", plan)
         self.assertIn("Profile settings", plan)

@@ -1,4 +1,5 @@
 (function () {
+  const EXPORTER_VERSION = "20260611-deep-table";
   const output = document.getElementById("output");
   const createGeneratedProbeButton = document.getElementById("create-generated-probe");
   const exportBoardButton = document.getElementById("export-board");
@@ -345,6 +346,7 @@
     const plainItems = items.map((item) => toPlain(item));
     const payload = {
       schema_version: 1,
+      exporter_version: EXPORTER_VERSION,
       source_surface: "web_sdk",
       export_scope: "board",
       exported_at: new Date().toISOString(),
@@ -762,6 +764,7 @@
     }));
     const payload = {
       schema_version: 1,
+      exporter_version: EXPORTER_VERSION,
       source_surface: "web_sdk",
       export_scope: "generated_probe",
       exported_at: new Date().toISOString(),
@@ -779,6 +782,7 @@
     const plainItems = selection.map((item) => toPlain(item));
     const payload = {
       schema_version: 1,
+      exporter_version: EXPORTER_VERSION,
       source_surface: "web_sdk",
       export_scope: "selection",
       exported_at: new Date().toISOString(),

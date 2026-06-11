@@ -74,13 +74,14 @@ def build_workflow_plan(output_dir: Path, *, board_id: str | None = None, websdk
             "## 4. Export the same board through the Web SDK app",
             "",
             "```powershell",
-            f"python -m http.server {websdk_port} --directory tools\\miro_websdk_exporter",
+            f"python tools\\miro_websdk_exporter\\serve_no_cache.py --port {websdk_port}",
             "```",
             "",
             (
                 f"Register `http://localhost:{websdk_port}/index.html` as the Miro Web SDK App URL. "
                 "Upload `tools\\miro_websdk_exporter\\icon-outline.svg` as the outline icon so the app appears on the board toolbar."
             ),
+            "The exported JSON must include `exporter_version`; if it does not, reload the Miro board and reopen the app panel because an older Web SDK panel is still cached.",
             (
                 "Install the app into the same Miro team as the target board. If several `export to Json` apps exist, "
                 "verify the App URL in `Profile settings` -> `Your apps`, then rename the Web SDK app or use its icon to identify it."
