@@ -37,6 +37,13 @@ class MiroWebsdkExporterAssetTests(unittest.TestCase):
         self.assertIn("embed_inline", js)
         self.assertIn('source_surface: "web_sdk"', js)
         self.assertIn("function toPlain", js)
+        self.assertIn("TABLE_DIAGNOSTIC_TYPES", js)
+        self.assertIn("function deepInspectTableLikeItem", js)
+        self.assertIn("Object.getOwnPropertyNames", js)
+        self.assertIn("known_field_reads", js)
+        self.assertIn("prototype_chain", js)
+        self.assertIn("diagnostics: buildDiagnostics(items)", js)
+        self.assertIn("diagnostics: buildDiagnostics(selection)", js)
 
     def test_index_registers_miro_toolbar_icon(self) -> None:
         html = (EXPORTER_DIR / "index.html").read_text(encoding="utf-8")

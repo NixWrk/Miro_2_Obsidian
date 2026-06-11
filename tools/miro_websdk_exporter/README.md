@@ -46,7 +46,13 @@ The exported payload has:
 - `source_surface: "web_sdk"`;
 - `items[]` from `miro.board.get()`;
 - `selection[]` from `miro.board.getSelection()`;
+- `diagnostics.table_like_items[]` for deep inspection of unsupported table/table_text items;
 - a compact `summary.by_type` count.
+
+Table diagnostics intentionally use `item_id` and `item_type` instead of `id`
+and `type`, so generic source scanners do not count diagnostics as extra Miro
+items. For table text recovery checks, inspect `textish_values`,
+`known_field_reads`, and `prototype_chain` in each diagnostic entry.
 
 This tool does not call the REST API and does not need a token. REST enrichment should be added later as a separate adapter after raw Web SDK samples are saved.
 

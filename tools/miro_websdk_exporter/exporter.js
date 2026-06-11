@@ -78,6 +78,31 @@
     "erd_zero_or_one",
   ];
 
+  const TABLE_DIAGNOSTIC_TYPES = new Set(["table", "table_text", "data_table_format"]);
+  const TABLE_DIAGNOSTIC_KNOWN_FIELDS = [
+    "content",
+    "text",
+    "title",
+    "plainText",
+    "plain_text",
+    "description",
+    "value",
+    "html",
+    "data",
+    "rows",
+    "columns",
+    "cells",
+    "table",
+    "tableData",
+    "cell",
+    "parent",
+    "parentId",
+    "x",
+    "y",
+    "width",
+    "height",
+  ];
+
   function gridPosition(index, origin, columns, gapX, gapY) {
     return {
       x: origin.x + (index % columns) * gapX,
@@ -113,6 +138,158 @@
       }
     }
     return plain;
+  }
+
+  function valuePreview(value) {
+    if (typeof value === "function") {
+      return undefined;
+    }
+    let converted;
+    try {
+      converted = toPlain(value);
+    } catch (error) {
+      return {
+        error: String(error && error.message ? error.message : error),
+      };
+    }
+    if (converted === undefined) {
+      return undefined;
+    }
+    const asJson = JSON.stringify(converted);
+    if (asJson && asJson.length > 1600) {
+      return {
+        preview: asJson.slice(0, 1600),
+        truncated: true,
+      };
+    }
+    return converted;
+  }
+
+  function readPropertySafely(target, key) {
+    try {
+      return {
+        ok: true,
+        value: valuePreview(target[key]),
+      };
+    } catch (error) {
+      return {
+        ok: false,
+        error: String(error && error.message ? error.message : error),
+      };
+    }
+  }
+
+  function descriptorSummary(target, key, descriptor) {
+    const summary = {
+      key,
+      enumerable: Boolean(descriptor.enumerable),
+      configurable: Boolean(descriptor.configurable),
+      has_getter: typeof descriptor.get === "function",
+      has_setter: typeof descriptor.set === "function",
+      value_type: descriptor.value === undefined ? undefined : typeof descriptor.value,
+    };
+    if ("writable" in descriptor) {
+      summary.writable = Boolean(descriptor.writable);
+    }
+    if (summary.has_getter) {
+      summary.getter_read = readPropertySafely(target, key);
+    } else if (typeof descriptor.value !== "function") {
+      summary.value_preview = valuePreview(descriptor.value);
+    }
+    return summary;
+  }
+
+  function prototypeName(proto) {
+    if (!proto) {
+      return null;
+    }
+    if (proto.constructor && proto.constructor.name) {
+      return proto.constructor.name;
+    }
+    return Object.prototype.toString.call(proto);
+  }
+
+  function findTextishValues(value, path, out, seen) {
+    if (!value || typeof value !== "object") {
+      return;
+    }
+    if (!seen) {
+      seen = new WeakSet();
+    }
+    if (seen.has(value)) {
+      return;
+    }
+    seen.add(value);
+
+    if (Array.isArray(value)) {
+      value.forEach((entry, index) => findTextishValues(entry, `${path}[${index}]`, out, seen));
+      return;
+    }
+
+    for (const key of Object.keys(value)) {
+      const nestedPath = path ? `${path}.${key}` : key;
+      const nested = value[key];
+      if (
+        ["content", "text", "title", "plainText", "plain_text", "description", "value", "html"].includes(key) &&
+        String(nested || "").trim()
+      ) {
+        out.push({ path: nestedPath, value: String(nested) });
+      }
+      findTextishValues(nested, nestedPath, out, seen);
+    }
+  }
+
+  function deepInspectTableLikeItem(item) {
+    const itemType = item && (item.type || item.itemType || item.kind);
+    const diagnostic = {
+      item_id: item && item.id ? String(item.id) : "",
+      item_type: itemType || "unknown",
+      enumerable_keys: Object.keys(item || {}),
+      own_property_names: [],
+      known_field_reads: {},
+      prototype_chain: [],
+      textish_values: [],
+    };
+
+    if (!item || typeof item !== "object") {
+      return diagnostic;
+    }
+
+    diagnostic.own_property_names = Object.getOwnPropertyNames(item);
+    for (const key of TABLE_DIAGNOSTIC_KNOWN_FIELDS) {
+      diagnostic.known_field_reads[key] = readPropertySafely(item, key);
+    }
+
+    let proto = item;
+    let depth = 0;
+    while (proto && depth < 6) {
+      const names = Object.getOwnPropertyNames(proto).sort();
+      diagnostic.prototype_chain.push({
+        depth,
+        name: prototypeName(proto),
+        property_names: names,
+        descriptors: names.map((key) => descriptorSummary(item, key, Object.getOwnPropertyDescriptor(proto, key))),
+      });
+      proto = Object.getPrototypeOf(proto);
+      depth += 1;
+    }
+
+    const plain = toPlain(item);
+    findTextishValues(plain, "", diagnostic.textish_values);
+    return diagnostic;
+  }
+
+  function buildDiagnostics(items) {
+    const tableLike = [];
+    for (const item of items) {
+      const itemType = item && (item.type || item.itemType || item.kind);
+      if (TABLE_DIAGNOSTIC_TYPES.has(itemType)) {
+        tableLike.push(deepInspectTableLikeItem(item));
+      }
+    }
+    return {
+      table_like_items: tableLike,
+    };
   }
 
   function summarize(items) {
@@ -174,6 +351,7 @@
       board: await getBoardInfo(),
       items: plainItems,
       selection: selection.map((item) => toPlain(item)),
+      diagnostics: buildDiagnostics(items),
       summary: summarize(plainItems),
     };
     setPayload(payload);
@@ -607,6 +785,7 @@
       board: await getBoardInfo(),
       items: plainItems,
       selection: plainItems,
+      diagnostics: buildDiagnostics(selection),
       summary: summarize(plainItems),
     };
     setPayload(payload);
