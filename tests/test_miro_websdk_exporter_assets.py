@@ -67,6 +67,7 @@ class MiroWebsdkExporterAssetTests(unittest.TestCase):
         self.assertNotIn(" role=", color)
         self.assertNotIn(" aria-", color)
         self.assertIn("sdkUri: http://localhost:8766/index.html", manifest)
+        self.assertIn("Use this URI for SDK authorization", manifest)
         self.assertIn("boards:read", manifest)
         self.assertIn("boards:write", manifest)
 

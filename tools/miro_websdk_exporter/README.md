@@ -42,6 +42,7 @@ offers manifest editing, keep the same values:
 
 - App URL / `sdkUri`: `http://localhost:8766/index.html`;
 - OAuth Redirect URI: `http://localhost:8000/callback`;
+- in the Redirect URI `Options` menu, select `Use this URI for SDK authorization`;
 - optional loopback Redirect URI: `http://127.0.0.1:8000/callback`;
 - scopes: `boards:read`, `boards:write`, `team:read`.
 

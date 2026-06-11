@@ -80,6 +80,7 @@ def build_workflow_plan(output_dir: Path, *, board_id: str | None = None, websdk
                 f"Register `http://localhost:{websdk_port}/index.html` as the Miro Web SDK App URL. "
                 "Upload `tools\\miro_websdk_exporter\\icon-outline.svg` as the outline icon so the app appears on the board toolbar."
             ),
+            "In the OAuth Redirect URI `Options` menu, select `Use this URI for SDK authorization` for `http://localhost:8000/callback`.",
             "",
             "Open the app from the board toolbar, export the board, and save the JSON as:",
             "",

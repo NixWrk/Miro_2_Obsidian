@@ -3,6 +3,8 @@ sdkUri: http://localhost:8766/index.html
 redirectUris:
   - http://localhost:8000/callback
   - http://127.0.0.1:8000/callback
+# In Miro settings, open Options for http://localhost:8000/callback and select
+# "Use this URI for SDK authorization" when the app uses both Web SDK and REST.
 scopes:
   - boards:read
   - boards:write

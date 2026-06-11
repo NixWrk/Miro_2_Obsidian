@@ -24,6 +24,7 @@ class MiroSourceExpansionWorkflowTests(unittest.TestCase):
         self.assertIn("MIRO_ACCESS_TOKEN", plan)
         self.assertIn("Yandex Browser", plan)
         self.assertIn("http://127.0.0.1:8000/callback", plan)
+        self.assertIn("Use this URI for SDK authorization", plan)
         self.assertIn("partial API failures", plan)
         self.assertIn("--board-id board-1", plan)
         self.assertIn("http://localhost:8766/index.html", plan)
