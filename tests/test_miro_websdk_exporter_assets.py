@@ -53,7 +53,17 @@ class MiroWebsdkExporterAssetTests(unittest.TestCase):
         self.assertIn("https://miro.com/app/static/sdk/v2/miro.js", html)
         self.assertIn('miro.board.ui.on("icon:click"', html)
         self.assertIn("miro.board.ui.openPanel", html)
-        self.assertIn("panel.html?v=20260611-deep-table", html)
+        self.assertIn("panel-20260611-deep-table.html", html)
+        self.assertIn("Exporter version: 20260611-deep-table", html)
+
+    def test_versioned_entrypoint_registers_miro_toolbar_icon(self) -> None:
+        html = (EXPORTER_DIR / "index-20260611-deep-table.html").read_text(encoding="utf-8")
+
+        self.assertIn("https://miro.com/app/static/sdk/v2/miro.js", html)
+        self.assertIn('miro.board.ui.on("icon:click"', html)
+        self.assertIn("miro.board.ui.openPanel", html)
+        self.assertIn("panel-20260611-deep-table.html", html)
+        self.assertIn("Exporter version: 20260611-deep-table", html)
 
     def test_panel_loads_miro_sdk_and_local_exporter(self) -> None:
         html = (EXPORTER_DIR / "panel.html").read_text(encoding="utf-8")
@@ -64,6 +74,17 @@ class MiroWebsdkExporterAssetTests(unittest.TestCase):
         self.assertIn("export-board", html)
         self.assertIn("export-selection", html)
         self.assertIn("./exporter.js?v=20260611-deep-table", html)
+        self.assertIn("Exporter version: 20260611-deep-table", html)
+
+    def test_versioned_panel_loads_miro_sdk_and_local_exporter(self) -> None:
+        html = (EXPORTER_DIR / "panel-20260611-deep-table.html").read_text(encoding="utf-8")
+
+        self.assertIn("https://miro.com/app/static/sdk/v2/miro.js", html)
+        self.assertIn("create-generated-probe", html)
+        self.assertIn("export-board", html)
+        self.assertIn("export-selection", html)
+        self.assertIn("./exporter.js?v=20260611-deep-table", html)
+        self.assertIn("Exporter version: 20260611-deep-table", html)
 
     def test_toolbar_icons_and_manifest_are_present(self) -> None:
         outline = (EXPORTER_DIR / "icon-outline.svg").read_text(encoding="utf-8")
@@ -76,7 +97,7 @@ class MiroWebsdkExporterAssetTests(unittest.TestCase):
         self.assertNotIn(" aria-", outline)
         self.assertNotIn(" role=", color)
         self.assertNotIn(" aria-", color)
-        self.assertIn("sdkUri: http://localhost:8766/index.html", manifest)
+        self.assertIn("sdkUri: http://localhost:8766/index-20260611-deep-table.html", manifest)
         self.assertIn("Use this URI for SDK authorization", manifest)
         self.assertIn("boards:read", manifest)
         self.assertIn("boards:write", manifest)
@@ -87,7 +108,7 @@ class MiroWebsdkExporterAssetTests(unittest.TestCase):
         self.assertIn("same team as the target board", readme)
         self.assertIn("If several", readme)
         self.assertIn("Profile settings", readme)
-        self.assertIn("http://localhost:8766/index.html", readme)
+        self.assertIn("http://localhost:8766/index-20260611-deep-table.html", readme)
         self.assertIn("serve_no_cache.py --port 8766", readme)
         self.assertIn("exporter_version", readme)
         self.assertIn("+ More apps", readme)

@@ -21,6 +21,7 @@ from miro_capability_probe import (  # noqa: E402
 
 
 DEFAULT_WORK_DIR = Path("work") / "MIRO2OBSIDIAN" / "source_expansion"
+WEBSDK_APP_ENTRYPOINT = "index-20260611-deep-table.html"
 
 
 def _path_for_markdown(path: Path) -> str:
@@ -78,7 +79,7 @@ def build_workflow_plan(output_dir: Path, *, board_id: str | None = None, websdk
             "```",
             "",
             (
-                f"Register `http://localhost:{websdk_port}/index.html` as the Miro Web SDK App URL. "
+                f"Register `http://localhost:{websdk_port}/{WEBSDK_APP_ENTRYPOINT}` as the Miro Web SDK App URL. "
                 "Upload `tools\\miro_websdk_exporter\\icon-outline.svg` as the outline icon so the app appears on the board toolbar."
             ),
             "The exported JSON must include `exporter_version`; if it does not, reload the Miro board and reopen the app panel because an older Web SDK panel is still cached.",

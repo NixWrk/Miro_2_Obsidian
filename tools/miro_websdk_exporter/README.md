@@ -5,7 +5,7 @@ Minimal static Miro app used to export the board through the Web SDK surface.
 The exporter is intentionally buildless:
 
 - host this folder with any static HTTP server;
-- create a Miro Web SDK app that points to `index.html`;
+- create a Miro Web SDK app that points to the current versioned entrypoint;
 - upload `icon-outline.svg` as the outline icon and `icon-color.svg` as the color icon;
 - install the app into the same team as the target board;
 - open the app from the board toolbar icon;
@@ -63,20 +63,21 @@ This tool does not call the REST API and does not need a token. REST enrichment 
 python tools\miro_websdk_exporter\serve_no_cache.py --port 8766
 ```
 
-Use `http://localhost:8766/index.html` as the app URL while developing. Keep the
-URL as `localhost` in Miro settings because Miro explicitly allows local HTTP
-for localhost development. The no-cache server is preferred over
+Use `http://localhost:8766/index-20260611-deep-table.html` as the app URL while
+developing. Keep the URL as `localhost` in Miro settings because Miro explicitly
+allows local HTTP for localhost development. The no-cache server is preferred over
 `python -m http.server` because Miro and the browser can keep an older panel
 loaded while Web SDK experiments are changing quickly.
 
 Every fresh export should include `exporter_version`. If the field is missing,
-close the app panel, reload the Miro board, and open the app again before using
-the JSON as evidence.
+close the app panel, reload the Miro board, verify that the visible panel says
+`Exporter version: 20260611-deep-table`, and open the app again before using the
+JSON as evidence.
 
 The local manifest sketch is stored in `manifest.example.yml`. If the Miro UI
 offers manifest editing, keep the same values:
 
-- App URL / `sdkUri`: `http://localhost:8766/index.html`;
+- App URL / `sdkUri`: `http://localhost:8766/index-20260611-deep-table.html`;
 - OAuth Redirect URI: `http://localhost:8000/callback`;
 - in the Redirect URI `Options` menu, select `Use this URI for SDK authorization`;
 - optional loopback Redirect URI: `http://127.0.0.1:8000/callback`;
