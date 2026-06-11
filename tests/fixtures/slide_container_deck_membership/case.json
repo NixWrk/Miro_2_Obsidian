@@ -55,6 +55,15 @@
         "label": "Deck B",
         "group_nodes": ["frame-b1"]
       }
+    ],
+    "non_overlapping_pairs": [
+      ["frame-a1", "frame-a2"]
+    ],
+    "children_inside_groups": [
+      {
+        "group_id": "frame-a1",
+        "child_ids": ["slide-text-a1", "slide-edge-a1"]
+      }
     ]
   }
 }

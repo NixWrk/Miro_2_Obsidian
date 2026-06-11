@@ -222,6 +222,32 @@ def _assert_no_overlapping_nodes(testcase: unittest.TestCase, canvas: dict[str, 
     )
 
 
+def _assert_children_inside_group(testcase: unittest.TestCase, canvas: dict[str, Any], rule: dict[str, Any]) -> None:
+    group = _node_by_id(canvas, str(rule["group_id"]))
+    child_ids = [str(child_id) for child_id in rule.get("child_ids", group.get("nodes") or [])]
+    tolerance = float(rule.get("tolerance", 0.0))
+
+    gx0, gy0, gx1, gy1 = _rect_for_node(group)
+    outside: list[str] = []
+    for child_id in child_ids:
+        child = _node_by_id(canvas, child_id)
+        cx = float(child["x"]) + float(child["width"]) / 2.0
+        cy = float(child["y"]) + float(child["height"]) / 2.0
+        if not (
+            gx0 - tolerance <= cx <= gx1 + tolerance
+            and gy0 - tolerance <= cy <= gy1 + tolerance
+        ):
+            outside.append(
+                f"{child_id} center=({cx:.4f},{cy:.4f}) outside "
+                f"{group.get('id')} rect=({gx0:.4f},{gy0:.4f},{gx1:.4f},{gy1:.4f})"
+            )
+
+    testcase.assertFalse(
+        outside,
+        "Expected child centers to stay inside group:\n" + "\n".join(outside),
+    )
+
+
 class FixtureRegressionTests(unittest.TestCase):
     maxDiff = None
 
@@ -265,6 +291,9 @@ class FixtureRegressionTests(unittest.TestCase):
 
                 for rule in assertions.get("no_overlapping_nodes", []):
                     _assert_no_overlapping_nodes(self, canvas, rule)
+
+                for rule in assertions.get("children_inside_groups", []):
+                    _assert_children_inside_group(self, canvas, rule)
 
     def test_fixture_conversion_is_deterministic(self) -> None:
         for fixture_dir in _fixture_dirs():

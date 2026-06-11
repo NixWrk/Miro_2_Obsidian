@@ -15,3 +15,7 @@ that frame; only the deck itself is structural.
 For slide frames, `parent.id` is authoritative for group membership. Geometry
 filters may still be useful for ordinary frames, but they must not eject a
 parent-linked slide child from the slide group.
+
+Miro may expose every frame in a deck at the same local `0,0` position. In that
+case the converter must synthesize a deterministic deck layout, then fit each
+slide's child nodes into the computed slide frame rectangle.

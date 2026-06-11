@@ -1999,6 +1999,210 @@ def _rect_contains(a: Dict[str, float], b: Dict[str, float], eps: float = 0.5) -
     )
 
 
+def _item_local_center_and_size(
+    item: Dict[str, Any],
+    node: Optional[Dict[str, Any]] = None,
+    scale: float = 1.0,
+) -> Optional[tuple]:
+    pos = item.get("position") if isinstance(item.get("position"), dict) else {}
+    geom = item.get("geometry") if isinstance(item.get("geometry"), dict) else {}
+    try:
+        x = float(pos.get("x") or 0.0)
+        y = float(pos.get("y") or 0.0)
+    except Exception:
+        return None
+
+    try:
+        width = float(geom.get("width") or 0.0)
+    except Exception:
+        width = 0.0
+    try:
+        height = float(geom.get("height") or 0.0)
+    except Exception:
+        height = 0.0
+
+    if node and scale:
+        if width <= 0:
+            width = float(node.get("width") or 0.0) / scale
+        if height <= 0:
+            height = float(node.get("height") or 0.0) / scale
+
+    origin = str(pos.get("origin") or "center").lower()
+    if origin == "top_left":
+        x += width / 2.0
+        y += height / 2.0
+    return x, y, max(width, 1.0), max(height, 1.0)
+
+
+def _layout_slide_frames_unscaled(
+    by_id: Dict[str, Dict[str, Any]],
+    deck_order: List[str],
+    slide_frames_by_deck: Dict[str, List[str]],
+    container_rects_unscaled: Dict[str, Dict[str, float]],
+) -> None:
+    """Lay out slide frames when Miro exposes deck membership but no per-slide coordinates."""
+    for did in deck_order:
+        frame_ids = [
+            fid for fid in slide_frames_by_deck.get(did, [])
+            if fid in container_rects_unscaled and fid in by_id
+        ]
+        if not frame_ids:
+            continue
+
+        source_positions: set = set()
+        for fid in frame_ids:
+            pos = by_id[fid].get("position") if isinstance(by_id[fid].get("position"), dict) else {}
+            try:
+                source_positions.add((
+                    round(float(pos.get("x") or 0.0), 4),
+                    round(float(pos.get("y") or 0.0), 4),
+                    str(pos.get("relativeTo") or ""),
+                ))
+            except Exception:
+                source_positions.add((0.0, 0.0, ""))
+
+        if len(frame_ids) <= 1 or len(source_positions) > 1:
+            continue
+
+        deck = by_id.get(did) or {}
+        deck_pos = deck.get("position") if isinstance(deck.get("position"), dict) else {}
+        try:
+            anchor_x = float(deck_pos.get("x") or 0.0)
+            anchor_y = float(deck_pos.get("y") or 0.0)
+        except Exception:
+            anchor_x = 0.0
+            anchor_y = 0.0
+
+        count = len(frame_ids)
+        cols = max(1, int(count ** 0.5))
+        if cols * cols < count:
+            cols += 1
+        rows = (count + cols - 1) // cols
+
+        rects = [container_rects_unscaled[fid] for fid in frame_ids]
+        max_w = max(float(r["width"]) for r in rects)
+        max_h = max(float(r["height"]) for r in rects)
+        gap_x = max(80.0, max_w * 0.25)
+        gap_y = max(80.0, max_h * 0.35)
+
+        col_widths = [0.0 for _ in range(cols)]
+        row_heights = [0.0 for _ in range(rows)]
+        for idx, rect in enumerate(rects):
+            col = idx % cols
+            row = idx // cols
+            col_widths[col] = max(col_widths[col], float(rect["width"]))
+            row_heights[row] = max(row_heights[row], float(rect["height"]))
+
+        total_w = sum(col_widths) + gap_x * max(0, cols - 1)
+        total_h = sum(row_heights) + gap_y * max(0, rows - 1)
+        start_x = anchor_x - total_w / 2.0
+        start_y = anchor_y - total_h / 2.0
+
+        col_offsets: List[float] = []
+        cur = start_x
+        for width in col_widths:
+            col_offsets.append(cur)
+            cur += width + gap_x
+
+        row_offsets: List[float] = []
+        cur = start_y
+        for height in row_heights:
+            row_offsets.append(cur)
+            cur += height + gap_y
+
+        for idx, fid in enumerate(frame_ids):
+            rect = container_rects_unscaled[fid]
+            col = idx % cols
+            row = idx // cols
+            width = float(rect["width"])
+            height = float(rect["height"])
+            container_rects_unscaled[fid] = {
+                "x": col_offsets[col] + (col_widths[col] - width) / 2.0,
+                "y": row_offsets[row] + (row_heights[row] - height) / 2.0,
+                "width": width,
+                "height": height,
+            }
+
+
+def _fit_slide_child_nodes_to_frame_rects(
+    node_map: Dict[str, Dict[str, Any]],
+    by_id: Dict[str, Dict[str, Any]],
+    children: Dict[str, List[str]],
+    slide_frame_ids: List[str],
+    container_rects_unscaled: Dict[str, Dict[str, float]],
+    scale: float,
+    min_font_px: int,
+) -> set:
+    """Place slide children inside their computed slide frame rects."""
+    slide_child_ids: set = set()
+
+    for frame_id in slide_frame_ids:
+        frame_rect = container_rects_unscaled.get(frame_id)
+        if not frame_rect:
+            continue
+
+        child_ids = [
+            cid for cid in (children.get(frame_id) or [])
+            if cid in node_map and cid in by_id
+        ]
+        if not child_ids:
+            continue
+        slide_child_ids.update(child_ids)
+
+        boxes: List[tuple] = []
+        centers: Dict[str, tuple] = {}
+        for cid in child_ids:
+            result = _item_local_center_and_size(by_id[cid], node_map[cid], scale=scale)
+            if result is None:
+                continue
+            cx, cy, width, height = result
+            centers[cid] = (cx, cy)
+            boxes.append((cx - width / 2.0, cy - height / 2.0, cx + width / 2.0, cy + height / 2.0))
+
+        if not boxes:
+            continue
+
+        min_x = min(box[0] for box in boxes)
+        min_y = min(box[1] for box in boxes)
+        max_x = max(box[2] for box in boxes)
+        max_y = max(box[3] for box in boxes)
+        bbox_w = max(max_x - min_x, 1.0)
+        bbox_h = max(max_y - min_y, 1.0)
+        frame_w = max(float(frame_rect["width"]), 1.0)
+        frame_h = max(float(frame_rect["height"]), 1.0)
+
+        eps = 1.0
+        needs_fit = min_x < -eps or min_y < -eps or max_x > frame_w + eps or max_y > frame_h + eps
+        if needs_fit:
+            fit = min(1.0, frame_w / bbox_w, frame_h / bbox_h)
+            origin_x = min_x
+            origin_y = min_y
+            offset_x = (frame_w - bbox_w * fit) / 2.0
+            offset_y = (frame_h - bbox_h * fit) / 2.0
+        else:
+            fit = 1.0
+            origin_x = 0.0
+            origin_y = 0.0
+            offset_x = 0.0
+            offset_y = 0.0
+
+        for cid, (local_x, local_y) in centers.items():
+            node = node_map[cid]
+            if fit < 1.0:
+                node["width"] = max(1.0, float(node["width"]) * fit)
+                node["height"] = max(1.0, float(node["height"]) * fit)
+                attrs = node.get("styleAttributes")
+                if isinstance(attrs, dict) and isinstance(attrs.get("fontSize"), (int, float)):
+                    attrs["fontSize"] = max(min_font_px, int(round(float(attrs["fontSize"]) * fit)))
+
+            center_x = float(frame_rect["x"]) + offset_x + (local_x - origin_x) * fit
+            center_y = float(frame_rect["y"]) + offset_y + (local_y - origin_y) * fit
+            node["x"] = center_x * scale - float(node["width"]) / 2.0
+            node["y"] = center_y * scale - float(node["height"]) / 2.0
+
+    return slide_child_ids
+
+
 
 def _is_white_like(hex_or_name: Optional[str]) -> bool:
     if not hex_or_name:
@@ -3164,6 +3368,8 @@ def convert_miro_to_canvas(
                 lst.append(fid)
                 seen.add(fid)
 
+    _layout_slide_frames_unscaled(by_id, deck_order, slide_frames_by_deck, container_rects_unscaled)
+
     # --- второй проход: сначала обычные узлы/рёбра (кроме контейнеров)
     node_map: Dict[str, Dict[str, Any]] = {}
     for item in all_items:
@@ -3252,24 +3458,38 @@ def convert_miro_to_canvas(
 
     _add_mindmap_hierarchy_edges(all_items, by_id, node_map, edges)
 
-    _resolve_text_visual_horizontal_overlaps(nodes, min_font_px=min_font_px)
-    _resolve_short_label_visual_vertical_overlaps(nodes)
-    _expand_short_inline_label_widths(nodes)
-    _compact_short_inline_label_heights(nodes)
-    _resolve_ultra_narrow_label_visual_overlaps(nodes)
-    _resolve_link_visual_overlaps(nodes)
-    _resolve_short_label_visual_vertical_overlaps(nodes)
-    _resolve_text_visual_vertical_stack_overlaps(nodes)
-    _resolve_text_text_vertical_overlaps(nodes)
-    _resolve_text_text_horizontal_edge_overlaps(nodes)
-    _resolve_short_label_visual_vertical_overlaps(nodes)
+    slide_child_node_ids = _fit_slide_child_nodes_to_frame_rects(
+        node_map,
+        by_id,
+        children,
+        slide_frame_ids,
+        container_rects_unscaled,
+        scale,
+        min_font_px,
+    )
+    layout_nodes = [
+        node for node in nodes
+        if str(node.get("id", "") or "") not in slide_child_node_ids
+    ]
+
+    _resolve_text_visual_horizontal_overlaps(layout_nodes, min_font_px=min_font_px)
+    _resolve_short_label_visual_vertical_overlaps(layout_nodes)
+    _expand_short_inline_label_widths(layout_nodes)
+    _compact_short_inline_label_heights(layout_nodes)
+    _resolve_ultra_narrow_label_visual_overlaps(layout_nodes)
+    _resolve_link_visual_overlaps(layout_nodes)
+    _resolve_short_label_visual_vertical_overlaps(layout_nodes)
+    _resolve_text_visual_vertical_stack_overlaps(layout_nodes)
+    _resolve_text_text_vertical_overlaps(layout_nodes)
+    _resolve_text_text_horizontal_edge_overlaps(layout_nodes)
+    _resolve_short_label_visual_vertical_overlaps(layout_nodes)
     for _ in range(4):
-        _compact_short_inline_label_heights(nodes)
-        _resolve_ultra_narrow_label_visual_overlaps(nodes)
-        _resolve_short_label_visual_vertical_overlaps(nodes)
-        _resolve_text_visual_vertical_stack_overlaps(nodes)
-        _resolve_text_text_vertical_overlaps(nodes)
-        _resolve_text_text_horizontal_edge_overlaps(nodes)
+        _compact_short_inline_label_heights(layout_nodes)
+        _resolve_ultra_narrow_label_visual_overlaps(layout_nodes)
+        _resolve_short_label_visual_vertical_overlaps(layout_nodes)
+        _resolve_text_visual_vertical_stack_overlaps(layout_nodes)
+        _resolve_text_text_vertical_overlaps(layout_nodes)
+        _resolve_text_text_horizontal_edge_overlaps(layout_nodes)
 
 
     # --- третий проход: строим контейнеры (Miro group / frame / diagram) как Canvas group
