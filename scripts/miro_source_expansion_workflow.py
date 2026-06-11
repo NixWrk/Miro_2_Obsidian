@@ -27,7 +27,7 @@ def _path_for_markdown(path: Path) -> str:
     return str(path).replace("\\", "\\\\")
 
 
-def build_workflow_plan(output_dir: Path, *, board_id: str | None = None, websdk_port: int = 8765) -> str:
+def build_workflow_plan(output_dir: Path, *, board_id: str | None = None, websdk_port: int = 8766) -> str:
     rest_manifest = output_dir / "rest_probe_manifest.json"
     rest_result = output_dir / "rest_probe_result.json"
     rest_export = output_dir / "rest_export.json"
@@ -76,7 +76,12 @@ def build_workflow_plan(output_dir: Path, *, board_id: str | None = None, websdk
             f"python -m http.server {websdk_port} --directory tools\\miro_websdk_exporter",
             "```",
             "",
-            f"Register/open `http://localhost:{websdk_port}/index.html` as a Miro app URL, export the board, and save the JSON as:",
+            (
+                f"Register `http://localhost:{websdk_port}/index.html` as the Miro Web SDK App URL. "
+                "Upload `tools\\miro_websdk_exporter\\icon-outline.svg` as the outline icon so the app appears on the board toolbar."
+            ),
+            "",
+            "Open the app from the board toolbar, export the board, and save the JSON as:",
             "",
             "For maximum generated coverage, click `Create probe items` in the app before exporting the board.",
             "",
@@ -192,7 +197,7 @@ def parse_args() -> argparse.Namespace:
     plan_parser = subparsers.add_parser("plan", help="Create a local workflow checklist.")
     plan_parser.add_argument("--output-dir", type=Path, default=DEFAULT_WORK_DIR)
     plan_parser.add_argument("--board-id")
-    plan_parser.add_argument("--websdk-port", type=int, default=8765)
+    plan_parser.add_argument("--websdk-port", type=int, default=8766)
 
     analyze_parser = subparsers.add_parser("analyze", help="Analyze REST/Web SDK exports and write merged source artifacts.")
     analyze_parser.add_argument("--rest-json", type=Path, required=True)

@@ -1,7 +1,8 @@
 ﻿# auth.py
 import threading
 import time
-import webbrowser
+import os
+import subprocess
 from flask import Flask, request, jsonify
 import requests
 from urllib.parse import quote_plus
@@ -9,7 +10,7 @@ from urllib.parse import quote_plus
 # ====== Ваши ключи Miro OAuth ======
 CLIENT_ID = "<redacted-long-id>"
 CLIENT_SECRET = "<redacted-miro-client-secret>"
-REDIRECT_URI = "http://localhost:8000/callback"
+REDIRECT_URI = "http://127.0.0.1:8000/callback"
 SCOPES = "boards:read team:read"
 
 AUTH_URL = (
@@ -22,6 +23,23 @@ AUTH_URL = (
 app = Flask(__name__)
 auth_code = None
 _flask_started = False
+
+
+def _yandex_browser_candidates():
+    return [
+        os.environ.get("YANDEX_BROWSER_PATH", ""),
+        os.path.join(os.environ.get("LOCALAPPDATA", ""), "Yandex", "YandexBrowser", "Application", "browser.exe"),
+        os.path.join(os.environ.get("ProgramFiles", ""), "Yandex", "YandexBrowser", "Application", "browser.exe"),
+        os.path.join(os.environ.get("ProgramFiles(x86)", ""), "Yandex", "YandexBrowser", "Application", "browser.exe"),
+    ]
+
+
+def open_in_yandex(url: str) -> bool:
+    for candidate in _yandex_browser_candidates():
+        if candidate and os.path.isfile(candidate):
+            subprocess.Popen([candidate, url], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            return True
+    return False
 
 @app.route("/popup")
 def popup():
@@ -86,7 +104,8 @@ def authorize_and_get_token() -> str:
         time.sleep(0.5)  # даём серверу подняться перед открытием браузера
 
     print("🔐 Запускаю авторизацию в Miro…")
-    webbrowser.open("http://localhost:8000/popup")
+    if not open_in_yandex("http://127.0.0.1:8000/popup"):
+        raise RuntimeError("Yandex Browser не найден. Укажите путь через YANDEX_BROWSER_PATH.")
 
     for _ in range(300):  # ждём до 5 минут
         if auth_code:

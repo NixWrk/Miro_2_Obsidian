@@ -38,14 +38,33 @@ class MiroWebsdkExporterAssetTests(unittest.TestCase):
         self.assertIn('source_surface: "web_sdk"', js)
         self.assertIn("function toPlain", js)
 
-    def test_index_loads_miro_sdk_and_local_exporter(self) -> None:
+    def test_index_registers_miro_toolbar_icon(self) -> None:
         html = (EXPORTER_DIR / "index.html").read_text(encoding="utf-8")
+
+        self.assertIn("https://miro.com/app/static/sdk/v2/miro.js", html)
+        self.assertIn('miro.board.ui.on("icon:click"', html)
+        self.assertIn("miro.board.ui.openPanel", html)
+        self.assertIn("panel.html", html)
+
+    def test_panel_loads_miro_sdk_and_local_exporter(self) -> None:
+        html = (EXPORTER_DIR / "panel.html").read_text(encoding="utf-8")
 
         self.assertIn("https://miro.com/app/static/sdk/v2/miro.js", html)
         self.assertIn("./exporter.js", html)
         self.assertIn("create-generated-probe", html)
         self.assertIn("export-board", html)
         self.assertIn("export-selection", html)
+
+    def test_toolbar_icons_and_manifest_are_present(self) -> None:
+        outline = (EXPORTER_DIR / "icon-outline.svg").read_text(encoding="utf-8")
+        color = (EXPORTER_DIR / "icon-color.svg").read_text(encoding="utf-8")
+        manifest = (EXPORTER_DIR / "manifest.example.yml").read_text(encoding="utf-8")
+
+        self.assertIn("<svg", outline)
+        self.assertIn("<svg", color)
+        self.assertIn("sdkUri: http://localhost:8766/index.html", manifest)
+        self.assertIn("boards:read", manifest)
+        self.assertIn("boards:write", manifest)
 
 
 if __name__ == "__main__":

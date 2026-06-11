@@ -5,10 +5,17 @@ Minimal static Miro app used to export the board through the Web SDK surface.
 The exporter is intentionally buildless:
 
 - host this folder with any static HTTP server;
-- create a Miro app that points to `index.html`;
-- open the app on a board;
+- create a Miro Web SDK app that points to `index.html`;
+- upload `icon-outline.svg` as the outline icon and `icon-color.svg` as the color icon;
+- install the app into the same team as the target board;
+- open the app from the board toolbar icon;
 - press `Export board` or `Export selection`;
 - download the JSON and compare it with the REST export using `scripts/miro_capability_probe.py`.
+
+`index.html` is only the Miro toolbar bootstrap. It registers the `icon:click`
+handler and opens `panel.html`, where the exporter controls live. If the app is
+installed but not visible in the board tools menu, verify the App URL, team, and
+uploaded outline icon first.
 
 The exported payload has:
 
@@ -23,10 +30,20 @@ This tool does not call the REST API and does not need a token. REST enrichment 
 ## Local hosting
 
 ```powershell
-python -m http.server 8765 --directory tools\miro_websdk_exporter
+python -m http.server 8766 --directory tools\miro_websdk_exporter
 ```
 
-Use `http://localhost:8765/index.html` as the app URL while developing.
+Use `http://localhost:8766/index.html` as the app URL while developing. Keep the
+URL as `localhost` in Miro settings because Miro explicitly allows local HTTP
+for localhost development.
+
+The local manifest sketch is stored in `manifest.example.yml`. If the Miro UI
+offers manifest editing, keep the same values:
+
+- App URL / `sdkUri`: `http://localhost:8766/index.html`;
+- OAuth Redirect URI: `http://localhost:8000/callback`;
+- optional loopback Redirect URI: `http://127.0.0.1:8000/callback`;
+- scopes: `boards:read`, `boards:write`, `team:read`.
 
 ## Follow-up flow
 

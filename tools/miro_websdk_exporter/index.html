@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Miro Web SDK Exporter</title>
+    <title>Miro2Obsidian Web SDK Bootstrap</title>
     <style>
       :root {
         color-scheme: light dark;
@@ -20,12 +20,6 @@
         gap: 12px;
       }
 
-      .controls {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 8px;
-      }
-
       button {
         min-height: 36px;
         padding: 0 12px;
@@ -34,17 +28,12 @@
         background: Canvas;
         color: CanvasText;
         cursor: pointer;
-      }
-
-      button:disabled {
-        cursor: default;
-        opacity: 0.55;
+        justify-self: start;
       }
 
       pre {
         overflow: auto;
-        min-height: 240px;
-        max-height: 64vh;
+        min-height: 96px;
         padding: 12px;
         border: 1px solid #8f99a8;
         border-radius: 6px;
@@ -54,17 +43,48 @@
   </head>
   <body>
     <main>
-      <h1>Miro Web SDK Exporter</h1>
-      <div class="controls">
-        <button id="create-generated-probe" type="button">Create probe items</button>
-        <button id="export-board" type="button">Export board</button>
-        <button id="export-selection" type="button">Export selection</button>
-        <button id="download-json" type="button" disabled>Download JSON</button>
-        <button id="copy-json" type="button" disabled>Copy JSON</button>
-      </div>
-      <pre id="output" aria-live="polite">Waiting for export...</pre>
+      <h1>Miro2Obsidian exporter</h1>
+      <p>This page registers the Miro toolbar icon and opens the exporter panel.</p>
+      <button id="open-panel" type="button">Open exporter panel</button>
+      <pre id="status" aria-live="polite">Waiting for Miro Web SDK...</pre>
     </main>
     <script src="https://miro.com/app/static/sdk/v2/miro.js"></script>
-    <script src="./exporter.js"></script>
+    <script>
+      (function () {
+        const panelUrl = "panel.html";
+        const status = document.getElementById("status");
+        const openPanelButton = document.getElementById("open-panel");
+
+        function setStatus(message) {
+          status.textContent = message;
+        }
+
+        async function openExporterPanel() {
+          if (!window.miro || !miro.board || !miro.board.ui) {
+            setStatus("Miro Web SDK UI API is not available. Open this page as an installed Miro app.");
+            return;
+          }
+
+          await miro.board.ui.openPanel({ url: panelUrl });
+          setStatus("Exporter panel opened.");
+        }
+
+        async function init() {
+          openPanelButton.addEventListener("click", openExporterPanel);
+
+          if (!window.miro || !miro.board || !miro.board.ui || typeof miro.board.ui.on !== "function") {
+            setStatus("Miro Web SDK UI API is not available. Check the App URL and open this inside a Miro board.");
+            return;
+          }
+
+          await miro.board.ui.on("icon:click", openExporterPanel);
+          setStatus("Ready. Click the app icon on the Miro toolbar to open the exporter panel.");
+        }
+
+        init().catch((error) => {
+          setStatus(String(error && error.stack ? error.stack : error));
+        });
+      })();
+    </script>
   </body>
 </html>

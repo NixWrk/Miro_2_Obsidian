@@ -1,0 +1,12 @@
+appName: Miro2Obsidian Web SDK Exporter
+sdkUri: http://localhost:8766/index.html
+redirectUris:
+  - http://localhost:8000/callback
+  - http://127.0.0.1:8000/callback
+scopes:
+  - boards:read
+  - boards:write
+  - team:read
+icons:
+  outline: ./icon-outline.svg
+  color: ./icon-color.svg
