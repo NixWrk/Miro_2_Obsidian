@@ -33,6 +33,8 @@ class MiroSourceExpansionWorkflowTests(unittest.TestCase):
         self.assertIn("Profile settings", plan)
         self.assertIn("+ More apps", plan)
         self.assertIn("+ More tools", plan)
+        self.assertIn("app-visible team", plan)
+        self.assertIn("same board", plan)
         self.assertIn("left-hand app toolbar", plan)
         self.assertIn("Create probe items", plan)
         self.assertIn("miro_source_expansion_workflow.py analyze", plan)

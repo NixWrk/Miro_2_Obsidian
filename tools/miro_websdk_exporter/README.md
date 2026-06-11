@@ -30,6 +30,11 @@ apps there under their app name. The monochrome outline icon is the one that
 appears on the board app toolbar; clicking it triggers the app's `icon:click`
 handler and opens `panel.html`.
 
+If the target team does not show apps in the board `+ More tools` panel, do not
+continue the Web SDK comparison in that team. Create or duplicate the probe
+board in an app-visible team where the board app launcher shows installed apps,
+then run both REST and Web SDK exports against that same board.
+
 The exported payload has:
 
 - `schema_version: 1`;
