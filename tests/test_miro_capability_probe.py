@@ -84,6 +84,24 @@ class MiroCapabilityProbeTests(unittest.TestCase):
         self.assertEqual(rows["data_table_format"].coverage, "rest_only")
         self.assertEqual(rows["data_table_format"].action, "intentional_or_source_limited")
 
+    def test_marks_geometry_only_table_text_as_source_limited(self) -> None:
+        rest_root = [
+            {
+                "id": "cell-1",
+                "type": "table_text",
+                "isSupported": False,
+                "position": {"x": 0, "y": 0},
+                "geometry": {"width": 120, "height": 30},
+            }
+        ]
+
+        rows = {row.item_type: row for row in build_coverage_rows(rest_root, [])}
+
+        self.assertEqual(rows["table_text"].coverage, "rest_only")
+        self.assertEqual(rows["table_text"].rest.with_geometry, 1)
+        self.assertEqual(rows["table_text"].rest.with_content, 0)
+        self.assertEqual(rows["table_text"].action, "intentional_or_source_limited")
+
     def test_board_metadata_is_not_a_converter_candidate(self) -> None:
         rest_root = [{"id": "board-1", "type": "board", "name": "Probe board"}]
 

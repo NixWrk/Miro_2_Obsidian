@@ -68,6 +68,7 @@ CAPABILITIES: tuple[Capability, ...] = (
     Capability("board_member", META, META, NO, NO, "drop", "metadata"),
     Capability("member", META, META, NO, NO, "drop", "metadata"),
     Capability("data_table_format", OBSERVED, LIMITED, NO, NO, "drop", "source_limited"),
+    Capability("table_text", OBSERVED, LIMITED, NO, NO, "drop empty cells", "source_limited", "Observed legacy table cell exports can have geometry without cell text."),
     Capability("slide_container", OBSERVED, UNKNOWN, UNKNOWN, UNKNOWN, "drop descendants", "source_limited"),
     Capability("emoji", NO, LIMITED, NO, NO, "drop/placeholder", "source_limited"),
     Capability("kanban", NO, LIMITED, NO, NO, "drop/placeholder", "source_limited"),
@@ -264,6 +265,8 @@ def classify_row(capability: Capability, rest: TypeStats, websdk: TypeStats) -> 
     if observed_websdk and not observed_rest:
         return coverage, "websdk_export_candidate"
     if observed_rest and capability.converter_output.startswith(("drop", "not exported")):
+        if capability.source_class == "source_limited" and rest.with_content == 0 and websdk.with_content == 0:
+            return coverage, "intentional_or_source_limited"
         if rest.with_geometry or rest.with_content:
             return coverage, "converter_candidate"
         return coverage, "intentional_or_source_limited"

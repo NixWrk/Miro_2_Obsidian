@@ -33,7 +33,21 @@ class MissingItemsAuditTests(unittest.TestCase):
 
         result = classify_missing_item(item)
 
-        self.assertEqual(result.reason, "unsupported_without_geometry")
+        self.assertEqual(result.reason, "table_source_limited")
+        self.assertFalse(result.actionable)
+
+    def test_classifies_empty_table_text_as_source_limited(self) -> None:
+        item = {
+            "id": "cell-1",
+            "type": "table_text",
+            "isSupported": False,
+            "geometry": {"width": 120, "height": 30},
+            "position": {"x": 0, "y": 0},
+        }
+
+        result = classify_missing_item(item)
+
+        self.assertEqual(result.reason, "table_source_limited")
         self.assertFalse(result.actionable)
 
     def test_classifies_embed_without_url_as_actionable_when_html_exists(self) -> None:

@@ -77,6 +77,18 @@ def _embed_has_resolvable_output(item: dict[str, Any]) -> bool:
     return False
 
 
+def _table_like_has_recoverable_content(item: dict[str, Any]) -> bool:
+    data = item.get("data") if isinstance(item.get("data"), dict) else {}
+    values = (
+        data.get("content"),
+        data.get("text"),
+        data.get("title"),
+        item.get("plain_text"),
+        item.get("title"),
+    )
+    return any(str(value or "").strip() for value in values)
+
+
 def classify_missing_item(item: dict[str, Any]) -> MissingMiroItem:
     item_id = str(item.get("id") or "")
     item_type = str(item.get("type") or "").lower()
@@ -109,6 +121,15 @@ def classify_missing_item(item: dict[str, Any]) -> MissingMiroItem:
             detail,
             title,
             actionable=has_html or has_preview,
+        )
+
+    if item_type in {"data_table_format", "table_text"} and not _table_like_has_recoverable_content(item):
+        return MissingMiroItem(
+            item_id,
+            item_type,
+            "table_source_limited",
+            "Miro export exposes no recoverable table cell text/layout for this item.",
+            title,
         )
 
     if item_type == "connector":

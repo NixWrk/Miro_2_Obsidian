@@ -1,0 +1,23 @@
+{
+  "description": "Unsupported table source with no recoverable cell text keeps only the table placeholder.",
+  "converter": {
+    "scale": 1.0,
+    "min_font_px": 8,
+    "theme": "dark"
+  },
+  "assertions": {
+    "node_count": 1,
+    "edge_count": 0,
+    "nodes": [
+      {
+        "id": "table-1",
+        "type": "text",
+        "text_contains": "[table]",
+        "text_not_contains": "[table text]",
+        "font_size": 8,
+        "width": 320,
+        "height": 180
+      }
+    ]
+  }
+}

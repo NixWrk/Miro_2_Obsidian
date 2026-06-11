@@ -2674,6 +2674,37 @@ def convert_item_to_canvas_node(
         else:
             return None
 
+    # ---------- TABLE_TEXT ----------
+    # Observed legacy/unsupported table cell exports carry geometry but no cell
+    # text, parent table layout, or reliable per-cell canvas position. Rendering
+    # those as generic unsupported placeholders creates many useless nodes at
+    # (0, 0), so empty table cells are treated as source-limited noise.
+    if item_type == "table_text":
+        data = item.get("data") if isinstance(item.get("data"), dict) else {}
+        raw_content = (
+            data.get("content")
+            or data.get("text")
+            or data.get("title")
+            or item.get("plain_text")
+            or item.get("title")
+            or ""
+        )
+        if not strip_html(str(raw_content)).strip():
+            return None
+
+        raw_content = _strip_edge_empty_paragraphs(str(raw_content))
+        base_font_px = _extract_font_base_px(item, fallback=OBSIDIAN_FONT_SIZE)
+        lh = _extract_line_height(item.get("style") or {}, default=1.35)
+        font_px = compute_font_px(scale, int(base_font_px), min_font_px)
+        node = {**base, "type": "text", "text": ""}
+        node.setdefault("styleAttributes", {})["fontSize"] = font_px
+        if _is_html(raw_content):
+            node["text"] = f'<div style="font-size:{font_px}px; line-height:{lh}">{raw_content}</div>'
+        else:
+            safe = _html_escape(raw_content, quote=False).replace("\n", "<br>")
+            node["text"] = f'<span style="font-size:{font_px}px; line-height:{lh}">{safe}</span>'
+        return node
+
     # ----------  TAG → TEXT-МЕТКА ----------
 
 

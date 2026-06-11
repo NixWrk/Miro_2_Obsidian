@@ -1,0 +1,57 @@
+{
+  "items": [
+    {
+      "id": "table-1",
+      "type": "table",
+      "isSupported": false,
+      "geometry": {
+        "width": 320,
+        "height": 180
+      },
+      "position": {
+        "x": 200,
+        "y": 120,
+        "origin": "center",
+        "relativeTo": "canvas_center"
+      },
+      "links": {
+        "web": "https://miro.com/app/board/example/?moveToWidget=table-1"
+      }
+    },
+    {
+      "id": "cell-1",
+      "type": "table_text",
+      "isSupported": false,
+      "geometry": {
+        "width": 160,
+        "height": 36
+      },
+      "position": {
+        "x": 0,
+        "y": 0,
+        "origin": "center",
+        "relativeTo": "canvas_center"
+      },
+      "links": {
+        "web": "https://miro.com/app/board/example/?moveToWidget=cell-1"
+      }
+    },
+    {
+      "id": "format-1",
+      "type": "data_table_format",
+      "isSupported": false,
+      "position": {
+        "x": 80,
+        "y": 40,
+        "origin": "center",
+        "relativeTo": "parent_top_left"
+      },
+      "parent": {
+        "id": "table-1"
+      },
+      "links": {
+        "self": "https://api.miro.com/v2/boards/example/data_table_formats/format-1"
+      }
+    }
+  ]
+}
