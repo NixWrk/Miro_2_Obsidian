@@ -1,0 +1,85 @@
+{
+  "verified_at": "2026-06-11",
+  "board_id": "uXjVSourceProbe=",
+  "table_id": "<redacted-long-id>",
+  "source_surfaces": {
+    "rest_table_probe": {
+      "artifact": "work/MIRO2OBSIDIAN/source_expansion/table_probe_result.json",
+      "summary": {
+        "checked": 19,
+        "available": 13,
+        "table_items": 7,
+        "contentful_table_items": 0,
+        "evidence_table_items": 7,
+        "auth_blocked_paths": [
+          "experimental_tables_collection",
+          "experimental_table_detail_<redacted-long-id>"
+        ]
+      },
+      "decision": "table_geometry_without_content_and_blocked_candidate"
+    },
+    "web_sdk_deep_diagnostics": {
+      "evidence_kind": "copied_panel_selection_export",
+      "exported_at": "2026-06-11T15:18:38.578Z",
+      "exporter_version": "20260611-deep-table",
+      "export_scope": "selection",
+      "summary": {
+        "total": 1,
+        "by_type": {
+          "table": 1
+        }
+      },
+      "item_type": "table",
+      "enumerable_keys": [
+        "id",
+        "parentId",
+        "type",
+        "origin",
+        "relativeTo",
+        "createdAt",
+        "createdBy",
+        "modifiedAt",
+        "modifiedBy",
+        "linkedTo",
+        "connectorIds",
+        "groupId",
+        "x",
+        "y",
+        "width",
+        "height"
+      ],
+      "prototype_names": [
+        "Unsupported",
+        "Unsupported",
+        "BaseItem",
+        "Object"
+      ],
+      "known_field_reads_without_values": [
+        "content",
+        "text",
+        "title",
+        "plainText",
+        "plain_text",
+        "description",
+        "value",
+        "html",
+        "data",
+        "rows",
+        "columns",
+        "cells",
+        "table",
+        "tableData",
+        "cell"
+      ],
+      "geometry_fields_with_values": [
+        "parentId",
+        "x",
+        "y",
+        "width",
+        "height"
+      ],
+      "textish_values": []
+    }
+  },
+  "decision": "table_cell_text_source_unavailable"
+}
