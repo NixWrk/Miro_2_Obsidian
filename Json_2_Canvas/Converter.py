@@ -43,6 +43,9 @@ SHORT_LABEL_SINGLE_LINE_AVG_CHAR_WIDTH = 0.50
 SHORT_LABEL_WIDTH_MIN_GROW = 32
 SHORT_LABEL_WIDTH_OVERLAP_TOLERANCE = 8
 EMBED_LINK_MIN_WIDTH = 320
+COMMENT_NODE_WIDTH = 300
+COMMENT_NODE_MIN_HEIGHT = 96
+COMMENT_NODE_OFFSET_X = 64
 
 # Цвета стикеров Miro
 MIRO_STICKY_HEX: Dict[str, str] = {
@@ -114,6 +117,7 @@ KEY_SETS = [
     "images", "image",
     "texts", "text",
     "shapes", "shape",
+    "comments", "comment",
 ]
 
 VALID_SIDES = {"left", "right", "top", "bottom"}
@@ -2137,6 +2141,47 @@ def _bbox_of_nodes(node_map: Dict[str, Dict[str, Any]], child_ids: List[str], pa
     }
 
 
+def _comment_fragment_to_html(value: Any) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    if _is_html(text):
+        return text
+    return _html_escape(text, quote=False).replace("\n", "<br>")
+
+
+def _format_comment_html(item: Dict[str, Any]) -> str:
+    status = "Resolved" if item.get("resolved") else "Open"
+    created_at = str(item.get("createdAt") or "").strip()
+    author = ((item.get("createdBy") or {}).get("name") or "").strip()
+
+    header_bits = [f"<strong>Comment</strong>", _html_escape(status, quote=False)]
+    if author:
+        header_bits.append(_html_escape(author, quote=False))
+    if created_at:
+        header_bits.append(_html_escape(created_at[:10], quote=False))
+
+    parts = [f"<p>{' · '.join(header_bits)}</p>"]
+    messages = item.get("messages") if isinstance(item.get("messages"), list) else []
+    for message in messages:
+        if not isinstance(message, dict):
+            continue
+        msg_author = ((message.get("createdBy") or {}).get("name") or author or "").strip()
+        content_html = _comment_fragment_to_html(message.get("content") or message.get("text"))
+        if not content_html:
+            continue
+        if msg_author:
+            parts.append(f"<p><strong>{_html_escape(msg_author, quote=False)}:</strong> {content_html}</p>")
+        else:
+            parts.append(f"<p>{content_html}</p>")
+
+    if len(parts) == 1:
+        content_html = _comment_fragment_to_html(item.get("content") or item.get("text") or item.get("title"))
+        if content_html:
+            parts.append(f"<p>{content_html}</p>")
+
+    return "".join(parts) if len(parts) > 1 else ""
+
 
 
 
@@ -2204,6 +2249,38 @@ def convert_item_to_canvas_node(
         if w > max_w or h > max_h:
             k = min(max_w / max(w, 1e-6), max_h / max(h, 1e-6))
             node["width"], node["height"] = w * k, h * k
+        return node
+
+
+    # ---------- COMMENT SIDECAR -> TEXT ----------
+    if item_type == "comment":
+        html = _format_comment_html(item)
+        if not html:
+            return None
+
+        font_px = compute_font_px(scale, 14, min_font_px)
+        lh = 1.35
+        node_w = max(COMMENT_NODE_WIDTH * scale, 220.0)
+        need_h = _estimate_render_height(html, width_px=node_w, font_px=font_px, line_height=lh, padding=48)
+        node_h = max(COMMENT_NODE_MIN_HEIGHT, need_h)
+
+        anchor_x = float(pos.get("x", 0) or 0.0) * scale
+        anchor_y = float(pos.get("y", 0) or 0.0) * scale
+        node = {
+            "id": str(item.get("id", "")),
+            "type": "text",
+            "x": anchor_x + COMMENT_NODE_OFFSET_X,
+            "y": anchor_y - node_h / 2.0,
+            "width": node_w,
+            "height": node_h,
+            "color": "#E6E0FF",
+            "text": f'<div style="font-size:{font_px}px; line-height:{lh}">{html}</div>',
+        }
+        node.setdefault("styleAttributes", {}).update({
+            "shape": "round-rectangle",
+            "fontSize": font_px,
+            "textAlign": "left",
+        })
         return node
 
 

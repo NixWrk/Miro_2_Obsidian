@@ -1,0 +1,59 @@
+{
+  "items": [
+    {
+      "id": "text-anchor",
+      "type": "text",
+      "position": {
+        "x": -1060,
+        "y": 105,
+        "origin": "center",
+        "relativeTo": "canvas_center"
+      },
+      "geometry": {
+        "width": 160,
+        "height": 50
+      },
+      "style": {
+        "fontSize": "16",
+        "color": "#1a1a1a"
+      },
+      "data": {
+        "content": "<p>Annotated item</p>"
+      }
+    }
+  ],
+  "comments": [
+    {
+      "id": "comment-1",
+      "type": "comment",
+      "createdAt": "2026-06-11T11:25:32Z",
+      "createdBy": {
+        "id": "user-1",
+        "type": "user",
+        "name": "Example User"
+      },
+      "mentionedUsers": [],
+      "messages": [
+        {
+          "id": "message-1",
+          "type": "message",
+          "content": "Comment body",
+          "createdAt": "2026-06-11T11:25:32Z",
+          "createdBy": {
+            "id": "user-1",
+            "type": "user",
+            "name": "Example User"
+          },
+          "reactions": []
+        }
+      ],
+      "position": {
+        "type": "canvas",
+        "x": -1011.0,
+        "y": 105.0
+      },
+      "resolved": false,
+      "source": "experimental_comments_collection"
+    }
+  ]
+}

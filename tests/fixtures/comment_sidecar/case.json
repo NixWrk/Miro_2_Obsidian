@@ -1,0 +1,33 @@
+{
+  "description": "Miro comment sidecar payload becomes a readable Canvas annotation node.",
+  "converter": {
+    "scale": 1.0,
+    "min_font_px": 8,
+    "theme": "dark"
+  },
+  "assertions": {
+    "node_count": 2,
+    "edge_count": 0,
+    "nodes": [
+      {
+        "id": "text-anchor",
+        "type": "text",
+        "text_contains": "Annotated item"
+      },
+      {
+        "id": "comment-1",
+        "type": "text",
+        "text_contains": "Comment body",
+        "font_size": 14,
+        "shape": "round-rectangle",
+        "min_width": 220,
+        "min_height": 96
+      }
+    ],
+    "no_overlapping_nodes": [
+      {
+        "types": ["text"]
+      }
+    ]
+  }
+}
