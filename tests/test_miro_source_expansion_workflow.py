@@ -41,6 +41,8 @@ class MiroSourceExpansionWorkflowTests(unittest.TestCase):
         self.assertIn("same board", plan)
         self.assertIn("left-hand app toolbar", plan)
         self.assertIn("Create probe items", plan)
+        self.assertIn("miro_slide_probe.py", plan)
+        self.assertIn("slide_probe_result.json", plan)
         self.assertIn("miro_source_expansion_workflow.py analyze", plan)
         self.assertNotIn("Bearer ", plan)
 

@@ -33,6 +33,7 @@ def build_workflow_plan(output_dir: Path, *, board_id: str | None = None, websdk
     rest_result = output_dir / "rest_probe_result.json"
     rest_export = output_dir / "rest_export.json"
     websdk_export = output_dir / "websdk_export.json"
+    slide_probe = output_dir / "slide_probe_result.json"
     merged = output_dir / "merged.miro.json"
 
     board_arg = f" --board-id {board_id}" if board_id else ""
@@ -97,7 +98,23 @@ def build_workflow_plan(output_dir: Path, *, board_id: str | None = None, websdk
             "",
             f"`{_path_for_markdown(websdk_export)}`",
             "",
-            "## 5. Analyze and merge",
+            "## 5. Run targeted source probes when candidates require them",
+            "",
+            "Slide/deck probe for real Miro slide decks:",
+            "",
+            "```powershell",
+            (
+                "python scripts\\miro_slide_probe.py "
+                f"--board-id {board_id or '<board_id>'} "
+                f"--evidence-json {_path_for_markdown(rest_export)} "
+                f"--evidence-json {_path_for_markdown(websdk_export)} "
+                f"--output {_path_for_markdown(slide_probe)}"
+            ),
+            "```",
+            "",
+            "Run this only when the board contains a real Miro slide deck or when `next_actions.md` keeps `slide_container` as a candidate.",
+            "",
+            "## 6. Analyze and merge",
             "",
             "```powershell",
             (
