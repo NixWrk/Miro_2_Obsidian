@@ -2844,29 +2844,42 @@ def _is_deck(it: Dict[str, Any]) -> bool:
     return (it.get("type") or "").lower() in DECK_TYPES
 
 
+def _slide_frame_deck_id(
+    mi_frame: Dict[str, Any],
+    deck_ids: set,
+    children: Dict[str, List[str]],
+    deck_order: Optional[List[str]] = None,
+) -> Optional[str]:
+    """Return the owning slide_container id for a frame, if the source links one."""
+    if (mi_frame.get("type") or "").lower() != "frame":
+        return None
+    if not deck_ids:
+        return None
+
+    par = mi_frame.get("parent")
+    if isinstance(par, dict) and par.get("id") is not None:
+        parent_id = str(par.get("id"))
+        if parent_id in deck_ids:
+            return parent_id
+
+    fid = str(mi_frame.get("id", "") or "")
+    if not fid:
+        return None
+
+    for did in (deck_order or list(deck_ids)):
+        if did in deck_ids and fid in (children.get(did) or []):
+            return did
+
+    return None
+
+
 def _is_slide_frame(
     mi_frame: Dict[str, Any],
     deck_ids: set,
     children: Dict[str, List[str]],
 ) -> bool:
     """True, если фрейм относится к slide_container (деке)."""
-    if (mi_frame.get("type") or "").lower() != "frame":
-        return False
-    if not deck_ids:
-        return False
-
-    # 1) Явный parent → deck
-    par = mi_frame.get("parent")
-    if isinstance(par, dict) and par.get("id") is not None and str(par.get("id")) in deck_ids:
-        return True
-
-    # 2) Через собранные связи children[deck_id] (если API их положил)
-    fid = str(mi_frame.get("id", "") or "")
-    for did in deck_ids:
-        if fid in (children.get(did) or []):
-            return True
-
-    return False
+    return _slide_frame_deck_id(mi_frame, deck_ids, children) is not None
 
 
 def _resolve_relative_positions_to_canvas_center(by_id: Dict[str, Any]) -> None:
@@ -3116,23 +3129,37 @@ def convert_miro_to_canvas(
 
      # --- Slides: deck и принадлежность фреймов к деке ---
 
-    # Найдём все slide_container'ы
-    deck_ids = {
-        str(it.get("id"))
-        for it in all_items
-        if isinstance(it, dict) and (it.get("type") or "").lower() in DECK_TYPES
-    }
+    # Найдём все slide_container'ы в стабильном порядке исходного JSON.
+    deck_order: List[str] = []
+    deck_seen: set = set()
+    for it in all_items:
+        if not isinstance(it, dict) or (it.get("type") or "").lower() not in DECK_TYPES:
+            continue
+        did = str(it.get("id", "") or "")
+        if did and did not in deck_seen:
+            deck_order.append(did)
+            deck_seen.add(did)
+    deck_ids = set(deck_order)
 
-    # Гарантируем, что у каждой деки в children будут её фреймы-слайды
-    slide_frame_ids = [
-        str(it.get("id"))
-        for it in containers
-        if (it.get("type") or "").lower() == "frame" and _is_slide_frame(it, deck_ids, children)
-    ]
-    for did in deck_ids:
+    # Гарантируем, что у каждой деки в children будут только её фреймы-слайды.
+    slide_frame_ids: List[str] = []
+    slide_frames_by_deck: Dict[str, List[str]] = {}
+    for it in containers:
+        if (it.get("type") or "").lower() != "frame":
+            continue
+        did = _slide_frame_deck_id(it, deck_ids, children, deck_order)
+        if not did:
+            continue
+        fid = str(it.get("id", "") or "")
+        if not fid:
+            continue
+        slide_frame_ids.append(fid)
+        slide_frames_by_deck.setdefault(did, []).append(fid)
+
+    for did in deck_order:
         lst = children.setdefault(did, [])
         seen = set(lst)
-        for fid in slide_frame_ids:
+        for fid in slide_frames_by_deck.get(did, []):
             if fid and fid not in seen:
                 lst.append(fid)
                 seen.add(fid)
@@ -3297,7 +3324,7 @@ def convert_miro_to_canvas(
     slide_frame_id_set = set(slide_frame_ids)
     # Первый слайд каждой деки (для metadata.startNode)
     first_slide_per_deck: Dict[str, str] = {}
-    for did in deck_ids:
+    for did in deck_order:
         for fid in (children.get(did) or []):
             if fid in slide_frame_id_set:
                 first_slide_per_deck[did] = fid

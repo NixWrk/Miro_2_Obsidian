@@ -1,0 +1,50 @@
+{
+  "description": "Slide deck groups contain only their own slide frames.",
+  "converter": {
+    "scale": 1.0,
+    "min_font_px": 8,
+    "theme": "dark"
+  },
+  "assertions": {
+    "node_count": 5,
+    "edge_count": 0,
+    "metadata": {
+      "startNode": "frame-a1"
+    },
+    "nodes": [
+      {
+        "id": "frame-a1",
+        "type": "group",
+        "label": "Slide A1",
+        "group_nodes": [],
+        "ratio": 1.7777777778
+      },
+      {
+        "id": "frame-a2",
+        "type": "group",
+        "label": "Slide A2",
+        "group_nodes": [],
+        "ratio": 1.7777777778
+      },
+      {
+        "id": "frame-b1",
+        "type": "group",
+        "label": "Slide B1",
+        "group_nodes": [],
+        "ratio": 1.7777777778
+      },
+      {
+        "id": "deck-a",
+        "type": "group",
+        "label": "Deck A",
+        "group_nodes": ["frame-a1", "frame-a2"]
+      },
+      {
+        "id": "deck-b",
+        "type": "group",
+        "label": "Deck B",
+        "group_nodes": ["frame-b1"]
+      }
+    ]
+  }
+}

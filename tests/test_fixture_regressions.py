@@ -138,6 +138,12 @@ def _assert_node(testcase: unittest.TestCase, canvas: dict[str, Any], expected: 
         testcase.assertEqual((node.get("styleAttributes") or {}).get("fontSize"), expected["font_size"])
     if "shape" in expected:
         testcase.assertEqual((node.get("styleAttributes") or {}).get("shape"), expected["shape"])
+    if "label" in expected:
+        testcase.assertEqual(node.get("label"), expected["label"])
+    if "group_nodes" in expected:
+        testcase.assertEqual(node.get("nodes"), expected["group_nodes"])
+    if "ratio" in expected:
+        testcase.assertAlmostEqual(float(node.get("ratio")), float(expected["ratio"]), places=4)
 
 
 def _assert_edge(testcase: unittest.TestCase, canvas: dict[str, Any], expected: dict[str, Any]) -> None:
@@ -239,6 +245,10 @@ class FixtureRegressionTests(unittest.TestCase):
                     self.assertEqual(len(canvas["nodes"]), int(assertions["node_count"]))
                 if "edge_count" in assertions:
                     self.assertEqual(len(canvas["edges"]), int(assertions["edge_count"]))
+                if "metadata" in assertions:
+                    metadata = canvas.get("metadata") or {}
+                    for key, expected_value in assertions["metadata"].items():
+                        self.assertEqual(metadata.get(key), expected_value)
 
                 node_ids = {str(n.get("id")) for n in canvas["nodes"]}
                 for node_id in assertions.get("absent_node_ids", []):
