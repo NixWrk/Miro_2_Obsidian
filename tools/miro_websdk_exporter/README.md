@@ -17,6 +17,12 @@ handler and opens `panel.html`, where the exporter controls live. If the app is
 installed but not visible in the board tools menu, verify the App URL, team, and
 uploaded outline icon first.
 
+The Team Admin `Apps` page confirms installation in the current team, but it may
+not show the developer App URL. If several `export to Json` apps exist, verify
+the App URL in `Profile settings` -> `Your apps`, then rename the Web SDK app or
+use its uploaded icon to distinguish it on the team Apps page. An app installed
+in another Miro team does not appear on this board.
+
 The exported payload has:
 
 - `schema_version: 1`;
