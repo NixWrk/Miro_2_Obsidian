@@ -35,6 +35,11 @@ continue the Web SDK comparison in that team. Create or duplicate the probe
 board in an app-visible team where the board app launcher shows installed apps,
 then run both REST and Web SDK exports against that same board.
 
+Some Miro plans reject REST board creation with `Creating more boards is not
+allowed in this plan`. In that case, create or choose an empty board in the
+app-visible team and pass that board id to the REST probe generator with
+`--board-id`.
+
 The exported payload has:
 
 - `schema_version: 1`;

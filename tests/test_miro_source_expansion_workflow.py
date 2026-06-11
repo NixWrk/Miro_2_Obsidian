@@ -26,6 +26,8 @@ class MiroSourceExpansionWorkflowTests(unittest.TestCase):
         self.assertIn("http://127.0.0.1:8000/callback", plan)
         self.assertIn("Use this URI for SDK authorization", plan)
         self.assertIn("partial API failures", plan)
+        self.assertIn("cannot create more boards", plan)
+        self.assertIn("--board-id", plan)
         self.assertIn("--board-id board-1", plan)
         self.assertIn("http://localhost:8766/index.html", plan)
         self.assertIn("same Miro team as the target board", plan)

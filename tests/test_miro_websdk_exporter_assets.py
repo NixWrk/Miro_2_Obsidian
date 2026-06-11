@@ -82,6 +82,9 @@ class MiroWebsdkExporterAssetTests(unittest.TestCase):
         self.assertIn("+ More tools", readme)
         self.assertIn("app-visible team", readme)
         self.assertIn("same board", readme)
+        self.assertIn("Creating more boards is not", readme)
+        self.assertIn("allowed in this plan", readme)
+        self.assertIn("--board-id", readme)
         self.assertIn("left-hand app toolbar", readme)
         self.assertIn("monochrome outline icon", readme)
 

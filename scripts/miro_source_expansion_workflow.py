@@ -53,6 +53,7 @@ def build_workflow_plan(output_dir: Path, *, board_id: str | None = None, websdk
             "Set `MIRO_ACCESS_TOKEN` in the shell, or set `MIRO_CLIENT_ID` and `MIRO_CLIENT_SECRET` and use `--oauth`.",
             "OAuth opens Yandex Browser by default and uses `http://127.0.0.1:8000/callback`.",
             "The generator records partial API failures in the result JSON instead of hiding successful items.",
+            "If the Miro plan cannot create more boards, create or choose an empty board in the app-visible team and pass its id with `--board-id`.",
             "",
             "Token-env run:",
             "",
