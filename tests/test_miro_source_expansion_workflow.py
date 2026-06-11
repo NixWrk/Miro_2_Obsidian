@@ -31,6 +31,8 @@ class MiroSourceExpansionWorkflowTests(unittest.TestCase):
         self.assertIn("same Miro team as the target board", plan)
         self.assertIn("If several `export to Json` apps exist", plan)
         self.assertIn("Profile settings", plan)
+        self.assertIn("+ More apps", plan)
+        self.assertIn("left-hand app toolbar", plan)
         self.assertIn("Create probe items", plan)
         self.assertIn("miro_source_expansion_workflow.py analyze", plan)
         self.assertNotIn("Bearer ", plan)

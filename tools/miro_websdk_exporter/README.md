@@ -23,6 +23,12 @@ the App URL in `Profile settings` -> `Your apps`, then rename the Web SDK app or
 use its uploaded icon to distinguish it on the team Apps page. An app installed
 in another Miro team does not appear on this board.
 
+To open the installed app on a board, use the `+ More apps` button at the bottom
+of the left-hand app toolbar. Miro shows installed apps there under their app
+name. The monochrome outline icon is the one that appears on the board app
+toolbar; clicking it triggers the app's `icon:click` handler and opens
+`panel.html`.
+
 The exported payload has:
 
 - `schema_version: 1`;
