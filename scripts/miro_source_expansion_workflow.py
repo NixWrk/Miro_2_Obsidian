@@ -85,7 +85,7 @@ def build_workflow_plan(output_dir: Path, *, board_id: str | None = None, websdk
                 "verify the App URL in `Profile settings` -> `Your apps`, then rename the Web SDK app or use its icon to identify it."
             ),
             "In the OAuth Redirect URI `Options` menu, select `Use this URI for SDK authorization` for `http://localhost:8000/callback`.",
-            "On the board, open `+ More apps` at the bottom of the left-hand app toolbar. The app should appear there under its configured app name.",
+            "On the board, open `+ More apps` / `+ More tools` at the bottom of the left-hand app toolbar. The app should appear there under its configured app name.",
             "",
             "Open the app from the board toolbar, export the board, and save the JSON as:",
             "",

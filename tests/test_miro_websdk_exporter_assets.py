@@ -79,6 +79,7 @@ class MiroWebsdkExporterAssetTests(unittest.TestCase):
         self.assertIn("Profile settings", readme)
         self.assertIn("http://localhost:8766/index.html", readme)
         self.assertIn("+ More apps", readme)
+        self.assertIn("+ More tools", readme)
         self.assertIn("left-hand app toolbar", readme)
         self.assertIn("monochrome outline icon", readme)
 
