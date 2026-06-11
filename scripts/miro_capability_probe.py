@@ -63,7 +63,7 @@ CAPABILITIES: tuple[Capability, ...] = (
     Capability("group", OBSERVED, YES, UNKNOWN, "createGroup", "structural", "observed"),
     Capability("connector", YES, YES, "POST /connectors", "createConnector", "edge", "supported"),
     Capability("tag", OBSERVED, YES, "POST /tags", "createTag", "text label", "observed"),
-    Capability("mindmap_node", NO, YES, NO, "experimental.createMindmapNode", "drop/placeholder", "supported"),
+    Capability("mindmap_node", NO, YES, NO, "experimental.createMindmapNode", "text node + hierarchy edge", "supported"),
     Capability("board", META, META, "POST /boards", NO, "drop", "metadata"),
     Capability("board_member", META, META, NO, NO, "drop", "metadata"),
     Capability("member", META, META, NO, NO, "drop", "metadata"),

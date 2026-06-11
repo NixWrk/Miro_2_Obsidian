@@ -1,0 +1,103 @@
+[
+  {
+    "id": "mind-root",
+    "type": "mindmap_node",
+    "position": {
+      "x": -360,
+      "y": 4920,
+      "origin": "center",
+      "relativeTo": "canvas_center"
+    },
+    "geometry": {
+      "width": 138.18,
+      "height": 64
+    },
+    "style": {
+      "nodeColor": "#1a85ff",
+      "fontSize": "14",
+      "shape": "rounded_rectangle"
+    },
+    "data": {
+      "isRoot": true,
+      "nodeView": {
+        "type": "text",
+        "data": {
+          "content": "<p>Mind map root</p>"
+        },
+        "style": {
+          "fillOpacity": "0.12",
+          "fontSize": "14",
+          "color": "#1a1a1a"
+        }
+      }
+    }
+  },
+  {
+    "id": "mind-child-a",
+    "type": "mindmap_node",
+    "parent": {
+      "id": "mind-root"
+    },
+    "position": {
+      "x": -247,
+      "y": 0,
+      "origin": "center",
+      "relativeTo": "parent_top_left"
+    },
+    "geometry": {
+      "width": 108.1,
+      "height": 36
+    },
+    "style": {
+      "nodeColor": "#7a28ff",
+      "fontSize": "14",
+      "shape": "none"
+    },
+    "data": {
+      "nodeView": {
+        "type": "text",
+        "data": {
+          "content": "<p>Mind map child A</p>"
+        },
+        "style": {
+          "fontSize": "14",
+          "color": "#1a1a1a"
+        }
+      }
+    }
+  },
+  {
+    "id": "mind-child-b",
+    "type": "mindmap_node",
+    "parent": {
+      "id": "mind-root"
+    },
+    "position": {
+      "x": 247,
+      "y": 0,
+      "origin": "center",
+      "relativeTo": "parent_top_left"
+    },
+    "geometry": {
+      "width": 108.1,
+      "height": 36
+    },
+    "style": {
+      "nodeColor": "#7a28ff",
+      "fontSize": "14",
+      "shape": "none"
+    },
+    "data": {
+      "nodeView": {
+        "type": "text",
+        "data": {
+          "content": "<p>Mind map child B</p>"
+        },
+        "style": {
+          "fontSize": "14",
+          "color": "#1a1a1a"
+        }
+      }
+    }
+  }
+]

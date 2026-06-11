@@ -140,6 +140,18 @@ def _assert_node(testcase: unittest.TestCase, canvas: dict[str, Any], expected: 
         testcase.assertEqual((node.get("styleAttributes") or {}).get("shape"), expected["shape"])
 
 
+def _assert_edge(testcase: unittest.TestCase, canvas: dict[str, Any], expected: dict[str, Any]) -> None:
+    for edge in canvas["edges"]:
+        if "id" in expected and str(edge.get("id")) != str(expected["id"]):
+            continue
+        if "fromNode" in expected and str(edge.get("fromNode")) != str(expected["fromNode"]):
+            continue
+        if "toNode" in expected and str(edge.get("toNode")) != str(expected["toNode"]):
+            continue
+        return
+    testcase.fail(f"Expected edge was not found: {expected!r}")
+
+
 def _assert_non_overlapping_pair(testcase: unittest.TestCase, canvas: dict[str, Any], pair: list[str]) -> None:
     testcase.assertEqual(len(pair), 2)
     left = _node_by_id(canvas, str(pair[0]))
@@ -234,6 +246,9 @@ class FixtureRegressionTests(unittest.TestCase):
 
                 for expected_node in assertions.get("nodes", []):
                     _assert_node(self, canvas, expected_node)
+
+                for expected_edge in assertions.get("edges", []):
+                    _assert_edge(self, canvas, expected_edge)
 
                 for pair in assertions.get("non_overlapping_pairs", []):
                     _assert_non_overlapping_pair(self, canvas, pair)

@@ -116,6 +116,26 @@ class MiroCapabilityProbeTests(unittest.TestCase):
         self.assertEqual(summary["mindmap_node"].with_geometry, 1)
         self.assertEqual(summary["mindmap_node"].with_content, 1)
 
+    def test_observed_mindmap_node_is_covered_after_fixture_rule(self) -> None:
+        rest_root = [
+            {
+                "id": "mind-1",
+                "type": "mindmap_node",
+                "position": {"x": 10, "y": 20},
+                "geometry": {"width": 180, "height": 60},
+                "data": {
+                    "nodeView": {
+                        "data": {"content": "<p>Root</p>"},
+                    },
+                },
+            }
+        ]
+
+        rows = {row.item_type: row for row in build_coverage_rows(rest_root, [])}
+
+        self.assertEqual(rows["mindmap_node"].coverage, "rest_only")
+        self.assertEqual(rows["mindmap_node"].action, "covered_or_audit_needed")
+
     def test_report_contains_actionable_candidate_rows(self) -> None:
         rows = build_coverage_rows([], [{"id": "tag-1", "type": "tag", "x": 0, "y": 0, "width": 80, "height": 24}])
 

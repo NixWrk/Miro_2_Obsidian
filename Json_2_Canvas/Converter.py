@@ -630,6 +630,54 @@ def extract_bg_color(item: Dict[str, Any]) -> Optional[str]:
         fill_opacity = 1.0
     return fill if (fill and fill_opacity > 0.0) else None
 
+def _mindmap_node_view(item: Dict[str, Any]) -> Dict[str, Any]:
+    data = item.get("data") if isinstance(item.get("data"), dict) else {}
+    for value in (data.get("nodeView"), item.get("nodeView")):
+        if isinstance(value, dict):
+            return value
+    return {}
+
+def _extract_mindmap_node_content(item: Dict[str, Any]) -> str:
+    data = item.get("data") if isinstance(item.get("data"), dict) else {}
+    node_view = _mindmap_node_view(item)
+    node_view_data = node_view.get("data") if isinstance(node_view.get("data"), dict) else {}
+
+    for value in (
+        node_view_data.get("content"),
+        node_view.get("content"),
+        data.get("content"),
+        data.get("title"),
+        item.get("plain_text"),
+        item.get("title"),
+    ):
+        if value:
+            return _strip_edge_empty_paragraphs(str(value))
+    return ""
+
+def _extract_mindmap_node_style(item: Dict[str, Any]) -> Dict[str, Any]:
+    data = item.get("data") if isinstance(item.get("data"), dict) else {}
+    style: Dict[str, Any] = {}
+    for source in (item.get("style"), data.get("style"), _mindmap_node_view(item).get("style")):
+        if isinstance(source, dict):
+            style.update(source)
+    return style
+
+def _extract_mindmap_node_shape(style: Dict[str, Any]) -> Optional[str]:
+    shape = str(style.get("shape") or "").strip().lower()
+    if not shape or shape == "none":
+        return None
+    return pick_canvas_shape(shape)
+
+def _extract_mindmap_node_bg(style: Dict[str, Any]) -> Optional[str]:
+    fill = style.get("fillColor") or style.get("backgroundColor")
+    if not fill and str(style.get("shape") or "").strip().lower() not in {"", "none"}:
+        fill = style.get("nodeColor")
+    try:
+        fill_opacity = float(style.get("fillOpacity") if style.get("fillOpacity") is not None else 1.0)
+    except Exception:
+        fill_opacity = 1.0
+    return str(fill) if fill and fill_opacity > 0.0 else None
+
 # =========================
 # Vault / Files
 # =========================
@@ -2159,6 +2207,47 @@ def convert_item_to_canvas_node(
         return node
 
 
+    # ---------- MINDMAP_NODE -> TEXT ----------
+    if item_type == "mindmap_node":
+        raw_content = _extract_mindmap_node_content(item)
+        if not raw_content:
+            return None
+        if _is_short_text_label(raw_content):
+            raw_content = _compact_short_label_html(raw_content)
+
+        style = _extract_mindmap_node_style(item)
+        node: Dict[str, Any] = {**base, "type": "text", "text": ""}
+        sa = node.setdefault("styleAttributes", {})
+
+        shape = _extract_mindmap_node_shape(style)
+        if shape:
+            sa["shape"] = shape
+
+        text_align = style.get("textAlign")
+        sa["textAlign"] = text_align if text_align in ("left", "center", "right") else "center"
+
+        bg = _extract_mindmap_node_bg(style)
+        if bg:
+            node["color"] = bg
+
+        base_font_px = _extract_font_base_px({"style": style, "data": item.get("data") or {}}, fallback=OBSIDIAN_FONT_SIZE)
+        lh = _extract_line_height(style, default=1.35)
+        font_px = compute_font_px(scale, int(base_font_px), min_font_px)
+        sa["fontSize"] = font_px
+
+        style_bits = [f"font-size:{font_px}px", f"line-height:{lh}"]
+        text_color = str(style.get("color") or "").strip()
+        if text_color and not (theme.lower() == "dark" and _is_miro_black_color(text_color)):
+            style_bits.append(f"color:{text_color}")
+
+        if _is_html(raw_content):
+            node["text"] = f'<div style="{"; ".join(style_bits)}">{raw_content}</div>'
+        else:
+            safe = _html_escape(raw_content, quote=False).replace("\n", "<br>")
+            node["text"] = f'<span style="{"; ".join(style_bits)}">{safe}</span>'
+        return node
+
+
     # ---------- TEXT / SHAPE / STICKY ----------
     if item_type in ("text", "shape", "sticky_note"):
         raw_content = ((item.get("data") or {}).get("content")
@@ -2756,6 +2845,40 @@ def _resolve_relative_positions_to_canvas_center(by_id: Dict[str, Any]) -> None:
         })
 
 
+def _add_mindmap_hierarchy_edges(
+    all_items: List[Dict[str, Any]],
+    by_id: Dict[str, Dict[str, Any]],
+    node_map: Dict[str, Dict[str, Any]],
+    edges: List[Dict[str, Any]],
+) -> None:
+    existing_ids = {str(edge.get("id")) for edge in edges}
+
+    for item in all_items:
+        if (item.get("type") or "").lower() != "mindmap_node":
+            continue
+
+        child_id = str(item.get("id") or "")
+        parent = item.get("parent") if isinstance(item.get("parent"), dict) else {}
+        parent_id = str(parent.get("id") or "") if isinstance(parent, dict) else ""
+        parent_item = by_id.get(parent_id)
+
+        if not child_id or not parent_id or child_id not in node_map or parent_id not in node_map:
+            continue
+        if (parent_item.get("type") or "").lower() != "mindmap_node":
+            continue
+
+        edge_id = f"mindmap-{parent_id}-{child_id}"
+        if edge_id in existing_ids:
+            continue
+
+        edges.append({
+            "id": edge_id,
+            "fromNode": parent_id,
+            "toNode": child_id,
+        })
+        existing_ids.add(edge_id)
+
+
 def convert_miro_to_canvas(
     json_path: str,
     target_dir: str,
@@ -3017,6 +3140,8 @@ def convert_miro_to_canvas(
             if nid:
                 node_map[nid] = node
 
+
+    _add_mindmap_hierarchy_edges(all_items, by_id, node_map, edges)
 
     _resolve_text_visual_horizontal_overlaps(nodes, min_font_px=min_font_px)
     _resolve_short_label_visual_vertical_overlaps(nodes)

@@ -1,0 +1,50 @@
+{
+  "description": "Miro mindmap_node tree becomes Canvas text nodes with parent-child edges.",
+  "converter": {
+    "scale": 1.0,
+    "min_font_px": 8,
+    "theme": "dark"
+  },
+  "assertions": {
+    "node_count": 3,
+    "edge_count": 2,
+    "nodes": [
+      {
+        "id": "mind-root",
+        "type": "text",
+        "text_contains": "Mind map root",
+        "font_size": 14,
+        "shape": "round-rectangle"
+      },
+      {
+        "id": "mind-child-a",
+        "type": "text",
+        "text_contains": "Mind map child A",
+        "font_size": 14
+      },
+      {
+        "id": "mind-child-b",
+        "type": "text",
+        "text_contains": "Mind map child B",
+        "font_size": 14
+      }
+    ],
+    "edges": [
+      {
+        "id": "mindmap-mind-root-mind-child-a",
+        "fromNode": "mind-root",
+        "toNode": "mind-child-a"
+      },
+      {
+        "id": "mindmap-mind-root-mind-child-b",
+        "fromNode": "mind-root",
+        "toNode": "mind-child-b"
+      }
+    ],
+    "no_overlapping_nodes": [
+      {
+        "types": ["text"]
+      }
+    ]
+  }
+}
