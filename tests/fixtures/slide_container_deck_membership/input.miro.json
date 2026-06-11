@@ -34,6 +34,54 @@
       }
     },
     {
+      "id": "slide-text-a1",
+      "type": "text",
+      "parent": {
+        "id": "frame-a1"
+      },
+      "position": {
+        "x": 200,
+        "y": 120,
+        "origin": "center",
+        "relativeTo": "parent_top_left"
+      },
+      "geometry": {
+        "width": 300,
+        "height": 80
+      },
+      "style": {
+        "fontSize": "24",
+        "color": "#1a1a1a"
+      },
+      "data": {
+        "content": "<p>Slide A1 content</p>"
+      }
+    },
+    {
+      "id": "slide-edge-a1",
+      "type": "text",
+      "parent": {
+        "id": "frame-a1"
+      },
+      "position": {
+        "x": 1720,
+        "y": 120,
+        "origin": "center",
+        "relativeTo": "parent_top_left"
+      },
+      "geometry": {
+        "width": 260,
+        "height": 80
+      },
+      "style": {
+        "fontSize": "24",
+        "color": "#1a1a1a"
+      },
+      "data": {
+        "content": "<p>Slide edge content</p>"
+      }
+    },
+    {
       "id": "frame-a2",
       "type": "frame",
       "parent": {

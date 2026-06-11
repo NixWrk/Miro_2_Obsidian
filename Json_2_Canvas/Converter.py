@@ -3164,37 +3164,11 @@ def convert_miro_to_canvas(
                 lst.append(fid)
                 seen.add(fid)
 
-
-    # --- собираем все ID потомков slide_container (рекурсивно)
-    def _collect_descendants(root_ids: set, id_to_parent_id: Dict[str, str]) -> set:
-        result: set = set()
-        queue = list(root_ids)
-        while queue:
-            pid = queue.pop()
-            for iid, par_id in id_to_parent_id.items():
-                if par_id == pid and iid not in result:
-                    result.add(iid)
-                    queue.append(iid)
-        return result
-
-    _id_to_parent_id: Dict[str, str] = {}
-    for it in all_items:
-        par = it.get("parent") or {}
-        pid = str(par.get("id") or "") if isinstance(par, dict) else ""
-        if pid:
-            _id_to_parent_id[str(it.get("id", ""))] = pid
-
-    slide_descendant_ids = _collect_descendants(deck_ids, _id_to_parent_id)
-
     # --- второй проход: сначала обычные узлы/рёбра (кроме контейнеров)
     node_map: Dict[str, Dict[str, Any]] = {}
     for item in all_items:
         t = (item.get("type") or "").lower()
         if t in CONTAINER_TYPES:  # {"group", "frame", "diagram"}
-            continue
-
-        # пропускаем все потомки slide_container (слайды и их содержимое)
-        if str(item.get("id", "")) in slide_descendant_ids:
             continue
 
         # 1) Нормализация по реальному родителю-контейнеру (frame/diagram)
@@ -3337,6 +3311,7 @@ def convert_miro_to_canvas(
 
         ctype = str(cont.get("type") or "").lower()
         is_frame_like = (ctype in FRAME_LIKE_TYPES)  # frame и diagram
+        is_slide_frame = cid in slide_frame_id_set
 
         # кандидаты-дети по id (берём только те, что реально сконвертированы в node_map)
         raw_child_ids = [ch for ch in (children.get(cid) or []) if ch in node_map]
@@ -3354,8 +3329,10 @@ def convert_miro_to_canvas(
         else:
             frect = None
 
-        # фильтр по центру (для frame/diagram)
-        if is_frame_like and frect:
+        # фильтр по центру (для обычных frame/diagram). Для slide frames
+        # parent.id авторитетнее: иначе часть содержимого слайда выпадает
+        # из Advanced Canvas slide group.
+        if is_frame_like and frect and not is_slide_frame:
             child_ids = [ch for ch in raw_child_ids if _node_center_inside_rect(node_map[ch], frect, tol=1.0)]
         else:
             child_ids = raw_child_ids
@@ -3369,7 +3346,9 @@ def convert_miro_to_canvas(
 
         # финальный прямоугольник контейнера
         if is_frame_like:
-            if frect and bbox:
+            if is_slide_frame:
+                rect = frect or bbox
+            elif frect and bbox:
                 rect = frect if _rect_contains(frect, bbox, eps=0.5) else _rect_union(frect, bbox)
             else:
                 rect = frect or bbox  # пустая рамка тоже допустима

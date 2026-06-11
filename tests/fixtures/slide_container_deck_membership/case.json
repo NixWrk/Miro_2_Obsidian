@@ -6,17 +6,27 @@
     "theme": "dark"
   },
   "assertions": {
-    "node_count": 5,
+    "node_count": 7,
     "edge_count": 0,
     "metadata": {
       "startNode": "frame-a1"
     },
     "nodes": [
       {
+        "id": "slide-text-a1",
+        "type": "text",
+        "text_contains": "Slide A1 content"
+      },
+      {
+        "id": "slide-edge-a1",
+        "type": "text",
+        "text_contains": "Slide edge content"
+      },
+      {
         "id": "frame-a1",
         "type": "group",
         "label": "Slide A1",
-        "group_nodes": [],
+        "group_nodes": ["slide-text-a1", "slide-edge-a1"],
         "ratio": 1.7777777778
       },
       {

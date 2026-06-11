@@ -7,3 +7,11 @@ owning deck. The converter must preserve that membership.
 Regression guarded here: each Canvas deck group must contain only the frame
 groups that belong to that deck. A slide frame from another deck must not be
 inserted into every deck group.
+
+Slide frame contents must also survive conversion. Text, images, shapes, and
+other supported children under a slide frame are normal Canvas nodes grouped by
+that frame; only the deck itself is structural.
+
+For slide frames, `parent.id` is authoritative for group membership. Geometry
+filters may still be useful for ordinary frames, but they must not eject a
+parent-linked slide child from the slide group.
