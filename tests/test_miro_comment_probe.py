@@ -15,6 +15,8 @@ sys.path.insert(0, str(SCRIPTS_DIR))
 from miro_comment_probe import (  # noqa: E402
     build_comment_probe_requests,
     classify_status,
+    decide_probe_result,
+    extract_comment_items,
     main,
     run_comment_probe,
 )
@@ -66,6 +68,26 @@ class MiroCommentProbeTests(unittest.TestCase):
         self.assertEqual(classify_status(429), "rate_limited")
         self.assertEqual(classify_status(503), "server_error")
 
+    def test_decides_empty_available_source_separately_from_items(self) -> None:
+        self.assertEqual(decide_probe_result(0, 0), "separate_source_not_found_in_checked_rest_paths")
+        self.assertEqual(decide_probe_result(1, 0), "comments_source_available_empty")
+        self.assertEqual(decide_probe_result(1, 2), "comments_available_with_items")
+
+    def test_extracts_comment_items_from_available_response(self) -> None:
+        comments = extract_comment_items(
+            [
+                {
+                    "key": "experimental_comments_collection",
+                    "classification": "available",
+                    "body": {"data": [{"id": "comment-1", "content": "Hello"}]},
+                }
+            ]
+        )
+
+        self.assertEqual(comments[0]["id"], "comment-1")
+        self.assertEqual(comments[0]["type"], "comment")
+        self.assertEqual(comments[0]["source"], "experimental_comments_collection")
+
     def test_probe_records_unavailable_comment_paths(self) -> None:
         session = FakeSession([
             FakeResponse({"message": "invalid type"}, status_code=400),
@@ -77,6 +99,7 @@ class MiroCommentProbeTests(unittest.TestCase):
 
         self.assertEqual(payload["summary"]["available"], 0)
         self.assertEqual(payload["decision"], "separate_source_not_found_in_checked_rest_paths")
+        self.assertEqual(payload["summary"]["comment_items"], 0)
         self.assertEqual(payload["summary"]["by_classification"]["not_found_or_endpoint_absent"], 2)
         self.assertNotIn("secret-token", str(payload))
         self.assertEqual(session.calls[0]["headers"]["Authorization"], "Bearer secret-token")
@@ -91,8 +114,23 @@ class MiroCommentProbeTests(unittest.TestCase):
         payload = run_comment_probe(board_id="board-1", token="secret-token", session=session)
 
         self.assertEqual(payload["summary"]["available"], 1)
-        self.assertEqual(payload["decision"], "comments_available")
-        self.assertEqual(payload["requests"][1]["body"]["data"][0]["id"], "comment-1")
+        self.assertEqual(payload["summary"]["comment_items"], 1)
+        self.assertEqual(payload["decision"], "comments_available_with_items")
+        self.assertEqual(payload["comments"][0]["id"], "comment-1")
+
+    def test_probe_marks_empty_available_source(self) -> None:
+        session = FakeSession([
+            FakeResponse({"data": []}, status_code=400),
+            FakeResponse({"detail": "Validation failure"}, status_code=400),
+            FakeResponse({"data": []}, status_code=200),
+        ])
+
+        payload = run_comment_probe(board_id="board-1", token="secret-token", session=session)
+
+        self.assertEqual(payload["summary"]["available"], 1)
+        self.assertEqual(payload["summary"]["comment_items"], 0)
+        self.assertEqual(payload["decision"], "comments_source_available_empty")
+        self.assertEqual(payload["comments"], [])
 
     def test_cli_writes_probe_output_without_printing_token(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -102,9 +140,10 @@ class MiroCommentProbeTests(unittest.TestCase):
                     "miro_comment_probe.run_comment_probe",
                     return_value={
                         "kind": "miro_comment_source_probe",
-                        "summary": {"checked": 3, "available": 0},
+                        "summary": {"checked": 3, "available": 0, "comment_items": 0},
                         "decision": "separate_source_not_found_in_checked_rest_paths",
                         "requests": [],
+                        "comments": [],
                     },
                 ):
                     with patch.object(sys, "argv", ["miro_comment_probe.py", "--board-id", "board-1", "--output", str(output)]):

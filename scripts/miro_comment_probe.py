@@ -79,6 +79,35 @@ def _response_body(response: Any, *, include_body: bool) -> Any:
         return text[:2000]
 
 
+def extract_comment_items(results: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    comments: list[dict[str, Any]] = []
+    for result in results:
+        if result.get("classification") != "available":
+            continue
+        body = result.get("body")
+        if not isinstance(body, dict):
+            continue
+        data = body.get("data")
+        if not isinstance(data, list):
+            continue
+        for item in data:
+            if not isinstance(item, dict):
+                continue
+            comment = dict(item)
+            comment.setdefault("type", "comment")
+            comment.setdefault("source", result.get("key"))
+            comments.append(comment)
+    return comments
+
+
+def decide_probe_result(available_count: int, comment_count: int) -> str:
+    if comment_count > 0:
+        return "comments_available_with_items"
+    if available_count > 0:
+        return "comments_source_available_empty"
+    return "separate_source_not_found_in_checked_rest_paths"
+
+
 def run_comment_probe(
     *,
     board_id: str,
@@ -124,16 +153,20 @@ def run_comment_probe(
 
     by_classification = Counter(result["classification"] for result in results)
     available = [result for result in results if result["classification"] == "available"]
+    comments = extract_comment_items(results)
     return {
         "kind": "miro_comment_source_probe",
         "board_id": board_id,
         "summary": {
             "checked": len(results),
             "available": len(available),
+            "comment_items": len(comments),
+            "available_paths": [result["key"] for result in available],
             "by_classification": dict(sorted(by_classification.items())),
         },
-        "decision": "comments_available" if available else "separate_source_not_found_in_checked_rest_paths",
+        "decision": decide_probe_result(len(available), len(comments)),
         "requests": results,
+        "comments": comments,
     }
 
 
