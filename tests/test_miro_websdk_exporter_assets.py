@@ -62,6 +62,10 @@ class MiroWebsdkExporterAssetTests(unittest.TestCase):
 
         self.assertIn("<svg", outline)
         self.assertIn("<svg", color)
+        self.assertNotIn(" role=", outline)
+        self.assertNotIn(" aria-", outline)
+        self.assertNotIn(" role=", color)
+        self.assertNotIn(" aria-", color)
         self.assertIn("sdkUri: http://localhost:8766/index.html", manifest)
         self.assertIn("boards:read", manifest)
         self.assertIn("boards:write", manifest)
