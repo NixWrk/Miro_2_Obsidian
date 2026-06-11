@@ -51,7 +51,7 @@ class MiroWebsdkExporterAssetTests(unittest.TestCase):
         self.assertIn("https://miro.com/app/static/sdk/v2/miro.js", html)
         self.assertIn('miro.board.ui.on("icon:click"', html)
         self.assertIn("miro.board.ui.openPanel", html)
-        self.assertIn("panel.html", html)
+        self.assertIn("panel.html?v=20260611-deep-table", html)
 
     def test_panel_loads_miro_sdk_and_local_exporter(self) -> None:
         html = (EXPORTER_DIR / "panel.html").read_text(encoding="utf-8")
@@ -61,6 +61,7 @@ class MiroWebsdkExporterAssetTests(unittest.TestCase):
         self.assertIn("create-generated-probe", html)
         self.assertIn("export-board", html)
         self.assertIn("export-selection", html)
+        self.assertIn("./exporter.js?v=20260611-deep-table", html)
 
     def test_toolbar_icons_and_manifest_are_present(self) -> None:
         outline = (EXPORTER_DIR / "icon-outline.svg").read_text(encoding="utf-8")
