@@ -1,0 +1,67 @@
+{
+  "description": "Synthetic slide layouts expand locally when slide fitting would crush text below the readable min-font geometry.",
+  "converter": {
+    "scale": 1.0,
+    "min_font_px": 8,
+    "theme": "dark"
+  },
+  "assertions": {
+    "node_count": 4,
+    "edge_count": 1,
+    "metadata": {
+      "startNode": "frame-readable"
+    },
+    "nodes": [
+      {
+        "id": "readable-long-text",
+        "type": "text",
+        "text_contains": "Readable slide text"
+      },
+      {
+        "id": "frame-readable",
+        "type": "group",
+        "label": "Readable Slide",
+        "group_nodes": ["readable-long-text"],
+        "min_width": 200,
+        "min_height": 112,
+        "ratio": 1.7777777778
+      },
+      {
+        "id": "frame-empty",
+        "type": "group",
+        "label": "Second Slide",
+        "group_nodes": [],
+        "ratio": 1.7777777778
+      },
+      {
+        "id": "deck-readable",
+        "type": "group",
+        "label": "Readable Deck",
+        "group_nodes": ["frame-readable", "frame-empty"]
+      }
+    ],
+    "edges": [
+      {
+        "id": "slide-sequence-frame-readable-frame-empty",
+        "fromNode": "frame-readable",
+        "toNode": "frame-empty",
+        "fromEnd": "none",
+        "toEnd": "none",
+        "color": "#00000000"
+      }
+    ],
+    "children_inside_groups": [
+      {
+        "group_id": "frame-readable",
+        "child_ids": ["readable-long-text"]
+      }
+    ],
+    "text_fits": [
+      {
+        "id": "readable-long-text",
+        "padding": 12,
+        "tolerance": 1.05
+      }
+    ]
+  }
+}

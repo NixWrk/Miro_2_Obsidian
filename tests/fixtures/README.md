@@ -51,3 +51,20 @@ It can also ask the regression test to scan every pair of selected node types:
 ```
 
 Use `types` to avoid checking Canvas `group` containers against their children.
+
+`case.json` can also assert that a text node's rendered height estimate fits
+inside the generated Canvas node:
+
+```json
+"text_fits": [
+  {
+    "id": "text-node-id",
+    "padding": 12,
+    "tolerance": 1.05
+  }
+]
+```
+
+Use this for rules where geometry can be numerically correct but Obsidian would
+still show an internal text scrollbar because `fontSize` is clamped to the
+readable minimum.

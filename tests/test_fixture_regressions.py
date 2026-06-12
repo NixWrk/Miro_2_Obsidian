@@ -15,7 +15,7 @@ FIXTURES_DIR = REPO_ROOT / "tests" / "fixtures"
 
 sys.path.insert(0, str(CONVERTER_DIR))
 
-from Converter import convert_miro_to_canvas  # noqa: E402
+from Converter import _estimate_render_height, convert_miro_to_canvas  # noqa: E402
 
 
 class CanvasValidationError(AssertionError):
@@ -251,6 +251,32 @@ def _assert_children_inside_group(testcase: unittest.TestCase, canvas: dict[str,
     )
 
 
+def _assert_text_fits(testcase: unittest.TestCase, canvas: dict[str, Any], rule: dict[str, Any]) -> None:
+    node = _node_by_id(canvas, str(rule["id"]))
+    testcase.assertEqual(node.get("type"), "text")
+
+    attrs = node.get("styleAttributes") or {}
+    font_px = int(round(float(attrs.get("fontSize") or 18)))
+    line_height = float(rule.get("line_height", 1.35))
+    padding = float(rule.get("padding", 12))
+    tolerance = float(rule.get("tolerance", 1.05))
+    needed_h = _estimate_render_height(
+        str(node.get("text") or ""),
+        width_px=float(node["width"]),
+        font_px=font_px,
+        line_height=line_height,
+        padding=padding,
+    )
+    testcase.assertLessEqual(
+        needed_h,
+        float(node["height"]) * tolerance,
+        (
+            f"Text node {node.get('id')!r} needs {needed_h:.4f}px height "
+            f"at {font_px}px font, got {float(node['height']):.4f}px"
+        ),
+    )
+
+
 class FixtureRegressionTests(unittest.TestCase):
     maxDiff = None
 
@@ -297,6 +323,9 @@ class FixtureRegressionTests(unittest.TestCase):
 
                 for rule in assertions.get("children_inside_groups", []):
                     _assert_children_inside_group(self, canvas, rule)
+
+                for rule in assertions.get("text_fits", []):
+                    _assert_text_fits(self, canvas, rule)
 
     def test_fixture_conversion_is_deterministic(self) -> None:
         for fixture_dir in _fixture_dirs():

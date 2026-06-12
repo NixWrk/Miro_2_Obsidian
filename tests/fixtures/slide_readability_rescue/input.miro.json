@@ -1,0 +1,81 @@
+{
+  "items": [
+    {
+      "id": "deck-readable",
+      "type": "slide_container",
+      "position": {
+        "x": 0,
+        "y": 0,
+        "origin": "center",
+        "relativeTo": "canvas_center"
+      },
+      "data": {
+        "title": "Readable Deck"
+      }
+    },
+    {
+      "id": "frame-readable",
+      "type": "frame",
+      "parent": {
+        "id": "deck-readable"
+      },
+      "position": {
+        "x": 0,
+        "y": 0,
+        "origin": "center",
+        "relativeTo": "parent_top_left"
+      },
+      "geometry": {
+        "width": 120,
+        "height": 67.5
+      },
+      "data": {
+        "title": "Readable Slide"
+      }
+    },
+    {
+      "id": "readable-long-text",
+      "type": "text",
+      "parent": {
+        "id": "frame-readable"
+      },
+      "position": {
+        "x": 420,
+        "y": 36,
+        "origin": "center",
+        "relativeTo": "parent_top_left"
+      },
+      "geometry": {
+        "width": 360,
+        "height": 54
+      },
+      "style": {
+        "fontSize": "18",
+        "color": "#1a1a1a"
+      },
+      "data": {
+        "content": "<p>Readable slide text should not be crushed into a tiny scrolling box.</p>"
+      }
+    },
+    {
+      "id": "frame-empty",
+      "type": "frame",
+      "parent": {
+        "id": "deck-readable"
+      },
+      "position": {
+        "x": 0,
+        "y": 0,
+        "origin": "center",
+        "relativeTo": "parent_top_left"
+      },
+      "geometry": {
+        "width": 120,
+        "height": 67.5
+      },
+      "data": {
+        "title": "Second Slide"
+      }
+    }
+  ]
+}
