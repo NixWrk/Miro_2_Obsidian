@@ -154,6 +154,9 @@ def _assert_edge(testcase: unittest.TestCase, canvas: dict[str, Any], expected: 
             continue
         if "toNode" in expected and str(edge.get("toNode")) != str(expected["toNode"]):
             continue
+        for key in ("fromEnd", "toEnd", "color"):
+            if key in expected:
+                testcase.assertEqual(edge.get(key), expected[key])
         return
     testcase.fail(f"Expected edge was not found: {expected!r}")
 

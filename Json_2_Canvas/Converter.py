@@ -3204,6 +3204,46 @@ def _add_mindmap_hierarchy_edges(
         existing_ids.add(edge_id)
 
 
+def _add_slide_sequence_edges(
+    slide_ids: List[str],
+    node_map: Dict[str, Dict[str, Any]],
+    edges: List[Dict[str, Any]],
+) -> None:
+    """Advanced Canvas presentation mode follows outgoing edges from metadata.startNode."""
+    existing_ids = {str(edge.get("id")) for edge in edges}
+    existing_pairs = {
+        (str(edge.get("fromNode") or ""), str(edge.get("toNode") or ""))
+        for edge in edges
+    }
+
+    ordered_slide_ids: List[str] = []
+    seen: set[str] = set()
+    for slide_id in slide_ids:
+        if not slide_id or slide_id in seen or slide_id not in node_map:
+            continue
+        ordered_slide_ids.append(slide_id)
+        seen.add(slide_id)
+
+    for from_id, to_id in zip(ordered_slide_ids, ordered_slide_ids[1:]):
+        if (from_id, to_id) in existing_pairs:
+            continue
+
+        edge_id = f"slide-sequence-{from_id}-{to_id}"
+        if edge_id in existing_ids:
+            continue
+
+        edges.append({
+            "id": edge_id,
+            "fromNode": from_id,
+            "toNode": to_id,
+            "fromEnd": "none",
+            "toEnd": "none",
+            "color": "#00000000",
+        })
+        existing_ids.add(edge_id)
+        existing_pairs.add((from_id, to_id))
+
+
 def convert_miro_to_canvas(
     json_path: str,
     target_dir: str,
@@ -3656,7 +3696,12 @@ def convert_miro_to_canvas(
         node_map[cid] = group_node
 
 
-
+    slide_sequence_ids: List[str] = []
+    for did in deck_order:
+        for fid in children.get(did) or []:
+            if fid in slide_frame_id_set:
+                slide_sequence_ids.append(fid)
+    _add_slide_sequence_edges(slide_sequence_ids, node_map, edges)
 
     # --- НОРМАЛИЗАЦИЯ: центрируем «вещественные» элементы в (0, 0)
     bb = _bbox_of_real_nodes(nodes, include_groups=False)  # считаем только по non-group
