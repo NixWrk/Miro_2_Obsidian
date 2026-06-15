@@ -617,6 +617,16 @@ def resolve_local_file_name(item: Dict[str, Any], fallback_id: str) -> str:
     return name or f"file_{fallback_id}.bin"
 
 
+def resolve_image_file_name(item: Dict[str, Any], fallback_id: str) -> str:
+    data = item.get("data", {}) or {}
+    name = item.get("local_name") or os.path.basename(data.get("title") or "")
+    if not name:
+        name = f"file_{fallback_id}.png"
+    if not Path(name).suffix:
+        name = f"{name}.png"
+    return name
+
+
 def compact_attachment_name(local_name: str, fallback_id: str, prefix: str) -> str:
     suffix = Path(local_name or "").suffix or ".bin"
     clean_id = re.sub(r"[^0-9A-Za-z_-]+", "", str(fallback_id)) or "file"
@@ -3241,16 +3251,18 @@ def convert_item_to_canvas_node(
         if is_slot or is_doc_parent:
             return None
 
-        local_name = resolve_local_file_name(item, base["id"])
         if item_type == "image":
+            local_name = resolve_image_file_name(item, base["id"])
             local_name = prepare_compact_attachment_reference(
                 new_files_folder,
                 local_name,
                 base["id"],
                 "img",
             )
+        else:
+            local_name = resolve_local_file_name(item, base["id"])
         abs_path = os.path.join(new_files_folder, local_name)
-        if os.path.isfile(abs_path):
+        if os.path.isfile(abs_path) or item_type == "image":
             rel = relpath_from_vault(abs_path, vault_root)
             node = {**base, "type": "file", "file": rel}
 

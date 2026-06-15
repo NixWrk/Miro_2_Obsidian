@@ -1,5 +1,5 @@
 {
-  "description": "Image items without a local downloaded asset fall back to a link instead of a broken Obsidian file node.",
+  "description": "Image items without a local downloaded asset stay file nodes so Obsidian preserves the image slot, even if it reports a missing local file.",
   "converter": {
     "scale": 1.0,
     "min_font_px": 8,
@@ -11,8 +11,8 @@
     "nodes": [
       {
         "id": "image-without-local-file",
-        "type": "link",
-        "url": "https://example.invalid/missing-preview.png",
+        "type": "file",
+        "file_contains": "img_local-file.png",
         "width": 320,
         "height": 180
       }
