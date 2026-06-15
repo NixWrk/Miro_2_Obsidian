@@ -15,6 +15,7 @@ from Converter import (  # noqa: E402
     _expand_short_inline_label_widths,
     _is_short_text_label,
     _recover_embed_url,
+    _resolve_link_text_edge_overlaps,
     _resolve_link_visual_overlaps,
     _resolve_text_text_horizontal_edge_overlaps,
     _resolve_short_label_visual_vertical_overlaps,
@@ -185,6 +186,62 @@ class TextLayoutTests(unittest.TestCase):
 
         self.assertEqual(nodes[0]["x"], -190)
         self.assertLessEqual(nodes[1]["y"] + nodes[1]["height"], nodes[0]["y"] - 16)
+
+    def test_link_text_edge_clearance_moves_link_away_from_colored_text(self) -> None:
+        nodes = [
+            {
+                "id": "video",
+                "type": "link",
+                "x": 0,
+                "y": 0,
+                "width": 320,
+                "height": 180,
+                "url": "https://example.com/video",
+            },
+            {
+                "id": "sticky",
+                "type": "text",
+                "x": -80,
+                "y": 176,
+                "width": 260,
+                "height": 120,
+                "text": '<span style="font-size:20px; line-height:1.35">sticky note</span>',
+                "styleAttributes": {"border": "invisible", "fontSize": 20},
+                "color": "#FFF59D",
+            },
+        ]
+
+        _resolve_link_text_edge_overlaps(nodes)
+
+        self.assertEqual(nodes[1]["y"], 176)
+        self.assertLessEqual(nodes[0]["y"] + nodes[0]["height"], nodes[1]["y"] - 16)
+
+    def test_link_text_edge_clearance_ignores_deep_overlap(self) -> None:
+        nodes = [
+            {
+                "id": "video",
+                "type": "link",
+                "x": 0,
+                "y": 0,
+                "width": 320,
+                "height": 180,
+                "url": "https://example.com/video",
+            },
+            {
+                "id": "text",
+                "type": "text",
+                "x": 0,
+                "y": 80,
+                "width": 320,
+                "height": 160,
+                "text": '<span style="font-size:20px; line-height:1.35">Source overlap</span>',
+                "styleAttributes": {"border": "invisible", "fontSize": 20},
+            },
+        ]
+
+        _resolve_link_text_edge_overlaps(nodes)
+
+        self.assertEqual(nodes[0]["y"], 0)
 
     def test_short_label_visual_clearance_moves_label_above_neighbor(self) -> None:
         nodes = [

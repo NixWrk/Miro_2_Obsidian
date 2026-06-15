@@ -1,0 +1,42 @@
+{
+  "description": "Generated link cards keep clearance from nearby text or sticky-note nodes when the overlap is only a tiny converted edge.",
+  "converter": {
+    "scale": 1.0,
+    "min_font_px": 8,
+    "theme": "dark"
+  },
+  "assertions": {
+    "node_count": 2,
+    "edge_count": 0,
+    "nodes": [
+      {
+        "id": "solo-link-edge",
+        "type": "link",
+        "url": "https://www.youtube.com/watch?v=aqz-KE-bpKQ",
+        "min_width": 360,
+        "min_height": 202
+      },
+      {
+        "id": "empty-sticky-edge",
+        "type": "text",
+        "text_contains": "sticky note"
+      }
+    ],
+    "non_overlapping_pairs": [
+      [
+        "solo-link-edge",
+        "empty-sticky-edge"
+      ]
+    ],
+    "no_overlapping_nodes": [
+      {
+        "types": [
+          "text",
+          "link"
+        ],
+        "min_overlap_width": 0,
+        "min_overlap_height": 0
+      }
+    ]
+  }
+}

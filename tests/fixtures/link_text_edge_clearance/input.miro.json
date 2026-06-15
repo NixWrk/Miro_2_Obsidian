@@ -1,0 +1,50 @@
+[
+  {
+    "id": "solo-link-edge",
+    "type": "text",
+    "data": {
+      "content": "<p><a href=\"https://www.youtube.com/watch?v=aqz-KE-bpKQ\">REST YouTube link probe</a></p>"
+    },
+    "style": {
+      "fillColor": "#ffffff",
+      "fillOpacity": "0.0",
+      "fontFamily": "open_sans",
+      "fontSize": "14",
+      "textAlign": "left",
+      "color": "#1a1a1a"
+    },
+    "geometry": {
+      "width": 360.0
+    },
+    "position": {
+      "x": 0.0,
+      "y": 0.0,
+      "origin": "center",
+      "relativeTo": "canvas_center"
+    }
+  },
+  {
+    "id": "empty-sticky-edge",
+    "type": "sticky_note",
+    "subtype": "sticky_note",
+    "data": {
+      "content": "",
+      "shape": "square"
+    },
+    "style": {
+      "fillColor": "light_yellow",
+      "textAlign": "center",
+      "textAlignVertical": "middle"
+    },
+    "geometry": {
+      "width": 335.0,
+      "height": 200.0
+    },
+    "position": {
+      "x": -70.0,
+      "y": 281.0,
+      "origin": "center",
+      "relativeTo": "canvas_center"
+    }
+  }
+]

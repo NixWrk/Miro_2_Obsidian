@@ -31,6 +31,8 @@ TEXT_TEXT_VERTICAL_MAX_PASSES = 8
 TEXT_TEXT_HORIZONTAL_EDGE_MAX_RATIO = 0.15
 TEXT_TEXT_HORIZONTAL_EDGE_MAX_PASSES = 16
 LINK_VISUAL_MAX_PASSES = 8
+LINK_TEXT_EDGE_MAX_PASSES = 8
+LINK_TEXT_EDGE_MAX_OVERLAP_PX = 8
 SHORT_LABEL_VISUAL_MAX_PASSES = 32
 TEXT_VISUAL_VERTICAL_MAX_PASSES = 32
 TEXT_VISUAL_VERTICAL_MIN_RATIO = 0.25
@@ -1856,6 +1858,76 @@ def _resolve_link_visual_overlaps(
                 link_node["x"] = new_x
                 link_node["y"] = new_y
                 changed = True
+                break
+
+        if not changed:
+            return
+
+
+def _resolve_link_text_edge_overlaps(
+    nodes: List[Dict[str, Any]],
+    *,
+    clearance_px: int = TEXT_VISUAL_CLEARANCE_PX,
+    max_edge_overlap_px: float = LINK_TEXT_EDGE_MAX_OVERLAP_PX,
+    max_passes: int = LINK_TEXT_EDGE_MAX_PASSES,
+) -> None:
+    for _ in range(max_passes):
+        changed = False
+        links = [n for n in nodes if n.get("type") == "link"]
+        texts = [n for n in nodes if n.get("type") == "text"]
+
+        for link_node in links:
+            link_rect = _node_rect(link_node)
+            if not link_rect:
+                continue
+
+            for text_node in texts:
+                text_rect = _node_rect(text_node)
+                link_rect = _node_rect(link_node)
+                if not link_rect or not text_rect:
+                    continue
+
+                overlap_w, overlap_h = _rect_overlap(link_rect, text_rect)
+                if overlap_w <= 0 or overlap_h <= 0:
+                    continue
+                if min(overlap_w, overlap_h) > max_edge_overlap_px:
+                    continue
+
+                lx0, ly0, lx1, ly1 = link_rect
+                tx0, ty0, tx1, ty1 = text_rect
+                link_w = lx1 - lx0
+                link_h = ly1 - ly0
+                candidates = [
+                    (lx0, ty0 - clearance_px - link_h),
+                    (lx0, ty1 + clearance_px),
+                    (tx0 - clearance_px - link_w, ly0),
+                    (tx1 + clearance_px, ly0),
+                ]
+
+                collision_free: list[tuple[float, float, float]] = []
+                for new_x, new_y in candidates:
+                    candidate_rect = (new_x, new_y, new_x + link_w, new_y + link_h)
+                    distance = abs(new_x - lx0) + abs(new_y - ly0)
+                    if not _candidate_rect_overlaps_any_node(
+                        nodes,
+                        candidate_rect,
+                        skip_id=str(link_node.get("id", "")),
+                        overlap_tolerance_px=1.0,
+                    ):
+                        collision_free.append((distance, new_x, new_y))
+
+                if not collision_free:
+                    continue
+
+                _distance, new_x, new_y = min(collision_free, key=lambda c: c[0])
+                if abs(new_x - lx0) <= 1e-9 and abs(new_y - ly0) <= 1e-9:
+                    continue
+                link_node["x"] = new_x
+                link_node["y"] = new_y
+                changed = True
+                break
+
+            if changed:
                 break
 
         if not changed:
@@ -3829,6 +3901,7 @@ def convert_miro_to_canvas(
     _compact_short_inline_label_heights(layout_nodes)
     _resolve_ultra_narrow_label_visual_overlaps(layout_nodes)
     _resolve_link_visual_overlaps(layout_nodes)
+    _resolve_link_text_edge_overlaps(layout_nodes)
     _resolve_short_label_visual_vertical_overlaps(layout_nodes)
     _resolve_text_visual_vertical_stack_overlaps(layout_nodes)
     _resolve_text_text_vertical_overlaps(layout_nodes)
@@ -3837,6 +3910,7 @@ def convert_miro_to_canvas(
     for _ in range(4):
         _compact_short_inline_label_heights(layout_nodes)
         _resolve_ultra_narrow_label_visual_overlaps(layout_nodes)
+        _resolve_link_text_edge_overlaps(layout_nodes)
         _resolve_short_label_visual_vertical_overlaps(layout_nodes)
         _resolve_text_visual_vertical_stack_overlaps(layout_nodes)
         _resolve_text_text_vertical_overlaps(layout_nodes)
