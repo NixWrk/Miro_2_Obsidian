@@ -157,6 +157,34 @@ class MiroRestExportBoardTests(unittest.TestCase):
         self.assertEqual(stats["failed"], 1)
         self.assertEqual(items[0]["data"]["imageUrl"], "https://api.miro.test/images/1")
 
+    def test_download_export_assets_treats_embed_preview_as_optional(self) -> None:
+        items = [
+            {
+                "id": "embed-1",
+                "type": "embed",
+                "data": {
+                    "title": "External video",
+                    "previewUrl": "https://cdn.example.test/missing-preview.png",
+                },
+            },
+        ]
+        messages: list[str] = []
+
+        with tempfile.TemporaryDirectory() as tmp:
+            output = Path(tmp) / "exports" / "board.json"
+            with patch("miro_rest_export_board.download_resource_with_redirect", return_value=None):
+                stats = download_export_assets(
+                    items,
+                    output_path=output,
+                    token="token-1",
+                    logger=messages.append,
+                )
+
+        self.assertEqual(stats, {"images": 0, "documents": 0, "doc_formats": 0, "embeds": 1, "failed": 0})
+        self.assertNotIn("local_name", items[0])
+        self.assertTrue(any("asset_optional_failed id=embed-1" in message for message in messages))
+        self.assertFalse(any("asset_missing embed-1" in message for message in messages))
+
 
 if __name__ == "__main__":
     unittest.main()

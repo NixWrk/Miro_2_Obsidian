@@ -224,6 +224,10 @@ def download_export_assets(
         if logger:
             logger(f"asset_failed id={item_id} reason={reason}")
 
+    def on_optional_fail(item_id: str, reason: str) -> None:
+        if logger:
+            logger(f"asset_optional_failed id={item_id} reason={reason}")
+
     if images:
         download_all(
             images,
@@ -312,9 +316,9 @@ def download_export_assets(
                     got_path.unlink(missing_ok=True)
                 except OSError:
                     pass
-            on_fail(item_id, "embed preview download failed or was not an image")
+            on_optional_fail(item_id, "embed preview download failed or was not an image")
 
-    required_resources = images + documents + doc_formats + embeds
+    required_resources = images + documents + doc_formats
     missing_assets = _validate_downloaded_assets(required_resources, attachments_dir=attachments_dir)
     if missing_assets:
         failed += len(missing_assets)
