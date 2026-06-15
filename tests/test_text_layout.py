@@ -14,6 +14,7 @@ from Converter import (  # noqa: E402
     _compact_tiny_slide_text_heights,
     _estimate_render_height,
     _expand_short_inline_label_widths,
+    _fit_slide_child_nodes_to_frame_rects,
     _is_short_text_label,
     _recover_embed_url,
     _resolve_link_text_edge_overlaps,
@@ -285,6 +286,41 @@ class TextLayoutTests(unittest.TestCase):
         _compact_tiny_slide_text_heights(nodes)
 
         self.assertEqual(nodes[0]["height"], 9)
+
+    def test_slide_child_fitting_clamps_rounded_node_inside_frame(self) -> None:
+        node_map = {
+            "child": {
+                "id": "child",
+                "type": "file",
+                "x": 0,
+                "y": 0,
+                "width": 20,
+                "height": 50,
+            }
+        }
+        by_id = {
+            "child": {
+                "id": "child",
+                "type": "image",
+                "position": {"x": 10, "y": 24, "origin": "center"},
+                "geometry": {"width": 20, "height": 48},
+            }
+        }
+
+        _fit_slide_child_nodes_to_frame_rects(
+            node_map,
+            by_id,
+            {"frame": ["child"]},
+            ["frame"],
+            {"frame": {"x": 0, "y": 0, "width": 100, "height": 50}},
+            scale=1.0,
+            min_font_px=8,
+        )
+
+        self.assertEqual(node_map["child"]["x"], 40)
+        self.assertEqual(node_map["child"]["y"], 0)
+        self.assertLessEqual(node_map["child"]["x"] + node_map["child"]["width"], 100)
+        self.assertLessEqual(node_map["child"]["y"] + node_map["child"]["height"], 50)
 
     def test_tiny_slide_marker_text_overlap_shrinks_text_from_left(self) -> None:
         nodes = [

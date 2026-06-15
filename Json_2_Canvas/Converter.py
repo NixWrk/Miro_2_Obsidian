@@ -2536,6 +2536,31 @@ def _set_node_font_px(node: Dict[str, Any], font_px: int) -> None:
             node["text"] = text
 
 
+def _clamp_node_to_scaled_rect(
+    node: Dict[str, Any],
+    rect_unscaled: Dict[str, float],
+    *,
+    scale: float,
+) -> None:
+    frame_x = float(rect_unscaled["x"]) * scale
+    frame_y = float(rect_unscaled["y"]) * scale
+    frame_w = max(float(rect_unscaled["width"]) * scale, 1.0)
+    frame_h = max(float(rect_unscaled["height"]) * scale, 1.0)
+
+    node_w = max(float(node.get("width") or 0.0), 1.0)
+    node_h = max(float(node.get("height") or 0.0), 1.0)
+    node_x = float(node.get("x") or 0.0)
+    node_y = float(node.get("y") or 0.0)
+
+    if node_w <= frame_w:
+        node_x = min(max(node_x, frame_x), frame_x + frame_w - node_w)
+    if node_h <= frame_h:
+        node_y = min(max(node_y, frame_y), frame_y + frame_h - node_h)
+
+    node["x"] = node_x
+    node["y"] = node_y
+
+
 def _fit_slide_child_nodes_to_frame_rects(
     node_map: Dict[str, Dict[str, Any]],
     by_id: Dict[str, Dict[str, Any]],
@@ -2603,6 +2628,7 @@ def _fit_slide_child_nodes_to_frame_rects(
             center_y = float(frame_rect["y"]) + offset_y + (local_y - origin_y) * fit
             node["x"] = center_x * scale - float(node["width"]) / 2.0
             node["y"] = center_y * scale - float(node["height"]) / 2.0
+            _clamp_node_to_scaled_rect(node, frame_rect, scale=scale)
 
     return slide_child_ids
 
