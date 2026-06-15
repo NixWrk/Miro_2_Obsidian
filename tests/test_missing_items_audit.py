@@ -36,12 +36,42 @@ class MissingItemsAuditTests(unittest.TestCase):
         self.assertEqual(result.reason, "table_source_limited")
         self.assertFalse(result.actionable)
 
+    def test_classifies_position_only_unsupported_item_as_actionable(self) -> None:
+        item = {"id": "custom-1", "type": "custom_widget", "position": {"x": 1, "y": 2}, "isSupported": False}
+
+        result = classify_missing_item(item)
+
+        self.assertEqual(result.reason, "unsupported_position_only")
+        self.assertTrue(result.actionable)
+
+    def test_classifies_known_position_only_source_limited_item(self) -> None:
+        item = {"id": "flip-1", "type": "flip_card", "position": {"x": 1, "y": 2}, "isSupported": False}
+
+        result = classify_missing_item(item)
+
+        self.assertEqual(result.reason, "source_limited_unsupported_content")
+        self.assertFalse(result.actionable)
+
     def test_classifies_empty_table_text_as_source_limited(self) -> None:
         item = {
             "id": "cell-1",
             "type": "table_text",
             "isSupported": False,
             "geometry": {"width": 120, "height": 30},
+            "position": {"x": 0, "y": 0},
+        }
+
+        result = classify_missing_item(item)
+
+        self.assertEqual(result.reason, "table_source_limited")
+        self.assertFalse(result.actionable)
+
+    def test_classifies_empty_table_item_as_source_limited(self) -> None:
+        item = {
+            "id": "table-1",
+            "type": "table",
+            "isSupported": False,
+            "geometry": {"width": 320, "height": 180},
             "position": {"x": 0, "y": 0},
         }
 

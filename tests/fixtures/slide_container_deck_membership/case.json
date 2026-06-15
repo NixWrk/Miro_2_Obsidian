@@ -7,7 +7,7 @@
   },
   "assertions": {
     "node_count": 7,
-    "edge_count": 2,
+    "edge_count": 1,
     "metadata": {
       "startNode": "frame-a1"
     },
@@ -64,14 +64,6 @@
         "id": "slide-sequence-frame-a1-frame-a2",
         "fromNode": "frame-a1",
         "toNode": "frame-a2",
-        "fromEnd": "none",
-        "toEnd": "none",
-        "color": "#00000000"
-      },
-      {
-        "id": "slide-sequence-frame-a2-frame-b1",
-        "fromNode": "frame-a2",
-        "toNode": "frame-b1",
         "fromEnd": "none",
         "toEnd": "none",
         "color": "#00000000"

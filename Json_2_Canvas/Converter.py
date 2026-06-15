@@ -36,9 +36,19 @@ TEXT_VISUAL_VERTICAL_MAX_PASSES = 32
 TEXT_VISUAL_VERTICAL_MIN_RATIO = 0.25
 TEXT_VISUAL_CASCADE_MAX_PASSES = 64
 SLIDE_THUMBNAIL_MIN_FONT_PX = 1
+SYNTHETIC_SLIDE_THUMBNAIL_MAX_SIDE = 240.0
+SYNTHETIC_SLIDE_DECK_TOP_ROW_COUNT = 4
 SHORT_LABEL_COMPACT_PADDING = 16
 ULTRA_NARROW_LABEL_WIDTH_PX = 16
 ULTRA_NARROW_LABEL_FALLBACK_WIDTHS = (176, 128, 96, 64, 32)
+SOURCE_LIMITED_DROP_TYPES = {
+    "dynamic_poll",
+    "flip_card",
+    "people",
+    "prototyping_screen",
+    "table",
+    "widgets_stack",
+}
 SHORT_LABEL_SINGLE_LINE_PADDING = 64
 SHORT_LABEL_SINGLE_LINE_AVG_CHAR_WIDTH = 0.50
 SHORT_LABEL_WIDTH_MIN_GROW = 32
@@ -618,6 +628,27 @@ def prepare_compact_attachment_reference(
     if os.path.exists(src) and not os.path.exists(dst):
         shutil.copy2(src, dst)
     return compact_name
+
+
+def _attachment_file_exists(files_folder: str, local_name: str) -> bool:
+    if not local_name:
+        return False
+    return os.path.isfile(os.path.join(files_folder, local_name))
+
+
+def _recover_attachment_url(item: Dict[str, Any], *data_keys: str) -> str | None:
+    data = item.get("data") if isinstance(item.get("data"), dict) else {}
+    for key in data_keys:
+        url = _normalize_external_url(str(data.get(key) or ""))
+        if url:
+            return url
+
+    links = item.get("links") if isinstance(item.get("links"), dict) else {}
+    for key in ("web", "self"):
+        url = _normalize_external_url(str(links.get(key) or ""))
+        if url:
+            return url
+    return None
 
 def extract_bg_color(item: Dict[str, Any]) -> Optional[str]:
     """
@@ -2076,29 +2107,92 @@ def _layout_slide_frames_unscaled(
             anchor_x = 0.0
             anchor_y = 0.0
 
-        rects = [container_rects_unscaled[fid] for fid in frame_ids]
+        rects = []
+        has_capped_thumbnail = False
+        for fid in frame_ids:
+            rect = dict(container_rects_unscaled[fid])
+            width = max(float(rect["width"]), 1.0)
+            height = max(float(rect["height"]), 1.0)
+            max_side = max(width, height)
+            if max_side > SYNTHETIC_SLIDE_THUMBNAIL_MAX_SIDE:
+                has_capped_thumbnail = True
+                fit = SYNTHETIC_SLIDE_THUMBNAIL_MAX_SIDE / max_side
+                width *= fit
+                height *= fit
+            rect["width"] = width
+            rect["height"] = height
+            rects.append(rect)
+
         max_w = max(float(r["width"]) for r in rects)
         max_h = max(float(r["height"]) for r in rects)
         gap_x = max(24.0, min(80.0, max_w * 0.08))
+        use_large_deck_overview = (
+            has_capped_thumbnail
+            and len(rects) > SYNTHETIC_SLIDE_DECK_TOP_ROW_COUNT
+        )
 
-        total_w = sum(float(r["width"]) for r in rects) + gap_x * max(0, len(rects) - 1)
-        total_h = max_h
-        start_x = anchor_x - total_w / 2.0
-        start_y = anchor_y - total_h / 2.0
+        if use_large_deck_overview:
+            top_count = min(SYNTHETIC_SLIDE_DECK_TOP_ROW_COUNT, len(rects))
+            top_rects = rects[:top_count]
+            trailing_rects = rects[top_count:]
+            gap_y = max(48.0, min(96.0, max_h * 0.55))
 
-        cur_x = start_x
-        for fid in frame_ids:
-            rect = container_rects_unscaled[fid]
-            width = float(rect["width"])
-            height = float(rect["height"])
-            container_rects_unscaled[fid] = {
-                "x": cur_x,
-                "y": start_y + (max_h - height) / 2.0,
-                "width": width,
-                "height": height,
-            }
-            synthesized_frame_ids.add(fid)
-            cur_x += width + gap_x
+            top_w = (
+                sum(float(r["width"]) for r in top_rects)
+                + gap_x * max(0, len(top_rects) - 1)
+            )
+            total_w = max(top_w, max((float(r["width"]) for r in trailing_rects), default=0.0))
+            total_h = max_h
+            if trailing_rects:
+                total_h += gap_y * len(trailing_rects)
+                total_h += sum(float(r["height"]) for r in trailing_rects)
+
+            start_x = anchor_x - total_w / 2.0
+            start_y = anchor_y - total_h / 2.0
+
+            cur_x = start_x
+            for fid, rect in zip(frame_ids[:top_count], top_rects):
+                width = float(rect["width"])
+                height = float(rect["height"])
+                container_rects_unscaled[fid] = {
+                    "x": cur_x,
+                    "y": start_y + (max_h - height) / 2.0,
+                    "width": width,
+                    "height": height,
+                }
+                synthesized_frame_ids.add(fid)
+                cur_x += width + gap_x
+
+            cur_y = start_y + max_h + gap_y
+            for fid, rect in zip(frame_ids[top_count:], trailing_rects):
+                width = float(rect["width"])
+                height = float(rect["height"])
+                container_rects_unscaled[fid] = {
+                    "x": start_x,
+                    "y": cur_y,
+                    "width": width,
+                    "height": height,
+                }
+                synthesized_frame_ids.add(fid)
+                cur_y += height + gap_y
+        else:
+            total_w = sum(float(r["width"]) for r in rects) + gap_x * max(0, len(rects) - 1)
+            total_h = max_h
+            start_x = anchor_x - total_w / 2.0
+            start_y = anchor_y - total_h / 2.0
+
+            cur_x = start_x
+            for fid, rect in zip(frame_ids, rects):
+                width = float(rect["width"])
+                height = float(rect["height"])
+                container_rects_unscaled[fid] = {
+                    "x": cur_x,
+                    "y": start_y + (max_h - height) / 2.0,
+                    "width": width,
+                    "height": height,
+                }
+                synthesized_frame_ids.add(fid)
+                cur_x += width + gap_x
 
     return synthesized_frame_ids
 
@@ -2424,6 +2518,24 @@ def _format_comment_html(item: Dict[str, Any]) -> str:
     return "".join(parts) if len(parts) > 1 else ""
 
 
+def _has_canvas_position(item: Dict[str, Any]) -> bool:
+    pos = item.get("position")
+    return (
+        isinstance(pos, dict)
+        and pos.get("x") is not None
+        and pos.get("y") is not None
+    )
+
+
+def _position_only_placeholder_size(item_type: str) -> tuple[float, float]:
+    sizes = {
+        "flip_card": (180.0, 240.0),
+        "people": (240.0, 150.0),
+        "widgets_stack": (260.0, 150.0),
+    }
+    return sizes.get(item_type, (220.0, 130.0))
+
+
 
 
 # =========================
@@ -2483,6 +2595,12 @@ def convert_item_to_canvas_node(
         if not str(local_name).lower().endswith(".pdf"):
             local_name = f"{local_name}.pdf"
         abs_path = os.path.join(new_files_folder, local_name)
+        if not os.path.isfile(abs_path):
+            url = _recover_attachment_url(item, "documentUrl", "url")
+            if url:
+                return {**base, "type": "link", "url": url}
+            return None
+
         rel = relpath_from_vault(abs_path, vault_root)
         node: Dict[str, Any] = {**base, "type": "file", "file": rel}
         max_w, max_h = 500.0, 700.0
@@ -2785,8 +2903,27 @@ def convert_item_to_canvas_node(
                 "img",
             )
         abs_path = os.path.join(new_files_folder, local_name)
-        rel = relpath_from_vault(abs_path, vault_root)
-        node = {**base, "type": "file", "file": rel}
+        if os.path.isfile(abs_path):
+            rel = relpath_from_vault(abs_path, vault_root)
+            node = {**base, "type": "file", "file": rel}
+
+            if item_type == "document":
+                max_w, max_h = 500.0, 700.0
+                w, h = float(node["width"]), float(node["height"])
+                if w > max_w or h > max_h:
+                    k = min(max_w / max(w, 1e-6), max_h / max(h, 1e-6))
+                    node["width"], node["height"] = w * k, h * k
+            return node
+
+        url = _recover_attachment_url(
+            item,
+            "imageUrl" if item_type == "image" else "documentUrl",
+            "url",
+        )
+        if not url:
+            return None
+
+        node = {**base, "type": "link", "url": url}
 
         if item_type == "document":
             max_w, max_h = 500.0, 700.0
@@ -2877,7 +3014,7 @@ def convert_item_to_canvas_node(
             Path(local_name).suffix.lower() in _EMBED_IMAGE_EXTS
         )
 
-        if local_name_is_image:
+        if local_name_is_image and _attachment_file_exists(new_files_folder, local_name):
             # Скачанное превью — реальное изображение → нода-файл
             local_name = prepare_compact_attachment_reference(
                 new_files_folder,
@@ -2885,6 +3022,8 @@ def convert_item_to_canvas_node(
                 base["id"],
                 "embed",
             )
+            if not _attachment_file_exists(new_files_folder, local_name):
+                return None
             abs_path = os.path.join(new_files_folder, local_name)
             rel = relpath_from_vault(abs_path, vault_root)
             node = {**base, "type": "file", "file": rel}
@@ -2950,6 +3089,16 @@ def convert_item_to_canvas_node(
 
 
     if item_type == "tag":
+        if (
+            not isinstance(item.get("position"), dict)
+            or pos.get("x") is None
+            or pos.get("y") is None
+            or not isinstance(item.get("geometry"), dict)
+            or geom.get("width") is None
+            or geom.get("height") is None
+        ):
+            return None
+
         title = item.get("title") or (item.get("data") or {}).get("title", "") or ""
         html = f"<p>[Tag] {_html_escape(title, False)}</p>"
         node = {**base, "type": "text", "text": ""}
@@ -2969,8 +3118,42 @@ def convert_item_to_canvas_node(
     if item_type in _META_TYPES:
         return None
 
-    # Если нет geometry — нет позиции на доске, дропаем
+    if item_type in SOURCE_LIMITED_DROP_TYPES:
+        return None
+
+    # Если нет geometry, но есть позиция, сохраняем диагностический placeholder:
+    # Miro показывает такие unsupported элементы на доске, но не отдаёт их размер.
     if not item.get("geometry"):
+        position_only_skip_types = {"data_table_format", "table_text"}
+        if item_type not in position_only_skip_types and _has_canvas_position(item):
+            default_w, default_h = _position_only_placeholder_size(item_type)
+            center_x = float(pos.get("x") or 0.0) * scale
+            center_y = float(pos.get("y") or 0.0) * scale
+            node_w = max(default_w * scale, 120.0)
+            node_h = max(default_h * scale, 80.0)
+            label = item_type.replace("_", " ")
+            title = (item.get("data") or {}).get("title", "") or item.get("title", "")
+            title_part = f": {_html_escape(str(title), False)}" if title else ""
+            placeholder_html = (
+                f'<p><em>[{label}{title_part}]</em></p>'
+                f'<p style="font-size:0.8em; opacity:0.6;">'
+                f'Position only; size/content not exposed by Miro API</p>'
+            )
+            node = {
+                "id": str(item.get("id", "")),
+                "type": "text",
+                "x": center_x - node_w / 2.0,
+                "y": center_y - node_h / 2.0,
+                "width": node_w,
+                "height": node_h,
+                "text": (
+                    f'<div style="font-size:{min_font_px}px; line-height:1.4">'
+                    f'{placeholder_html}</div>'
+                ),
+            }
+            node.setdefault("styleAttributes", {})["fontSize"] = min_font_px
+            return node
+
         return None
 
     # Есть geometry → создаём текстовую заглушку с указанием типа
@@ -3740,12 +3923,12 @@ def convert_miro_to_canvas(
         node_map[cid] = group_node
 
 
-    slide_sequence_ids: List[str] = []
     for did in deck_order:
+        slide_sequence_ids: List[str] = []
         for fid in children.get(did) or []:
             if fid in slide_frame_id_set:
                 slide_sequence_ids.append(fid)
-    _add_slide_sequence_edges(slide_sequence_ids, node_map, edges)
+        _add_slide_sequence_edges(slide_sequence_ids, node_map, edges)
 
     # --- НОРМАЛИЗАЦИЯ: центрируем «вещественные» элементы в (0, 0)
     bb = _bbox_of_real_nodes(nodes, include_groups=False)  # считаем только по non-group

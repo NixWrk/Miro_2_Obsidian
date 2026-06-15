@@ -1,0 +1,74 @@
+{
+  "description": "Visible Miro connectors between items inside different slide frames are preserved while slide sequence links remain invisible.",
+  "converter": {
+    "scale": 1.0,
+    "min_font_px": 8,
+    "theme": "dark"
+  },
+  "assertions": {
+    "node_count": 5,
+    "edge_count": 2,
+    "metadata": {
+      "startNode": "arrow-frame-1"
+    },
+    "nodes": [
+      {
+        "id": "arrow-shape-1",
+        "type": "text",
+        "text_contains": "1"
+      },
+      {
+        "id": "arrow-shape-2",
+        "type": "text",
+        "text_contains": "2"
+      },
+      {
+        "id": "arrow-frame-1",
+        "type": "group",
+        "label": "Slide 1",
+        "group_nodes": ["arrow-shape-1"],
+        "ratio": 1.7777777778
+      },
+      {
+        "id": "arrow-frame-2",
+        "type": "group",
+        "label": "Slide 2",
+        "group_nodes": ["arrow-shape-2"],
+        "ratio": 1.7777777778
+      },
+      {
+        "id": "deck-with-arrow",
+        "type": "group",
+        "label": "Slides",
+        "group_nodes": ["arrow-frame-1", "arrow-frame-2"]
+      }
+    ],
+    "edges": [
+      {
+        "id": "arrow-between-slide-items",
+        "fromNode": "arrow-shape-1",
+        "toNode": "arrow-shape-2",
+        "fromEnd": "none",
+        "toEnd": "arrow"
+      },
+      {
+        "id": "slide-sequence-arrow-frame-1-arrow-frame-2",
+        "fromNode": "arrow-frame-1",
+        "toNode": "arrow-frame-2",
+        "fromEnd": "none",
+        "toEnd": "none",
+        "color": "#00000000"
+      }
+    ],
+    "children_inside_groups": [
+      {
+        "group_id": "arrow-frame-1",
+        "child_ids": ["arrow-shape-1"]
+      },
+      {
+        "group_id": "arrow-frame-2",
+        "child_ids": ["arrow-shape-2"]
+      }
+    ]
+  }
+}

@@ -1,0 +1,18 @@
+[
+  {
+    "id": "flip-card-position-only",
+    "type": "flip_card",
+    "isSupported": false,
+    "position": {
+      "x": 100,
+      "y": 50,
+      "origin": "center",
+      "relativeTo": "canvas_center"
+    }
+  },
+  {
+    "id": "unknown-without-position",
+    "type": "widgets_stack",
+    "isSupported": false
+  }
+]

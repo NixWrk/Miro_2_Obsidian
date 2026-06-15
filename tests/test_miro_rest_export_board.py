@@ -12,7 +12,7 @@ SCRIPTS_DIR = REPO_ROOT / "scripts"
 
 sys.path.insert(0, str(SCRIPTS_DIR))
 
-from miro_rest_export_board import export_board_items, write_json  # noqa: E402
+from miro_rest_export_board import download_export_assets, export_board_items, write_json  # noqa: E402
 
 
 class MiroRestExportBoardTests(unittest.TestCase):
@@ -40,6 +40,42 @@ class MiroRestExportBoardTests(unittest.TestCase):
 
             self.assertTrue(path.exists())
             self.assertIn('"item-1"', path.read_text(encoding="utf-8"))
+
+    def test_download_export_assets_creates_sidecar_and_sets_local_names(self) -> None:
+        items = [
+            {"id": "img-1", "type": "image", "data": {"imageUrl": "https://api.miro.test/images/1?redirect=false"}},
+            {"id": "doc-1", "type": "document", "data": {"documentUrl": "https://api.miro.test/documents/1?redirect=false"}},
+            {
+                "id": "embed-1",
+                "type": "embed",
+                "data": {
+                    "title": "Video",
+                    "previewUrl": "https://cdn.example.test/preview.png",
+                },
+            },
+        ]
+
+        def fake_download_all(resources, _save_path, _token, _safe_team, _safe_board, **kwargs):
+            id_to_final_path = kwargs["id_to_final_path"]
+            for resource in resources:
+                resource["local_name"] = id_to_final_path[str(resource["id"])].name
+
+        with tempfile.TemporaryDirectory() as tmp:
+            output = Path(tmp) / "exports" / "board.json"
+            embed_path = output.with_name("board_files") / "rest_board_Video.png"
+            with (
+                patch("miro_rest_export_board.download_all", side_effect=fake_download_all) as dl_all,
+                patch("miro_rest_export_board.download_resource_with_redirect", return_value=embed_path) as dl_embed,
+            ):
+                stats = download_export_assets(items, output_path=output, token="token-1")
+
+        self.assertEqual(stats, {"images": 1, "documents": 1, "embeds": 1, "failed": 0})
+        self.assertEqual(dl_all.call_count, 2)
+        self.assertTrue(hasattr(dl_all.call_args_list[0].kwargs["gui_root"], "after"))
+        dl_embed.assert_called_once()
+        self.assertTrue(items[0]["local_name"])
+        self.assertTrue(items[1]["local_name"])
+        self.assertEqual(items[2]["local_name"], "rest_board_Video.png")
 
 
 if __name__ == "__main__":

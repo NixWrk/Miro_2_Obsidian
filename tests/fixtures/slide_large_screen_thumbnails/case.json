@@ -1,0 +1,80 @@
+{
+  "description": "Synthetic slide decks with large screen frames render as compact Miro-like thumbnails.",
+  "converter": {
+    "scale": 1.0,
+    "min_font_px": 8,
+    "theme": "dark"
+  },
+  "assertions": {
+    "node_count": 5,
+    "edge_count": 2,
+    "metadata": {
+      "startNode": "screen-frame-1"
+    },
+    "nodes": [
+      {
+        "id": "screen-frame-1",
+        "type": "group",
+        "label": "Screen 1",
+        "width": 240,
+        "height": 135,
+        "ratio": 1.7777777778,
+        "group_nodes": ["screen-text"]
+      },
+      {
+        "id": "screen-frame-2",
+        "type": "group",
+        "label": "Screen 2",
+        "width": 240,
+        "height": 135,
+        "ratio": 1.7777777778,
+        "group_nodes": []
+      },
+      {
+        "id": "screen-frame-3",
+        "type": "group",
+        "label": "Screen 3",
+        "width": 240,
+        "height": 135,
+        "ratio": 1.7777777778,
+        "group_nodes": []
+      },
+      {
+        "id": "deck-large",
+        "type": "group",
+        "label": "Slides",
+        "group_nodes": ["screen-frame-1", "screen-frame-2", "screen-frame-3"],
+        "max_width": 820,
+        "max_height": 170
+      }
+    ],
+    "non_overlapping_pairs": [
+      ["screen-frame-1", "screen-frame-2"],
+      ["screen-frame-2", "screen-frame-3"]
+    ],
+    "children_inside_groups": [
+      {
+        "group_id": "screen-frame-1",
+        "child_ids": ["screen-text"]
+      }
+    ],
+    "edges": [
+      {
+        "id": "slide-sequence-screen-frame-1-screen-frame-2",
+        "fromNode": "screen-frame-1",
+        "toNode": "screen-frame-2",
+        "fromEnd": "none",
+        "toEnd": "none",
+        "color": "#00000000"
+      },
+      {
+        "id": "slide-sequence-screen-frame-2-screen-frame-3",
+        "fromNode": "screen-frame-2",
+        "toNode": "screen-frame-3",
+        "fromEnd": "none",
+        "toEnd": "none",
+        "color": "#00000000"
+      }
+    ]
+  }
+}

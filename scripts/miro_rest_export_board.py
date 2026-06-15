@@ -13,8 +13,15 @@ MIRO_JSON_DIR = REPO_ROOT / "Miro_2_Json"
 sys.path.insert(0, str(MIRO_JSON_DIR))
 sys.path.insert(0, str(REPO_ROOT / "scripts"))
 
-from miro_downloader import _dedupe_miro_items, add_browser_links, get_items_on_board  # noqa: E402
+from miro_downloader import (  # noqa: E402
+    _dedupe_miro_items,
+    add_browser_links,
+    download_all,
+    download_resource_with_redirect,
+    get_items_on_board,
+)
 from miro_oauth_token import DEFAULT_BROWSER, DEFAULT_REDIRECT_URI  # noqa: E402
+from utils import compute_target_filename, make_unique_in_batch  # noqa: E402
 
 
 def export_board_items(
@@ -38,6 +45,154 @@ def export_board_items(
 def write_json(path: Path, payload: Any) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
+def _asset_dir_for_output(output_path: Path) -> Path:
+    return output_path.with_name(f"{output_path.stem}_files")
+
+
+class _ImmediateCallbackTarget:
+    def after(self, _delay_ms: int, callback: Any) -> None:
+        callback()
+
+
+def _id_to_final_paths(
+    resources: list[dict[str, Any]],
+    *,
+    attachments_dir: Path,
+    safe_board: str,
+    is_image: bool,
+) -> dict[str, Path]:
+    wanted = [
+        attachments_dir / compute_target_filename(
+            item,
+            "rest",
+            safe_board,
+            rename_files=True,
+            is_image=is_image,
+        )
+        for item in resources
+    ]
+    final_paths = make_unique_in_batch(wanted)
+    return {
+        str(item["id"]): path
+        for item, path in zip(resources, final_paths)
+        if item.get("id") is not None
+    }
+
+
+def download_export_assets(
+    items: list[dict[str, Any]],
+    *,
+    output_path: Path,
+    token: str,
+    logger: Any | None = None,
+) -> dict[str, int]:
+    attachments_dir = _asset_dir_for_output(output_path)
+    attachments_dir.mkdir(parents=True, exist_ok=True)
+    safe_board = output_path.stem
+
+    images = [
+        item for item in items
+        if item.get("type") == "image" and (item.get("data") or {}).get("imageUrl")
+    ]
+    documents = [
+        item for item in items
+        if item.get("type") == "document" and (item.get("data") or {}).get("documentUrl")
+    ]
+    embeds = [
+        item for item in items
+        if item.get("type") == "embed" and (item.get("data") or {}).get("previewUrl")
+    ]
+
+    failed = 0
+
+    def on_fail(item_id: str, reason: str) -> None:
+        nonlocal failed
+        failed += 1
+        if logger:
+            logger(f"asset_failed id={item_id} reason={reason}")
+
+    if images:
+        download_all(
+            images,
+            attachments_dir,
+            token,
+            "rest",
+            safe_board,
+            is_image=True,
+            strategy="overwrite",
+            id_to_final_path=_id_to_final_paths(
+                images,
+                attachments_dir=attachments_dir,
+                safe_board=safe_board,
+                is_image=True,
+            ),
+            gui_root=_ImmediateCallbackTarget(),
+            on_file_fail=on_fail,
+        )
+
+    if documents:
+        download_all(
+            documents,
+            attachments_dir,
+            token,
+            "rest",
+            safe_board,
+            is_image=False,
+            strategy="overwrite",
+            id_to_final_path=_id_to_final_paths(
+                documents,
+                attachments_dir=attachments_dir,
+                safe_board=safe_board,
+                is_image=False,
+            ),
+            gui_root=_ImmediateCallbackTarget(),
+            on_file_fail=on_fail,
+        )
+
+    image_exts = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".svg"}
+    embed_paths = _id_to_final_paths(
+        embeds,
+        attachments_dir=attachments_dir,
+        safe_board=safe_board,
+        is_image=True,
+    )
+    for item in embeds:
+        item_id = str(item.get("id") or "")
+        preview_url = str((item.get("data") or {}).get("previewUrl") or "")
+        final_path = embed_paths.get(item_id)
+        if not final_path or not preview_url:
+            continue
+        got_path = download_resource_with_redirect(
+            preview_url,
+            final_path,
+            token,
+            overwrite_when_guessing_ext=True,
+        )
+        if got_path and got_path.suffix.lower() in image_exts:
+            item["local_name"] = got_path.name
+        else:
+            if got_path:
+                try:
+                    got_path.unlink(missing_ok=True)
+                except OSError:
+                    pass
+            on_fail(item_id, "embed preview download failed or was not an image")
+
+    stats = {
+        "images": len(images),
+        "documents": len(documents),
+        "embeds": len(embeds),
+        "failed": failed,
+    }
+    if logger:
+        logger(
+            "assets="
+            f"images:{stats['images']} documents:{stats['documents']} "
+            f"embeds:{stats['embeds']} failed:{stats['failed']}"
+        )
+    return stats
 
 
 def resolve_token_from_args(args: argparse.Namespace) -> str:
@@ -72,6 +227,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--board-id", required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--stable-items", action="store_true", help="Use stable v2 items instead of v2-experimental.")
+    parser.add_argument("--no-download-assets", action="store_true", help="Write JSON only; do not create the sidecar _files folder.")
     parser.add_argument("--token-env", default="MIRO_ACCESS_TOKEN")
     parser.add_argument("--oauth", action="store_true")
     parser.add_argument("--oauth-client-id-env", default="MIRO_CLIENT_ID")
@@ -98,6 +254,8 @@ def main() -> int:
         prefer_experimental=not args.stable_items,
         logger=messages.append,
     )
+    if not args.no_download_assets:
+        download_export_assets(items, output_path=args.output, token=token, logger=messages.append)
     write_json(args.output, items)
     print(f"items={len(items)}")
     print(f"output={args.output}")

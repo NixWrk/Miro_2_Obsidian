@@ -1,0 +1,15 @@
+{
+  "description": "Tags without source geometry are dropped instead of becoming phantom nodes at canvas origin.",
+  "converter": {
+    "scale": 1.0,
+    "min_font_px": 8,
+    "theme": "dark"
+  },
+  "assertions": {
+    "node_count": 0,
+    "edge_count": 0,
+    "absent_node_ids": [
+      "floating-tag"
+    ]
+  }
+}

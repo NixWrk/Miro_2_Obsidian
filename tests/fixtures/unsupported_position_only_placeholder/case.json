@@ -1,0 +1,16 @@
+{
+  "description": "Known source-limited unsupported items with position but no geometry are dropped from Canvas and classified in the audit.",
+  "converter": {
+    "scale": 1.0,
+    "min_font_px": 8,
+    "theme": "dark"
+  },
+  "assertions": {
+    "node_count": 0,
+    "edge_count": 0,
+    "absent_node_ids": [
+      "flip-card-position-only",
+      "unknown-without-position"
+    ]
+  }
+}

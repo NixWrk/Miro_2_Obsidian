@@ -1,0 +1,21 @@
+{
+  "description": "Image items without a local downloaded asset fall back to a link instead of a broken Obsidian file node.",
+  "converter": {
+    "scale": 1.0,
+    "min_font_px": 8,
+    "theme": "dark"
+  },
+  "assertions": {
+    "node_count": 1,
+    "edge_count": 0,
+    "nodes": [
+      {
+        "id": "image-without-local-file",
+        "type": "link",
+        "url": "https://example.invalid/missing-preview.png",
+        "width": 320,
+        "height": 180
+      }
+    ]
+  }
+}

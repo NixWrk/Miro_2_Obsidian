@@ -14,6 +14,13 @@ from typing import Any, Iterable
 REPO_ROOT = Path(__file__).resolve().parents[1]
 CONVERTER_DIR = REPO_ROOT / "Json_2_Canvas"
 DEFAULT_LIMIT = 50
+SOURCE_LIMITED_UNSUPPORTED_TYPES = {
+    "dynamic_poll",
+    "flip_card",
+    "people",
+    "prototyping_screen",
+    "widgets_stack",
+}
 
 
 @dataclass(frozen=True)
@@ -89,6 +96,11 @@ def _table_like_has_recoverable_content(item: dict[str, Any]) -> bool:
     return any(str(value or "").strip() for value in values)
 
 
+def _has_canvas_position(item: dict[str, Any]) -> bool:
+    position = item.get("position") if isinstance(item.get("position"), dict) else {}
+    return position.get("x") is not None and position.get("y") is not None
+
+
 def classify_missing_item(item: dict[str, Any]) -> MissingMiroItem:
     item_id = str(item.get("id") or "")
     item_type = str(item.get("type") or "").lower()
@@ -132,6 +144,24 @@ def classify_missing_item(item: dict[str, Any]) -> MissingMiroItem:
             title,
         )
 
+    if item_type == "table" and not _table_like_has_recoverable_content(item):
+        return MissingMiroItem(
+            item_id,
+            item_type,
+            "table_source_limited",
+            "Miro export exposes table geometry but no recoverable cell text/layout.",
+            title,
+        )
+
+    if item_type in SOURCE_LIMITED_UNSUPPORTED_TYPES:
+        return MissingMiroItem(
+            item_id,
+            item_type,
+            "source_limited_unsupported_content",
+            "Current Miro export exposes no recoverable content for this unsupported item family.",
+            title,
+        )
+
     if item_type == "connector":
         start = (item.get("startItem") or {}).get("id") if isinstance(item.get("startItem"), dict) else None
         end = (item.get("endItem") or {}).get("id") if isinstance(item.get("endItem"), dict) else None
@@ -145,6 +175,15 @@ def classify_missing_item(item: dict[str, Any]) -> MissingMiroItem:
             )
 
     if not item.get("geometry"):
+        if item_type not in {"tag", "data_table_format", "table_text"} and _has_canvas_position(item):
+            return MissingMiroItem(
+                item_id,
+                item_type,
+                "unsupported_position_only",
+                "Source exposes a board position but no size/content; converter should keep a diagnostic placeholder.",
+                title,
+                actionable=True,
+            )
         return MissingMiroItem(
             item_id,
             item_type,
