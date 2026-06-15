@@ -30,6 +30,15 @@ TEXT_TEXT_VERTICAL_OVERLAP_MIN_RATIO = 0.45
 TEXT_TEXT_VERTICAL_MAX_PASSES = 8
 TEXT_TEXT_HORIZONTAL_EDGE_MAX_RATIO = 0.15
 TEXT_TEXT_HORIZONTAL_EDGE_MAX_PASSES = 16
+TINY_TEXT_TEXT_VERTICAL_EDGE_MAX_OVERLAP_PX = 4
+TINY_TEXT_TEXT_VERTICAL_EDGE_CLEARANCE_PX = 1
+TINY_TEXT_TEXT_VERTICAL_EDGE_MAX_HEIGHT_PX = 48
+TINY_TEXT_TEXT_VERTICAL_EDGE_MIN_HORIZONTAL_RATIO = 0.80
+TINY_TEXT_TEXT_VERTICAL_EDGE_MAX_PASSES = 16
+TINY_SLIDE_TEXT_MAX_FONT_PX = 7
+TINY_SLIDE_TEXT_MAX_HEIGHT_PX = 48
+TINY_SLIDE_TEXT_COMPACT_PADDING = 2
+TINY_SLIDE_MARKER_TEXT_CLEARANCE_PX = 1
 LINK_VISUAL_MAX_PASSES = 8
 LINK_TEXT_EDGE_MAX_PASSES = 8
 LINK_TEXT_EDGE_MAX_OVERLAP_PX = 8
@@ -1794,6 +1803,188 @@ def _resolve_text_text_horizontal_edge_overlaps(
 
             if changed:
                 break
+
+        if not changed:
+            return
+
+
+def _has_visible_text(node: Dict[str, Any]) -> bool:
+    text = str(node.get("text") or "")
+    plain = _html_unescape(strip_html(text)).replace("\xa0", " ")
+    plain = re.sub(r"\s+", " ", plain).strip()
+    return bool(plain)
+
+
+def _compact_tiny_slide_text_heights(
+    nodes: List[Dict[str, Any]],
+    *,
+    max_font_px: int = TINY_SLIDE_TEXT_MAX_FONT_PX,
+    max_height_px: float = TINY_SLIDE_TEXT_MAX_HEIGHT_PX,
+    padding: int = TINY_SLIDE_TEXT_COMPACT_PADDING,
+) -> None:
+    for node in nodes:
+        if not _is_clearance_text_node(node) or not _has_visible_text(node):
+            continue
+        attrs = node.get("styleAttributes") or {}
+        shape = str(attrs.get("shape") or "").lower()
+        if shape not in ("", "rectangle", "round-rectangle"):
+            continue
+
+        try:
+            font_px = int(round(float(attrs.get("fontSize") or OBSIDIAN_FONT_SIZE)))
+            width = float(node.get("width") or 0)
+            current_h = float(node.get("height") or 0)
+        except Exception:
+            continue
+        if font_px <= 0 or font_px > max_font_px:
+            continue
+        if width <= 0 or current_h <= 0 or current_h > max_height_px:
+            continue
+
+        text = str(node.get("text") or "")
+        if re.search(r"<(?:ol|ul|table|li)\b", text, re.I):
+            continue
+        line_height = _line_height_from_canvas_text(text)
+        needed_h = float(
+            _estimate_render_height(
+                text,
+                width_px=width,
+                font_px=font_px,
+                line_height=line_height,
+                padding=padding,
+            )
+        )
+        if 0 < needed_h < current_h:
+            node["height"] = needed_h
+
+
+def _plain_canvas_text(node: Dict[str, Any]) -> str:
+    text = str(node.get("text") or "")
+    plain = _html_unescape(strip_html(text)).replace("\xa0", " ")
+    return re.sub(r"\s+", " ", plain).strip()
+
+
+def _is_tiny_slide_number_marker(node: Dict[str, Any]) -> bool:
+    if node.get("type") != "text":
+        return False
+    attrs = node.get("styleAttributes") or {}
+    if str(attrs.get("shape") or "").lower() != "circle":
+        return False
+    try:
+        font_px = int(round(float(attrs.get("fontSize") or OBSIDIAN_FONT_SIZE)))
+        width = float(node.get("width") or 0)
+        height = float(node.get("height") or 0)
+    except Exception:
+        return False
+    if font_px > TINY_SLIDE_TEXT_MAX_FONT_PX + 1 or width > 20 or height > 20:
+        return False
+    return bool(re.fullmatch(r"\d{1,2}", _plain_canvas_text(node)))
+
+
+def _resolve_tiny_slide_marker_text_overlaps(
+    nodes: List[Dict[str, Any]],
+    *,
+    clearance_px: int = TINY_SLIDE_MARKER_TEXT_CLEARANCE_PX,
+) -> None:
+    markers = [n for n in nodes if _is_tiny_slide_number_marker(n)]
+    if not markers:
+        return
+
+    for text_node in nodes:
+        if not _is_clearance_text_node(text_node) or not _has_visible_text(text_node):
+            continue
+        if _is_tiny_slide_number_marker(text_node):
+            continue
+        attrs = text_node.get("styleAttributes") or {}
+        try:
+            font_px = int(round(float(attrs.get("fontSize") or OBSIDIAN_FONT_SIZE)))
+        except Exception:
+            continue
+        if font_px > TINY_SLIDE_TEXT_MAX_FONT_PX:
+            continue
+
+        text_rect = _node_rect(text_node)
+        if not text_rect:
+            continue
+        tx0, ty0, tx1, ty1 = text_rect
+        required_x: float | None = None
+        for marker in markers:
+            marker_rect = _node_rect(marker)
+            if not marker_rect:
+                continue
+            overlap_w, overlap_h = _rect_overlap(text_rect, marker_rect)
+            if overlap_w <= 0 or overlap_h <= 0:
+                continue
+            candidate_x = marker_rect[2] + clearance_px
+            if required_x is None or candidate_x > required_x:
+                required_x = candidate_x
+
+        if required_x is None or tx0 >= required_x:
+            continue
+        new_width = tx1 - required_x
+        if new_width <= 1:
+            continue
+        text_node["x"] = required_x
+        text_node["width"] = new_width
+
+
+def _resolve_tiny_text_text_vertical_edge_overlaps(
+    nodes: List[Dict[str, Any]],
+    *,
+    clearance_px: int = TINY_TEXT_TEXT_VERTICAL_EDGE_CLEARANCE_PX,
+    max_vertical_overlap_px: float = TINY_TEXT_TEXT_VERTICAL_EDGE_MAX_OVERLAP_PX,
+    max_text_height_px: float = TINY_TEXT_TEXT_VERTICAL_EDGE_MAX_HEIGHT_PX,
+    min_horizontal_overlap_ratio: float = TINY_TEXT_TEXT_VERTICAL_EDGE_MIN_HORIZONTAL_RATIO,
+    max_passes: int = TINY_TEXT_TEXT_VERTICAL_EDGE_MAX_PASSES,
+) -> None:
+    text_nodes = [
+        n for n in nodes
+        if _is_clearance_text_node(n) and _has_visible_text(n)
+    ]
+    if len(text_nodes) < 2:
+        return
+
+    for _ in range(max_passes):
+        changed = False
+        text_nodes.sort(key=lambda n: (float(n.get("y", 0) or 0), float(n.get("x", 0) or 0)))
+
+        for i, upper_node in enumerate(text_nodes):
+            upper_rect = _node_rect(upper_node)
+            if not upper_rect:
+                continue
+            ux0, uy0, ux1, uy1 = upper_rect
+            upper_w = ux1 - ux0
+            upper_h = uy1 - uy0
+            if upper_h > max_text_height_px:
+                continue
+            upper_center_y = (uy0 + uy1) / 2.0
+
+            for lower_node in text_nodes[i + 1:]:
+                lower_rect = _node_rect(lower_node)
+                if not lower_rect:
+                    continue
+                lx0, ly0, lx1, ly1 = lower_rect
+                lower_h = ly1 - ly0
+                if lower_h > max_text_height_px:
+                    continue
+                if (ly0 + ly1) / 2.0 <= upper_center_y:
+                    continue
+
+                overlap_w, overlap_h = _rect_overlap(upper_rect, lower_rect)
+                if overlap_w <= 0 or overlap_h <= 0:
+                    continue
+                if overlap_h > max_vertical_overlap_px:
+                    continue
+
+                min_w = min(upper_w, lx1 - lx0)
+                if min_w <= 0 or overlap_w < min_w * min_horizontal_overlap_ratio:
+                    continue
+
+                required_y = uy1 + clearance_px
+                if ly0 >= required_y:
+                    continue
+                lower_node["y"] = required_y
+                changed = True
 
         if not changed:
             return
@@ -3890,6 +4081,13 @@ def convert_miro_to_canvas(
         None,
         synthetic_slide_frame_ids,
     )
+    slide_child_layout_nodes = [
+        node_map[cid] for cid in slide_child_node_ids
+        if cid in node_map
+    ]
+    _compact_tiny_slide_text_heights(slide_child_layout_nodes)
+    _resolve_tiny_slide_marker_text_overlaps(slide_child_layout_nodes)
+    _resolve_tiny_text_text_vertical_edge_overlaps(slide_child_layout_nodes)
     layout_nodes = [
         node for node in nodes
         if str(node.get("id", "") or "") not in slide_child_node_ids

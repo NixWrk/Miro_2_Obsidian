@@ -11,6 +11,7 @@ sys.path.insert(0, str(CONVERTER_DIR))
 from Converter import (  # noqa: E402
     _compact_short_label_html,
     _compact_short_inline_label_heights,
+    _compact_tiny_slide_text_heights,
     _estimate_render_height,
     _expand_short_inline_label_widths,
     _is_short_text_label,
@@ -22,6 +23,8 @@ from Converter import (  # noqa: E402
     _resolve_text_text_vertical_overlaps,
     _resolve_text_visual_horizontal_overlaps,
     _resolve_text_visual_vertical_stack_overlaps,
+    _resolve_tiny_slide_marker_text_overlaps,
+    _resolve_tiny_text_text_vertical_edge_overlaps,
     _resolve_ultra_narrow_label_visual_overlaps,
     _strip_edge_empty_paragraphs,
 )
@@ -160,6 +163,157 @@ class TextLayoutTests(unittest.TestCase):
         _resolve_text_text_horizontal_edge_overlaps(nodes)
 
         self.assertGreaterEqual(nodes[1]["x"], nodes[0]["x"] + nodes[0]["width"] + 16)
+
+    def test_tiny_text_text_vertical_edge_clearance_moves_lower_text_minimally(self) -> None:
+        nodes = [
+            {
+                "id": "agenda-1",
+                "type": "text",
+                "x": 0,
+                "y": 0,
+                "width": 92,
+                "height": 30,
+                "text": '<span style="font-size:4px; line-height:1.35">Description of your agenda item</span>',
+                "styleAttributes": {"border": "invisible", "fontSize": 4},
+            },
+            {
+                "id": "agenda-3",
+                "type": "text",
+                "x": 0,
+                "y": 27,
+                "width": 92,
+                "height": 30,
+                "text": '<span style="font-size:4px; line-height:1.35">Description of your agenda item</span>',
+                "styleAttributes": {"border": "invisible", "fontSize": 4},
+            },
+        ]
+
+        _resolve_tiny_text_text_vertical_edge_overlaps(nodes)
+
+        self.assertEqual(nodes[0]["y"], 0)
+        self.assertEqual(nodes[1]["y"], 31)
+
+    def test_tiny_text_text_vertical_edge_clearance_ignores_deep_overlap(self) -> None:
+        nodes = [
+            {
+                "id": "upper",
+                "type": "text",
+                "x": 0,
+                "y": 0,
+                "width": 92,
+                "height": 30,
+                "text": '<span style="font-size:4px; line-height:1.35">Agenda item</span>',
+                "styleAttributes": {"border": "invisible", "fontSize": 4},
+            },
+            {
+                "id": "lower",
+                "type": "text",
+                "x": 0,
+                "y": 18,
+                "width": 92,
+                "height": 30,
+                "text": '<span style="font-size:4px; line-height:1.35">Agenda item</span>',
+                "styleAttributes": {"border": "invisible", "fontSize": 4},
+            },
+        ]
+
+        _resolve_tiny_text_text_vertical_edge_overlaps(nodes)
+
+        self.assertEqual(nodes[1]["y"], 18)
+
+    def test_tiny_text_text_vertical_edge_clearance_ignores_empty_text(self) -> None:
+        nodes = [
+            {
+                "id": "empty-decoration",
+                "type": "text",
+                "x": 0,
+                "y": 0,
+                "width": 12,
+                "height": 12,
+                "text": "",
+                "styleAttributes": {"border": "invisible", "fontSize": 4},
+            },
+            {
+                "id": "label",
+                "type": "text",
+                "x": 0,
+                "y": 10,
+                "width": 12,
+                "height": 12,
+                "text": '<span style="font-size:4px; line-height:1.35">Label</span>',
+                "styleAttributes": {"border": "invisible", "fontSize": 4},
+            },
+        ]
+
+        _resolve_tiny_text_text_vertical_edge_overlaps(nodes)
+
+        self.assertEqual(nodes[1]["y"], 10)
+
+    def test_tiny_slide_text_height_compacts_invisible_label(self) -> None:
+        nodes = [
+            {
+                "id": "agenda-description",
+                "type": "text",
+                "x": 0,
+                "y": 0,
+                "width": 92,
+                "height": 30,
+                "text": '<span style="font-size:5px; line-height:1.35">Description of your agenda item</span>',
+                "styleAttributes": {"shape": "round-rectangle", "border": "invisible", "fontSize": 5},
+            },
+        ]
+
+        _compact_tiny_slide_text_heights(nodes)
+
+        self.assertLess(nodes[0]["height"], 30)
+        self.assertGreater(nodes[0]["height"], 0)
+
+    def test_tiny_slide_text_height_keeps_number_marker_shape(self) -> None:
+        nodes = [
+            {
+                "id": "agenda-number",
+                "type": "text",
+                "x": 0,
+                "y": 0,
+                "width": 9,
+                "height": 9,
+                "text": '<div style="font-size:5px; line-height:1.35"><p><strong>1</strong></p></div>',
+                "styleAttributes": {"shape": "circle", "border": None, "fontSize": 5},
+            },
+        ]
+
+        _compact_tiny_slide_text_heights(nodes)
+
+        self.assertEqual(nodes[0]["height"], 9)
+
+    def test_tiny_slide_marker_text_overlap_shrinks_text_from_left(self) -> None:
+        nodes = [
+            {
+                "id": "agenda-number",
+                "type": "text",
+                "x": 0,
+                "y": 0,
+                "width": 9,
+                "height": 9,
+                "text": '<div style="font-size:5px; line-height:1.35"><p><strong>1</strong></p></div>',
+                "styleAttributes": {"shape": "circle", "border": None, "fontSize": 5},
+            },
+            {
+                "id": "agenda-description",
+                "type": "text",
+                "x": -3,
+                "y": -2,
+                "width": 93,
+                "height": 15,
+                "text": '<span style="font-size:5px; line-height:1.35">Description of your agenda item</span>',
+                "styleAttributes": {"shape": "round-rectangle", "border": "invisible", "fontSize": 5},
+            },
+        ]
+
+        _resolve_tiny_slide_marker_text_overlaps(nodes)
+
+        self.assertEqual(nodes[1]["x"], 10)
+        self.assertEqual(nodes[1]["width"], 80)
 
     def test_link_visual_clearance_moves_link_away_from_file(self) -> None:
         nodes = [
