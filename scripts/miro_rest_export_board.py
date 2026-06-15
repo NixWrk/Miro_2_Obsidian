@@ -24,6 +24,12 @@ from miro_oauth_token import DEFAULT_BROWSER, DEFAULT_REDIRECT_URI  # noqa: E402
 from utils import compute_target_filename, make_unique_in_batch  # noqa: E402
 
 
+IMAGE_URL_KEYS = ("imageUrl", "url", "downloadUrl", "previewUrl", "thumbnailUrl")
+DOCUMENT_URL_KEYS = ("documentUrl", "url", "downloadUrl")
+EMBED_PREVIEW_URL_KEYS = ("previewUrl", "thumbnailUrl", "imageUrl")
+IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".svg"}
+
+
 def export_board_items(
     *,
     board_id: str,
@@ -81,12 +87,113 @@ def _id_to_final_paths(
     }
 
 
+def _first_data_url(item: dict[str, Any], keys: tuple[str, ...]) -> str:
+    data = item.get("data") if isinstance(item.get("data"), dict) else {}
+    for key in keys:
+        value = str(data.get(key) or "").strip()
+        if value:
+            return value
+    return ""
+
+
+def _ensure_data_url(item: dict[str, Any], canonical_key: str, keys: tuple[str, ...]) -> bool:
+    data = item.setdefault("data", {})
+    if not isinstance(data, dict):
+        data = {}
+        item["data"] = data
+    value = _first_data_url(item, (canonical_key,))
+    if value:
+        return True
+    value = _first_data_url(item, keys)
+    if not value:
+        return False
+    data[canonical_key] = value
+    return True
+
+
+def _is_doc_format_slot_image(item: dict[str, Any]) -> bool:
+    position = item.get("position") if isinstance(item.get("position"), dict) else {}
+    if position.get("slotId"):
+        return True
+
+    parent = item.get("parent") if isinstance(item.get("parent"), dict) else {}
+    links = parent.get("links") if isinstance(parent.get("links"), dict) else {}
+    return "/doc_formats/" in str(links.get("self") or "")
+
+
+def _norm_url_without_format(raw_url: str) -> str | None:
+    if not raw_url:
+        return None
+    from urllib.parse import urlsplit
+
+    url = raw_url.split("?format")[0]
+    parts = urlsplit(url)
+    if not parts.scheme or not parts.netloc:
+        return None
+    return f"{parts.scheme}://{parts.netloc}{parts.path}"
+
+
+def _build_image_maps(
+    images: list[dict[str, Any]],
+    attachments_dir: Path,
+) -> tuple[dict[str, Path], dict[str, dict[str, Path]], dict[str, Path]]:
+    image_src_map: dict[str, Path] = {}
+    slot_map: dict[str, dict[str, Path]] = {}
+    image_id_map: dict[str, Path] = {}
+
+    for item in images:
+        local_name = item.get("local_name")
+        if not local_name:
+            continue
+        local_path = attachments_dir / str(local_name)
+        image_url = str((item.get("data") or {}).get("imageUrl") or "")
+
+        key = _norm_url_without_format(image_url)
+        if key:
+            image_src_map[key] = local_path
+
+        parent = item.get("parent") if isinstance(item.get("parent"), dict) else {}
+        position = item.get("position") if isinstance(item.get("position"), dict) else {}
+        parent_id = parent.get("id")
+        slot_id = position.get("slotId")
+        if parent_id and slot_id:
+            slot_map.setdefault(str(parent_id), {})[str(slot_id)] = local_path
+
+        import re
+
+        match = re.search(r"/images/(\d+)(?:[/?]|$)", image_url, flags=re.IGNORECASE)
+        if match:
+            image_id_map[match.group(1)] = local_path
+
+    return image_src_map, slot_map, image_id_map
+
+
+def _validate_downloaded_assets(
+    resources: list[dict[str, Any]],
+    *,
+    attachments_dir: Path,
+) -> list[str]:
+    missing: list[str] = []
+    for item in resources:
+        if item.get("type") == "image" and _is_doc_format_slot_image(item):
+            continue
+        item_id = str(item.get("id") or "<missing-id>")
+        local_name = str(item.get("local_name") or "")
+        if not local_name:
+            missing.append(f"{item_id}: missing local_name")
+            continue
+        if not (attachments_dir / local_name).is_file():
+            missing.append(f"{item_id}: missing file {local_name}")
+    return missing
+
+
 def download_export_assets(
     items: list[dict[str, Any]],
     *,
     output_path: Path,
     token: str,
     logger: Any | None = None,
+    strict: bool = True,
 ) -> dict[str, int]:
     attachments_dir = _asset_dir_for_output(output_path)
     attachments_dir.mkdir(parents=True, exist_ok=True)
@@ -94,15 +201,19 @@ def download_export_assets(
 
     images = [
         item for item in items
-        if item.get("type") == "image" and (item.get("data") or {}).get("imageUrl")
+        if item.get("type") == "image" and _ensure_data_url(item, "imageUrl", IMAGE_URL_KEYS)
     ]
     documents = [
         item for item in items
-        if item.get("type") == "document" and (item.get("data") or {}).get("documentUrl")
+        if item.get("type") == "document" and _ensure_data_url(item, "documentUrl", DOCUMENT_URL_KEYS)
+    ]
+    doc_formats = [
+        item for item in items
+        if item.get("type") == "doc_format" and (item.get("data") or {}).get("html")
     ]
     embeds = [
         item for item in items
-        if item.get("type") == "embed" and (item.get("data") or {}).get("previewUrl")
+        if item.get("type") == "embed" and _ensure_data_url(item, "previewUrl", EMBED_PREVIEW_URL_KEYS)
     ]
 
     failed = 0
@@ -132,6 +243,8 @@ def download_export_assets(
             on_file_fail=on_fail,
         )
 
+    image_src_map, slot_map, image_id_map = _build_image_maps(images, attachments_dir)
+
     if documents:
         download_all(
             documents,
@@ -151,7 +264,28 @@ def download_export_assets(
             on_file_fail=on_fail,
         )
 
-    image_exts = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".svg"}
+    if doc_formats:
+        download_all(
+            doc_formats,
+            attachments_dir,
+            token,
+            "rest",
+            safe_board,
+            is_image=False,
+            strategy="overwrite",
+            id_to_final_path=_id_to_final_paths(
+                doc_formats,
+                attachments_dir=attachments_dir,
+                safe_board=safe_board,
+                is_image=False,
+            ),
+            inline_slot_map=slot_map,
+            inline_image_url_map=image_src_map,
+            inline_image_id_map=image_id_map,
+            gui_root=_ImmediateCallbackTarget(),
+            on_file_fail=on_fail,
+        )
+
     embed_paths = _id_to_final_paths(
         embeds,
         attachments_dir=attachments_dir,
@@ -170,7 +304,7 @@ def download_export_assets(
             token,
             overwrite_when_guessing_ext=True,
         )
-        if got_path and got_path.suffix.lower() in image_exts:
+        if got_path and got_path.suffix.lower() in IMAGE_EXTS:
             item["local_name"] = got_path.name
         else:
             if got_path:
@@ -180,9 +314,22 @@ def download_export_assets(
                     pass
             on_fail(item_id, "embed preview download failed or was not an image")
 
+    required_resources = images + documents + doc_formats + embeds
+    missing_assets = _validate_downloaded_assets(required_resources, attachments_dir=attachments_dir)
+    if missing_assets:
+        failed += len(missing_assets)
+        for reason in missing_assets:
+            if logger:
+                logger(f"asset_missing {reason}")
+        if strict:
+            shown = "; ".join(missing_assets[:5])
+            more = "" if len(missing_assets) <= 5 else f"; +{len(missing_assets) - 5} more"
+            raise RuntimeError(f"Asset download incomplete: {shown}{more}")
+
     stats = {
         "images": len(images),
         "documents": len(documents),
+        "doc_formats": len(doc_formats),
         "embeds": len(embeds),
         "failed": failed,
     }
@@ -190,7 +337,8 @@ def download_export_assets(
         logger(
             "assets="
             f"images:{stats['images']} documents:{stats['documents']} "
-            f"embeds:{stats['embeds']} failed:{stats['failed']}"
+            f"doc_formats:{stats['doc_formats']} embeds:{stats['embeds']} "
+            f"failed:{stats['failed']}"
         )
     return stats
 
@@ -228,6 +376,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--stable-items", action="store_true", help="Use stable v2 items instead of v2-experimental.")
     parser.add_argument("--no-download-assets", action="store_true", help="Write JSON only; do not create the sidecar _files folder.")
+    parser.add_argument(
+        "--allow-missing-assets",
+        action="store_true",
+        help="Keep writing JSON if a downloadable attachment fails; converter may fall back to links.",
+    )
     parser.add_argument("--token-env", default="MIRO_ACCESS_TOKEN")
     parser.add_argument("--oauth", action="store_true")
     parser.add_argument("--oauth-client-id-env", default="MIRO_CLIENT_ID")
@@ -255,7 +408,13 @@ def main() -> int:
         logger=messages.append,
     )
     if not args.no_download_assets:
-        download_export_assets(items, output_path=args.output, token=token, logger=messages.append)
+        download_export_assets(
+            items,
+            output_path=args.output,
+            token=token,
+            logger=messages.append,
+            strict=not args.allow_missing_assets,
+        )
     write_json(args.output, items)
     print(f"items={len(items)}")
     print(f"output={args.output}")

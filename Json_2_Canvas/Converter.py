@@ -2721,7 +2721,7 @@ def convert_item_to_canvas_node(
     # ---------- DOC_FORMAT → FILE (PDF) ----------
     if item_type == "doc_format":
         local_name = item.get("local_name") or f"doc_{str(item.get('id', ''))}.pdf"
-        if not str(local_name).lower().endswith(".pdf"):
+        if not Path(str(local_name)).suffix:
             local_name = f"{local_name}.pdf"
         abs_path = os.path.join(new_files_folder, local_name)
         if not os.path.isfile(abs_path):

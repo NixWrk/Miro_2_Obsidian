@@ -1,0 +1,19 @@
+{
+  "description": "doc_format local HTML fallback remains a valid local file attachment instead of being rewritten to a missing PDF name.",
+  "converter": {
+    "scale": 1.0,
+    "min_font_px": 8,
+    "theme": "dark"
+  },
+  "assertions": {
+    "node_count": 1,
+    "edge_count": 0,
+    "nodes": [
+      {
+        "id": "doc-format-html",
+        "type": "file",
+        "file_contains": "doc-format-html.html"
+      }
+    ]
+  }
+}
