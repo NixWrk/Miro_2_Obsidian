@@ -2518,6 +2518,63 @@ def _format_comment_html(item: Dict[str, Any]) -> str:
     return "".join(parts) if len(parts) > 1 else ""
 
 
+def _format_code_block_html(item: Dict[str, Any], *, font_px: int, theme: str) -> tuple[str, int]:
+    data = item.get("data") if isinstance(item.get("data"), dict) else {}
+    code = str(data.get("code") or "")
+    title = str(data.get("title") or "Code").strip()
+    language = str(data.get("language") or "").strip()
+    line_numbers = bool(data.get("lineNumbersVisible"))
+
+    header_bits = []
+    if title:
+        header_bits.append(f"<strong>{_html_escape(title, quote=False)}</strong>")
+    if language:
+        header_bits.append(
+            f'<span style="opacity:0.72">{_html_escape(language, quote=False)}</span>'
+        )
+    if line_numbers:
+        header_bits.append('<span style="opacity:0.58">line-numbers</span>')
+
+    t = (theme or "light").lower()
+    pre_bg = "#111827" if t == "dark" else "#f3f4f6"
+    border = "#374151" if t == "dark" else "#d1d5db"
+    safe_code = _html_escape(code, quote=False)
+
+    html_parts = []
+    if header_bits:
+        html_parts.append(
+            '<p style="margin:0 0 6px 0;">'
+            + " · ".join(header_bits)
+            + "</p>"
+        )
+    html_parts.append(
+        '<pre style="'
+        f"font-family:Consolas, 'Courier New', monospace; "
+        f"font-size:{font_px}px; line-height:1.45; "
+        "white-space:pre-wrap; margin:0; padding:8px; "
+        f"background:{pre_bg}; border:1px solid {border}; border-radius:4px;"
+        f'"><code>{safe_code}</code></pre>'
+    )
+
+    return "".join(html_parts), max(1, code.count("\n") + 1)
+
+
+def _estimate_code_block_height(
+    code: str,
+    *,
+    width_px: float,
+    font_px: int,
+    has_header: bool,
+) -> int:
+    usable_w = max(1.0, float(width_px) - 40.0)
+    max_cols = max(1, int(usable_w / max(1.0, font_px * 0.58)))
+    code_lines = 0
+    for line in (code.splitlines() or [""]):
+        code_lines += max(1, (len(line) + max_cols - 1) // max_cols)
+    header_lines = 1 if has_header else 0
+    return int((header_lines + code_lines) * font_px * 1.45 + 48)
+
+
 def _has_canvas_position(item: Dict[str, Any]) -> bool:
     pos = item.get("position")
     return (
@@ -2876,6 +2933,33 @@ def convert_item_to_canvas_node(
         # Obsidian adds paragraph margins/padding inside text nodes; use a conservative
         # estimate so app_card fields do not end up behind an internal scrollbar.
         need_h = _estimate_render_height(html or "", width_px=base_w, font_px=font_px, line_height=lh, padding=72)
+        if need_h > node["height"]:
+            node["height"] = need_h
+        return node
+
+    # ---------- CODE → TEXT ----------
+    if item_type == "code":
+        data = item.get("data") if isinstance(item.get("data"), dict) else {}
+        code = str(data.get("code") or "")
+        title = str(data.get("title") or "").strip()
+        language = str(data.get("language") or "").strip()
+        if not code.strip() and not title and not language:
+            return None
+
+        base_font_px = _extract_font_base_px(item, fallback=12)
+        font_px = compute_font_px(scale, int(base_font_px), min_font_px)
+        html, _line_count = _format_code_block_html(item, font_px=font_px, theme=theme)
+
+        node = {**base, "type": "text", "text": ""}
+        node.setdefault("styleAttributes", {})["fontSize"] = font_px
+        node["text"] = f'<div style="font-size:{font_px}px; line-height:1.35">{html}</div>'
+
+        need_h = _estimate_code_block_height(
+            code,
+            width_px=base_w,
+            font_px=font_px,
+            has_header=bool(title or language or data.get("lineNumbersVisible")),
+        )
         if need_h > node["height"]:
             node["height"] = need_h
         return node

@@ -1,0 +1,41 @@
+{
+  "description": "Miro code blocks preserve code text, language, title, and line-number visibility instead of becoming unsupported placeholders.",
+  "converter": {
+    "scale": 1.0,
+    "min_font_px": 8,
+    "theme": "dark"
+  },
+  "assertions": {
+    "node_count": 1,
+    "edge_count": 0,
+    "nodes": [
+      {
+        "id": "code-js-1",
+        "type": "text",
+        "text_contains": "Code block"
+      },
+      {
+        "id": "code-js-1",
+        "type": "text",
+        "text_contains": "JavaScript"
+      },
+      {
+        "id": "code-js-1",
+        "type": "text",
+        "text_contains": "const answer = 42;"
+      },
+      {
+        "id": "code-js-1",
+        "type": "text",
+        "text_contains": "line-numbers"
+      },
+      {
+        "id": "code-js-1",
+        "type": "text",
+        "text_not_contains": "Тип не поддерживается API Miro",
+        "min_height": 100,
+        "font_size": 12
+      }
+    ]
+  }
+}

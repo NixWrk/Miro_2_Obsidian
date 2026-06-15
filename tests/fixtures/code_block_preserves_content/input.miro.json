@@ -1,0 +1,22 @@
+[
+  {
+    "id": "code-js-1",
+    "type": "code",
+    "data": {
+      "code": "const answer = 42;\nconsole.log(answer);",
+      "language": "JavaScript",
+      "lineNumbersVisible": true,
+      "title": "Code block"
+    },
+    "geometry": {
+      "width": 420,
+      "height": 72
+    },
+    "position": {
+      "x": 120,
+      "y": 80,
+      "origin": "center",
+      "relativeTo": "canvas_center"
+    }
+  }
+]
