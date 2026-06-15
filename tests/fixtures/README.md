@@ -68,3 +68,18 @@ inside the generated Canvas node:
 Use this for rules where geometry can be numerically correct but Obsidian would
 still show an internal text scrollbar because `fontSize` is clamped to the
 readable minimum.
+
+Node assertions support both lower and upper geometry bounds:
+
+```json
+{
+  "id": "node-id",
+  "min_width": 120,
+  "max_width": 600,
+  "min_height": 60,
+  "max_height": 100
+}
+```
+
+Use upper bounds for overview-preservation rules where a fix must not silently
+expand a Miro item into a much larger Canvas footprint.

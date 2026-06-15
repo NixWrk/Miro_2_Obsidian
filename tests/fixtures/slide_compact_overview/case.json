@@ -1,0 +1,85 @@
+{
+  "description": "Synthetic slide decks preserve a compact Miro-like board overview instead of expanding into a square grid.",
+  "converter": {
+    "scale": 1.0,
+    "min_font_px": 8,
+    "theme": "dark"
+  },
+  "assertions": {
+    "node_count": 5,
+    "edge_count": 3,
+    "metadata": {
+      "startNode": "compact-frame-1"
+    },
+    "nodes": [
+      {
+        "id": "compact-frame-1",
+        "type": "group",
+        "label": "Slide 1",
+        "ratio": 1.7777777778
+      },
+      {
+        "id": "compact-frame-2",
+        "type": "group",
+        "label": "Slide 2",
+        "ratio": 1.7777777778
+      },
+      {
+        "id": "compact-frame-3",
+        "type": "group",
+        "label": "Slide 3",
+        "ratio": 1.7777777778
+      },
+      {
+        "id": "compact-frame-4",
+        "type": "group",
+        "label": "Slide 4",
+        "ratio": 1.7777777778
+      },
+      {
+        "id": "deck-compact",
+        "type": "group",
+        "label": "Slides",
+        "group_nodes": [
+          "compact-frame-1",
+          "compact-frame-2",
+          "compact-frame-3",
+          "compact-frame-4"
+        ],
+        "max_height": 100,
+        "max_width": 600
+      }
+    ],
+    "non_overlapping_pairs": [
+      ["compact-frame-1", "compact-frame-2"],
+      ["compact-frame-2", "compact-frame-3"],
+      ["compact-frame-3", "compact-frame-4"]
+    ],
+    "edges": [
+      {
+        "id": "slide-sequence-compact-frame-1-compact-frame-2",
+        "fromNode": "compact-frame-1",
+        "toNode": "compact-frame-2",
+        "fromEnd": "none",
+        "toEnd": "none",
+        "color": "#00000000"
+      },
+      {
+        "id": "slide-sequence-compact-frame-2-compact-frame-3",
+        "fromNode": "compact-frame-2",
+        "toNode": "compact-frame-3",
+        "fromEnd": "none",
+        "toEnd": "none",
+        "color": "#00000000"
+      },
+      {
+        "id": "slide-sequence-compact-frame-3-compact-frame-4",
+        "fromNode": "compact-frame-3",
+        "toNode": "compact-frame-4",
+        "fromEnd": "none",
+        "toEnd": "none",
+        "color": "#00000000"
+      }
+    ]
+  }
+}

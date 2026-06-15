@@ -35,9 +35,7 @@ SHORT_LABEL_VISUAL_MAX_PASSES = 32
 TEXT_VISUAL_VERTICAL_MAX_PASSES = 32
 TEXT_VISUAL_VERTICAL_MIN_RATIO = 0.25
 TEXT_VISUAL_CASCADE_MAX_PASSES = 64
-SLIDE_READABILITY_MAX_EXPAND = 16.0
-SLIDE_READABILITY_RENDER_PADDING = 12
-SLIDE_READABILITY_OVERFLOW_TOLERANCE = 1.05
+SLIDE_THUMBNAIL_MIN_FONT_PX = 1
 SHORT_LABEL_COMPACT_PADDING = 16
 ULTRA_NARROW_LABEL_WIDTH_PX = 16
 ULTRA_NARROW_LABEL_FALLBACK_WIDTHS = (176, 128, 96, 64, 32)
@@ -2078,56 +2076,29 @@ def _layout_slide_frames_unscaled(
             anchor_x = 0.0
             anchor_y = 0.0
 
-        count = len(frame_ids)
-        cols = max(1, int(count ** 0.5))
-        if cols * cols < count:
-            cols += 1
-        rows = (count + cols - 1) // cols
-
         rects = [container_rects_unscaled[fid] for fid in frame_ids]
         max_w = max(float(r["width"]) for r in rects)
         max_h = max(float(r["height"]) for r in rects)
-        gap_x = max(80.0, max_w * 0.25)
-        gap_y = max(80.0, max_h * 0.35)
+        gap_x = max(24.0, min(80.0, max_w * 0.08))
 
-        col_widths = [0.0 for _ in range(cols)]
-        row_heights = [0.0 for _ in range(rows)]
-        for idx, rect in enumerate(rects):
-            col = idx % cols
-            row = idx // cols
-            col_widths[col] = max(col_widths[col], float(rect["width"]))
-            row_heights[row] = max(row_heights[row], float(rect["height"]))
-
-        total_w = sum(col_widths) + gap_x * max(0, cols - 1)
-        total_h = sum(row_heights) + gap_y * max(0, rows - 1)
+        total_w = sum(float(r["width"]) for r in rects) + gap_x * max(0, len(rects) - 1)
+        total_h = max_h
         start_x = anchor_x - total_w / 2.0
         start_y = anchor_y - total_h / 2.0
 
-        col_offsets: List[float] = []
-        cur = start_x
-        for width in col_widths:
-            col_offsets.append(cur)
-            cur += width + gap_x
-
-        row_offsets: List[float] = []
-        cur = start_y
-        for height in row_heights:
-            row_offsets.append(cur)
-            cur += height + gap_y
-
-        for idx, fid in enumerate(frame_ids):
+        cur_x = start_x
+        for fid in frame_ids:
             rect = container_rects_unscaled[fid]
-            col = idx % cols
-            row = idx // cols
             width = float(rect["width"])
             height = float(rect["height"])
             container_rects_unscaled[fid] = {
-                "x": col_offsets[col] + (col_widths[col] - width) / 2.0,
-                "y": row_offsets[row] + (row_heights[row] - height) / 2.0,
+                "x": cur_x,
+                "y": start_y + (max_h - height) / 2.0,
                 "width": width,
                 "height": height,
             }
             synthesized_frame_ids.add(fid)
+            cur_x += width + gap_x
 
     return synthesized_frame_ids
 
@@ -2186,98 +2157,16 @@ def _slide_child_boxes(
     return boxes
 
 
-def _slide_text_fits_at_scale(
-    node: Dict[str, Any],
-    item: Dict[str, Any],
-    content_scale: float,
-    min_font_px: int,
-) -> bool:
-    if node.get("type") != "text":
-        return True
-    text = str(node.get("text") or "")
-    if not strip_html(text).strip():
-        return True
-
-    attrs = node.get("styleAttributes") if isinstance(node.get("styleAttributes"), dict) else {}
-    base_font = float(attrs.get("fontSize") or OBSIDIAN_FONT_SIZE)
-    if content_scale < 1.0:
-        font_px = max(min_font_px, int(round(base_font * content_scale)))
-    else:
-        font_px = int(round(base_font))
-
-    width = max(1.0, float(node.get("width") or 1.0) * content_scale)
-    height = max(1.0, float(node.get("height") or 1.0) * content_scale)
-    line_height = _extract_line_height(item.get("style") or {}, default=1.35)
-    needed_h = _estimate_render_height(
-        text,
-        width_px=width,
-        font_px=font_px,
-        line_height=line_height,
-        padding=SLIDE_READABILITY_RENDER_PADDING,
-    )
-    return needed_h <= height * SLIDE_READABILITY_OVERFLOW_TOLERANCE
-
-
-def _compute_slide_readability_expansions(
-    node_map: Dict[str, Dict[str, Any]],
-    by_id: Dict[str, Dict[str, Any]],
-    children: Dict[str, List[str]],
-    slide_frame_ids: Iterable[str],
-    container_rects_unscaled: Dict[str, Dict[str, float]],
-    scale: float,
-    min_font_px: int,
-) -> Dict[str, float]:
-    expansions: Dict[str, float] = {}
-
-    for frame_id in slide_frame_ids:
-        frame_rect = container_rects_unscaled.get(frame_id)
-        if not frame_rect:
-            continue
-
-        child_ids = [
-            cid for cid in (children.get(frame_id) or [])
-            if cid in node_map and cid in by_id
-        ]
-        if not child_ids:
-            continue
-
-        boxes = _slide_child_boxes(child_ids, node_map, by_id, scale)
-        if not boxes:
-            continue
-
-        fit = float(_slide_fit_data(frame_rect, boxes)["fit"])
-
-        def all_text_fits(expand: float) -> bool:
-            content_scale = fit * expand
-            return all(
-                _slide_text_fits_at_scale(node_map[cid], by_id[cid], content_scale, min_font_px)
-                for cid in child_ids
-            )
-
-        if all_text_fits(1.0):
-            continue
-
-        lo = 1.0
-        hi = 1.0
-        while hi < SLIDE_READABILITY_MAX_EXPAND and not all_text_fits(hi):
-            hi *= 1.5
-        hi = min(hi, SLIDE_READABILITY_MAX_EXPAND)
-
-        if not all_text_fits(hi):
-            expansions[frame_id] = hi
-            continue
-
-        for _ in range(24):
-            mid = (lo + hi) / 2.0
-            if all_text_fits(mid):
-                hi = mid
-            else:
-                lo = mid
-
-        if hi > 1.01:
-            expansions[frame_id] = hi
-
-    return expansions
+def _set_node_font_px(node: Dict[str, Any], font_px: int) -> None:
+    attrs = node.get("styleAttributes")
+    if isinstance(attrs, dict):
+        attrs["fontSize"] = font_px
+    text = node.get("text")
+    if isinstance(text, str):
+        if FONT_SIZE_STYLE_RE.search(text):
+            node["text"] = FONT_SIZE_STYLE_RE.sub(rf"\g<1>{font_px}px", text)
+        else:
+            node["text"] = text
 
 
 def _fit_slide_child_nodes_to_frame_rects(
@@ -2289,6 +2178,7 @@ def _fit_slide_child_nodes_to_frame_rects(
     scale: float,
     min_font_px: int,
     content_scales_by_frame: Optional[Dict[str, float]] = None,
+    sub_min_font_frame_ids: Optional[set[str]] = None,
 ) -> set:
     """Place slide children inside their computed slide frame rects."""
     slide_child_ids: set = set()
@@ -2335,7 +2225,12 @@ def _fit_slide_child_nodes_to_frame_rects(
                 node["height"] = max(1.0, float(node["height"]) * fit)
                 attrs = node.get("styleAttributes")
                 if fit < 1.0 and isinstance(attrs, dict) and isinstance(attrs.get("fontSize"), (int, float)):
-                    attrs["fontSize"] = max(min_font_px, int(round(float(attrs["fontSize"]) * fit)))
+                    font_floor = (
+                        SLIDE_THUMBNAIL_MIN_FONT_PX
+                        if sub_min_font_frame_ids and frame_id in sub_min_font_frame_ids
+                        else min_font_px
+                    )
+                    _set_node_font_px(node, max(font_floor, int(round(float(attrs["fontSize"]) * fit))))
 
             center_x = float(frame_rect["x"]) + offset_x + (local_x - origin_x) * fit
             center_y = float(frame_rect["y"]) + offset_y + (local_y - origin_y) * fit
@@ -3645,39 +3540,6 @@ def convert_miro_to_canvas(
 
     _add_mindmap_hierarchy_edges(all_items, by_id, node_map, edges)
 
-    slide_content_scales: Dict[str, float] = {}
-    readability_expansions = _compute_slide_readability_expansions(
-        node_map,
-        by_id,
-        children,
-        synthetic_slide_frame_ids,
-        container_rects_unscaled,
-        scale,
-        min_font_px,
-    )
-    if readability_expansions:
-        for fid, expand in readability_expansions.items():
-            rect = container_rects_unscaled.get(fid)
-            if not rect:
-                continue
-            child_ids = [cid for cid in (children.get(fid) or []) if cid in node_map and cid in by_id]
-            boxes = _slide_child_boxes(child_ids, node_map, by_id, scale)
-            if not boxes:
-                continue
-            fit_data = _slide_fit_data(rect, boxes)
-            slide_content_scales[fid] = float(fit_data["fit"]) * float(expand)
-            cx = float(rect["x"]) + float(rect["width"]) / 2.0
-            cy = float(rect["y"]) + float(rect["height"]) / 2.0
-            new_w = float(rect["width"]) * float(expand)
-            new_h = float(rect["height"]) * float(expand)
-            rect.update({
-                "x": cx - new_w / 2.0,
-                "y": cy - new_h / 2.0,
-                "width": new_w,
-                "height": new_h,
-            })
-        _layout_slide_frames_unscaled(by_id, deck_order, slide_frames_by_deck, container_rects_unscaled)
-
     slide_child_node_ids = _fit_slide_child_nodes_to_frame_rects(
         node_map,
         by_id,
@@ -3686,7 +3548,8 @@ def convert_miro_to_canvas(
         container_rects_unscaled,
         scale,
         min_font_px,
-        slide_content_scales,
+        None,
+        synthetic_slide_frame_ids,
     )
     layout_nodes = [
         node for node in nodes

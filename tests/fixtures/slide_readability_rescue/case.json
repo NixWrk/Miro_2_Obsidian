@@ -1,5 +1,5 @@
 {
-  "description": "Synthetic slide layouts expand locally when slide fitting would crush text below the readable min-font geometry.",
+  "description": "Synthetic slide layouts keep the board overview compact and scale slide-child text inside thumbnails.",
   "converter": {
     "scale": 1.0,
     "min_font_px": 8,
@@ -15,15 +15,16 @@
       {
         "id": "readable-long-text",
         "type": "text",
-        "text_contains": "Readable slide text"
+        "text_contains": "Readable slide text",
+        "font_size": 5
       },
       {
         "id": "frame-readable",
         "type": "group",
         "label": "Readable Slide",
         "group_nodes": ["readable-long-text"],
-        "min_width": 200,
-        "min_height": 112,
+        "width": 120,
+        "height": 67.5,
         "ratio": 1.7777777778
       },
       {
@@ -54,13 +55,6 @@
       {
         "group_id": "frame-readable",
         "child_ids": ["readable-long-text"]
-      }
-    ],
-    "text_fits": [
-      {
-        "id": "readable-long-text",
-        "padding": 12,
-        "tolerance": 1.05
       }
     ]
   }

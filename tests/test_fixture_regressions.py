@@ -130,10 +130,14 @@ def _assert_node(testcase: unittest.TestCase, canvas: dict[str, Any], expected: 
         testcase.assertAlmostEqual(float(node["width"]), float(expected["width"]), places=4)
     if "min_width" in expected:
         testcase.assertGreaterEqual(float(node["width"]), float(expected["min_width"]))
+    if "max_width" in expected:
+        testcase.assertLessEqual(float(node["width"]), float(expected["max_width"]))
     if "height" in expected:
         testcase.assertAlmostEqual(float(node["height"]), float(expected["height"]), places=4)
     if "min_height" in expected:
         testcase.assertGreaterEqual(float(node["height"]), float(expected["min_height"]))
+    if "max_height" in expected:
+        testcase.assertLessEqual(float(node["height"]), float(expected["max_height"]))
     if "font_size" in expected:
         testcase.assertEqual((node.get("styleAttributes") or {}).get("fontSize"), expected["font_size"])
     if "shape" in expected:

@@ -1,0 +1,97 @@
+{
+  "items": [
+    {
+      "id": "deck-compact",
+      "type": "slide_container",
+      "position": {
+        "x": 0,
+        "y": 0,
+        "origin": "center",
+        "relativeTo": "canvas_center"
+      },
+      "data": {
+        "title": "Slides"
+      }
+    },
+    {
+      "id": "compact-frame-1",
+      "type": "frame",
+      "parent": {
+        "id": "deck-compact"
+      },
+      "position": {
+        "x": 0,
+        "y": 0,
+        "origin": "center",
+        "relativeTo": "parent_top_left"
+      },
+      "geometry": {
+        "width": 120,
+        "height": 67.5
+      },
+      "data": {
+        "title": "Slide 1"
+      }
+    },
+    {
+      "id": "compact-frame-2",
+      "type": "frame",
+      "parent": {
+        "id": "deck-compact"
+      },
+      "position": {
+        "x": 0,
+        "y": 0,
+        "origin": "center",
+        "relativeTo": "parent_top_left"
+      },
+      "geometry": {
+        "width": 120,
+        "height": 67.5
+      },
+      "data": {
+        "title": "Slide 2"
+      }
+    },
+    {
+      "id": "compact-frame-3",
+      "type": "frame",
+      "parent": {
+        "id": "deck-compact"
+      },
+      "position": {
+        "x": 0,
+        "y": 0,
+        "origin": "center",
+        "relativeTo": "parent_top_left"
+      },
+      "geometry": {
+        "width": 120,
+        "height": 67.5
+      },
+      "data": {
+        "title": "Slide 3"
+      }
+    },
+    {
+      "id": "compact-frame-4",
+      "type": "frame",
+      "parent": {
+        "id": "deck-compact"
+      },
+      "position": {
+        "x": 0,
+        "y": 0,
+        "origin": "center",
+        "relativeTo": "parent_top_left"
+      },
+      "geometry": {
+        "width": 120,
+        "height": 67.5
+      },
+      "data": {
+        "title": "Slide 4"
+      }
+    }
+  ]
+}
