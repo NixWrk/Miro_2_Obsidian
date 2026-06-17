@@ -1,0 +1,70 @@
+{
+  "description": "Small synthetic slide frames normalize to the manual target size and scale children by the same ratio.",
+  "converter": {
+    "scale": 1.0,
+    "min_font_px": 8,
+    "theme": "dark"
+  },
+  "assertions": {
+    "node_count": 4,
+    "edge_count": 0,
+    "metadata": {
+      "startNode": "small-frame"
+    },
+    "nodes": [
+      {
+        "id": "small-frame",
+        "type": "group",
+        "label": "Small Slide",
+        "width": 1200,
+        "height": 675,
+        "ratio": 1.7777777778,
+        "group_nodes": ["small-slide-text", "small-slide-image"]
+      },
+      {
+        "id": "small-slide-text",
+        "type": "text",
+        "text_contains": "Scaled text",
+        "width": 300,
+        "height": 135,
+        "font_size": 20
+      },
+      {
+        "id": "small-slide-image",
+        "type": "file",
+        "width": 120,
+        "height": 67.5
+      },
+      {
+        "id": "deck-small",
+        "type": "group",
+        "label": "Slides",
+        "group_nodes": ["small-frame"]
+      }
+    ],
+    "children_inside_groups": [
+      {
+        "group_id": "small-frame",
+        "child_ids": ["small-slide-text", "small-slide-image"]
+      }
+    ],
+    "nodes_relative_to_groups": [
+      {
+        "id": "small-slide-text",
+        "group_id": "small-frame",
+        "center_x_ratio": 0.5,
+        "center_y_ratio": 0.5,
+        "width_ratio": 0.25,
+        "height_ratio": 0.2
+      },
+      {
+        "id": "small-slide-image",
+        "group_id": "small-frame",
+        "center_x_ratio": 0.75,
+        "center_y_ratio": 0.25,
+        "width_ratio": 0.1,
+        "height_ratio": 0.1
+      }
+    ]
+  }
+}

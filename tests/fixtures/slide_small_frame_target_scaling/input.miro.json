@@ -1,7 +1,7 @@
 {
   "items": [
     {
-      "id": "deck-readable",
+      "id": "deck-small",
       "type": "slide_container",
       "position": {
         "x": 0,
@@ -10,14 +10,14 @@
         "relativeTo": "canvas_center"
       },
       "data": {
-        "title": "Readable Deck"
+        "title": "Slides"
       }
     },
     {
-      "id": "frame-readable",
+      "id": "small-frame",
       "type": "frame",
       "parent": {
-        "id": "deck-readable"
+        "id": "deck-small"
       },
       "position": {
         "x": 0,
@@ -26,55 +26,55 @@
         "relativeTo": "parent_top_left"
       },
       "geometry": {
-        "width": 120,
-        "height": 67.5
+        "width": 234.58153555895782,
+        "height": 131.95211375191377
       },
       "data": {
-        "title": "Readable Slide"
+        "title": "Small Slide"
       }
     },
     {
-      "id": "readable-long-text",
+      "id": "small-slide-text",
       "type": "text",
       "parent": {
-        "id": "frame-readable"
+        "id": "small-frame"
       },
       "position": {
-        "x": 60,
-        "y": 33.75,
+        "x": 117.29076777947891,
+        "y": 65.97605687595688,
         "origin": "center",
         "relativeTo": "parent_top_left"
       },
       "geometry": {
-        "width": 36,
-        "height": 18
+        "width": 58.64538388973946,
+        "height": 26.390422750382754
       },
       "style": {
-        "fontSize": "5",
+        "fontSize": "4",
         "color": "#1a1a1a"
       },
       "data": {
-        "content": "<p>Readable slide text should not be crushed into a tiny scrolling box.</p>"
+        "content": "<p>Scaled text</p>"
       }
     },
     {
-      "id": "frame-empty",
-      "type": "frame",
+      "id": "small-slide-image",
+      "type": "image",
       "parent": {
-        "id": "deck-readable"
+        "id": "small-frame"
       },
       "position": {
-        "x": 0,
-        "y": 0,
+        "x": 175.93615166921837,
+        "y": 32.98802843797844,
         "origin": "center",
         "relativeTo": "parent_top_left"
       },
       "geometry": {
-        "width": 120,
-        "height": 67.5
+        "width": 23.45815355589578,
+        "height": 13.195211375191378
       },
       "data": {
-        "title": "Second Slide"
+        "imageUrl": "https://example.com/small-slide-image.png"
       }
     }
   ]

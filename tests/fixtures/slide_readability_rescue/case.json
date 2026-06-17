@@ -1,5 +1,5 @@
 {
-  "description": "Synthetic slide layouts keep the board overview compact and scale slide-child text inside thumbnails.",
+  "description": "Synthetic slide layouts normalize small frames and scale slide-child text with the slide.",
   "converter": {
     "scale": 1.0,
     "min_font_px": 8,
@@ -16,15 +16,17 @@
         "id": "readable-long-text",
         "type": "text",
         "text_contains": "Readable slide text",
-        "font_size": 5
+        "width": 360,
+        "height": 180,
+        "font_size": 50
       },
       {
         "id": "frame-readable",
         "type": "group",
         "label": "Readable Slide",
         "group_nodes": ["readable-long-text"],
-        "width": 120,
-        "height": 67.5,
+        "width": 1200,
+        "height": 675,
         "ratio": 1.7777777778
       },
       {
@@ -32,6 +34,8 @@
         "type": "group",
         "label": "Second Slide",
         "group_nodes": [],
+        "width": 1200,
+        "height": 675,
         "ratio": 1.7777777778
       },
       {
@@ -55,6 +59,16 @@
       {
         "group_id": "frame-readable",
         "child_ids": ["readable-long-text"]
+      }
+    ],
+    "nodes_relative_to_groups": [
+      {
+        "id": "readable-long-text",
+        "group_id": "frame-readable",
+        "center_x_ratio": 0.5,
+        "center_y_ratio": 0.5,
+        "width_ratio": 0.3,
+        "height_ratio": 0.2666666667
       }
     ]
   }

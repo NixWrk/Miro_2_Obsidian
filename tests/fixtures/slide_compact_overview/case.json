@@ -1,5 +1,5 @@
 {
-  "description": "Synthetic slide decks preserve a compact Miro-like board overview instead of expanding into a square grid.",
+  "description": "Synthetic slide decks normalize small Miro-like overview frames to Obsidian's manual slide size.",
   "converter": {
     "scale": 1.0,
     "min_font_px": 8,
@@ -16,24 +16,32 @@
         "id": "compact-frame-1",
         "type": "group",
         "label": "Slide 1",
+        "width": 1200,
+        "height": 675,
         "ratio": 1.7777777778
       },
       {
         "id": "compact-frame-2",
         "type": "group",
         "label": "Slide 2",
+        "width": 1200,
+        "height": 675,
         "ratio": 1.7777777778
       },
       {
         "id": "compact-frame-3",
         "type": "group",
         "label": "Slide 3",
+        "width": 1200,
+        "height": 675,
         "ratio": 1.7777777778
       },
       {
         "id": "compact-frame-4",
         "type": "group",
         "label": "Slide 4",
+        "width": 1200,
+        "height": 675,
         "ratio": 1.7777777778
       },
       {
@@ -46,8 +54,8 @@
           "compact-frame-3",
           "compact-frame-4"
         ],
-        "max_height": 100,
-        "max_width": 600
+        "width": 5064,
+        "height": 699
       }
     ],
     "non_overlapping_pairs": [

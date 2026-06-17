@@ -255,6 +255,37 @@ def _assert_children_inside_group(testcase: unittest.TestCase, canvas: dict[str,
     )
 
 
+def _assert_node_relative_to_group(testcase: unittest.TestCase, canvas: dict[str, Any], rule: dict[str, Any]) -> None:
+    node = _node_by_id(canvas, str(rule["id"]))
+    group = _node_by_id(canvas, str(rule["group_id"]))
+    tolerance = float(rule.get("tolerance", 1e-4))
+
+    gx = float(group["x"])
+    gy = float(group["y"])
+    gw = float(group["width"])
+    gh = float(group["height"])
+    nx = float(node["x"])
+    ny = float(node["y"])
+    nw = float(node["width"])
+    nh = float(node["height"])
+
+    values = {
+        "center_x_ratio": ((nx + nw / 2.0) - gx) / gw,
+        "center_y_ratio": ((ny + nh / 2.0) - gy) / gh,
+        "width_ratio": nw / gw,
+        "height_ratio": nh / gh,
+    }
+
+    for key, actual in values.items():
+        if key in rule:
+            testcase.assertAlmostEqual(
+                actual,
+                float(rule[key]),
+                delta=tolerance,
+                msg=f"{node.get('id')} {key} expected {rule[key]}, got {actual}",
+            )
+
+
 def _assert_text_fits(testcase: unittest.TestCase, canvas: dict[str, Any], rule: dict[str, Any]) -> None:
     node = _node_by_id(canvas, str(rule["id"]))
     testcase.assertEqual(node.get("type"), "text")
@@ -327,6 +358,9 @@ class FixtureRegressionTests(unittest.TestCase):
 
                 for rule in assertions.get("children_inside_groups", []):
                     _assert_children_inside_group(self, canvas, rule)
+
+                for rule in assertions.get("nodes_relative_to_groups", []):
+                    _assert_node_relative_to_group(self, canvas, rule)
 
                 for rule in assertions.get("text_fits", []):
                     _assert_text_fits(self, canvas, rule)

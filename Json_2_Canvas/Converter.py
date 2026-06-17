@@ -2385,6 +2385,37 @@ def _item_local_center_and_size(
     return x, y, max(width, 1.0), max(height, 1.0)
 
 
+def _slide_child_source_visual_height(item: Dict[str, Any], width: float) -> Optional[float]:
+    geom = item.get("geometry") if isinstance(item.get("geometry"), dict) else {}
+    if geom.get("height") is not None:
+        return None
+
+    item_type = str(item.get("type") or "").lower()
+    if item_type not in {"text", "shape", "sticky_note"}:
+        return None
+
+    data = item.get("data") if isinstance(item.get("data"), dict) else {}
+    content_html = str(data.get("content") or item.get("plain_text") or "")
+    if not strip_html(content_html).strip():
+        return None
+
+    style = item.get("style") if isinstance(item.get("style"), dict) else {}
+    font_px = _extract_font_base_px(item, fallback=OBSIDIAN_FONT_SIZE)
+    line_height = _extract_line_height(style, default=1.35)
+    return max(
+        1.0,
+        float(
+            _estimate_render_height(
+                _strip_edge_empty_paragraphs(content_html),
+                width_px=max(float(width), 1.0),
+                font_px=font_px,
+                line_height=line_height,
+                padding=0,
+            )
+        ),
+    )
+
+
 def _slide_thumbnail_content_size_boost(fit: float) -> float:
     safe_fit = max(float(fit), 1e-9)
     if safe_fit >= SLIDE_THUMBNAIL_CONTENT_BOOST_MAX_FIT:
@@ -2449,7 +2480,7 @@ def _layout_slide_frames_unscaled(
             except Exception:
                 source_positions.add((0.0, 0.0, ""))
 
-        if len(frame_ids) <= 1 or len(source_positions) > 1:
+        if len(source_positions) > 1:
             continue
 
         deck = by_id.get(did) or {}
@@ -2462,19 +2493,17 @@ def _layout_slide_frames_unscaled(
             anchor_y = 0.0
 
         rects = []
-        has_capped_thumbnail = False
+        has_normalized_frame = False
         for fid in frame_ids:
             rect = dict(container_rects_unscaled[fid])
             width = max(float(rect["width"]), 1.0)
             height = max(float(rect["height"]), 1.0)
             max_side = max(width, height)
-            if max_side > max_thumbnail_side:
-                has_capped_thumbnail = True
-                fit = max_thumbnail_side / max_side
+            fit = max_thumbnail_side / max_side
+            if abs(fit - 1.0) > 1e-9:
+                has_normalized_frame = True
                 if content_scales_by_frame is not None:
                     content_scales_by_frame[fid] = fit
-                if content_size_boosts_by_frame is not None:
-                    content_size_boosts_by_frame[fid] = _slide_thumbnail_content_size_boost(fit)
                 width *= fit
                 height *= fit
             rect["width"] = width
@@ -2485,7 +2514,7 @@ def _layout_slide_frames_unscaled(
         max_h = max(float(r["height"]) for r in rects)
         gap_x = max(24.0, min(80.0, max_w * 0.08))
         use_large_deck_overview = (
-            has_capped_thumbnail
+            has_normalized_frame
             and len(rects) > SYNTHETIC_SLIDE_DECK_TOP_ROW_COUNT
         )
 
@@ -2784,12 +2813,17 @@ def _fit_slide_child_nodes_to_frame_rects(
 
         boxes: List[tuple] = []
         centers: Dict[str, tuple] = {}
+        local_sizes: Dict[str, tuple] = {}
         for cid in child_ids:
             result = _item_local_center_and_size(by_id[cid], node_map[cid], scale=scale)
             if result is None:
                 continue
             cx, cy, width, height = result
+            source_visual_height = _slide_child_source_visual_height(by_id[cid], width)
+            if source_visual_height is not None:
+                height = source_visual_height
             centers[cid] = (cx, cy)
+            local_sizes[cid] = (width, height)
             boxes.append((cx - width / 2.0, cy - height / 2.0, cx + width / 2.0, cy + height / 2.0))
 
         if not boxes:
@@ -2820,16 +2854,25 @@ def _fit_slide_child_nodes_to_frame_rects(
                 elif source_type in {"text", "shape", "sticky_note"}:
                     size_fit *= _slide_thumbnail_text_size_boost(source_item, boost)
             if abs(size_fit - 1.0) > 1e-9:
-                node["width"] = max(1.0, float(node["width"]) * size_fit)
-                node["height"] = max(1.0, float(node["height"]) * size_fit)
+                local_width, local_height = local_sizes.get(cid, (0.0, 0.0))
+                node["width"] = max(1.0, float(local_width) * float(scale) * size_fit)
+                node["height"] = max(1.0, float(local_height) * float(scale) * size_fit)
                 attrs = node.get("styleAttributes")
-                if size_fit < 1.0 and isinstance(attrs, dict) and isinstance(attrs.get("fontSize"), (int, float)):
-                    font_floor = (
-                        SLIDE_THUMBNAIL_MIN_FONT_PX
-                        if sub_min_font_frame_ids and frame_id in sub_min_font_frame_ids
-                        else min_font_px
+                if isinstance(attrs, dict) and isinstance(attrs.get("fontSize"), (int, float)):
+                    source_font_px = _extract_font_base_px(
+                        source_item,
+                        fallback=float(attrs["fontSize"]) / max(float(scale), 1e-9),
                     )
-                    _set_node_font_px(node, max(font_floor, int(round(float(attrs["fontSize"]) * size_fit))))
+                    scaled_font = int(round(float(source_font_px) * float(scale) * size_fit))
+                    if size_fit < 1.0:
+                        font_floor = (
+                            SLIDE_THUMBNAIL_MIN_FONT_PX
+                            if sub_min_font_frame_ids and frame_id in sub_min_font_frame_ids
+                            else min_font_px
+                        )
+                    else:
+                        font_floor = 1
+                    _set_node_font_px(node, max(font_floor, scaled_font))
 
             center_x = float(frame_rect["x"]) + offset_x + (local_x - origin_x) * fit
             center_y = float(frame_rect["y"]) + offset_y + (local_y - origin_y) * fit
