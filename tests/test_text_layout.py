@@ -14,6 +14,7 @@ from Converter import (  # noqa: E402
     _compact_tiny_slide_text_heights,
     _estimate_render_height,
     _expand_short_inline_label_widths,
+    _expand_slide_frame_rects_to_child_bounds,
     _fit_slide_child_nodes_to_frame_rects,
     _is_short_text_label,
     _recover_embed_url,
@@ -666,7 +667,7 @@ class TextLayoutTests(unittest.TestCase):
         self.assertAlmostEqual(node_map["child"]["x"], 0.0)
         self.assertAlmostEqual(node_map["child"]["y"], 0.0)
 
-    def test_slide_child_fitting_still_fits_large_coordinate_space(self) -> None:
+    def test_slide_child_fitting_uses_min_font_and_expands_frame_when_needed(self) -> None:
         node_map = {
             "child": {
                 "id": "child",
@@ -697,8 +698,77 @@ class TextLayoutTests(unittest.TestCase):
             min_font_px=8,
         )
 
-        self.assertAlmostEqual(node_map["child"]["x"], 0.0)
-        self.assertLessEqual(node_map["child"]["x"] + node_map["child"]["width"], 120)
+        self.assertEqual(node_map["child"]["styleAttributes"]["fontSize"], 8)
+        self.assertAlmostEqual(node_map["child"]["x"], -20.0)
+        self.assertAlmostEqual(node_map["child"]["width"], 160.0)
+
+        frame_rects = {"frame": {"x": 0, "y": 0, "width": 120, "height": 67.5}}
+        expanded = _expand_slide_frame_rects_to_child_bounds(
+            node_map,
+            {"frame": ["child"]},
+            ["frame"],
+            frame_rects,
+            scale=1.0,
+        )
+
+        self.assertEqual(expanded, {"frame"})
+        self.assertGreater(frame_rects["frame"]["width"], 120)
+        self.assertLessEqual(node_map["child"]["x"], frame_rects["frame"]["x"] + 1e-9)
+        self.assertLessEqual(
+            node_map["child"]["x"] + node_map["child"]["width"],
+            frame_rects["frame"]["x"] + frame_rects["frame"]["width"] + 1e-9,
+        )
+
+    def test_slide_child_min_font_overflow_can_expand_instead_of_clamping(self) -> None:
+        node_map = {
+            "child": {
+                "id": "child",
+                "type": "text",
+                "x": 0,
+                "y": 0,
+                "width": 10,
+                "height": 10,
+                "text": "<div style=\"font-size:1px\">edge</div>",
+                "styleAttributes": {"fontSize": 1},
+            }
+        }
+        by_id = {
+            "child": {
+                "id": "child",
+                "type": "text",
+                "position": {"x": 105, "y": 30},
+                "geometry": {"width": 10, "height": 10},
+                "style": {"fontSize": "1"},
+            }
+        }
+        frame_rects = {"frame": {"x": 0, "y": 0, "width": 120, "height": 67.5}}
+
+        _fit_slide_child_nodes_to_frame_rects(
+            node_map,
+            by_id,
+            {"frame": ["child"]},
+            ["frame"],
+            frame_rects,
+            scale=1.0,
+            min_font_px=8,
+            content_scales_by_frame={"frame": 2.0},
+            expandable_frame_ids={"frame"},
+        )
+
+        self.assertEqual(node_map["child"]["styleAttributes"]["fontSize"], 8)
+        self.assertAlmostEqual(node_map["child"]["x"], 170.0)
+        self.assertAlmostEqual(node_map["child"]["width"], 80.0)
+
+        expanded = _expand_slide_frame_rects_to_child_bounds(
+            node_map,
+            {"frame": ["child"]},
+            ["frame"],
+            frame_rects,
+            scale=1.0,
+        )
+
+        self.assertEqual(expanded, {"frame"})
+        self.assertGreater(frame_rects["frame"]["width"], 240)
 
     def test_slide_child_fitting_fits_dense_modest_overflow(self) -> None:
         node_map = {

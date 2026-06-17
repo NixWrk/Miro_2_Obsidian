@@ -1,0 +1,81 @@
+{
+  "items": [
+    {
+      "id": "deck-min-font",
+      "type": "slide_container",
+      "position": {
+        "x": 0,
+        "y": 0,
+        "origin": "center",
+        "relativeTo": "canvas_center"
+      },
+      "data": {
+        "title": "Slides"
+      }
+    },
+    {
+      "id": "frame-grow",
+      "type": "frame",
+      "parent": {
+        "id": "deck-min-font"
+      },
+      "position": {
+        "x": 0,
+        "y": 0,
+        "origin": "center",
+        "relativeTo": "parent_top_left"
+      },
+      "geometry": {
+        "width": 234.58153555895782,
+        "height": 131.95211375191377
+      },
+      "data": {
+        "title": "Min Font Slide"
+      }
+    },
+    {
+      "id": "edge-text",
+      "type": "text",
+      "parent": {
+        "id": "frame-grow"
+      },
+      "position": {
+        "x": 219.92268958652295,
+        "y": 65.97605687595688,
+        "origin": "center",
+        "relativeTo": "parent_top_left"
+      },
+      "geometry": {
+        "width": 234.58153555895782,
+        "height": 17.59361516692184
+      },
+      "style": {
+        "fontSize": "1",
+        "color": "#1a1a1a"
+      },
+      "data": {
+        "content": "<p>Edge text should keep 8px readability and force the slide wider.</p>"
+      }
+    },
+    {
+      "id": "frame-neighbor",
+      "type": "frame",
+      "parent": {
+        "id": "deck-min-font"
+      },
+      "position": {
+        "x": 0,
+        "y": 0,
+        "origin": "center",
+        "relativeTo": "parent_top_left"
+      },
+      "geometry": {
+        "width": 234.58153555895782,
+        "height": 131.95211375191377
+      },
+      "data": {
+        "title": "Neighbor Slide"
+      }
+    }
+  ]
+}

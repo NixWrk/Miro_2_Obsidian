@@ -1,0 +1,71 @@
+{
+  "description": "Synthetic slides keep 8px readable text and grow the slide frame when that text no longer fits.",
+  "converter": {
+    "scale": 1.0,
+    "min_font_px": 8,
+    "theme": "dark"
+  },
+  "assertions": {
+    "node_count": 4,
+    "edge_count": 1,
+    "metadata": {
+      "startNode": "frame-grow"
+    },
+    "nodes": [
+      {
+        "id": "frame-grow",
+        "type": "group",
+        "label": "Min Font Slide",
+        "min_width": 2080,
+        "min_height": 1170,
+        "ratio": 1.7777777778,
+        "group_nodes": ["edge-text"]
+      },
+      {
+        "id": "edge-text",
+        "type": "text",
+        "text_contains": "Edge text should keep 8px",
+        "width": 1920,
+        "height": 144,
+        "font_size": 8
+      },
+      {
+        "id": "frame-neighbor",
+        "type": "group",
+        "label": "Neighbor Slide",
+        "width": 1200,
+        "height": 675,
+        "ratio": 1.7777777778,
+        "group_nodes": []
+      },
+      {
+        "id": "deck-min-font",
+        "type": "group",
+        "label": "Slides",
+        "group_nodes": ["frame-grow", "frame-neighbor"]
+      }
+    ],
+    "edges": [
+      {
+        "id": "slide-sequence-frame-grow-frame-neighbor",
+        "fromNode": "frame-grow",
+        "toNode": "frame-neighbor",
+        "fromEnd": "none",
+        "toEnd": "none",
+        "color": "#00000000"
+      }
+    ],
+    "children_inside_groups": [
+      {
+        "group_id": "frame-grow",
+        "child_ids": ["edge-text"]
+      }
+    ],
+    "no_overlapping_nodes": [
+      {
+        "types": ["group"],
+        "exclude_node_ids": ["deck-min-font"]
+      }
+    ]
+  }
+}

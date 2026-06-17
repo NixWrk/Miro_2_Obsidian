@@ -2350,6 +2350,28 @@ def _rect_contains(a: Dict[str, float], b: Dict[str, float], eps: float = 0.5) -
     )
 
 
+def _expand_rect_to_aspect_ratio(rect: Dict[str, float], ratio: float) -> Dict[str, float]:
+    if ratio <= 0:
+        return dict(rect)
+    width = max(float(rect["width"]), 1.0)
+    height = max(float(rect["height"]), 1.0)
+    target_width = width
+    target_height = height
+    current_ratio = width / height
+    if current_ratio < ratio:
+        target_width = height * ratio
+    elif current_ratio > ratio:
+        target_height = width / ratio
+    cx = float(rect["x"]) + width / 2.0
+    cy = float(rect["y"]) + height / 2.0
+    return {
+        "x": cx - target_width / 2.0,
+        "y": cy - target_height / 2.0,
+        "width": target_width,
+        "height": target_height,
+    }
+
+
 def _item_local_center_and_size(
     item: Dict[str, Any],
     node: Optional[Dict[str, Any]] = None,
@@ -2794,6 +2816,7 @@ def _fit_slide_child_nodes_to_frame_rects(
     content_scales_by_frame: Optional[Dict[str, float]] = None,
     content_size_boosts_by_frame: Optional[Dict[str, float]] = None,
     sub_min_font_frame_ids: Optional[set[str]] = None,
+    expandable_frame_ids: Optional[set[str]] = None,
 ) -> set:
     """Place slide children inside their computed slide frame rects."""
     slide_child_ids: set = set()
@@ -2845,6 +2868,7 @@ def _fit_slide_child_nodes_to_frame_rects(
         for cid, (local_x, local_y) in centers.items():
             node = node_map[cid]
             size_fit = fit
+            grew_for_min_font = False
             source_item = by_id.get(cid) or {}
             source_type = str(source_item.get("type") or "").lower()
             if content_size_boosts_by_frame and frame_id in content_size_boosts_by_frame:
@@ -2855,8 +2879,9 @@ def _fit_slide_child_nodes_to_frame_rects(
                     size_fit *= _slide_thumbnail_text_size_boost(source_item, boost)
             if abs(size_fit - 1.0) > 1e-9:
                 local_width, local_height = local_sizes.get(cid, (0.0, 0.0))
-                node["width"] = max(1.0, float(local_width) * float(scale) * size_fit)
-                node["height"] = max(1.0, float(local_height) * float(scale) * size_fit)
+                scaled_width = float(local_width) * float(scale) * size_fit
+                scaled_height = float(local_height) * float(scale) * size_fit
+                text_size_multiplier = 1.0
                 attrs = node.get("styleAttributes")
                 if isinstance(attrs, dict) and isinstance(attrs.get("fontSize"), (int, float)):
                     source_font_px = _extract_font_base_px(
@@ -2871,16 +2896,200 @@ def _fit_slide_child_nodes_to_frame_rects(
                             else min_font_px
                         )
                     else:
-                        font_floor = 1
-                    _set_node_font_px(node, max(font_floor, scaled_font))
+                        font_floor = min_font_px
+                    final_font = max(font_floor, scaled_font)
+                    if scaled_font > 0 and final_font > scaled_font:
+                        text_size_multiplier = final_font / scaled_font
+                        grew_for_min_font = True
+                    _set_node_font_px(node, final_font)
+                node["width"] = max(1.0, scaled_width * text_size_multiplier)
+                node["height"] = max(1.0, scaled_height * text_size_multiplier)
 
             center_x = float(frame_rect["x"]) + offset_x + (local_x - origin_x) * fit
             center_y = float(frame_rect["y"]) + offset_y + (local_y - origin_y) * fit
             node["x"] = center_x * scale - float(node["width"]) / 2.0
             node["y"] = center_y * scale - float(node["height"]) / 2.0
-            _clamp_node_to_scaled_rect(node, frame_rect, scale=scale)
+            can_expand_frame = bool(expandable_frame_ids and frame_id in expandable_frame_ids)
+            if not (grew_for_min_font and can_expand_frame):
+                _clamp_node_to_scaled_rect(node, frame_rect, scale=scale)
 
     return slide_child_ids
+
+
+def _canvas_rect_from_unscaled(rect: Dict[str, float], scale: float) -> Dict[str, float]:
+    return {
+        "x": float(rect["x"]) * scale,
+        "y": float(rect["y"]) * scale,
+        "width": float(rect["width"]) * scale,
+        "height": float(rect["height"]) * scale,
+    }
+
+
+def _unscaled_rect_from_canvas(rect: Dict[str, float], scale: float) -> Dict[str, float]:
+    safe_scale = max(float(scale), 1e-9)
+    return {
+        "x": float(rect["x"]) / safe_scale,
+        "y": float(rect["y"]) / safe_scale,
+        "width": float(rect["width"]) / safe_scale,
+        "height": float(rect["height"]) / safe_scale,
+    }
+
+
+def _expand_slide_frame_rects_to_child_bounds(
+    node_map: Dict[str, Dict[str, Any]],
+    children: Dict[str, List[str]],
+    slide_frame_ids: List[str],
+    container_rects_unscaled: Dict[str, Dict[str, float]],
+    scale: float,
+) -> set[str]:
+    expanded_frame_ids: set[str] = set()
+    for frame_id in slide_frame_ids:
+        frame_rect = container_rects_unscaled.get(frame_id)
+        if not frame_rect:
+            continue
+        child_ids = [cid for cid in (children.get(frame_id) or []) if cid in node_map]
+        if not child_ids:
+            continue
+        child_bbox = _bbox_of_nodes(node_map, child_ids, padding=0)
+        if not child_bbox:
+            continue
+        frame_canvas = _canvas_rect_from_unscaled(frame_rect, scale)
+        if _rect_contains(frame_canvas, child_bbox, eps=1.0):
+            continue
+
+        union_canvas = _rect_union(frame_canvas, child_bbox)
+        ratio = float(frame_rect["width"]) / max(float(frame_rect["height"]), 1e-9)
+        expanded_canvas = _expand_rect_to_aspect_ratio(union_canvas, ratio)
+        container_rects_unscaled[frame_id] = _unscaled_rect_from_canvas(expanded_canvas, scale)
+        expanded_frame_ids.add(frame_id)
+    return expanded_frame_ids
+
+
+def _collect_descendant_canvas_node_ids(
+    children: Dict[str, List[str]],
+    node_map: Dict[str, Dict[str, Any]],
+    root_id: str,
+    out: Optional[set[str]] = None,
+) -> set[str]:
+    if out is None:
+        out = set()
+    for child_id in children.get(root_id) or []:
+        child_id = str(child_id)
+        if child_id in node_map:
+            out.add(child_id)
+        _collect_descendant_canvas_node_ids(children, node_map, child_id, out)
+    return out
+
+
+def _move_slide_frame_descendants(
+    node_map: Dict[str, Dict[str, Any]],
+    children: Dict[str, List[str]],
+    frame_id: str,
+    dx_unscaled: float,
+    dy_unscaled: float,
+    scale: float,
+) -> None:
+    dx = dx_unscaled * scale
+    dy = dy_unscaled * scale
+    for node_id in _collect_descendant_canvas_node_ids(children, node_map, frame_id):
+        node = node_map.get(node_id)
+        if not isinstance(node, dict):
+            continue
+        try:
+            node["x"] = float(node["x"]) + dx
+            node["y"] = float(node["y"]) + dy
+        except Exception:
+            continue
+
+
+def _relayout_synthetic_slide_frames_from_current_sizes(
+    deck_order: List[str],
+    slide_frames_by_deck: Dict[str, List[str]],
+    synthetic_slide_frame_ids: set[str],
+    container_rects_unscaled: Dict[str, Dict[str, float]],
+    children: Dict[str, List[str]],
+    node_map: Dict[str, Dict[str, Any]],
+    scale: float,
+) -> None:
+    for did in deck_order:
+        frame_ids = [
+            fid for fid in slide_frames_by_deck.get(did, [])
+            if fid in synthetic_slide_frame_ids and fid in container_rects_unscaled
+        ]
+        if not frame_ids:
+            continue
+
+        rects = [dict(container_rects_unscaled[fid]) for fid in frame_ids]
+        min_x = min(float(r["x"]) for r in rects)
+        min_y = min(float(r["y"]) for r in rects)
+        max_x = max(float(r["x"]) + float(r["width"]) for r in rects)
+        max_y = max(float(r["y"]) + float(r["height"]) for r in rects)
+        anchor_x = (min_x + max_x) / 2.0
+        anchor_y = (min_y + max_y) / 2.0
+
+        max_w = max(float(r["width"]) for r in rects)
+        max_h = max(float(r["height"]) for r in rects)
+        gap_x = max(24.0, min(80.0, max_w * 0.08))
+
+        new_rects: Dict[str, Dict[str, float]] = {}
+        if len(rects) > SYNTHETIC_SLIDE_DECK_TOP_ROW_COUNT:
+            top_count = min(SYNTHETIC_SLIDE_DECK_TOP_ROW_COUNT, len(rects))
+            top_rects = rects[:top_count]
+            trailing_rects = rects[top_count:]
+            gap_y = max(48.0, min(96.0, max_h * 0.55))
+            top_w = sum(float(r["width"]) for r in top_rects) + gap_x * max(0, len(top_rects) - 1)
+            total_w = max(top_w, max((float(r["width"]) for r in trailing_rects), default=0.0))
+            total_h = max_h
+            if trailing_rects:
+                total_h += gap_y * len(trailing_rects)
+                total_h += sum(float(r["height"]) for r in trailing_rects)
+
+            start_x = anchor_x - total_w / 2.0
+            start_y = anchor_y - total_h / 2.0
+            cur_x = start_x
+            for fid, rect in zip(frame_ids[:top_count], top_rects):
+                width = float(rect["width"])
+                height = float(rect["height"])
+                new_rects[fid] = {
+                    "x": cur_x,
+                    "y": start_y + (max_h - height) / 2.0,
+                    "width": width,
+                    "height": height,
+                }
+                cur_x += width + gap_x
+
+            cur_y = start_y + max_h + gap_y
+            for fid, rect in zip(frame_ids[top_count:], trailing_rects):
+                width = float(rect["width"])
+                height = float(rect["height"])
+                new_rects[fid] = {"x": start_x, "y": cur_y, "width": width, "height": height}
+                cur_y += height + gap_y
+        else:
+            total_w = sum(float(r["width"]) for r in rects) + gap_x * max(0, len(rects) - 1)
+            total_h = max_h
+            start_x = anchor_x - total_w / 2.0
+            start_y = anchor_y - total_h / 2.0
+            cur_x = start_x
+            for fid, rect in zip(frame_ids, rects):
+                width = float(rect["width"])
+                height = float(rect["height"])
+                new_rects[fid] = {
+                    "x": cur_x,
+                    "y": start_y + (max_h - height) / 2.0,
+                    "width": width,
+                    "height": height,
+                }
+                cur_x += width + gap_x
+
+        for fid, new_rect in new_rects.items():
+            old_rect = container_rects_unscaled.get(fid)
+            if not old_rect:
+                continue
+            dx = float(new_rect["x"]) - float(old_rect["x"])
+            dy = float(new_rect["y"]) - float(old_rect["y"])
+            if abs(dx) > 1e-9 or abs(dy) > 1e-9:
+                _move_slide_frame_descendants(node_map, children, fid, dx, dy, scale)
+            container_rects_unscaled[fid] = new_rect
 
 
 
@@ -4372,9 +4581,10 @@ def convert_miro_to_canvas(
         container_rects_unscaled,
         scale,
         min_font_px,
-        slide_content_scales_by_frame,
-        slide_content_size_boosts_by_frame,
-        synthetic_slide_frame_ids,
+        content_scales_by_frame=slide_content_scales_by_frame,
+        content_size_boosts_by_frame=slide_content_size_boosts_by_frame,
+        sub_min_font_frame_ids=synthetic_slide_frame_ids,
+        expandable_frame_ids=synthetic_slide_frame_ids,
     )
     slide_child_layout_nodes = [
         node_map[cid] for cid in slide_child_node_ids
@@ -4383,6 +4593,23 @@ def convert_miro_to_canvas(
     _compact_tiny_slide_text_heights(slide_child_layout_nodes)
     _resolve_tiny_slide_marker_text_overlaps(slide_child_layout_nodes)
     _resolve_tiny_text_text_vertical_edge_overlaps(slide_child_layout_nodes)
+    expanded_slide_frame_ids = _expand_slide_frame_rects_to_child_bounds(
+        node_map,
+        children,
+        list(synthetic_slide_frame_ids),
+        container_rects_unscaled,
+        scale,
+    )
+    if expanded_slide_frame_ids:
+        _relayout_synthetic_slide_frames_from_current_sizes(
+            deck_order,
+            slide_frames_by_deck,
+            synthetic_slide_frame_ids,
+            container_rects_unscaled,
+            children,
+            node_map,
+            scale,
+        )
     layout_nodes = [
         node for node in nodes
         if str(node.get("id", "") or "") not in slide_child_node_ids
