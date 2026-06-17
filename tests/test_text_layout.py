@@ -336,7 +336,7 @@ class TextLayoutTests(unittest.TestCase):
             min_font_px=8,
         )
 
-        self.assertEqual(node_map["child"]["x"], 40)
+        self.assertEqual(node_map["child"]["x"], 0)
         self.assertEqual(node_map["child"]["y"], 0)
         self.assertLessEqual(node_map["child"]["x"] + node_map["child"]["width"], 100)
         self.assertLessEqual(node_map["child"]["y"] + node_map["child"]["height"], 50)
@@ -377,6 +377,171 @@ class TextLayoutTests(unittest.TestCase):
         self.assertAlmostEqual(node_map["child"]["height"], 2.5)
         self.assertAlmostEqual(node_map["child"]["x"], 110.0)
         self.assertAlmostEqual(node_map["child"]["y"], 58.75)
+
+    def test_slide_child_fitting_preserves_non_overflowing_local_coordinates(self) -> None:
+        node_map = {
+            "child": {
+                "id": "child",
+                "type": "text",
+                "x": 0,
+                "y": 0,
+                "width": 20,
+                "height": 10,
+            }
+        }
+        by_id = {
+            "child": {
+                "id": "child",
+                "type": "shape",
+                "position": {"x": 50, "y": 30, "origin": "center"},
+                "geometry": {"width": 20, "height": 10},
+            }
+        }
+
+        _fit_slide_child_nodes_to_frame_rects(
+            node_map,
+            by_id,
+            {"frame": ["child"]},
+            ["frame"],
+            {"frame": {"x": 0, "y": 0, "width": 200, "height": 100}},
+            scale=1.0,
+            min_font_px=8,
+        )
+
+        self.assertAlmostEqual(node_map["child"]["x"], 40.0)
+        self.assertAlmostEqual(node_map["child"]["y"], 25.0)
+
+    def test_slide_child_fitting_preserves_modest_overflow_and_clamps(self) -> None:
+        node_map = {
+            "child": {
+                "id": "child",
+                "type": "file",
+                "x": 0,
+                "y": 0,
+                "width": 20,
+                "height": 20,
+            }
+        }
+        by_id = {
+            "child": {
+                "id": "child",
+                "type": "image",
+                "position": {"x": 5, "y": 5, "origin": "center"},
+                "geometry": {"width": 20, "height": 20},
+            }
+        }
+
+        _fit_slide_child_nodes_to_frame_rects(
+            node_map,
+            by_id,
+            {"frame": ["child"]},
+            ["frame"],
+            {"frame": {"x": 0, "y": 0, "width": 100, "height": 50}},
+            scale=1.0,
+            min_font_px=8,
+        )
+
+        self.assertAlmostEqual(node_map["child"]["x"], 0.0)
+        self.assertAlmostEqual(node_map["child"]["y"], 0.0)
+
+    def test_slide_child_fitting_still_fits_large_coordinate_space(self) -> None:
+        node_map = {
+            "child": {
+                "id": "child",
+                "type": "text",
+                "x": 0,
+                "y": 0,
+                "width": 360,
+                "height": 54,
+                "styleAttributes": {"fontSize": 18},
+            }
+        }
+        by_id = {
+            "child": {
+                "id": "child",
+                "type": "text",
+                "position": {"x": 420, "y": 36, "origin": "center"},
+                "geometry": {"width": 360, "height": 54},
+            }
+        }
+
+        _fit_slide_child_nodes_to_frame_rects(
+            node_map,
+            by_id,
+            {"frame": ["child"]},
+            ["frame"],
+            {"frame": {"x": 0, "y": 0, "width": 120, "height": 67.5}},
+            scale=1.0,
+            min_font_px=8,
+        )
+
+        self.assertAlmostEqual(node_map["child"]["x"], 0.0)
+        self.assertLessEqual(node_map["child"]["x"] + node_map["child"]["width"], 120)
+
+    def test_slide_child_fitting_fits_dense_modest_overflow(self) -> None:
+        node_map = {
+            "title": {
+                "id": "title",
+                "type": "text",
+                "x": 0,
+                "y": 0,
+                "width": 120,
+                "height": 20,
+                "styleAttributes": {"fontSize": 12},
+            },
+            "marker": {
+                "id": "marker",
+                "type": "text",
+                "x": 0,
+                "y": 0,
+                "width": 10,
+                "height": 10,
+                "styleAttributes": {"fontSize": 8},
+            },
+            "label": {
+                "id": "label",
+                "type": "text",
+                "x": 0,
+                "y": 0,
+                "width": 40,
+                "height": 10,
+                "styleAttributes": {"fontSize": 8},
+            },
+        }
+        by_id = {
+            "title": {
+                "id": "title",
+                "type": "text",
+                "position": {"x": 50, "y": 15, "origin": "center"},
+                "geometry": {"width": 120, "height": 20},
+            },
+            "marker": {
+                "id": "marker",
+                "type": "shape",
+                "position": {"x": 20, "y": 45, "origin": "center"},
+                "geometry": {"width": 10, "height": 10},
+            },
+            "label": {
+                "id": "label",
+                "type": "text",
+                "position": {"x": 55, "y": 45, "origin": "center"},
+                "geometry": {"width": 40, "height": 10},
+            },
+        }
+
+        _fit_slide_child_nodes_to_frame_rects(
+            node_map,
+            by_id,
+            {"frame": ["title", "marker", "label"]},
+            ["frame"],
+            {"frame": {"x": 0, "y": 0, "width": 100, "height": 60}},
+            scale=1.0,
+            min_font_px=8,
+        )
+
+        self.assertLessEqual(node_map["title"]["width"], 100)
+        self.assertAlmostEqual(node_map["title"]["x"], 0.0)
+        self.assertLessEqual(node_map["title"]["x"] + node_map["title"]["width"], 100)
 
     def test_tiny_slide_marker_text_overlap_shrinks_text_from_left(self) -> None:
         nodes = [

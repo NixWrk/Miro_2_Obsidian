@@ -49,6 +49,11 @@ TEXT_VISUAL_CASCADE_MAX_PASSES = 64
 SLIDE_THUMBNAIL_MIN_FONT_PX = 1
 SYNTHETIC_SLIDE_THUMBNAIL_MAX_SIDE = 240.0
 SYNTHETIC_SLIDE_DECK_TOP_ROW_COUNT = 4
+SLIDE_CHILD_FIT_OVERFLOW_RATIO = 0.15
+SLIDE_CHILD_FIT_OVERFLOW_MIN_PX = 24.0
+SLIDE_CHILD_FIT_BBOX_RATIO = 1.5
+SLIDE_CHILD_FIT_DENSE_MIN_CHILDREN = 3
+SLIDE_CHILD_FIT_DENSE_BBOX_RATIO = 1.10
 SHORT_LABEL_COMPACT_PADDING = 16
 ULTRA_NARROW_LABEL_WIDTH_PX = 16
 ULTRA_NARROW_LABEL_FALLBACK_WIDTHS = (176, 128, 96, 64, 32)
@@ -2496,8 +2501,16 @@ def _slide_fit_data(frame_rect: Dict[str, float], boxes: List[tuple]) -> Dict[st
     frame_w = max(float(frame_rect["width"]), 1.0)
     frame_h = max(float(frame_rect["height"]), 1.0)
 
-    eps = 1.0
-    needs_fit = min_x < -eps or min_y < -eps or max_x > frame_w + eps or max_y > frame_h + eps
+    overflow_x = max(0.0, -min_x, max_x - frame_w)
+    overflow_y = max(0.0, -min_y, max_y - frame_h)
+    substantial_overflow_x = overflow_x > max(SLIDE_CHILD_FIT_OVERFLOW_MIN_PX, frame_w * SLIDE_CHILD_FIT_OVERFLOW_RATIO)
+    substantial_overflow_y = overflow_y > max(SLIDE_CHILD_FIT_OVERFLOW_MIN_PX, frame_h * SLIDE_CHILD_FIT_OVERFLOW_RATIO)
+    oversized_bbox = bbox_w > frame_w * SLIDE_CHILD_FIT_BBOX_RATIO or bbox_h > frame_h * SLIDE_CHILD_FIT_BBOX_RATIO
+    dense_oversized_bbox = (
+        len(boxes) >= SLIDE_CHILD_FIT_DENSE_MIN_CHILDREN
+        and (bbox_w > frame_w * SLIDE_CHILD_FIT_DENSE_BBOX_RATIO or bbox_h > frame_h * SLIDE_CHILD_FIT_DENSE_BBOX_RATIO)
+    )
+    needs_fit = substantial_overflow_x or substantial_overflow_y or oversized_bbox or dense_oversized_bbox
     if needs_fit:
         fit = min(1.0, frame_w / bbox_w, frame_h / bbox_h)
         origin_x = min_x
@@ -2628,8 +2641,8 @@ def _fit_slide_child_nodes_to_frame_rects(
             fit = float(fit_data["fit"])
             origin_x = float(fit_data["origin_x"])
             origin_y = float(fit_data["origin_y"])
-            offset_x = (max(float(frame_rect["width"]), 1.0) - float(fit_data["bbox_w"]) * fit) / 2.0
-            offset_y = (max(float(frame_rect["height"]), 1.0) - float(fit_data["bbox_h"]) * fit) / 2.0
+            offset_x = float(fit_data["offset_x"])
+            offset_y = float(fit_data["offset_y"])
 
         for cid, (local_x, local_y) in centers.items():
             node = node_map[cid]
