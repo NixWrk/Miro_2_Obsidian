@@ -1,5 +1,5 @@
 {
-  "description": "Synthetic slide decks with large screen frames render as compact Miro-like thumbnails.",
+  "description": "Synthetic slide decks with large screen frames render at Obsidian's manual slide default size.",
   "converter": {
     "scale": 1.0,
     "min_font_px": 8,
@@ -16,8 +16,8 @@
         "id": "screen-frame-1",
         "type": "group",
         "label": "Screen 1",
-        "width": 240,
-        "height": 135,
+        "width": 1200,
+        "height": 675,
         "ratio": 1.7777777778,
         "group_nodes": ["screen-text"]
       },
@@ -25,8 +25,8 @@
         "id": "screen-frame-2",
         "type": "group",
         "label": "Screen 2",
-        "width": 240,
-        "height": 135,
+        "width": 1200,
+        "height": 675,
         "ratio": 1.7777777778,
         "group_nodes": []
       },
@@ -34,8 +34,8 @@
         "id": "screen-frame-3",
         "type": "group",
         "label": "Screen 3",
-        "width": 240,
-        "height": 135,
+        "width": 1200,
+        "height": 675,
         "ratio": 1.7777777778,
         "group_nodes": []
       },
@@ -44,8 +44,8 @@
         "type": "group",
         "label": "Slides",
         "group_nodes": ["screen-frame-1", "screen-frame-2", "screen-frame-3"],
-        "max_width": 820,
-        "max_height": 170
+        "width": 3784,
+        "height": 699
       }
     ],
     "non_overlapping_pairs": [

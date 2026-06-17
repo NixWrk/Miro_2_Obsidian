@@ -252,6 +252,35 @@ class TextLayoutTests(unittest.TestCase):
 
         self.assertEqual(nodes[1]["y"], 10)
 
+    def test_tiny_text_text_vertical_edge_clearance_handles_empty_slide_background(self) -> None:
+        nodes = [
+            {
+                "id": "empty-background",
+                "type": "text",
+                "x": 0,
+                "y": 0,
+                "width": 86,
+                "height": 19,
+                "text": '<span style="font-size:7px; line-height:1.35"></span>',
+                "styleAttributes": {"shape": "round-rectangle", "border": "invisible", "fontSize": 7},
+                "color": "#ffeedb",
+            },
+            {
+                "id": "label",
+                "type": "text",
+                "x": 8,
+                "y": 17,
+                "width": 72,
+                "height": 22,
+                "text": '<span style="font-size:5px; line-height:1.35">Soft pink toe beans</span>',
+                "styleAttributes": {"border": "invisible", "fontSize": 5},
+            },
+        ]
+
+        _resolve_tiny_text_text_vertical_edge_overlaps(nodes)
+
+        self.assertEqual(nodes[1]["y"], 20)
+
     def test_tiny_slide_text_height_compacts_invisible_label(self) -> None:
         nodes = [
             {
@@ -288,6 +317,25 @@ class TextLayoutTests(unittest.TestCase):
         _compact_tiny_slide_text_heights(nodes)
 
         self.assertLess(nodes[0]["height"], 4)
+        self.assertGreater(nodes[0]["height"], 0)
+
+    def test_tiny_slide_text_height_compacts_medium_entity_icon(self) -> None:
+        nodes = [
+            {
+                "id": "medium-entity",
+                "type": "text",
+                "x": 0,
+                "y": 0,
+                "width": 7.2,
+                "height": 68.0,
+                "text": '<span style="font-size:5px; line-height:1.35">&amp;#x1f9b7;</span>',
+                "styleAttributes": {"shape": "round-rectangle", "border": "invisible", "fontSize": 5},
+            },
+        ]
+
+        _compact_tiny_slide_text_heights(nodes)
+
+        self.assertLess(nodes[0]["height"], 10)
         self.assertGreater(nodes[0]["height"], 0)
 
     def test_tiny_slide_text_height_keeps_number_marker_shape(self) -> None:
@@ -422,6 +470,7 @@ class TextLayoutTests(unittest.TestCase):
 
     def test_capped_slide_thumbnail_image_boost_uses_inverse_power_cap(self) -> None:
         self.assertAlmostEqual(_slide_thumbnail_content_size_boost(0.125), 4.756828460010884)
+        self.assertEqual(_slide_thumbnail_content_size_boost(0.5625), 1.0)
         self.assertEqual(_slide_thumbnail_content_size_boost(1.0), 1.0)
         self.assertEqual(_slide_thumbnail_content_size_boost(2.0), 1.0)
         self.assertEqual(_slide_thumbnail_content_size_boost(0.01), 5.0)

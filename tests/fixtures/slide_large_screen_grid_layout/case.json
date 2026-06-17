@@ -1,5 +1,5 @@
 {
-  "description": "Large synthetic slide thumbnails use a Miro-like overview: four slides in the first row and remaining slides stacked below the left column.",
+  "description": "Large synthetic slide frames use Obsidian's manual slide default size with a four-plus-remainder overview layout.",
   "converter": {
     "scale": 1.0,
     "min_font_px": 8,
@@ -16,48 +16,48 @@
         "id": "grid-frame-1",
         "type": "group",
         "label": "Slide 1",
-        "width": 240,
-        "height": 135,
+        "width": 1200,
+        "height": 675,
         "ratio": 1.7777777778
       },
       {
         "id": "grid-frame-2",
         "type": "group",
         "label": "Slide 2",
-        "width": 240,
-        "height": 135,
+        "width": 1200,
+        "height": 675,
         "ratio": 1.7777777778
       },
       {
         "id": "grid-frame-3",
         "type": "group",
         "label": "Slide 3",
-        "width": 240,
-        "height": 135,
+        "width": 1200,
+        "height": 675,
         "ratio": 1.7777777778
       },
       {
         "id": "grid-frame-4",
         "type": "group",
         "label": "Slide 4",
-        "width": 240,
-        "height": 135,
+        "width": 1200,
+        "height": 675,
         "ratio": 1.7777777778
       },
       {
         "id": "grid-frame-5",
         "type": "group",
         "label": "Slide 5",
-        "width": 240,
-        "height": 135,
+        "width": 1200,
+        "height": 675,
         "ratio": 1.7777777778
       },
       {
         "id": "grid-frame-6",
         "type": "group",
         "label": "Slide 6",
-        "width": 240,
-        "height": 135,
+        "width": 1200,
+        "height": 675,
         "ratio": 1.7777777778
       },
       {
@@ -72,9 +72,8 @@
           "grid-frame-5",
           "grid-frame-6"
         ],
-        "max_width": 1100,
-        "min_height": 550,
-        "max_height": 620
+        "width": 5064,
+        "height": 2241
       }
     ],
     "non_overlapping_pairs": [

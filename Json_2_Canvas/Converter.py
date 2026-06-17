@@ -47,10 +47,11 @@ TEXT_VISUAL_VERTICAL_MAX_PASSES = 32
 TEXT_VISUAL_VERTICAL_MIN_RATIO = 0.25
 TEXT_VISUAL_CASCADE_MAX_PASSES = 64
 SLIDE_THUMBNAIL_MIN_FONT_PX = 1
-SYNTHETIC_SLIDE_THUMBNAIL_MAX_SIDE = 240.0
+SYNTHETIC_SLIDE_MANUAL_DEFAULT_MAX_SIDE = 1200.0
 SYNTHETIC_SLIDE_DECK_TOP_ROW_COUNT = 4
 SLIDE_THUMBNAIL_CONTENT_BOOST_EXPONENT = 0.75
 SLIDE_THUMBNAIL_CONTENT_BOOST_MAX = 5.0
+SLIDE_THUMBNAIL_CONTENT_BOOST_MAX_FIT = 0.25
 SLIDE_THUMBNAIL_TEXT_BOOST_MAX = 4.0
 SLIDE_THUMBNAIL_TEXT_BOOST_FONT_DIVISOR = 4.0
 SLIDE_THUMBNAIL_MEDIUM_TEXT_BOOST = 1.5
@@ -1870,14 +1871,17 @@ def _compact_tiny_slide_text_heights(
             continue
         if font_px <= 0 or font_px > max_font_px:
             continue
-        if width <= 0 or current_h <= 0 or current_h > max_height_px:
+        is_tiny_entity = width <= 12 and _is_tiny_entity_text_node(node)
+        if width <= 0 or current_h <= 0:
+            continue
+        if current_h > max_height_px and not is_tiny_entity:
             continue
 
         text = str(node.get("text") or "")
         if re.search(r"<(?:ol|ul|table|li)\b", text, re.I):
             continue
         line_height = _line_height_from_canvas_text(text)
-        if font_px <= 2 and width <= 8 and _is_tiny_entity_text_node(node):
+        if is_tiny_entity:
             needed_h = max(1.0, float(font_px) * line_height + padding)
         else:
             needed_h = float(
@@ -1914,6 +1918,20 @@ def _is_tiny_slide_number_marker(node: Dict[str, Any]) -> bool:
     if font_px > TINY_SLIDE_TEXT_MAX_FONT_PX + 1 or width > 20 or height > 20:
         return False
     return bool(re.fullmatch(r"\d{1,2}", _plain_canvas_text(node)))
+
+
+def _is_tiny_empty_slide_background(node: Dict[str, Any]) -> bool:
+    if node.get("type") != "text" or _has_visible_text(node):
+        return False
+    attrs = node.get("styleAttributes") or {}
+    if str(attrs.get("shape") or "").lower() not in ("rectangle", "round-rectangle"):
+        return False
+    try:
+        font_px = int(round(float(attrs.get("fontSize") or OBSIDIAN_FONT_SIZE)))
+        height = float(node.get("height") or 0)
+    except Exception:
+        return False
+    return 0 < font_px <= TINY_SLIDE_TEXT_MAX_FONT_PX and 0 < height <= TINY_TEXT_TEXT_VERTICAL_EDGE_MAX_HEIGHT_PX
 
 
 def _resolve_tiny_slide_marker_text_overlaps(
@@ -1974,7 +1992,7 @@ def _resolve_tiny_text_text_vertical_edge_overlaps(
 ) -> None:
     text_nodes = [
         n for n in nodes
-        if _is_clearance_text_node(n) and _has_visible_text(n)
+        if (_is_clearance_text_node(n) and _has_visible_text(n)) or _is_tiny_empty_slide_background(n)
     ]
     if len(text_nodes) < 2:
         return
@@ -2366,6 +2384,8 @@ def _item_local_center_and_size(
 
 def _slide_thumbnail_content_size_boost(fit: float) -> float:
     safe_fit = max(float(fit), 1e-9)
+    if safe_fit >= SLIDE_THUMBNAIL_CONTENT_BOOST_MAX_FIT:
+        return 1.0
     return min(
         SLIDE_THUMBNAIL_CONTENT_BOOST_MAX,
         max(1.0, (1.0 / safe_fit) ** SLIDE_THUMBNAIL_CONTENT_BOOST_EXPONENT),
@@ -2400,9 +2420,11 @@ def _layout_slide_frames_unscaled(
     container_rects_unscaled: Dict[str, Dict[str, float]],
     content_scales_by_frame: Optional[Dict[str, float]] = None,
     content_size_boosts_by_frame: Optional[Dict[str, float]] = None,
+    target_max_side_unscaled: Optional[float] = None,
 ) -> set[str]:
     """Lay out slide frames when Miro exposes deck membership but no per-slide coordinates."""
     synthesized_frame_ids: set[str] = set()
+    max_thumbnail_side = max(float(target_max_side_unscaled or SYNTHETIC_SLIDE_MANUAL_DEFAULT_MAX_SIDE), 1.0)
 
     for did in deck_order:
         frame_ids = [
@@ -2443,9 +2465,9 @@ def _layout_slide_frames_unscaled(
             width = max(float(rect["width"]), 1.0)
             height = max(float(rect["height"]), 1.0)
             max_side = max(width, height)
-            if max_side > SYNTHETIC_SLIDE_THUMBNAIL_MAX_SIDE:
+            if max_side > max_thumbnail_side:
                 has_capped_thumbnail = True
-                fit = SYNTHETIC_SLIDE_THUMBNAIL_MAX_SIDE / max_side
+                fit = max_thumbnail_side / max_side
                 if content_scales_by_frame is not None:
                     content_scales_by_frame[fid] = fit
                 if content_size_boosts_by_frame is not None:
@@ -4097,6 +4119,7 @@ def convert_miro_to_canvas(
 
     slide_content_scales_by_frame: Dict[str, float] = {}
     slide_content_size_boosts_by_frame: Dict[str, float] = {}
+    slide_target_max_side_unscaled = SYNTHETIC_SLIDE_MANUAL_DEFAULT_MAX_SIDE / max(float(scale), 1e-9)
     synthetic_slide_frame_ids = _layout_slide_frames_unscaled(
         by_id,
         deck_order,
@@ -4104,6 +4127,7 @@ def convert_miro_to_canvas(
         container_rects_unscaled,
         slide_content_scales_by_frame,
         slide_content_size_boosts_by_frame,
+        slide_target_max_side_unscaled,
     )
 
     # --- второй проход: сначала обычные узлы/рёбра (кроме контейнеров)
