@@ -27,6 +27,7 @@ from Converter import (  # noqa: E402
     _resolve_tiny_slide_marker_text_overlaps,
     _resolve_tiny_text_text_vertical_edge_overlaps,
     _resolve_ultra_narrow_label_visual_overlaps,
+    _resolve_synthetic_slide_deck_canvas_overlaps,
     _slide_thumbnail_content_size_boost,
     _slide_thumbnail_text_size_boost,
     _strip_edge_empty_paragraphs,
@@ -474,6 +475,21 @@ class TextLayoutTests(unittest.TestCase):
         self.assertEqual(_slide_thumbnail_content_size_boost(1.0), 1.0)
         self.assertEqual(_slide_thumbnail_content_size_boost(2.0), 1.0)
         self.assertEqual(_slide_thumbnail_content_size_boost(0.01), 5.0)
+
+    def test_synthetic_slide_deck_moves_away_from_neighboring_group(self) -> None:
+        nodes = [
+            {"id": "obstacle", "type": "group", "x": 0, "y": 0, "width": 500, "height": 200},
+            {"id": "deck", "type": "group", "x": 0, "y": 100, "width": 1000, "height": 400, "nodes": ["slide"]},
+            {"id": "slide", "type": "group", "x": 0, "y": 100, "width": 1000, "height": 400, "nodes": ["text"]},
+            {"id": "text", "type": "text", "x": 40, "y": 140, "width": 120, "height": 40, "text": "content"},
+        ]
+        node_map = {str(node["id"]): node for node in nodes}
+
+        _resolve_synthetic_slide_deck_canvas_overlaps(nodes, node_map, ["deck"], {"slide"})
+
+        self.assertEqual(nodes[1]["y"], 224.0)
+        self.assertEqual(nodes[2]["y"], 224.0)
+        self.assertEqual(nodes[3]["y"], 264.0)
 
     def test_capped_slide_thumbnail_text_boost_uses_source_font_tiers(self) -> None:
         self.assertEqual(

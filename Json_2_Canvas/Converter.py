@@ -49,6 +49,9 @@ TEXT_VISUAL_CASCADE_MAX_PASSES = 64
 SLIDE_THUMBNAIL_MIN_FONT_PX = 1
 SYNTHETIC_SLIDE_MANUAL_DEFAULT_MAX_SIDE = 1200.0
 SYNTHETIC_SLIDE_DECK_TOP_ROW_COUNT = 4
+SYNTHETIC_SLIDE_DECK_OVERLAP_CLEARANCE_PX = 24.0
+SYNTHETIC_SLIDE_DECK_OVERLAP_TOLERANCE_PX = 1.0
+SYNTHETIC_SLIDE_DECK_OVERLAP_MAX_PASSES = 16
 SLIDE_THUMBNAIL_CONTENT_BOOST_EXPONENT = 0.75
 SLIDE_THUMBNAIL_CONTENT_BOOST_MAX = 5.0
 SLIDE_THUMBNAIL_CONTENT_BOOST_MAX_FIT = 0.25
@@ -2552,6 +2555,106 @@ def _layout_slide_frames_unscaled(
     return synthesized_frame_ids
 
 
+def _collect_canvas_group_subtree_ids(
+    node_map: Dict[str, Dict[str, Any]],
+    root_id: str,
+    out: Optional[set[str]] = None,
+) -> set[str]:
+    if out is None:
+        out = set()
+    if root_id in out:
+        return out
+    out.add(root_id)
+    node = node_map.get(root_id)
+    if not isinstance(node, dict):
+        return out
+    for child_id in node.get("nodes") or []:
+        _collect_canvas_group_subtree_ids(node_map, str(child_id), out)
+    return out
+
+
+def _translate_canvas_nodes(node_map: Dict[str, Dict[str, Any]], node_ids: Iterable[str], dx: float, dy: float) -> None:
+    for node_id in node_ids:
+        node = node_map.get(str(node_id))
+        if not isinstance(node, dict):
+            continue
+        try:
+            node["x"] = float(node["x"]) + dx
+            node["y"] = float(node["y"]) + dy
+        except Exception:
+            continue
+
+
+def _clearance_down_delta(
+    rect: tuple[float, float, float, float],
+    obstacles: List[tuple[float, float, float, float]],
+    *,
+    clearance_px: float = SYNTHETIC_SLIDE_DECK_OVERLAP_CLEARANCE_PX,
+    tolerance_px: float = SYNTHETIC_SLIDE_DECK_OVERLAP_TOLERANCE_PX,
+    max_passes: int = SYNTHETIC_SLIDE_DECK_OVERLAP_MAX_PASSES,
+) -> float:
+    dy = 0.0
+    x0, y0, x1, y1 = rect
+
+    for _ in range(max_passes):
+        moved = (x0, y0 + dy, x1, y1 + dy)
+        blockers: List[tuple[float, float, float, float]] = []
+        for obstacle in obstacles:
+            overlap_w, overlap_h = _rect_overlap(moved, obstacle)
+            if overlap_w > tolerance_px and overlap_h > tolerance_px:
+                blockers.append(obstacle)
+        if not blockers:
+            return dy
+
+        next_dy = max(obstacle[3] + clearance_px for obstacle in blockers) - y0
+        if next_dy <= dy + tolerance_px:
+            return dy
+        dy = next_dy
+
+    return dy
+
+
+def _resolve_synthetic_slide_deck_canvas_overlaps(
+    nodes: List[Dict[str, Any]],
+    node_map: Dict[str, Dict[str, Any]],
+    deck_order: List[str],
+    synthetic_slide_frame_ids: set[str],
+) -> None:
+    """Move enlarged synthetic slide decks away from neighboring canvas objects."""
+    if not synthetic_slide_frame_ids:
+        return
+
+    for did in deck_order:
+        deck_node = node_map.get(did)
+        if not isinstance(deck_node, dict):
+            continue
+        deck_children = [str(child_id) for child_id in deck_node.get("nodes") or []]
+        if not any(child_id in synthetic_slide_frame_ids for child_id in deck_children):
+            continue
+
+        moving_ids = _collect_canvas_group_subtree_ids(node_map, did)
+        deck_rect = _node_rect(deck_node)
+        if not deck_rect:
+            continue
+
+        obstacles: List[tuple[float, float, float, float]] = []
+        for node in nodes:
+            node_id = str(node.get("id", "") or "")
+            if not node_id or node_id in moving_ids:
+                continue
+            if node.get("type") not in ("group", "text", "file", "link"):
+                continue
+            obstacle_rect = _node_rect(node)
+            if obstacle_rect:
+                obstacles.append(obstacle_rect)
+        if not obstacles:
+            continue
+
+        dy = _clearance_down_delta(deck_rect, obstacles)
+        if dy > SYNTHETIC_SLIDE_DECK_OVERLAP_TOLERANCE_PX:
+            _translate_canvas_nodes(node_map, moving_ids, 0.0, dy)
+
+
 def _slide_fit_data(frame_rect: Dict[str, float], boxes: List[tuple]) -> Dict[str, float]:
     min_x = min(box[0] for box in boxes)
     min_y = min(box[1] for box in boxes)
@@ -4427,6 +4530,13 @@ def convert_miro_to_canvas(
         nodes.append(group_node)
         node_map[cid] = group_node
 
+
+    _resolve_synthetic_slide_deck_canvas_overlaps(
+        nodes,
+        node_map,
+        deck_order,
+        synthetic_slide_frame_ids,
+    )
 
     for did in deck_order:
         slide_sequence_ids: List[str] = []

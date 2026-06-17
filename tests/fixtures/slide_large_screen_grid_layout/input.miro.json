@@ -14,6 +14,23 @@
       }
     },
     {
+      "id": "nearby-frame",
+      "type": "frame",
+      "position": {
+        "x": 0,
+        "y": 0,
+        "origin": "center",
+        "relativeTo": "canvas_center"
+      },
+      "geometry": {
+        "width": 300,
+        "height": 200
+      },
+      "data": {
+        "title": "Nearby frame"
+      }
+    },
+    {
       "id": "grid-frame-1",
       "type": "frame",
       "parent": {
