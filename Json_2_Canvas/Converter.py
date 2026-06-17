@@ -49,6 +49,7 @@ TEXT_VISUAL_CASCADE_MAX_PASSES = 64
 SLIDE_THUMBNAIL_MIN_FONT_PX = 1
 SYNTHETIC_SLIDE_THUMBNAIL_MAX_SIDE = 240.0
 SYNTHETIC_SLIDE_DECK_TOP_ROW_COUNT = 4
+SLIDE_THUMBNAIL_CONTENT_BOOST_MAX = 4.0
 SLIDE_CHILD_FIT_OVERFLOW_RATIO = 0.15
 SLIDE_CHILD_FIT_OVERFLOW_MIN_PX = 24.0
 SLIDE_CHILD_FIT_BBOX_RATIO = 1.5
@@ -2363,6 +2364,7 @@ def _layout_slide_frames_unscaled(
     slide_frames_by_deck: Dict[str, List[str]],
     container_rects_unscaled: Dict[str, Dict[str, float]],
     content_scales_by_frame: Optional[Dict[str, float]] = None,
+    content_size_boosts_by_frame: Optional[Dict[str, float]] = None,
 ) -> set[str]:
     """Lay out slide frames when Miro exposes deck membership but no per-slide coordinates."""
     synthesized_frame_ids: set[str] = set()
@@ -2411,6 +2413,11 @@ def _layout_slide_frames_unscaled(
                 fit = SYNTHETIC_SLIDE_THUMBNAIL_MAX_SIDE / max_side
                 if content_scales_by_frame is not None:
                     content_scales_by_frame[fid] = fit
+                if content_size_boosts_by_frame is not None:
+                    content_size_boosts_by_frame[fid] = min(
+                        SLIDE_THUMBNAIL_CONTENT_BOOST_MAX,
+                        max(1.0, (1.0 / max(fit, 1e-9)) ** 0.5),
+                    )
                 width *= fit
                 height *= fit
             rect["width"] = width
@@ -2599,6 +2606,7 @@ def _fit_slide_child_nodes_to_frame_rects(
     scale: float,
     min_font_px: int,
     content_scales_by_frame: Optional[Dict[str, float]] = None,
+    content_size_boosts_by_frame: Optional[Dict[str, float]] = None,
     sub_min_font_frame_ids: Optional[set[str]] = None,
 ) -> set:
     """Place slide children inside their computed slide frame rects."""
@@ -2643,20 +2651,27 @@ def _fit_slide_child_nodes_to_frame_rects(
             origin_y = float(fit_data["origin_y"])
             offset_x = float(fit_data["offset_x"])
             offset_y = float(fit_data["offset_y"])
-
         for cid, (local_x, local_y) in centers.items():
             node = node_map[cid]
-            if abs(fit - 1.0) > 1e-9:
-                node["width"] = max(1.0, float(node["width"]) * fit)
-                node["height"] = max(1.0, float(node["height"]) * fit)
+            size_fit = fit
+            source_type = str((by_id.get(cid) or {}).get("type") or "").lower()
+            if (
+                source_type == "image"
+                and content_size_boosts_by_frame
+                and frame_id in content_size_boosts_by_frame
+            ):
+                size_fit *= float(content_size_boosts_by_frame[frame_id])
+            if abs(size_fit - 1.0) > 1e-9:
+                node["width"] = max(1.0, float(node["width"]) * size_fit)
+                node["height"] = max(1.0, float(node["height"]) * size_fit)
                 attrs = node.get("styleAttributes")
-                if fit < 1.0 and isinstance(attrs, dict) and isinstance(attrs.get("fontSize"), (int, float)):
+                if size_fit < 1.0 and isinstance(attrs, dict) and isinstance(attrs.get("fontSize"), (int, float)):
                     font_floor = (
                         SLIDE_THUMBNAIL_MIN_FONT_PX
                         if sub_min_font_frame_ids and frame_id in sub_min_font_frame_ids
                         else min_font_px
                     )
-                    _set_node_font_px(node, max(font_floor, int(round(float(attrs["fontSize"]) * fit))))
+                    _set_node_font_px(node, max(font_floor, int(round(float(attrs["fontSize"]) * size_fit))))
 
             center_x = float(frame_rect["x"]) + offset_x + (local_x - origin_x) * fit
             center_y = float(frame_rect["y"]) + offset_y + (local_y - origin_y) * fit
@@ -4048,12 +4063,14 @@ def convert_miro_to_canvas(
                 seen.add(fid)
 
     slide_content_scales_by_frame: Dict[str, float] = {}
+    slide_content_size_boosts_by_frame: Dict[str, float] = {}
     synthetic_slide_frame_ids = _layout_slide_frames_unscaled(
         by_id,
         deck_order,
         slide_frames_by_deck,
         container_rects_unscaled,
         slide_content_scales_by_frame,
+        slide_content_size_boosts_by_frame,
     )
 
     # --- второй проход: сначала обычные узлы/рёбра (кроме контейнеров)
@@ -4153,6 +4170,7 @@ def convert_miro_to_canvas(
         scale,
         min_font_px,
         slide_content_scales_by_frame,
+        slide_content_size_boosts_by_frame,
         synthetic_slide_frame_ids,
     )
     slide_child_layout_nodes = [

@@ -378,6 +378,89 @@ class TextLayoutTests(unittest.TestCase):
         self.assertAlmostEqual(node_map["child"]["x"], 110.0)
         self.assertAlmostEqual(node_map["child"]["y"], 58.75)
 
+    def test_capped_slide_thumbnail_can_boost_child_size_without_moving_center(self) -> None:
+        node_map = {
+            "child": {
+                "id": "child",
+                "type": "file",
+                "x": 0,
+                "y": 0,
+                "width": 40,
+                "height": 20,
+            }
+        }
+        by_id = {
+            "child": {
+                "id": "child",
+                "type": "image",
+                "position": {"x": 100, "y": 80, "origin": "center"},
+                "geometry": {"width": 40, "height": 20},
+            }
+        }
+
+        _fit_slide_child_nodes_to_frame_rects(
+            node_map,
+            by_id,
+            {"frame": ["child"]},
+            ["frame"],
+            {"frame": {"x": 100, "y": 50, "width": 240, "height": 135}},
+            scale=1.0,
+            min_font_px=8,
+            content_scales_by_frame={"frame": 0.125},
+            content_size_boosts_by_frame={"frame": 3.0},
+            sub_min_font_frame_ids={"frame"},
+        )
+
+        center_x = node_map["child"]["x"] + node_map["child"]["width"] / 2
+        center_y = node_map["child"]["y"] + node_map["child"]["height"] / 2
+        self.assertAlmostEqual(node_map["child"]["width"], 15.0)
+        self.assertAlmostEqual(node_map["child"]["height"], 7.5)
+        self.assertAlmostEqual(center_x, 112.5)
+        self.assertAlmostEqual(center_y, 60.0)
+
+    def test_capped_slide_thumbnail_does_not_boost_text_size(self) -> None:
+        node_map = {
+            "child": {
+                "id": "child",
+                "type": "text",
+                "x": 0,
+                "y": 0,
+                "width": 40,
+                "height": 20,
+                "text": '<span style="font-size:16px">Title</span>',
+                "styleAttributes": {"fontSize": 16},
+            }
+        }
+        by_id = {
+            "child": {
+                "id": "child",
+                "type": "text",
+                "position": {"x": 100, "y": 80, "origin": "center"},
+                "geometry": {"width": 40, "height": 20},
+            }
+        }
+
+        _fit_slide_child_nodes_to_frame_rects(
+            node_map,
+            by_id,
+            {"frame": ["child"]},
+            ["frame"],
+            {"frame": {"x": 100, "y": 50, "width": 240, "height": 135}},
+            scale=1.0,
+            min_font_px=8,
+            content_scales_by_frame={"frame": 0.125},
+            content_size_boosts_by_frame={"frame": 3.0},
+            sub_min_font_frame_ids={"frame"},
+        )
+
+        center_x = node_map["child"]["x"] + node_map["child"]["width"] / 2
+        center_y = node_map["child"]["y"] + node_map["child"]["height"] / 2
+        self.assertAlmostEqual(node_map["child"]["width"], 5.0)
+        self.assertAlmostEqual(node_map["child"]["height"], 2.5)
+        self.assertAlmostEqual(center_x, 112.5)
+        self.assertAlmostEqual(center_y, 60.0)
+        self.assertEqual(node_map["child"]["styleAttributes"]["fontSize"], 2)
+
     def test_slide_child_fitting_preserves_non_overflowing_local_coordinates(self) -> None:
         node_map = {
             "child": {
