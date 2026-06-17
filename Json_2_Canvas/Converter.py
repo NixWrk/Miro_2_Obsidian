@@ -49,7 +49,8 @@ TEXT_VISUAL_CASCADE_MAX_PASSES = 64
 SLIDE_THUMBNAIL_MIN_FONT_PX = 1
 SYNTHETIC_SLIDE_THUMBNAIL_MAX_SIDE = 240.0
 SYNTHETIC_SLIDE_DECK_TOP_ROW_COUNT = 4
-SLIDE_THUMBNAIL_CONTENT_BOOST_MAX = 4.0
+SLIDE_THUMBNAIL_CONTENT_BOOST_EXPONENT = 0.75
+SLIDE_THUMBNAIL_CONTENT_BOOST_MAX = 5.0
 SLIDE_CHILD_FIT_OVERFLOW_RATIO = 0.15
 SLIDE_CHILD_FIT_OVERFLOW_MIN_PX = 24.0
 SLIDE_CHILD_FIT_BBOX_RATIO = 1.5
@@ -2358,6 +2359,14 @@ def _item_local_center_and_size(
     return x, y, max(width, 1.0), max(height, 1.0)
 
 
+def _slide_thumbnail_content_size_boost(fit: float) -> float:
+    safe_fit = max(float(fit), 1e-9)
+    return min(
+        SLIDE_THUMBNAIL_CONTENT_BOOST_MAX,
+        max(1.0, (1.0 / safe_fit) ** SLIDE_THUMBNAIL_CONTENT_BOOST_EXPONENT),
+    )
+
+
 def _layout_slide_frames_unscaled(
     by_id: Dict[str, Dict[str, Any]],
     deck_order: List[str],
@@ -2414,10 +2423,7 @@ def _layout_slide_frames_unscaled(
                 if content_scales_by_frame is not None:
                     content_scales_by_frame[fid] = fit
                 if content_size_boosts_by_frame is not None:
-                    content_size_boosts_by_frame[fid] = min(
-                        SLIDE_THUMBNAIL_CONTENT_BOOST_MAX,
-                        max(1.0, (1.0 / max(fit, 1e-9)) ** 0.5),
-                    )
+                    content_size_boosts_by_frame[fid] = _slide_thumbnail_content_size_boost(fit)
                 width *= fit
                 height *= fit
             rect["width"] = width

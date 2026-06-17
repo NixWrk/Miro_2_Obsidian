@@ -27,6 +27,7 @@ from Converter import (  # noqa: E402
     _resolve_tiny_slide_marker_text_overlaps,
     _resolve_tiny_text_text_vertical_edge_overlaps,
     _resolve_ultra_narrow_label_visual_overlaps,
+    _slide_thumbnail_content_size_boost,
     _strip_edge_empty_paragraphs,
 )
 
@@ -417,6 +418,12 @@ class TextLayoutTests(unittest.TestCase):
         self.assertAlmostEqual(node_map["child"]["height"], 7.5)
         self.assertAlmostEqual(center_x, 112.5)
         self.assertAlmostEqual(center_y, 60.0)
+
+    def test_capped_slide_thumbnail_image_boost_uses_inverse_power_cap(self) -> None:
+        self.assertAlmostEqual(_slide_thumbnail_content_size_boost(0.125), 4.756828460010884)
+        self.assertEqual(_slide_thumbnail_content_size_boost(1.0), 1.0)
+        self.assertEqual(_slide_thumbnail_content_size_boost(2.0), 1.0)
+        self.assertEqual(_slide_thumbnail_content_size_boost(0.01), 5.0)
 
     def test_capped_slide_thumbnail_does_not_boost_text_size(self) -> None:
         node_map = {
