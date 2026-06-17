@@ -51,6 +51,11 @@ SYNTHETIC_SLIDE_THUMBNAIL_MAX_SIDE = 240.0
 SYNTHETIC_SLIDE_DECK_TOP_ROW_COUNT = 4
 SLIDE_THUMBNAIL_CONTENT_BOOST_EXPONENT = 0.75
 SLIDE_THUMBNAIL_CONTENT_BOOST_MAX = 5.0
+SLIDE_THUMBNAIL_TEXT_BOOST_MAX = 4.0
+SLIDE_THUMBNAIL_TEXT_BOOST_FONT_DIVISOR = 4.0
+SLIDE_THUMBNAIL_MEDIUM_TEXT_BOOST = 1.5
+SLIDE_THUMBNAIL_MEDIUM_TEXT_MIN_FONT_PX = 5.0
+SLIDE_THUMBNAIL_LARGE_TEXT_MIN_FONT_PX = 8.0
 SLIDE_CHILD_FIT_OVERFLOW_RATIO = 0.15
 SLIDE_CHILD_FIT_OVERFLOW_MIN_PX = 24.0
 SLIDE_CHILD_FIT_BBOX_RATIO = 1.5
@@ -2367,6 +2372,27 @@ def _slide_thumbnail_content_size_boost(fit: float) -> float:
     )
 
 
+def _slide_thumbnail_text_size_boost(item: Dict[str, Any], frame_boost: float) -> float:
+    item_type = str(item.get("type") or "").lower()
+    if item_type == "shape":
+        data = item.get("data") if isinstance(item.get("data"), dict) else {}
+        if not str(data.get("content") or "").strip():
+            return 1.0
+
+    font_px = _extract_font_base_px(item, fallback=0.0)
+    if font_px <= 0:
+        return 1.0
+    if font_px >= SLIDE_THUMBNAIL_LARGE_TEXT_MIN_FONT_PX:
+        return min(
+            float(frame_boost),
+            SLIDE_THUMBNAIL_TEXT_BOOST_MAX,
+            max(SLIDE_THUMBNAIL_MEDIUM_TEXT_BOOST, font_px / SLIDE_THUMBNAIL_TEXT_BOOST_FONT_DIVISOR),
+        )
+    if font_px >= SLIDE_THUMBNAIL_MEDIUM_TEXT_MIN_FONT_PX:
+        return min(float(frame_boost), SLIDE_THUMBNAIL_MEDIUM_TEXT_BOOST)
+    return 1.0
+
+
 def _layout_slide_frames_unscaled(
     by_id: Dict[str, Dict[str, Any]],
     deck_order: List[str],
@@ -2660,13 +2686,14 @@ def _fit_slide_child_nodes_to_frame_rects(
         for cid, (local_x, local_y) in centers.items():
             node = node_map[cid]
             size_fit = fit
-            source_type = str((by_id.get(cid) or {}).get("type") or "").lower()
-            if (
-                source_type == "image"
-                and content_size_boosts_by_frame
-                and frame_id in content_size_boosts_by_frame
-            ):
-                size_fit *= float(content_size_boosts_by_frame[frame_id])
+            source_item = by_id.get(cid) or {}
+            source_type = str(source_item.get("type") or "").lower()
+            if content_size_boosts_by_frame and frame_id in content_size_boosts_by_frame:
+                boost = float(content_size_boosts_by_frame[frame_id])
+                if source_type == "image":
+                    size_fit *= boost
+                elif source_type in {"text", "shape", "sticky_note"}:
+                    size_fit *= _slide_thumbnail_text_size_boost(source_item, boost)
             if abs(size_fit - 1.0) > 1e-9:
                 node["width"] = max(1.0, float(node["width"]) * size_fit)
                 node["height"] = max(1.0, float(node["height"]) * size_fit)

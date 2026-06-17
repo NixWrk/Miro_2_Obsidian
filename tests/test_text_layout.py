@@ -28,6 +28,7 @@ from Converter import (  # noqa: E402
     _resolve_tiny_text_text_vertical_edge_overlaps,
     _resolve_ultra_narrow_label_visual_overlaps,
     _slide_thumbnail_content_size_boost,
+    _slide_thumbnail_text_size_boost,
     _strip_edge_empty_paragraphs,
 )
 
@@ -424,6 +425,72 @@ class TextLayoutTests(unittest.TestCase):
         self.assertEqual(_slide_thumbnail_content_size_boost(1.0), 1.0)
         self.assertEqual(_slide_thumbnail_content_size_boost(2.0), 1.0)
         self.assertEqual(_slide_thumbnail_content_size_boost(0.01), 5.0)
+
+    def test_capped_slide_thumbnail_text_boost_uses_source_font_tiers(self) -> None:
+        self.assertEqual(
+            _slide_thumbnail_text_size_boost({"type": "text", "style": {"fontSize": "16"}}, 4.75),
+            4.0,
+        )
+        self.assertEqual(
+            _slide_thumbnail_text_size_boost({"type": "text", "style": {"fontSize": "5"}}, 4.75),
+            1.5,
+        )
+        self.assertEqual(
+            _slide_thumbnail_text_size_boost({"type": "text", "style": {"fontSize": "4"}}, 4.75),
+            1.0,
+        )
+        self.assertEqual(
+            _slide_thumbnail_text_size_boost({"type": "shape", "style": {"fontSize": "32"}, "data": {"content": ""}}, 4.75),
+            1.0,
+        )
+        self.assertEqual(
+            _slide_thumbnail_text_size_boost({"type": "shape", "style": {"fontSize": "32"}, "data": {"content": "<p>1</p>"}}, 4.75),
+            4.0,
+        )
+
+    def test_capped_slide_thumbnail_can_boost_styled_text_without_moving_center(self) -> None:
+        node_map = {
+            "child": {
+                "id": "child",
+                "type": "text",
+                "x": 0,
+                "y": 0,
+                "width": 40,
+                "height": 20,
+                "text": '<span style="font-size:16px">Title</span>',
+                "styleAttributes": {"fontSize": 16},
+            }
+        }
+        by_id = {
+            "child": {
+                "id": "child",
+                "type": "text",
+                "position": {"x": 100, "y": 80, "origin": "center"},
+                "geometry": {"width": 40, "height": 20},
+                "style": {"fontSize": "16"},
+            }
+        }
+
+        _fit_slide_child_nodes_to_frame_rects(
+            node_map,
+            by_id,
+            {"frame": ["child"]},
+            ["frame"],
+            {"frame": {"x": 100, "y": 50, "width": 240, "height": 135}},
+            scale=1.0,
+            min_font_px=8,
+            content_scales_by_frame={"frame": 0.125},
+            content_size_boosts_by_frame={"frame": 3.0},
+            sub_min_font_frame_ids={"frame"},
+        )
+
+        center_x = node_map["child"]["x"] + node_map["child"]["width"] / 2
+        center_y = node_map["child"]["y"] + node_map["child"]["height"] / 2
+        self.assertAlmostEqual(node_map["child"]["width"], 15.0)
+        self.assertAlmostEqual(node_map["child"]["height"], 7.5)
+        self.assertAlmostEqual(center_x, 112.5)
+        self.assertAlmostEqual(center_y, 60.0)
+        self.assertEqual(node_map["child"]["styleAttributes"]["fontSize"], 6)
 
     def test_capped_slide_thumbnail_does_not_boost_text_size(self) -> None:
         node_map = {
