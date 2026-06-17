@@ -269,6 +269,25 @@ class TextLayoutTests(unittest.TestCase):
         self.assertLess(nodes[0]["height"], 30)
         self.assertGreater(nodes[0]["height"], 0)
 
+    def test_tiny_slide_text_height_compacts_entity_icon(self) -> None:
+        nodes = [
+            {
+                "id": "tiny-entity",
+                "type": "text",
+                "x": 0,
+                "y": 0,
+                "width": 1.6,
+                "height": 15.125,
+                "text": '<span style="font-size:1px; line-height:1.35">&amp;#x1f9b7;</span>',
+                "styleAttributes": {"shape": "round-rectangle", "border": "invisible", "fontSize": 1},
+            },
+        ]
+
+        _compact_tiny_slide_text_heights(nodes)
+
+        self.assertLess(nodes[0]["height"], 4)
+        self.assertGreater(nodes[0]["height"], 0)
+
     def test_tiny_slide_text_height_keeps_number_marker_shape(self) -> None:
         nodes = [
             {
@@ -321,6 +340,43 @@ class TextLayoutTests(unittest.TestCase):
         self.assertEqual(node_map["child"]["y"], 0)
         self.assertLessEqual(node_map["child"]["x"] + node_map["child"]["width"], 100)
         self.assertLessEqual(node_map["child"]["y"] + node_map["child"]["height"], 50)
+
+    def test_capped_slide_thumbnail_preserves_source_local_coordinates(self) -> None:
+        node_map = {
+            "child": {
+                "id": "child",
+                "type": "file",
+                "x": 0,
+                "y": 0,
+                "width": 40,
+                "height": 20,
+            }
+        }
+        by_id = {
+            "child": {
+                "id": "child",
+                "type": "image",
+                "position": {"x": 100, "y": 80, "origin": "center"},
+                "geometry": {"width": 40, "height": 20},
+            }
+        }
+
+        _fit_slide_child_nodes_to_frame_rects(
+            node_map,
+            by_id,
+            {"frame": ["child"]},
+            ["frame"],
+            {"frame": {"x": 100, "y": 50, "width": 240, "height": 135}},
+            scale=1.0,
+            min_font_px=8,
+            content_scales_by_frame={"frame": 0.125},
+            sub_min_font_frame_ids={"frame"},
+        )
+
+        self.assertAlmostEqual(node_map["child"]["width"], 5.0)
+        self.assertAlmostEqual(node_map["child"]["height"], 2.5)
+        self.assertAlmostEqual(node_map["child"]["x"], 110.0)
+        self.assertAlmostEqual(node_map["child"]["y"], 58.75)
 
     def test_tiny_slide_marker_text_overlap_shrinks_text_from_left(self) -> None:
         nodes = [

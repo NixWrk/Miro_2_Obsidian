@@ -1825,6 +1825,16 @@ def _has_visible_text(node: Dict[str, Any]) -> bool:
     return bool(plain)
 
 
+def _is_tiny_entity_text_node(node: Dict[str, Any]) -> bool:
+    plain = _plain_canvas_text(node)
+    if not plain or re.search(r"\s", plain):
+        return False
+    if re.fullmatch(r"&(?:#[0-9]+|#x[0-9a-fA-F]+|[A-Za-z][A-Za-z0-9]+);", plain):
+        return True
+    decoded = _html_unescape(plain)
+    return bool(decoded) and not re.search(r"\s", decoded) and len(decoded) <= 2
+
+
 def _compact_tiny_slide_text_heights(
     nodes: List[Dict[str, Any]],
     *,
@@ -1855,15 +1865,18 @@ def _compact_tiny_slide_text_heights(
         if re.search(r"<(?:ol|ul|table|li)\b", text, re.I):
             continue
         line_height = _line_height_from_canvas_text(text)
-        needed_h = float(
-            _estimate_render_height(
-                text,
-                width_px=width,
-                font_px=font_px,
-                line_height=line_height,
-                padding=padding,
+        if font_px <= 2 and width <= 8 and _is_tiny_entity_text_node(node):
+            needed_h = max(1.0, float(font_px) * line_height + padding)
+        else:
+            needed_h = float(
+                _estimate_render_height(
+                    text,
+                    width_px=width,
+                    font_px=font_px,
+                    line_height=line_height,
+                    padding=padding,
+                )
             )
-        )
         if 0 < needed_h < current_h:
             node["height"] = needed_h
 
@@ -2344,6 +2357,7 @@ def _layout_slide_frames_unscaled(
     deck_order: List[str],
     slide_frames_by_deck: Dict[str, List[str]],
     container_rects_unscaled: Dict[str, Dict[str, float]],
+    content_scales_by_frame: Optional[Dict[str, float]] = None,
 ) -> set[str]:
     """Lay out slide frames when Miro exposes deck membership but no per-slide coordinates."""
     synthesized_frame_ids: set[str] = set()
@@ -2390,6 +2404,8 @@ def _layout_slide_frames_unscaled(
             if max_side > SYNTHETIC_SLIDE_THUMBNAIL_MAX_SIDE:
                 has_capped_thumbnail = True
                 fit = SYNTHETIC_SLIDE_THUMBNAIL_MAX_SIDE / max_side
+                if content_scales_by_frame is not None:
+                    content_scales_by_frame[fid] = fit
                 width *= fit
                 height *= fit
             rect["width"] = width
@@ -2601,14 +2617,19 @@ def _fit_slide_child_nodes_to_frame_rects(
         if not boxes:
             continue
 
-        fit_data = _slide_fit_data(frame_rect, boxes)
-        fit = float(fit_data["fit"])
         if content_scales_by_frame and frame_id in content_scales_by_frame:
             fit = float(content_scales_by_frame[frame_id])
-        origin_x = float(fit_data["origin_x"])
-        origin_y = float(fit_data["origin_y"])
-        offset_x = (max(float(frame_rect["width"]), 1.0) - float(fit_data["bbox_w"]) * fit) / 2.0
-        offset_y = (max(float(frame_rect["height"]), 1.0) - float(fit_data["bbox_h"]) * fit) / 2.0
+            origin_x = 0.0
+            origin_y = 0.0
+            offset_x = 0.0
+            offset_y = 0.0
+        else:
+            fit_data = _slide_fit_data(frame_rect, boxes)
+            fit = float(fit_data["fit"])
+            origin_x = float(fit_data["origin_x"])
+            origin_y = float(fit_data["origin_y"])
+            offset_x = (max(float(frame_rect["width"]), 1.0) - float(fit_data["bbox_w"]) * fit) / 2.0
+            offset_y = (max(float(frame_rect["height"]), 1.0) - float(fit_data["bbox_h"]) * fit) / 2.0
 
         for cid, (local_x, local_y) in centers.items():
             node = node_map[cid]
@@ -4013,11 +4034,13 @@ def convert_miro_to_canvas(
                 lst.append(fid)
                 seen.add(fid)
 
+    slide_content_scales_by_frame: Dict[str, float] = {}
     synthetic_slide_frame_ids = _layout_slide_frames_unscaled(
         by_id,
         deck_order,
         slide_frames_by_deck,
         container_rects_unscaled,
+        slide_content_scales_by_frame,
     )
 
     # --- второй проход: сначала обычные узлы/рёбра (кроме контейнеров)
@@ -4116,7 +4139,7 @@ def convert_miro_to_canvas(
         container_rects_unscaled,
         scale,
         min_font_px,
-        None,
+        slide_content_scales_by_frame,
         synthetic_slide_frame_ids,
     )
     slide_child_layout_nodes = [
