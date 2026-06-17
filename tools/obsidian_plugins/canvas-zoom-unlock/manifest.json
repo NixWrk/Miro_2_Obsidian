@@ -1,0 +1,9 @@
+{
+  "id": "canvas-zoom-unlock",
+  "name": "Canvas Zoom Unlock",
+  "version": "0.1.0",
+  "minAppVersion": "1.1.0",
+  "description": "Relaxes Obsidian Canvas zoom limits for large imported boards.",
+  "author": "Miro 2 Obsidian",
+  "isDesktopOnly": true
+}
