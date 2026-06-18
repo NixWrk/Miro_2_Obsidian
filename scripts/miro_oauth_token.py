@@ -11,7 +11,7 @@ from typing import Any
 from urllib.parse import parse_qs, urlencode, urlparse
 
 
-DEFAULT_AUTHORIZE_URL = "https://miro.com/app-install/"
+DEFAULT_AUTHORIZE_URL = "https://miro.com/oauth/authorize"
 DEFAULT_TOKEN_URL = "https://api.miro.com/v1/oauth/token"
 DEFAULT_REDIRECT_URI = "http://127.0.0.1:8000/callback"
 DEFAULT_SCOPES = "boards:read boards:write team:read"
@@ -257,7 +257,7 @@ def exchange_access_token(config: OAuthConfig, code: str, *, session: Any | None
 
     response = session.post(
         config.token_url,
-        data={
+        params={
             "grant_type": "authorization_code",
             "code": code,
             "redirect_uri": config.redirect_uri,

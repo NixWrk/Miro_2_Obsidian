@@ -14,7 +14,7 @@ sys.path.insert(0, str(MIRO_JSON_DIR))
 sys.path.insert(0, str(REPO_ROOT / "scripts"))
 
 from miro_downloader import get_boards  # noqa: E402
-from miro_oauth_token import DEFAULT_BROWSER, DEFAULT_REDIRECT_URI  # noqa: E402
+from miro_oauth_token import DEFAULT_AUTHORIZE_URL, DEFAULT_BROWSER, DEFAULT_REDIRECT_URI  # noqa: E402
 from miro_rest_export_board import resolve_token_from_args, write_json  # noqa: E402
 
 
@@ -35,7 +35,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--oauth-client-secret-env", default="MIRO_CLIENT_SECRET")
     parser.add_argument("--oauth-redirect-uri", default=DEFAULT_REDIRECT_URI)
     parser.add_argument("--oauth-scopes", default="boards:read boards:write team:read")
-    parser.add_argument("--oauth-authorize-url", default="https://miro.com/app-install/")
+    parser.add_argument("--oauth-authorize-url", default=DEFAULT_AUTHORIZE_URL)
     parser.add_argument("--oauth-token-url", default="https://api.miro.com/v1/oauth/token")
     parser.add_argument("--oauth-timeout-seconds", type=int, default=300)
     parser.add_argument("--oauth-browser", default=DEFAULT_BROWSER)

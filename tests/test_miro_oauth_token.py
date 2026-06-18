@@ -48,8 +48,8 @@ class FakeSession:
         self.calls: list[dict[str, object]] = []
         self.response = response or FakeResponse({"access_token": "token-1"})
 
-    def post(self, url: str, *, data: dict[str, str], timeout: int) -> FakeResponse:
-        self.calls.append({"url": url, "data": data, "timeout": timeout})
+    def post(self, url: str, *, params: dict[str, str], timeout: int) -> FakeResponse:
+        self.calls.append({"url": url, "params": params, "timeout": timeout})
         return self.response
 
 
@@ -162,7 +162,7 @@ class MiroOAuthTokenTests(unittest.TestCase):
         )
 
         self.assertEqual(token, "token-1")
-        self.assertEqual(session.calls[0]["data"]["code"], "code-1")
+        self.assertEqual(session.calls[0]["params"]["code"], "code-1")
 
     def test_token_exchange_error_sanitizes_secret_and_code(self) -> None:
         config = OAuthConfig(client_id="client-1", client_secret="secret-1")
@@ -187,7 +187,7 @@ class MiroOAuthTokenTests(unittest.TestCase):
         with self.assertRaisesRegex(OAuthTokenExchangeError, "invalid_client"):
             exchange_access_token(config, "code-1", session=session)
 
-    def test_exchange_access_token_posts_oauth_payload(self) -> None:
+    def test_exchange_access_token_posts_oauth_query_params(self) -> None:
         config = OAuthConfig(
             client_id="client-1",
             client_secret="secret-1",
@@ -200,7 +200,7 @@ class MiroOAuthTokenTests(unittest.TestCase):
         self.assertEqual(token, "token-1")
         self.assertEqual(session.calls[0]["url"], "https://api.miro.com/v1/oauth/token")
         self.assertEqual(
-            session.calls[0]["data"],
+            session.calls[0]["params"],
             {
                 "grant_type": "authorization_code",
                 "code": "code-1",
