@@ -1243,6 +1243,12 @@ def _is_empty_decorative_text_node(node: Dict[str, Any]) -> bool:
     return shape not in ("", "none")
 
 
+def _has_canvas_text_shape(node: Dict[str, Any]) -> bool:
+    attrs = node.get("styleAttributes") or {}
+    shape = str(attrs.get("shape") or "").lower()
+    return shape not in ("", "none")
+
+
 def _is_clearance_text_node(node: Dict[str, Any]) -> bool:
     if node.get("type") != "text":
         return False
@@ -1254,6 +1260,20 @@ def _is_clearance_text_node(node: Dict[str, Any]) -> bool:
         return False
     sa = node.get("styleAttributes") or {}
     return sa.get("border") in (None, "invisible")
+
+
+def _is_text_clearance_obstacle_node(node: Dict[str, Any]) -> bool:
+    if _is_clearance_text_node(node):
+        return True
+    if node.get("type") != "text":
+        return False
+    if not isinstance(node.get("text"), str) or not node.get("text"):
+        return False
+    if not _canvas_text_plain(node):
+        return False
+    if _is_empty_decorative_text_node(node):
+        return False
+    return bool(node.get("color") or _has_canvas_text_shape(node))
 
 
 def _is_visual_neighbor_node(node: Dict[str, Any]) -> bool:
@@ -1918,14 +1938,15 @@ def _resolve_text_text_vertical_overlaps(
     max_passes: int = TEXT_TEXT_VERTICAL_MAX_PASSES,
 ) -> None:
     text_nodes = [n for n in nodes if _is_clearance_text_node(n)]
-    if len(text_nodes) < 2:
+    obstacle_nodes = [n for n in nodes if _is_text_clearance_obstacle_node(n)]
+    if not text_nodes or len(obstacle_nodes) < 2:
         return
 
     for _ in range(max_passes):
         changed = False
-        text_nodes.sort(key=lambda n: (float(n.get("y", 0) or 0), float(n.get("x", 0) or 0)))
+        obstacle_nodes.sort(key=lambda n: (float(n.get("y", 0) or 0), float(n.get("x", 0) or 0)))
 
-        for i, upper_node in enumerate(text_nodes):
+        for upper_node in obstacle_nodes:
             upper_rect = _node_rect(upper_node)
             if not upper_rect:
                 continue
@@ -1933,7 +1954,9 @@ def _resolve_text_text_vertical_overlaps(
             upper_center_y = (uy0 + uy1) / 2.0
             upper_w = ux1 - ux0
 
-            for lower_node in text_nodes[i + 1:]:
+            for lower_node in text_nodes:
+                if str(lower_node.get("id", "")) == str(upper_node.get("id", "")):
+                    continue
                 lower_rect = _node_rect(lower_node)
                 if not lower_rect:
                     continue

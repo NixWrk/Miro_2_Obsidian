@@ -170,6 +170,45 @@ class TextLayoutTests(unittest.TestCase):
         self.assertEqual(nodes[0]["y"], 100)
         self.assertGreaterEqual(nodes[1]["y"], nodes[0]["y"] + nodes[0]["height"] + 16)
 
+    def test_text_text_vertical_clearance_moves_text_below_colored_sticky(self) -> None:
+        nodes = [
+            {
+                "id": "sticky-link",
+                "type": "text",
+                "x": -6258.936189156478,
+                "y": -3878.0232324443828,
+                "width": 265.8189305890471,
+                "height": 304.5563626849384,
+                "color": "#7986CB",
+                "text": "[SAP components](https://example.invalid/sap)",
+                "styleAttributes": {
+                    "shape": "round-rectangle",
+                    "textAlign": "center",
+                    "border": "invisible",
+                    "fontSize": 45,
+                },
+            },
+            {
+                "id": "section-title",
+                "type": "text",
+                "x": -6202.936284299482,
+                "y": -3614.282171776188,
+                "width": 338.8448531983122,
+                "height": 131.10369738711609,
+                "text": "Reference models by architecture level and direction",
+                "styleAttributes": {
+                    "shape": "round-rectangle",
+                    "textAlign": "left",
+                    "border": "invisible",
+                    "fontSize": 28,
+                },
+            },
+        ]
+
+        _resolve_text_text_vertical_overlaps(nodes)
+
+        self.assertGreaterEqual(nodes[1]["y"], nodes[0]["y"] + nodes[0]["height"] + 16)
+
     def test_text_text_vertical_clearance_does_not_create_empty_shape_overlap(self) -> None:
         nodes = [
             {
