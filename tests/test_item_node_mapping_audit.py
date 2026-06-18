@@ -92,6 +92,59 @@ class ItemNodeMappingAuditTests(unittest.TestCase):
 
         self.assertIn("node_position_drift", reasons)
 
+    def test_allows_canvas_size_change_when_top_left_anchor_is_preserved(self) -> None:
+        miro = [
+            {
+                "id": "embed-1",
+                "type": "embed",
+                "geometry": {"width": 200, "height": 200},
+                "position": {"x": 0, "y": 0, "origin": "center", "relativeTo": "canvas_center"},
+            }
+        ]
+        canvas = {
+            "nodes": [{"id": "embed-1", "type": "link", "x": -100, "y": -100, "width": 200, "height": 112.5}],
+            "edges": [],
+        }
+
+        summary = summarize_mapping(miro, canvas, scale=1)
+
+        self.assertEqual(summary["total"], 0)
+
+    def test_marks_position_drift_from_repaired_source_overlap_as_non_actionable(self) -> None:
+        miro = [
+            {
+                "id": "a",
+                "type": "text",
+                "geometry": {"width": 100, "height": 100},
+                "position": {"x": 0, "y": 0, "origin": "center", "relativeTo": "canvas_center"},
+            },
+            {
+                "id": "b",
+                "type": "text",
+                "geometry": {"width": 100, "height": 100},
+                "position": {"x": 0, "y": 40, "origin": "center", "relativeTo": "canvas_center"},
+            },
+            {
+                "id": "anchor",
+                "type": "text",
+                "geometry": {"width": 100, "height": 100},
+                "position": {"x": 300, "y": 300, "origin": "center", "relativeTo": "canvas_center"},
+            },
+        ]
+        canvas = {
+            "nodes": [
+                {"id": "a", "type": "text", "x": -50, "y": -50, "width": 100, "height": 100},
+                {"id": "b", "type": "text", "x": -50, "y": 66, "width": 100, "height": 100},
+                {"id": "anchor", "type": "text", "x": 250, "y": 250, "width": 100, "height": 100},
+            ],
+            "edges": [],
+        }
+
+        summary = summarize_mapping(miro, canvas, scale=1)
+
+        self.assertEqual(summary["actionable"], 0)
+        self.assertEqual(summary["by_reason"], {"node_layout_repaired_source_overlap": 1})
+
 
 if __name__ == "__main__":
     unittest.main()

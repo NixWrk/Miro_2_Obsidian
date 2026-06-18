@@ -131,9 +131,60 @@ def _canvas_node_rect(node: dict[str, Any]) -> tuple[float, float, float, float]
     return x, y, width, height
 
 
+def _rects_overlap(
+    left: tuple[float, float, float, float],
+    right: tuple[float, float, float, float],
+    *,
+    tolerance: float = 1.0,
+) -> bool:
+    left_x, left_y, left_w, left_h = left
+    right_x, right_y, right_w, right_h = right
+    overlap_w = min(left_x + left_w, right_x + right_w) - max(left_x, right_x)
+    overlap_h = min(left_y + left_h, right_y + right_h) - max(left_y, right_y)
+    return overlap_w > tolerance and overlap_h > tolerance
+
+
+def _source_rect_tuple(source_rect: Any) -> tuple[float, float, float, float]:
+    return float(source_rect.x), float(source_rect.y), float(source_rect.width), float(source_rect.height)
+
+
+def _source_rect_overlaps_any(source_rects: dict[str, Any], node_id: str) -> bool:
+    source_rect = source_rects.get(node_id)
+    if not source_rect:
+        return False
+    left = _source_rect_tuple(source_rect)
+    for other_id, other_rect in source_rects.items():
+        if other_id == node_id:
+            continue
+        if _rects_overlap(left, _source_rect_tuple(other_rect)):
+            return True
+    return False
+
+
+def _canvas_rect_overlaps_any(
+    nodes_by_id: dict[str, list[dict[str, Any]]],
+    node_id: str,
+    canvas_rect: tuple[float, float, float, float],
+) -> bool:
+    for other_id, nodes in nodes_by_id.items():
+        if other_id == node_id:
+            continue
+        for node in nodes:
+            if node.get("type") not in {"text", "file", "link"}:
+                continue
+            other_rect = _canvas_node_rect(node)
+            if other_rect and _rects_overlap(canvas_rect, other_rect):
+                return True
+    return False
+
+
 def _position_drift_tolerance(source_width: float, source_height: float) -> float:
     basis = min(max(source_width, source_height), 800.0)
     return max(24.0, basis * 0.25)
+
+
+def _distance(left_x: float, left_y: float, right_x: float, right_y: float) -> float:
+    return math.hypot(left_x - right_x, left_y - right_y)
 
 
 def _append_geometry_drift_issues(
@@ -183,23 +234,34 @@ def _append_geometry_drift_issues(
         canvas_cy = y + height / 2.0
         expected_cx = source_cx + board_dx
         expected_cy = source_cy + board_dy
-        drift = math.hypot(canvas_cx - expected_cx, canvas_cy - expected_cy)
+        expected_x = source_rect.x + board_dx
+        expected_y = source_rect.y + board_dy
+        center_drift = _distance(canvas_cx, canvas_cy, expected_cx, expected_cy)
+        top_left_drift = _distance(x, y, expected_x, expected_y)
+        drift = min(center_drift, top_left_drift)
         tolerance = _position_drift_tolerance(source_rect.width, source_rect.height)
         if drift <= tolerance:
             continue
+        source_overlap_repaired = (
+            _source_rect_overlaps_any(source_rects, node_id)
+            and not _canvas_rect_overlaps_any(nodes_by_id, node_id, canvas_rect)
+        )
+        reason = "node_layout_repaired_source_overlap" if source_overlap_repaired else "node_position_drift"
         issues.append(
             MappingIssue(
                 node_id,
                 item_type,
-                "node_position_drift",
+                reason,
                 (
                     f"Canvas center ({canvas_cx:.2f}, {canvas_cy:.2f}) differs from "
                     f"source center after board translation ({expected_cx:.2f}, {expected_cy:.2f}) by "
-                    f"{drift:.2f}px; tolerance {tolerance:.2f}px; "
+                    f"{center_drift:.2f}px; top-left drift {top_left_drift:.2f}px; "
+                    f"effective drift {drift:.2f}px; tolerance {tolerance:.2f}px; "
                     f"board translation ({board_dx:.2f}, {board_dy:.2f})."
                 ),
                 canvas_kind="node",
                 canvas_type=str(node.get("type") or ""),
+                actionable=not source_overlap_repaired,
             )
         )
 
