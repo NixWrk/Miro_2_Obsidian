@@ -209,6 +209,62 @@ class TextLayoutTests(unittest.TestCase):
 
         self.assertGreaterEqual(nodes[1]["y"], nodes[0]["y"] + nodes[0]["height"] + 16)
 
+    def test_text_text_vertical_clearance_keeps_short_labels_inside_large_text_block(self) -> None:
+        nodes = [
+            {
+                "id": "large-block",
+                "type": "text",
+                "x": 0,
+                "y": 0,
+                "width": 520,
+                "height": 320,
+                "color": "#c6dcff",
+                "text": "**AI influence**",
+                "styleAttributes": {
+                    "shape": "round-rectangle",
+                    "textAlign": "left",
+                    "border": "invisible",
+                    "fontSize": 33,
+                },
+            },
+            {
+                "id": "quality-label",
+                "type": "text",
+                "x": 40,
+                "y": 190,
+                "width": 130,
+                "height": 48,
+                "text": "**Quality**",
+                "styleAttributes": {
+                    "shape": "round-rectangle",
+                    "textAlign": "left",
+                    "border": "invisible",
+                    "fontSize": 18,
+                },
+            },
+            {
+                "id": "delegation-label",
+                "type": "text",
+                "x": 60,
+                "y": 255,
+                "width": 210,
+                "height": 48,
+                "text": "**Delegation**",
+                "styleAttributes": {
+                    "shape": "round-rectangle",
+                    "textAlign": "center",
+                    "border": "invisible",
+                    "fontSize": 18,
+                },
+            },
+        ]
+
+        _resolve_text_text_vertical_overlaps(nodes)
+
+        self.assertEqual(nodes[1]["y"], 190)
+        self.assertEqual(nodes[2]["y"], 255)
+        self.assertGreaterEqual(nodes[2]["y"], nodes[1]["y"] + nodes[1]["height"] + 16)
+
     def test_text_text_vertical_clearance_does_not_create_empty_shape_overlap(self) -> None:
         nodes = [
             {

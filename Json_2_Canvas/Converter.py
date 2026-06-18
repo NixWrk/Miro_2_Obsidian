@@ -1276,6 +1276,34 @@ def _is_text_clearance_obstacle_node(node: Dict[str, Any]) -> bool:
     return bool(node.get("color") or _has_canvas_text_shape(node))
 
 
+def _is_short_label_inside_large_text_block(
+    upper_node: Dict[str, Any],
+    lower_node: Dict[str, Any],
+    upper_rect: tuple[float, float, float, float],
+    lower_rect: tuple[float, float, float, float],
+) -> bool:
+    if not _is_text_clearance_obstacle_node(upper_node):
+        return False
+    if not _is_short_clearance_label_node(lower_node):
+        return False
+    upper_font = float((upper_node.get("styleAttributes") or {}).get("fontSize") or 0.0)
+    lower_font = float((lower_node.get("styleAttributes") or {}).get("fontSize") or 0.0)
+    if max(upper_font, lower_font) > 96.0:
+        return False
+
+    upper_w = upper_rect[2] - upper_rect[0]
+    upper_h = upper_rect[3] - upper_rect[1]
+    lower_w = lower_rect[2] - lower_rect[0]
+    lower_h = lower_rect[3] - lower_rect[1]
+    if lower_w <= 0 or lower_h <= 0:
+        return False
+    if upper_w < lower_w * 1.5 or upper_h < lower_h * 2.5:
+        return False
+
+    overlap_w, overlap_h = _rect_overlap(upper_rect, lower_rect)
+    return overlap_w >= lower_w - 1.0 and overlap_h >= lower_h - 1.0
+
+
 def _is_visual_neighbor_node(node: Dict[str, Any]) -> bool:
     return node.get("type") in ("file", "link")
 
@@ -1968,6 +1996,13 @@ def _resolve_text_text_vertical_overlaps(
                 overlap_w, _overlap_h = _rect_overlap(upper_rect, lower_rect)
                 min_w = min(upper_w, lx1 - lx0)
                 if min_w <= 0 or overlap_w < min_w * min_horizontal_overlap_ratio:
+                    continue
+                if _is_short_label_inside_large_text_block(
+                    upper_node,
+                    lower_node,
+                    upper_rect,
+                    lower_rect,
+                ):
                     continue
 
                 required_y = uy1 + clearance_px
