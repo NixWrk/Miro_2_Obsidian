@@ -18,6 +18,7 @@ CONVERTER_DIR = REPO_ROOT / "Json_2_Canvas"
 DEFAULT_BOARD_LIST = REPO_ROOT / "work" / "MIRO2OBSIDIAN" / "Obs_Miro" / "Концепт" / "Web_boards.md"
 DEFAULT_JSON_ROOT = REPO_ROOT / "work" / "MIRO2OBSIDIAN" / "web_test"
 DEFAULT_OUT_DIR = REPO_ROOT / "tools" / "canvas_render" / ".out" / "web_board_audit"
+RENDER_DIR = REPO_ROOT / "tools" / "canvas_render"
 OBSIDIAN_UNLOCKED_MIN_ZOOM = 2 ** -12
 
 sys.path.insert(0, str(CONVERTER_DIR))
@@ -50,6 +51,33 @@ def safe_name(value: str) -> str:
     value = SAFE_NAME_RE.sub("_", value.strip())
     value = re.sub(r"_+", "_", value).strip("._ ")
     return value or "board"
+
+
+def board_artifact_key(board: BoardRef, text_style_mode: str) -> str:
+    return f"{safe_name(board.board_id)}_{safe_name(text_style_mode)}"
+
+
+def expand_text_style_modes(mode: str) -> list[str]:
+    if mode == "both":
+        return ["miro", "obsidian"]
+    return [mode]
+
+
+def reset_generated_outputs(out_dir: Path, *, export_rest: bool) -> None:
+    out_dir.mkdir(parents=True, exist_ok=True)
+    for child in ("converted", "renders"):
+        shutil.rmtree(out_dir / child, ignore_errors=True)
+    if export_rest:
+        shutil.rmtree(out_dir / "rest_exports", ignore_errors=True)
+    for filename in (
+        "web_board_pipeline_audit.json",
+        "web_board_pipeline_audit.md",
+        "web_board_review_queue.md",
+    ):
+        try:
+            (out_dir / filename).unlink()
+        except FileNotFoundError:
+            pass
 
 
 def parse_board_markdown(path: Path) -> list[BoardRef]:
@@ -193,6 +221,33 @@ def export_rest_board(board: BoardRef, output_json: Path, *, token: str, allow_m
     }
 
 
+def render_canvas_check(canvas_path: Path, screenshot_path: Path) -> dict[str, Any]:
+    try:
+        sys.path.insert(0, str(RENDER_DIR))
+        from capture_fixture import capture_canvas  # type: ignore  # noqa: PLC0415
+        from PIL import Image  # noqa: PLC0415
+
+        capture_canvas(canvas_path, screenshot_path, fit_viewport=True)
+        with Image.open(screenshot_path) as image:
+            rgb = image.convert("RGB")
+            extrema = rgb.getextrema()
+            nonblank = any(low != high for low, high in extrema)
+            width, height = rgb.size
+        return {
+            "path": str(screenshot_path),
+            "width": width,
+            "height": height,
+            "extrema": extrema,
+            "nonblank": nonblank,
+        }
+    except Exception as exc:  # noqa: BLE001
+        return {
+            "path": str(screenshot_path),
+            "nonblank": False,
+            "error": str(exc),
+        }
+
+
 def audit_one_board(
     board: BoardRef,
     *,
@@ -202,16 +257,19 @@ def audit_one_board(
     min_zoom: float,
     text_style_mode: str,
     min_font_px: int,
+    render: bool = False,
+    render_dir: Path | None = None,
 ) -> dict[str, Any]:
     record: dict[str, Any] = {
         "board": asdict(board),
         "status": "no_json_export",
         "source_json": str(source_json) if source_json else None,
+        "text_style_mode": text_style_mode,
     }
     if source_json is None:
         return record
 
-    board_key = f"{safe_name(board.label)}_{safe_name(board.board_id)}"
+    board_key = board_artifact_key(board, text_style_mode)
     board_dir = out_dir / "converted" / board_key
     vault_root = board_dir / "vault"
     target_dir = vault_root / "MIRO2OBSIDIAN" / board_key
@@ -250,7 +308,22 @@ def audit_one_board(
         record["status"] = "canvas_missing_files"
     if record["missing_miro_items"]["actionable"] or record["overlaps"]["generated"]:
         record["status"] = "needs_review"
+    if render:
+        actual_render_dir = render_dir or (out_dir / "renders")
+        screenshot_path = actual_render_dir / f"{board_key}.render.png"
+        record["render"] = render_canvas_check(canvas_path, screenshot_path)
+        if not record["render"].get("nonblank"):
+            record["status"] = "render_failed"
     return record
+
+
+def render_status(record: dict[str, Any]) -> str:
+    render = record.get("render")
+    if not render:
+        return ""
+    if render.get("error"):
+        return "fail"
+    return "ok" if render.get("nonblank") else "blank"
 
 
 def render_markdown_report(payload: dict[str, Any]) -> str:
@@ -258,12 +331,13 @@ def render_markdown_report(payload: dict[str, Any]) -> str:
         "# Web Board Pipeline Audit",
         "",
         f"boards: {payload['summary']['boards']}",
+        f"records: {payload['summary']['records']}",
         f"ok: {payload['summary']['ok']}",
         f"needs_review: {payload['summary']['needs_review']}",
         f"missing_json: {payload['summary']['missing_json']}",
         "",
-        "| Board | Status | Miro items | Canvas nodes/edges | Missing/actionable | Generated overlaps | Missing files |",
-        "|---|---:|---:|---:|---:|---:|---:|",
+        "| Board | Mode | Status | Miro items | Canvas nodes/edges | Missing/actionable | Generated overlaps | Missing files | Render |",
+        "|---|---:|---:|---:|---:|---:|---:|---:|---:|",
     ]
     for board in payload["boards"]:
         source_items = (board.get("source") or {}).get("items", "")
@@ -279,19 +353,29 @@ def render_markdown_report(payload: dict[str, Any]) -> str:
         generated = overlaps.get("generated", "") if overlaps else ""
         missing_files = canvas.get("missing_files", "") if canvas else ""
         label = board["board"]["label"].replace("|", "\\|")
+        mode = board.get("text_style_mode") or ""
         lines.append(
-            f"| [{label}]({board['board']['url']}) | {board['status']} | {source_items} | "
-            f"{canvas_count} | {missing_count} | {generated} | {missing_files} |"
+            f"| [{label}]({board['board']['url']}) | {mode} | {board['status']} | {source_items} | "
+            f"{canvas_count} | {missing_count} | {generated} | {missing_files} | {render_status(board)} |"
         )
 
     lines.append("")
     lines.append("## Needs Review")
     for board in payload["boards"]:
-        if board["status"] not in {"needs_review", "canvas_missing_files", "no_json_export", "export_failed", "convert_failed"}:
+        if board["status"] not in {
+            "needs_review",
+            "canvas_missing_files",
+            "no_json_export",
+            "export_failed",
+            "convert_failed",
+            "render_failed",
+        }:
             continue
         lines.append("")
         lines.append(f"### {board['board']['label']}")
         lines.append(f"- id: `{board['board']['board_id']}`")
+        if board.get("text_style_mode"):
+            lines.append(f"- mode: `{board['text_style_mode']}`")
         lines.append(f"- status: `{board['status']}`")
         if board.get("source_json"):
             lines.append(f"- source_json: `{board['source_json']}`")
@@ -316,16 +400,72 @@ def render_markdown_report(payload: dict[str, Any]) -> str:
             lines.append(f"- missing files: `{canvas['missing_files']}`")
             for item in canvas.get("missing_file_examples", [])[:5]:
                 lines.append(f"  - `{item['id']}`: `{item['file']}`")
+        render = board.get("render") or {}
+        if render.get("error"):
+            lines.append(f"- render error: `{render['error']}`")
+        elif render and not render.get("nonblank"):
+            lines.append("- render error: `blank screenshot`")
 
+    return "\n".join(lines) + "\n"
+
+
+def issue_tags(record: dict[str, Any]) -> list[str]:
+    tags: list[str] = []
+    if record["status"] == "no_json_export":
+        tags.append("получить source snapshot")
+    if record["status"] == "export_failed":
+        tags.append("REST export failed")
+    if record["status"] == "convert_failed":
+        tags.append("conversion failed")
+    if record["status"] == "render_failed":
+        tags.append("render failed")
+    canvas = record.get("canvas") or {}
+    if canvas.get("missing_files"):
+        tags.append("missing attachments")
+    missing = record.get("missing_miro_items") or {}
+    if missing.get("actionable"):
+        tags.append("actionable missing Miro items")
+    overlaps = record.get("overlaps") or {}
+    if overlaps.get("generated"):
+        tags.append("generated overlaps")
+    return tags
+
+
+def render_queue_report(payload: dict[str, Any]) -> str:
+    lines = [
+        "# Web Board Review Queue",
+        "",
+        "Правило очереди: один цикл — одна проблема; после фикса прогоняется весь список web-досок.",
+        "",
+    ]
+    queued = 0
+    for record in payload["boards"]:
+        tags = issue_tags(record)
+        if not tags:
+            continue
+        queued += 1
+        mode = record.get("text_style_mode") or "source"
+        board = record["board"]
+        lines.append(f"- [ ] [{board['label']}]({board['url']}) `{mode}` — {', '.join(tags)}")
+        if record.get("canvas_path"):
+            lines.append(f"  - canvas: `{record['canvas_path']}`")
+        if record.get("source_json"):
+            lines.append(f"  - source_json: `{record['source_json']}`")
+
+    if not queued:
+        lines.append("Очередь пуста.")
     return "\n".join(lines) + "\n"
 
 
 def build_summary(records: list[dict[str, Any]]) -> dict[str, Any]:
     statuses = Counter(record["status"] for record in records)
+    review_statuses = {"needs_review", "canvas_missing_files", "render_failed", "convert_failed", "export_failed"}
+    board_ids = {record["board"]["board_id"] for record in records if record.get("board")}
     return {
-        "boards": len(records),
+        "boards": len(board_ids),
+        "records": len(records),
         "ok": statuses.get("ok", 0),
-        "needs_review": statuses.get("needs_review", 0) + statuses.get("canvas_missing_files", 0),
+        "needs_review": sum(statuses.get(status, 0) for status in review_statuses),
         "missing_json": statuses.get("no_json_export", 0),
         "by_status": dict(sorted(statuses.items())),
     }
@@ -338,12 +478,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--out-dir", type=Path, default=DEFAULT_OUT_DIR)
     parser.add_argument("--scale-mode", choices=["balanced", "overview", "readable"], default="readable")
     parser.add_argument("--min-zoom", type=float, default=OBSIDIAN_UNLOCKED_MIN_ZOOM)
-    parser.add_argument("--text-style-mode", choices=["miro", "obsidian"], default="obsidian")
+    parser.add_argument("--text-style-mode", choices=["miro", "obsidian", "both"], default="obsidian")
     parser.add_argument("--min-font-px", type=int, default=8)
     parser.add_argument("--limit", type=int, help="Only audit the first N boards from the list.")
     parser.add_argument("--export-rest", action="store_true", help="Refresh each board JSON through REST before conversion.")
     parser.add_argument("--token-env", default="MIRO_ACCESS_TOKEN")
     parser.add_argument("--allow-missing-assets", action="store_true")
+    parser.add_argument("--render", action="store_true", help="Capture a smoke screenshot for each converted Canvas.")
     return parser.parse_args()
 
 
@@ -355,7 +496,7 @@ def main() -> int:
     if not boards:
         raise SystemExit(f"No boards found in {args.board_list}")
 
-    args.out_dir.mkdir(parents=True, exist_ok=True)
+    reset_generated_outputs(args.out_dir, export_rest=args.export_rest)
     export_dir = args.out_dir / "rest_exports"
     if args.export_rest:
         export_dir.mkdir(parents=True, exist_ok=True)
@@ -365,12 +506,13 @@ def main() -> int:
     else:
         token = ""
 
+    text_modes = expand_text_style_modes(args.text_style_mode)
     records: list[dict[str, Any]] = []
     for board in boards:
         source_json = find_local_export(board.board_id, args.json_root)
-        record: dict[str, Any]
+        export_info: dict[str, Any] | None = None
         if args.export_rest:
-            output_json = export_dir / f"{safe_name(board.label)}_{safe_name(board.board_id)}.json"
+            output_json = export_dir / f"{safe_name(board.board_id)}.json"
             try:
                 export_info = export_rest_board(
                     board,
@@ -385,38 +527,53 @@ def main() -> int:
                         "board": asdict(board),
                         "status": "export_failed",
                         "source_json": str(source_json) if source_json else None,
+                        "text_style_mode": None,
                         "error": str(exc),
                     }
                 )
                 continue
             else:
-                record = {"export": export_info}
-        else:
-            record = {}
+                source_json = output_json
 
-        try:
-            record.update(
-                audit_one_board(
-                    board,
-                    source_json=source_json,
-                    out_dir=args.out_dir,
-                    scale_mode=args.scale_mode,
-                    min_zoom=args.min_zoom,
-                    text_style_mode=args.text_style_mode,
-                    min_font_px=args.min_font_px,
+        if source_json is None:
+            record = {
+                "board": asdict(board),
+                "status": "no_json_export",
+                "source_json": None,
+                "text_style_mode": None,
+            }
+            records.append(record)
+            print(f"{record['status']} {board.board_id} {board.label}")
+            continue
+
+        for text_mode in text_modes:
+            record: dict[str, Any] = {"export": export_info} if export_info else {}
+            try:
+                record.update(
+                    audit_one_board(
+                        board,
+                        source_json=source_json,
+                        out_dir=args.out_dir,
+                        scale_mode=args.scale_mode,
+                        min_zoom=args.min_zoom,
+                        text_style_mode=text_mode,
+                        min_font_px=args.min_font_px,
+                        render=args.render,
+                        render_dir=args.out_dir / "renders",
+                    )
                 )
-            )
-        except Exception as exc:  # noqa: BLE001
-            record.update(
-                {
-                    "board": asdict(board),
-                    "status": "convert_failed",
-                    "source_json": str(source_json) if source_json else None,
-                    "error": str(exc),
-                }
-            )
-        records.append(record)
-        print(f"{record['status']} {board.board_id} {board.label}")
+            except Exception as exc:  # noqa: BLE001
+                record.update(
+                    {
+                        "board": asdict(board),
+                        "status": "convert_failed",
+                        "source_json": str(source_json),
+                        "text_style_mode": text_mode,
+                        "error": str(exc),
+                    }
+                )
+            records.append(record)
+            print(f"{record['status']} {board.board_id} {board.label} [{text_mode}]")
 
     payload = {
         "schema_version": 1,
@@ -426,18 +583,23 @@ def main() -> int:
             "scale_mode": args.scale_mode,
             "min_zoom": args.min_zoom,
             "text_style_mode": args.text_style_mode,
+            "text_modes": text_modes,
             "min_font_px": args.min_font_px,
             "export_rest": bool(args.export_rest),
+            "render": bool(args.render),
         },
         "summary": build_summary(records),
         "boards": records,
     }
     report_json = args.out_dir / "web_board_pipeline_audit.json"
     report_md = args.out_dir / "web_board_pipeline_audit.md"
+    queue_md = args.out_dir / "web_board_review_queue.md"
     write_json(report_json, payload)
     report_md.write_text(render_markdown_report(payload), encoding="utf-8")
+    queue_md.write_text(render_queue_report(payload), encoding="utf-8")
     print(f"report_json={report_json}")
     print(f"report_md={report_md}")
+    print(f"queue_md={queue_md}")
     print("summary=" + json.dumps(payload["summary"], ensure_ascii=False, sort_keys=True))
     return 0
 

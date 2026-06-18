@@ -14,6 +14,9 @@ sys.path.insert(0, str(SCRIPTS_DIR))
 from audit_web_board_pipeline import (  # noqa: E402
     BoardRef,
     audit_one_board,
+    board_artifact_key,
+    build_summary,
+    expand_text_style_modes,
     find_local_export,
     parse_board_markdown,
 )
@@ -49,6 +52,43 @@ class WebBoardPipelineAuditTests(unittest.TestCase):
             self.assertEqual(find_local_export("uXjVAlpha=", root), expected)
             self.assertIsNone(find_local_export("missing=", root))
 
+    def test_expand_text_style_modes_supports_both_variants(self) -> None:
+        self.assertEqual(expand_text_style_modes("miro"), ["miro"])
+        self.assertEqual(expand_text_style_modes("obsidian"), ["obsidian"])
+        self.assertEqual(expand_text_style_modes("both"), ["miro", "obsidian"])
+
+    def test_board_artifact_key_stays_short_and_unique(self) -> None:
+        board = BoardRef(
+            board_id="uXjVLongBoard=",
+            label="Очень длинное название доски, которое не должно попасть в путь артефактов",
+            url="https://miro.com/app/board/uXjVLongBoard=/",
+        )
+
+        self.assertEqual(board_artifact_key(board, "obsidian"), "uXjVLongBoard=_obsidian")
+
+    def test_build_summary_counts_unique_boards_and_variant_records(self) -> None:
+        board = {"board_id": "uXjVAlpha=", "label": "Alpha", "url": "https://miro.com/app/board/uXjVAlpha=/"}
+        summary = build_summary(
+            [
+                {"board": board, "status": "ok"},
+                {"board": board, "status": "needs_review"},
+                {
+                    "board": {
+                        "board_id": "uXjVBeta=",
+                        "label": "Beta",
+                        "url": "https://miro.com/app/board/uXjVBeta=/",
+                    },
+                    "status": "no_json_export",
+                },
+            ]
+        )
+
+        self.assertEqual(summary["boards"], 2)
+        self.assertEqual(summary["records"], 3)
+        self.assertEqual(summary["ok"], 1)
+        self.assertEqual(summary["needs_review"], 1)
+        self.assertEqual(summary["missing_json"], 1)
+
     def test_audit_one_board_converts_and_reports_clean_minimal_export(self) -> None:
         with tempfile.TemporaryDirectory(prefix="miro2obs_web_pipeline_") as tmp:
             root = Path(tmp)
@@ -81,6 +121,7 @@ class WebBoardPipelineAuditTests(unittest.TestCase):
             )
 
         self.assertEqual(record["status"], "ok")
+        self.assertEqual(record["text_style_mode"], "obsidian")
         self.assertEqual(record["source"]["items"], 1)
         self.assertEqual(record["canvas"]["nodes"], 1)
         self.assertEqual(record["missing_miro_items"]["total"], 0)
