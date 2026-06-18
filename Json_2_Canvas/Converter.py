@@ -203,6 +203,7 @@ _SOLO_A_HREF_RE = re.compile(
     r'^\s*(?:<p[^>]*>\s*)?<a\b[^>]*\bhref\s*=\s*["\']([^"\']+)["\'][^>]*>.*?</a>\s*(?:</p>\s*)?$',
     re.I | re.S,
 )
+VIDEO_LINK_HOSTS = ("youtube.com", "youtu.be", "vimeo.com")
 
 
 def _extract_iframe_size(html: str) -> tuple[int, int] | None:
@@ -285,7 +286,11 @@ def _extract_solo_url(html_or_plain: str) -> str | None:
     # HTML с единственным <a href>: точный матч — только тег внутри <p>
     m = _SOLO_A_HREF_RE.match(text)
     if m:
-        return m.group(1).strip()
+        href = m.group(1).strip()
+        stripped = _html_unescape(re.sub(r"<[^>]+>", "", text)).strip()
+        if not stripped or stripped == href or _is_video_link_url(href):
+            return href
+        return None
     # Нестандартное обрамление: проверяем, что после удаления тегов
     # не осталось постороннего текста
     href_m = re.search(r'<a\b[^>]*\bhref\s*=\s*["\']([^"\']+)["\']', text, re.I)
@@ -295,6 +300,14 @@ def _extract_solo_url(html_or_plain: str) -> str | None:
     if not stripped or stripped == href_m.group(1).strip():
         return href_m.group(1).strip()
     return None
+
+
+def _is_video_link_url(url: str) -> bool:
+    try:
+        host = urlparse(url).netloc.lower()
+    except Exception:
+        return False
+    return any(host == value or host.endswith(f".{value}") for value in VIDEO_LINK_HOSTS)
 
 
 def _plain_field_text(value: Any) -> str:

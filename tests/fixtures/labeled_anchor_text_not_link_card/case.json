@@ -1,0 +1,20 @@
+{
+  "description": "A labelled non-video HTML anchor remains a text node instead of becoming a large native link card.",
+  "converter": {
+    "scale": 1.0,
+    "min_font_px": 8,
+    "theme": "dark"
+  },
+  "assertions": {
+    "node_count": 1,
+    "edge_count": 0,
+    "nodes": [
+      {
+        "id": "labeled-anchor",
+        "type": "text",
+        "text_contains": "TAM / SAM / SOM Canvas",
+        "max_height": 100
+      }
+    ]
+  }
+}

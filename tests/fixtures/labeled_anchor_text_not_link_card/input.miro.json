@@ -1,0 +1,25 @@
+[
+  {
+    "id": "labeled-anchor",
+    "type": "text",
+    "position": {
+      "x": 0,
+      "y": 0,
+      "origin": "center",
+      "relativeTo": "canvas_center"
+    },
+    "geometry": {
+      "width": 504
+    },
+    "style": {
+      "fontSize": "40",
+      "fillColor": "#ffffff",
+      "fillOpacity": "0.0",
+      "textAlign": "left",
+      "color": "#1a1a1a"
+    },
+    "data": {
+      "content": "<p><a href=\"https://example.invalid/tam-sam-som\"><strong>TAM / SAM / SOM Canvas</strong></a></p>"
+    }
+  }
+]
