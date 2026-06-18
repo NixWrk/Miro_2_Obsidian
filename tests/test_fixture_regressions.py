@@ -58,6 +58,7 @@ def _run_converter(fixture_dir: Path) -> dict[str, Any]:
             scale=float(converter_cfg.get("scale", 1.0)),
             min_font_px=int(converter_cfg.get("min_font_px", 8)),
             theme=str(converter_cfg.get("theme", "dark")),
+            text_style_mode=str(converter_cfg.get("text_style_mode", "miro")),
         )
         return _load_json(Path(canvas_path))
 
@@ -126,6 +127,8 @@ def _assert_node(testcase: unittest.TestCase, canvas: dict[str, Any], expected: 
         testcase.assertIn(expected["text_contains"], node.get("text", ""))
     if "text_not_contains" in expected:
         testcase.assertNotIn(expected["text_not_contains"], node.get("text", ""))
+    if "text_equals" in expected:
+        testcase.assertEqual(node.get("text", ""), expected["text_equals"])
     if "width" in expected:
         testcase.assertAlmostEqual(float(node["width"]), float(expected["width"]), places=4)
     if "min_width" in expected:

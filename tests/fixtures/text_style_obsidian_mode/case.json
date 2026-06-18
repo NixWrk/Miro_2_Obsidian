@@ -1,0 +1,28 @@
+{
+  "description": "Obsidian text style mode strips simple HTML wrappers but keeps rich visual HTML.",
+  "converter": {
+    "scale": 1.0,
+    "min_font_px": 8,
+    "theme": "dark",
+    "text_style_mode": "obsidian"
+  },
+  "assertions": {
+    "node_count": 2,
+    "edge_count": 0,
+    "nodes": [
+      {
+        "id": "simple-html-text",
+        "type": "text",
+        "text_equals": "Hello **native**\nObsidian",
+        "font_size": 18
+      },
+      {
+        "id": "rich-html-text",
+        "type": "text",
+        "text_contains": "<span",
+        "text_not_contains": "font-size:",
+        "font_size": 18
+      }
+    ]
+  }
+}

@@ -1,0 +1,43 @@
+[
+  {
+    "id": "simple-html-text",
+    "type": "text",
+    "position": {
+      "x": 100,
+      "y": 50,
+      "origin": "center",
+      "relativeTo": "canvas_center"
+    },
+    "geometry": {
+      "width": 320,
+      "height": 120
+    },
+    "style": {
+      "fontSize": "18",
+      "color": "#1a1a1a"
+    },
+    "data": {
+      "content": "<p>Hello <strong>native</strong><br>Obsidian</p>"
+    }
+  },
+  {
+    "id": "rich-html-text",
+    "type": "text",
+    "position": {
+      "x": 520,
+      "y": 50,
+      "origin": "center",
+      "relativeTo": "canvas_center"
+    },
+    "geometry": {
+      "width": 320,
+      "height": 120
+    },
+    "style": {
+      "fontSize": "18"
+    },
+    "data": {
+      "content": "<p><span style=\"background-color:#fff59d\">Highlighted</span></p>"
+    }
+  }
+]

@@ -52,6 +52,7 @@ def stage_fixture(name: str) -> Path:
             scale=float(converter_cfg.get("scale", 1.0)),
             min_font_px=int(converter_cfg.get("min_font_px", 8)),
             theme=str(converter_cfg.get("theme", "dark")),
+            text_style_mode=str(converter_cfg.get("text_style_mode", "miro")),
         )
 
     return Path(canvas_path)

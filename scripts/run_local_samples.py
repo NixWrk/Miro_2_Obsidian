@@ -241,6 +241,7 @@ def run_sample(
     scale: float | None,
     min_font_px: int,
     theme: str,
+    text_style_mode: str,
     skip_render: bool,
     strict_files: bool,
     stage_vault: bool,
@@ -264,6 +265,7 @@ def run_sample(
                 scale=scale_used,
                 min_font_px=min_font_px,
                 theme=theme,
+                text_style_mode=text_style_mode,
             ))
     else:
         with tempfile.TemporaryDirectory(prefix=f"miro2obs_local_{sample_key}_") as tmp:
@@ -282,6 +284,7 @@ def run_sample(
                 scale=scale_used,
                 min_font_px=min_font_px,
                 theme=theme,
+                text_style_mode=text_style_mode,
             ))
 
             canvas = load_json(canvas_path)
@@ -318,6 +321,12 @@ def main() -> int:
     parser.add_argument("--scale", type=float, default=None, help="Explicit scale. Defaults to Scale_engine auto-fit.")
     parser.add_argument("--min-font-px", type=int, default=8)
     parser.add_argument("--theme", default="dark")
+    parser.add_argument(
+        "--text-style-mode",
+        choices=["miro", "obsidian"],
+        default="miro",
+        help="Text rendering policy: miro preserves HTML wrappers; obsidian minimizes HTML and prefers Markdown/plain text.",
+    )
     parser.add_argument("--viewport-width", type=int, default=1920)
     parser.add_argument("--viewport-height", type=int, default=1080)
     parser.add_argument("--min-zoom", type=float, default=0.12)
@@ -358,6 +367,7 @@ def main() -> int:
                 scale=args.scale,
                 min_font_px=args.min_font_px,
                 theme=args.theme,
+                text_style_mode=args.text_style_mode,
                 skip_render=args.skip_render,
                 strict_files=not args.allow_missing_files,
                 stage_vault=args.stage_vault,
@@ -374,7 +384,7 @@ def main() -> int:
                     f"; fit={'yes' if fit_bbox['fits'] else 'no'}"
                 )
             print(
-                f"OK {sample.name}: mode={args.scale_mode}; scale={scale_used:.6f}; "
+                f"OK {sample.name}: mode={args.scale_mode}; text={args.text_style_mode}; scale={scale_used:.6f}; "
                 f"{summary}{fit_summary}; canvas={canvas_path}"
             )
         except Exception as exc:  # noqa: BLE001

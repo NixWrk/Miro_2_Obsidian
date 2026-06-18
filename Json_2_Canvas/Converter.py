@@ -17,8 +17,9 @@ from urllib.parse import parse_qs, unquote, urlparse
 # =========================
 
 DECK_TYPES = {"slide_container"}
-CONTAINER_TYPES = {"group", "frame", "diagram", "slide_container"} 
+CONTAINER_TYPES = {"group", "frame", "diagram", "slide_container"}
 FRAME_LIKE_TYPES = {"frame", "diagram"}  # строим как рамку
+TEXT_STYLE_MODES = frozenset({"miro", "obsidian"})
 
 
 OBSIDIAN_FONT_SIZE = 18  # px
@@ -172,6 +173,15 @@ EDGE_EMPTY_P_RE = re.compile(r"^\s*(?:<p\b[^>]*>\s*(?:<br\s*/?>|&nbsp;|\s)*</p\s
 TRAILING_EMPTY_P_RE = re.compile(r"(?:\s*<p\b[^>]*>\s*(?:<br\s*/?>|&nbsp;|\s)*</p\s*>\s*)+\s*$", re.I)
 BR_RE = re.compile(r"<br\s*/?>", re.I)
 LI_RE = re.compile(r"<li\b", re.I)
+LI_BLOCK_RE = re.compile(r"<li\b[^>]*>(.*?)</li\s*>", re.I | re.S)
+A_HREF_RE = re.compile(r"<a\b[^>]*\bhref\s*=\s*[\"']([^\"']+)[\"'][^>]*>(.*?)</a\s*>", re.I | re.S)
+STRONG_RE = re.compile(r"<(?:strong|b)\b[^>]*>(.*?)</(?:strong|b)\s*>", re.I | re.S)
+EM_RE = re.compile(r"<(?:em|i)\b[^>]*>(.*?)</(?:em|i)\s*>", re.I | re.S)
+OPEN_P_RE = re.compile(r"<p\b[^>]*>", re.I)
+P_TAG_RE = re.compile(r"</?p\b[^>]*>", re.I)
+SIMPLE_HTML_TAG_RE = re.compile(r"</?\s*([a-zA-Z0-9:-]+)\b[^>]*>")
+RICH_HTML_TAG_RE = re.compile(r"<(?:table|thead|tbody|tr|td|th|iframe|img|svg|canvas|video|pre|code)\b", re.I)
+VISUAL_STYLE_RE = re.compile(r"\bstyle\s*=\s*[\"'][^\"']*(?:background|color|font-size)[^\"']*[\"']", re.I)
 PCT_RE = re.compile(r"^\s*([+-]?\d+(?:\.\d+)?)\s*%\s*$")
 COLOR_PROP_RE   = re.compile(r"(color\s*:\s*)(#[0-9a-fA-F]{3,8}|rgb\s*\(\s*\d+\s*,\s*\d+\s*,\s*\d+\s*\))", re.I)
 SPAN_BGCOLOR_RE = re.compile(r"<span\b[^>]*background-color\s*:", re.I)  # span с background-color
@@ -520,6 +530,93 @@ def strip_html(text: str) -> str:
 
 def _is_html(s: str) -> bool:
     return bool(s) and bool(HAS_TAG_RE.search(s))
+
+
+def normalize_text_style_mode(mode: str | None) -> str:
+    mode_value = (mode or "miro").strip().lower()
+    if mode_value not in TEXT_STYLE_MODES:
+        raise ValueError(
+            f"Unknown text style mode: {mode!r}. Expected one of: {', '.join(sorted(TEXT_STYLE_MODES))}"
+        )
+    return mode_value
+
+
+def _html_to_markdown_fragment(html: str) -> str:
+    text = _strip_edge_empty_paragraphs(html or "")
+
+    def clean_inline(value: str) -> str:
+        value = BR_RE.sub("\n", value or "")
+        value = HTML_TAG_RE.sub("", value)
+        return _html_unescape(value).replace("\xa0", " ").strip()
+
+    text = A_HREF_RE.sub(
+        lambda m: f"[{clean_inline(m.group(2))}]({_html_unescape(m.group(1)).strip()})",
+        text,
+    )
+    text = STRONG_RE.sub(lambda m: f"**{clean_inline(m.group(1))}**", text)
+    text = EM_RE.sub(lambda m: f"*{clean_inline(m.group(1))}*", text)
+    text = LI_BLOCK_RE.sub(lambda m: "\n- " + clean_inline(m.group(1)), text)
+    text = BR_RE.sub("\n", text)
+    text = OPEN_P_RE.sub("", text)
+    text = P_CLOSE_RE.sub("\n\n", text)
+    text = re.sub(r"</?(?:ul|ol)\b[^>]*>", "\n", text, flags=re.I)
+    text = HTML_TAG_RE.sub("", text)
+    text = _html_unescape(text).replace("\xa0", " ")
+    text = re.sub(r"[ \t]+\n", "\n", text)
+    text = re.sub(r"\n[ \t]+", "\n", text)
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    return text.strip()
+
+
+def _should_keep_html_for_obsidian_style(html: str, wrapper_extra_color: Optional[str] = None) -> bool:
+    if wrapper_extra_color:
+        return True
+    if RICH_HTML_TAG_RE.search(html or ""):
+        return True
+    if VISUAL_STYLE_RE.search(html or "") or SPAN_BGCOLOR_RE.search(html or ""):
+        return True
+
+    allowed = {"p", "br", "strong", "b", "em", "i", "ul", "ol", "li", "a"}
+    for match in SIMPLE_HTML_TAG_RE.finditer(html or ""):
+        if match.group(1).lower() not in allowed:
+            return True
+    return False
+
+
+def _render_canvas_text(
+    content: Any,
+    *,
+    font_px: int,
+    line_height: float = 1.35,
+    text_style_mode: str = "miro",
+    wrapper_extra_color: Optional[str] = None,
+) -> str:
+    text = str(content or "")
+    mode = normalize_text_style_mode(text_style_mode)
+    is_html = _is_html(text)
+
+    if mode == "obsidian":
+        if is_html:
+            if _should_keep_html_for_obsidian_style(text, wrapper_extra_color):
+                if wrapper_extra_color:
+                    return f'<div style="color:{wrapper_extra_color}">{text}</div>'
+                return text
+            return _html_to_markdown_fragment(text)
+
+        if wrapper_extra_color:
+            safe = _html_escape(text, quote=False).replace("\n", "<br>")
+            return f'<span style="color:{wrapper_extra_color}">{safe}</span>'
+        return text
+
+    style_bits = [f"font-size:{font_px}px", f"line-height:{line_height}"]
+    if wrapper_extra_color:
+        style_bits.append(f"color:{wrapper_extra_color}")
+    style_attr = "; ".join(style_bits)
+    if is_html:
+        return f'<div style="{style_attr}">{text}</div>'
+
+    safe = _html_escape(text, quote=False).replace("\n", "<br>")
+    return f'<span style="{style_attr}">{safe}</span>'
 
 
 def _strip_edge_empty_paragraphs(html_or_text: str) -> str:
@@ -1159,11 +1256,12 @@ def _set_canvas_text_font_px(node: Dict[str, Any], font_px: int) -> None:
     node.setdefault("styleAttributes", {})["fontSize"] = font_px
     text = node.get("text")
     if isinstance(text, str):
-        node["text"] = FONT_SIZE_STYLE_RE.sub(
+        updated = FONT_SIZE_STYLE_RE.sub(
             lambda m: f"{m.group(1)}{font_px}px",
             text,
             count=1,
         )
+        node["text"] = updated
 
 
 def _refit_text_node_after_width_change(node: Dict[str, Any], *, min_font_px: int) -> None:
@@ -3365,6 +3463,7 @@ def convert_item_to_canvas_node(
     min_font_px: int = 8,
     theme: str = "light",
     grow_text_nodes: bool = False,
+    text_style_mode: str = "miro",
 ) -> Optional[Dict[str, Any]]:
     """
     Размеры и позиция = геометрия Miro * scale.
@@ -3375,6 +3474,7 @@ def convert_item_to_canvas_node(
     If min-font text no longer fits, Obsidian handles the internal overflow.
     """
     item_type = (item.get("type") or "").lower()
+    text_style_mode = normalize_text_style_mode(text_style_mode)
     pos = (item.get("position") or {}) if isinstance(item.get("position"), dict) else {}
     geom = (item.get("geometry") or {}) if isinstance(item.get("geometry"), dict) else {}
 
@@ -3448,7 +3548,12 @@ def convert_item_to_canvas_node(
             "width": node_w,
             "height": node_h,
             "color": "#E6E0FF",
-            "text": f'<div style="font-size:{font_px}px; line-height:{lh}">{html}</div>',
+            "text": _render_canvas_text(
+                html,
+                font_px=font_px,
+                line_height=lh,
+                text_style_mode=text_style_mode,
+            ),
         }
         node.setdefault("styleAttributes", {}).update({
             "shape": "round-rectangle",
@@ -3486,16 +3591,18 @@ def convert_item_to_canvas_node(
         font_px = compute_font_px(scale, int(base_font_px), min_font_px)
         sa["fontSize"] = font_px
 
-        style_bits = [f"font-size:{font_px}px", f"line-height:{lh}"]
         text_color = str(style.get("color") or "").strip()
+        wrapper_extra_color: Optional[str] = None
         if text_color and not (theme.lower() == "dark" and _is_miro_black_color(text_color)):
-            style_bits.append(f"color:{text_color}")
+            wrapper_extra_color = text_color
 
-        if _is_html(raw_content):
-            node["text"] = f'<div style="{"; ".join(style_bits)}">{raw_content}</div>'
-        else:
-            safe = _html_escape(raw_content, quote=False).replace("\n", "<br>")
-            node["text"] = f'<span style="{"; ".join(style_bits)}">{safe}</span>'
+        node["text"] = _render_canvas_text(
+            raw_content,
+            font_px=font_px,
+            line_height=lh,
+            text_style_mode=text_style_mode,
+            wrapper_extra_color=wrapper_extra_color,
+        )
         return node
 
 
@@ -3630,18 +3737,13 @@ def convert_item_to_canvas_node(
             if style_color and not (theme.lower() == "dark" and _is_miro_black_color(style_color)):
                 wrapper_extra_color = style_color
 
-        # Собираем HTML-обёртку
-        if _is_html(content_html):
-            style_bits = [f"font-size:{font_px}px", f"line-height:{lh}"]
-            if wrapper_extra_color:
-                style_bits.append(f"color:{wrapper_extra_color}")
-            node["text"] = f'<div style="{"; ".join(style_bits)}">{content_html}</div>'
-        else:
-            safe = _html_escape(content_html or "", quote=False).replace("\n", "<br>")
-            style_bits = [f"font-size:{font_px}px", f"line-height:{lh}"]
-            if wrapper_extra_color:
-                style_bits.append(f"color:{wrapper_extra_color}")
-            node["text"] = f'<span style="{"; ".join(style_bits)}">{safe}</span>'
+        node["text"] = _render_canvas_text(
+            content_html,
+            font_px=font_px,
+            line_height=lh,
+            text_style_mode=text_style_mode,
+            wrapper_extra_color=wrapper_extra_color,
+        )
 
         # ---- Solo-URL: text-блок содержит только ссылку → type:link ----
         if item_type == "text":
@@ -3686,7 +3788,12 @@ def convert_item_to_canvas_node(
         lh = _extract_line_height(item.get("style") or {}, default=1.35)
         font_px = compute_font_px(scale, int(base_font_px), min_font_px)
         node.setdefault("styleAttributes", {})["fontSize"] = font_px
-        node["text"] = f'<div style="font-size:{font_px}px; line-height:{lh}">{html}</div>'
+        node["text"] = _render_canvas_text(
+            html,
+            font_px=font_px,
+            line_height=lh,
+            text_style_mode=text_style_mode,
+        )
 
         # Obsidian adds paragraph margins/padding inside text nodes; use a conservative
         # estimate so app_card fields do not end up behind an internal scrollbar.
@@ -3710,7 +3817,12 @@ def convert_item_to_canvas_node(
 
         node = {**base, "type": "text", "text": ""}
         node.setdefault("styleAttributes", {})["fontSize"] = font_px
-        node["text"] = f'<div style="font-size:{font_px}px; line-height:1.35">{html}</div>'
+        node["text"] = _render_canvas_text(
+            html,
+            font_px=font_px,
+            line_height=1.35,
+            text_style_mode=text_style_mode,
+        )
 
         need_h = _estimate_code_block_height(
             code,
@@ -3830,7 +3942,12 @@ def convert_item_to_canvas_node(
         if card_color:
             node["styleAttributes"]["backgroundColor"] = card_color
 
-        node["text"] = f'<div style="font-size:{font_px}px; line-height:{lh}">{content_html}</div>'
+        node["text"] = _render_canvas_text(
+            content_html,
+            font_px=font_px,
+            line_height=lh,
+            text_style_mode=text_style_mode,
+        )
 
         # подгоняем высоту под контент
         need_h = _estimate_render_height(content_html, width_px=base_w, font_px=font_px, line_height=lh)
@@ -3891,7 +4008,12 @@ def convert_item_to_canvas_node(
             html = "".join(parts)
             node = {**base, "type": "text", "text": ""}
             node.setdefault("styleAttributes", {})["fontSize"] = min_font_px
-            node["text"] = f'<div style="font-size:{min_font_px}px; line-height:1.35">{html}</div>'
+            node["text"] = _render_canvas_text(
+                html,
+                font_px=min_font_px,
+                line_height=1.35,
+                text_style_mode=text_style_mode,
+            )
             node["width"] = content_w
             node["height"] = max(content_h, _estimate_render_height(html, width_px=content_w, font_px=min_font_px))
             return node
@@ -3922,11 +4044,12 @@ def convert_item_to_canvas_node(
         font_px = compute_font_px(scale, int(base_font_px), min_font_px)
         node = {**base, "type": "text", "text": ""}
         node.setdefault("styleAttributes", {})["fontSize"] = font_px
-        if _is_html(raw_content):
-            node["text"] = f'<div style="font-size:{font_px}px; line-height:{lh}">{raw_content}</div>'
-        else:
-            safe = _html_escape(raw_content, quote=False).replace("\n", "<br>")
-            node["text"] = f'<span style="font-size:{font_px}px; line-height:{lh}">{safe}</span>'
+        node["text"] = _render_canvas_text(
+            raw_content,
+            font_px=font_px,
+            line_height=lh,
+            text_style_mode=text_style_mode,
+        )
         return node
 
     # ----------  TAG → TEXT-МЕТКА ----------
@@ -3950,7 +4073,12 @@ def convert_item_to_canvas_node(
         lh = _extract_line_height(item.get("style") or {}, default=1.35)
         font_px = compute_font_px(scale, int(base_font_px), min_font_px)
         node.setdefault("styleAttributes", {})["fontSize"] = font_px
-        node["text"] = f'<div style="font-size:{font_px}px; line-height:{lh}">{html}</div>'
+        node["text"] = _render_canvas_text(
+            html,
+            font_px=font_px,
+            line_height=lh,
+            text_style_mode=text_style_mode,
+        )
         need_h = _estimate_render_height(html, width_px=base_w, font_px=font_px, line_height=lh)
         if need_h > node["height"]:
             node["height"] = need_h
@@ -3990,9 +4118,11 @@ def convert_item_to_canvas_node(
                 "y": center_y - node_h / 2.0,
                 "width": node_w,
                 "height": node_h,
-                "text": (
-                    f'<div style="font-size:{min_font_px}px; line-height:1.4">'
-                    f'{placeholder_html}</div>'
+                "text": _render_canvas_text(
+                    placeholder_html,
+                    font_px=min_font_px,
+                    line_height=1.4,
+                    text_style_mode=text_style_mode,
                 ),
             }
             node.setdefault("styleAttributes", {})["fontSize"] = min_font_px
@@ -4010,9 +4140,11 @@ def convert_item_to_canvas_node(
     )
     node = {**base, "type": "text", "text": ""}
     node.setdefault("styleAttributes", {})["fontSize"] = min_font_px
-    node["text"] = (
-        f'<div style="font-size:{min_font_px}px; line-height:1.4">'
-        f'{placeholder_html}</div>'
+    node["text"] = _render_canvas_text(
+        placeholder_html,
+        font_px=min_font_px,
+        line_height=1.4,
+        text_style_mode=text_style_mode,
     )
     return node
 
@@ -4318,12 +4450,14 @@ def convert_miro_to_canvas(
     min_font_px: int = 8,
     theme: str = "light",
     grow_text_nodes: bool = False,
+    text_style_mode: str = "miro",
 ) -> str:
     """
     Основной конвейер конвертации Miro JSON → Obsidian Canvas.
     Возвращает путь к созданному .canvas.
     """
     base_name = os.path.splitext(os.path.basename(json_path))[0]
+    text_style_mode = normalize_text_style_mode(text_style_mode)
     canvas_path = os.path.join(target_dir, base_name + ".canvas")
 
     src_files_folder = os.path.join(os.path.dirname(json_path), base_name + "_files")
@@ -4563,6 +4697,7 @@ def convert_miro_to_canvas(
             min_font_px=min_font_px,
             theme=theme,
             grow_text_nodes=grow_text_nodes,
+            text_style_mode=text_style_mode,
         )
         if node:
             nodes.append(node)
