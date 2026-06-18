@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import argparse
+import html
 import json
 import math
+import re
 import sys
 from collections import Counter, defaultdict
 from dataclasses import asdict, dataclass
@@ -131,6 +133,28 @@ def _canvas_node_rect(node: dict[str, Any]) -> tuple[float, float, float, float]
     return x, y, width, height
 
 
+def _canvas_text_plain(node: dict[str, Any]) -> str:
+    raw = str(node.get("text") or node.get("file") or node.get("url") or "")
+    plain = re.sub(r"<[^>]+>", " ", raw)
+    return html.unescape(re.sub(r"\s+", " ", plain)).strip()
+
+
+def _is_empty_decorative_canvas_node(node: dict[str, Any]) -> bool:
+    if str(node.get("type") or "") != "text":
+        return False
+    if _canvas_text_plain(node):
+        return False
+    style = node.get("styleAttributes") if isinstance(node.get("styleAttributes"), dict) else {}
+    border = style.get("border")
+    return bool(
+        style.get("shape")
+        or style.get("borderStyle")
+        or style.get("borderColor")
+        or (border and border != "invisible")
+        or node.get("color")
+    )
+
+
 def _rects_overlap(
     left: tuple[float, float, float, float],
     right: tuple[float, float, float, float],
@@ -171,6 +195,8 @@ def _canvas_rect_overlaps_any(
             continue
         for node in nodes:
             if node.get("type") not in {"text", "file", "link"}:
+                continue
+            if _is_empty_decorative_canvas_node(node):
                 continue
             other_rect = _canvas_node_rect(node)
             if other_rect and _rects_overlap(canvas_rect, other_rect):

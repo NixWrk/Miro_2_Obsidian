@@ -145,6 +145,51 @@ class ItemNodeMappingAuditTests(unittest.TestCase):
         self.assertEqual(summary["actionable"], 0)
         self.assertEqual(summary["by_reason"], {"node_layout_repaired_source_overlap": 1})
 
+    def test_repaired_source_overlap_ignores_empty_decorative_canvas_overlap(self) -> None:
+        miro = [
+            {
+                "id": "a",
+                "type": "text",
+                "geometry": {"width": 100, "height": 100},
+                "position": {"x": 0, "y": 0, "origin": "center", "relativeTo": "canvas_center"},
+            },
+            {
+                "id": "b",
+                "type": "text",
+                "geometry": {"width": 100, "height": 100},
+                "position": {"x": 0, "y": 40, "origin": "center", "relativeTo": "canvas_center"},
+            },
+            {
+                "id": "decor",
+                "type": "shape",
+                "data": {"content": ""},
+                "geometry": {"width": 400, "height": 400},
+                "position": {"x": 0, "y": 132, "origin": "center", "relativeTo": "canvas_center"},
+            },
+        ]
+        canvas = {
+            "nodes": [
+                {"id": "a", "type": "text", "x": -50, "y": -50, "width": 100, "height": 100},
+                {"id": "b", "type": "text", "x": -50, "y": 66, "width": 100, "height": 100},
+                {
+                    "id": "decor",
+                    "type": "text",
+                    "x": -200,
+                    "y": -68,
+                    "width": 400,
+                    "height": 400,
+                    "text": '<span style="font-size:12px"></span>',
+                    "styleAttributes": {"shape": "round-rectangle"},
+                },
+            ],
+            "edges": [],
+        }
+
+        summary = summarize_mapping(miro, canvas, scale=1)
+
+        self.assertEqual(summary["actionable"], 0)
+        self.assertEqual(summary["by_reason"], {"node_layout_repaired_source_overlap": 1})
+
 
 if __name__ == "__main__":
     unittest.main()
