@@ -28,6 +28,7 @@ class NodeRect:
     height: float
     label: str = ""
     estimated: bool = False
+    decorative_empty: bool = False
 
     @property
     def right(self) -> float:
@@ -90,6 +91,26 @@ def text_snippet(node: dict[str, Any], *, max_len: int = 90) -> str:
     return plain[: max_len - 1].rstrip() + "..."
 
 
+def is_empty_decorative_canvas_node(node: dict[str, Any]) -> bool:
+    if str(node.get("type") or "") != "text":
+        return False
+    if text_snippet(node):
+        return False
+    style = node.get("styleAttributes") if isinstance(node.get("styleAttributes"), dict) else {}
+    border = style.get("border")
+    return bool(
+        style.get("shape")
+        or style.get("borderStyle")
+        or style.get("borderColor")
+        or (border and border != "invisible")
+        or node.get("color")
+    )
+
+
+def is_empty_decorative_source_item(item: dict[str, Any]) -> bool:
+    return str(item.get("type") or "").lower() == "shape" and not text_snippet(item)
+
+
 def node_rect(node: dict[str, Any]) -> NodeRect | None:
     try:
         x = float(node["x"])
@@ -108,6 +129,7 @@ def node_rect(node: dict[str, Any]) -> NodeRect | None:
         width=width,
         height=height,
         label=text_snippet(node),
+        decorative_empty=is_empty_decorative_canvas_node(node),
     )
 
 
@@ -172,6 +194,7 @@ def miro_source_rect_for_item(item: dict[str, Any], *, scale: float) -> tuple[No
     if missing:
         return None, "missing_" + ",".join(missing)
 
+    label = text_snippet(item)
     return (
         NodeRect(
             node_id=item_id,
@@ -180,8 +203,9 @@ def miro_source_rect_for_item(item: dict[str, Any], *, scale: float) -> tuple[No
             y=(center_y - height / 2.0) * scale,
             width=width * scale,
             height=height * scale,
-            label=text_snippet(item),
+            label=label,
             estimated=estimated,
+            decorative_empty=is_empty_decorative_source_item(item),
         ),
         "estimated_geometry.height" if estimated else "",
     )
@@ -357,6 +381,18 @@ def classify_source_overlap(
     if source_w > min_overlap_width and source_h > min_overlap_height:
         status = "source_estimated_overlap" if estimated else "source_overlap"
         return status, source_w, source_h, reason
+    decorative_empty = (
+        left.decorative_empty
+        or right.decorative_empty
+        or left_source.decorative_empty
+        or right_source.decorative_empty
+    )
+    source_edge_touch = (
+        (source_w > min_overlap_width and source_h >= -min_overlap_height)
+        or (source_h > min_overlap_height and source_w >= -min_overlap_width)
+    )
+    if decorative_empty and source_edge_touch:
+        return "decorative_source_touch", max(source_w, 0.0), max(source_h, 0.0), reason
     return "generated_overlap", max(source_w, 0.0), max(source_h, 0.0), reason
 
 

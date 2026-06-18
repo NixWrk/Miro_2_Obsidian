@@ -104,6 +104,79 @@ class NodeOverlapAuditTests(unittest.TestCase):
         self.assertEqual(overlaps[0].source_width, 0)
         self.assertEqual(overlaps[0].source_height, 0)
 
+    def test_classifies_empty_decorative_source_touch_as_non_generated(self) -> None:
+        canvas = {
+            "nodes": [
+                {
+                    "id": "frame",
+                    "type": "text",
+                    "x": 0,
+                    "y": 0,
+                    "width": 100,
+                    "height": 100,
+                    "text": '<span style="font-size:12px"></span>',
+                    "styleAttributes": {"shape": "round-rectangle", "border": "normal"},
+                },
+                {
+                    "id": "label",
+                    "type": "text",
+                    "x": 90,
+                    "y": 0,
+                    "width": 80,
+                    "height": 40,
+                    "text": "Visible label",
+                },
+            ],
+            "edges": [],
+        }
+        source_rects = {
+            "frame": NodeRect("frame", "shape", 0, 0, 90, 100, decorative_empty=True),
+            "label": NodeRect("label", "text", 90, 0, 80, 40, estimated=True),
+        }
+
+        overlaps = audit_nodes(canvas, source_rects=source_rects, source_missing={})
+
+        self.assertEqual(overlaps[0].source_status, "decorative_source_touch")
+        self.assertEqual(overlaps[0].source_width, 0)
+        self.assertEqual(overlaps[0].source_height, 40)
+        self.assertEqual(overlaps[0].source_reason, "estimated_source_geometry")
+
+    def test_empty_decorative_with_source_gap_still_counts_as_generated(self) -> None:
+        canvas = {
+            "nodes": [
+                {
+                    "id": "frame",
+                    "type": "text",
+                    "x": 0,
+                    "y": 0,
+                    "width": 100,
+                    "height": 100,
+                    "text": '<span style="font-size:12px"></span>',
+                    "styleAttributes": {"shape": "round-rectangle", "border": "normal"},
+                },
+                {
+                    "id": "label",
+                    "type": "text",
+                    "x": 90,
+                    "y": 0,
+                    "width": 80,
+                    "height": 40,
+                    "text": "Visible label",
+                },
+            ],
+            "edges": [],
+        }
+        source_rects = {
+            "frame": NodeRect("frame", "shape", 0, 0, 80, 100, decorative_empty=True),
+            "label": NodeRect("label", "text", 90, 0, 80, 40, estimated=True),
+        }
+
+        overlaps = audit_nodes(canvas, source_rects=source_rects, source_missing={})
+
+        self.assertEqual(overlaps[0].source_status, "generated_overlap")
+        self.assertEqual(overlaps[0].source_width, 0)
+        self.assertEqual(overlaps[0].source_height, 40)
+
     def test_classifies_estimated_source_overlap(self) -> None:
         canvas = {
             "nodes": [
