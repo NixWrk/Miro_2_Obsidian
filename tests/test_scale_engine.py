@@ -76,6 +76,23 @@ class ScaleEngineTests(unittest.TestCase):
         self.assertEqual(ctx["scale_limited_by_fit"], 0.0)
         self.assertEqual(ctx["scale_exceeds_fit"], 1.0)
 
+    def test_zoom_unlocked_profile_makes_readable_scale_fit_huge_boards(self) -> None:
+        profile = ViewProfile(width=1920, height=1080, min_zoom=2 ** -12, scale_mode="readable")
+        miro_root = [
+            _text_node("left", 0, 0, 200, 100),
+            _text_node("right", 1_100_000, 548_000, 200, 100),
+        ]
+
+        scale, ctx = pick_recommended_scale(miro_root, profile, OBSIDIAN_FONT_SIZE)
+
+        self.assertAlmostEqual(scale, ctx["scale_readability"])
+        self.assertLessEqual(ctx["bbox_w"] * scale * profile.min_zoom, profile.width)
+        self.assertLessEqual(ctx["bbox_h"] * scale * profile.min_zoom, profile.height)
+        self.assertEqual(ctx["scale_mode"], "readable")
+        self.assertEqual(ctx["scale_conflict_fit_vs_readability"], 0.0)
+        self.assertEqual(ctx["scale_limited_by_fit"], 0.0)
+        self.assertEqual(ctx["scale_exceeds_fit"], 0.0)
+
     def test_overview_scale_uses_fit_cap_even_when_board_already_fits(self) -> None:
         profile = ViewProfile(width=1920, height=1080, min_zoom=0.12, scale_mode="overview")
         miro_root = [

@@ -13,3 +13,13 @@ Default range:
 
 This relies on private Obsidian Canvas internals. It is intentionally small,
 local, and easy to remove if an Obsidian update changes those internals.
+
+Conversion policy:
+
+- Use this plugin in the controlled work vault when validating very large
+  Miro boards where readability is more important than stock Obsidian zoom
+  compatibility.
+- For zoom-unlocked validation, run local samples with `--scale-mode readable`
+  and `--min-zoom 0.000244140625`.
+- FullHD fit at the stock `min_zoom=0.12` remains a compatibility check for
+  vaults without this plugin.
