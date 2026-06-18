@@ -1,0 +1,50 @@
+[
+  {
+    "id": "empty-process",
+    "type": "shape",
+    "position": {
+      "x": 0,
+      "y": 0,
+      "origin": "center",
+      "relativeTo": "canvas_center"
+    },
+    "geometry": {
+      "width": 180,
+      "height": 80
+    },
+    "style": {
+      "fontSize": "18",
+      "fillColor": "#a5c2ff",
+      "fillOpacity": 0.25,
+      "borderColor": "#4262ff"
+    },
+    "data": {
+      "content": "",
+      "shape": "flow_chart_predefined_process"
+    }
+  },
+  {
+    "id": "labeled-process",
+    "type": "shape",
+    "position": {
+      "x": 260,
+      "y": 0,
+      "origin": "center",
+      "relativeTo": "canvas_center"
+    },
+    "geometry": {
+      "width": 180,
+      "height": 80
+    },
+    "style": {
+      "fontSize": "18",
+      "fillColor": "#a5c2ff",
+      "fillOpacity": 0.25,
+      "borderColor": "#4262ff"
+    },
+    "data": {
+      "content": "<p>Explicit Miro label</p>",
+      "shape": "flow_chart_predefined_process"
+    }
+  }
+]

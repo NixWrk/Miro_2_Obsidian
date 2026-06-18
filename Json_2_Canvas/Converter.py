@@ -3660,14 +3660,10 @@ def convert_item_to_canvas_node(
                 raw_content = ARROW_SYMBOLS[subtype]
             elif subtype in BRACE_SYMBOLS:
                 raw_content = BRACE_SYMBOLS[subtype]
-            elif subtype.startswith(FLOW_PREFIX):
-                raw_content = default_flow_label(subtype)
-                if "color" not in node:
-                    node["color"] = "#FFFFFF"
-            elif subtype and subtype not in EXACT_BASE_SHAPES:
+            elif item_type == "sticky_note" and subtype and subtype not in EXACT_BASE_SHAPES:
                 raw_content = subtype.replace("_", " ")
 
-      
+
         # Базовый кегль из Miro + пересчёт по масштабу
         base_font_px = _extract_font_base_px(item, fallback=OBSIDIAN_FONT_SIZE)
         lh = _extract_line_height(item.get("style") or {}, default=1.35)

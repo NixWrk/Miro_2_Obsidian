@@ -1,0 +1,26 @@
+{
+  "description": "Empty Miro flowchart shapes keep their visual shape without inventing subtype labels.",
+  "converter": {
+    "scale": 1.0,
+    "min_font_px": 8,
+    "theme": "dark"
+  },
+  "assertions": {
+    "node_count": 2,
+    "edge_count": 0,
+    "nodes": [
+      {
+        "id": "empty-process",
+        "type": "text",
+        "shape": "predefined-process",
+        "text_not_contains": "predefined process"
+      },
+      {
+        "id": "labeled-process",
+        "type": "text",
+        "shape": "predefined-process",
+        "text_contains": "Explicit Miro label"
+      }
+    ]
+  }
+}
