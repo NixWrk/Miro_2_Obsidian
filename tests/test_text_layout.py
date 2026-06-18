@@ -1148,6 +1148,60 @@ class TextLayoutTests(unittest.TestCase):
         self.assertGreaterEqual(nodes[1]["y"], nodes[0]["y"] + nodes[0]["height"] + 16)
         self.assertGreaterEqual(nodes[3]["y"], nodes[1]["y"] + nodes[1]["height"] + 16)
 
+    def test_short_label_visual_clearance_does_not_cascade_empty_decorations(self) -> None:
+        nodes = [
+            {
+                "id": "label",
+                "type": "text",
+                "x": 0,
+                "y": 0,
+                "width": 140,
+                "height": 45,
+                "text": '<span style="font-size:11px; line-height:1.35">Interviews</span>',
+                "styleAttributes": {"border": "invisible", "fontSize": 11},
+            },
+            {
+                "id": "lower-image",
+                "type": "file",
+                "x": 0,
+                "y": 38,
+                "width": 140,
+                "height": 50,
+            },
+            {
+                "id": "upper-blocker",
+                "type": "file",
+                "x": 0,
+                "y": -23,
+                "width": 140,
+                "height": 45,
+            },
+            {
+                "id": "lower-blocker",
+                "type": "file",
+                "x": 0,
+                "y": 104,
+                "width": 140,
+                "height": 45,
+            },
+            {
+                "id": "empty-decoration",
+                "type": "text",
+                "x": 0,
+                "y": 104,
+                "width": 140,
+                "height": 45,
+                "text": '<span style="font-size:11px; line-height:1.35"></span>',
+                "styleAttributes": {"shape": "round-rectangle", "fontSize": 11},
+            },
+        ]
+
+        _resolve_short_label_visual_vertical_overlaps(nodes)
+
+        self.assertGreaterEqual(nodes[1]["y"], nodes[0]["y"] + nodes[0]["height"] + 16)
+        self.assertGreaterEqual(nodes[3]["y"], nodes[1]["y"] + nodes[1]["height"] + 16)
+        self.assertEqual(nodes[4]["y"], 104)
+
     def test_short_inline_label_height_compacts_to_single_line_need(self) -> None:
         nodes = [
             {

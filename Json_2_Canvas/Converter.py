@@ -1214,10 +1214,28 @@ def _rect_overlap(a: tuple[float, float, float, float], b: tuple[float, float, f
     return overlap_w, overlap_h
 
 
+def _canvas_text_plain(node: Dict[str, Any]) -> str:
+    text = str(node.get("text") or "")
+    plain = _html_unescape(strip_html(text)).replace("\xa0", " ")
+    return re.sub(r"\s+", " ", plain).strip()
+
+
+def _is_empty_decorative_text_node(node: Dict[str, Any]) -> bool:
+    if node.get("type") != "text":
+        return False
+    if _canvas_text_plain(node):
+        return False
+    attrs = node.get("styleAttributes") or {}
+    shape = str(attrs.get("shape") or "").lower()
+    return shape not in ("", "none")
+
+
 def _is_clearance_text_node(node: Dict[str, Any]) -> bool:
     if node.get("type") != "text":
         return False
     if not isinstance(node.get("text"), str) or not node.get("text"):
+        return False
+    if not _canvas_text_plain(node):
         return False
     if node.get("color"):
         return False
@@ -1315,6 +1333,8 @@ def _candidate_rect_overlaps_any_node(
             continue
         if node.get("type") not in ("text", "file", "link"):
             continue
+        if _is_empty_decorative_text_node(node):
+            continue
         rect = _node_rect(node)
         if not rect:
             continue
@@ -1355,6 +1375,8 @@ def _move_node_down_with_cascade(
             if node_id in moved_ids:
                 continue
             if node.get("type") not in ("text", "file", "link"):
+                continue
+            if _is_empty_decorative_text_node(node):
                 continue
             rect = _node_rect(node)
             if not rect:
@@ -1933,10 +1955,7 @@ def _resolve_text_text_horizontal_edge_overlaps(
 
 
 def _has_visible_text(node: Dict[str, Any]) -> bool:
-    text = str(node.get("text") or "")
-    plain = _html_unescape(strip_html(text)).replace("\xa0", " ")
-    plain = re.sub(r"\s+", " ", plain).strip()
-    return bool(plain)
+    return bool(_canvas_text_plain(node))
 
 
 def _is_tiny_entity_text_node(node: Dict[str, Any]) -> bool:
@@ -1999,9 +2018,7 @@ def _compact_tiny_slide_text_heights(
 
 
 def _plain_canvas_text(node: Dict[str, Any]) -> str:
-    text = str(node.get("text") or "")
-    plain = _html_unescape(strip_html(text)).replace("\xa0", " ")
-    return re.sub(r"\s+", " ", plain).strip()
+    return _canvas_text_plain(node)
 
 
 def _is_tiny_slide_number_marker(node: Dict[str, Any]) -> bool:
