@@ -141,6 +141,44 @@ class TextLayoutTests(unittest.TestCase):
         self.assertEqual(nodes[0]["y"], -820)
         self.assertGreaterEqual(nodes[1]["y"], nodes[0]["y"] + nodes[0]["height"] + 16)
 
+    def test_text_text_vertical_clearance_does_not_create_empty_shape_overlap(self) -> None:
+        nodes = [
+            {
+                "id": "upper-text",
+                "type": "text",
+                "x": 0,
+                "y": 0,
+                "width": 100,
+                "height": 100,
+                "text": '<div style="font-size:16px; line-height:1.35">Upper text</div>',
+                "styleAttributes": {"border": "invisible", "fontSize": 16},
+            },
+            {
+                "id": "lower-text",
+                "type": "text",
+                "x": 0,
+                "y": 80,
+                "width": 100,
+                "height": 50,
+                "text": '<div style="font-size:16px; line-height:1.35">Lower text</div>',
+                "styleAttributes": {"border": "invisible", "fontSize": 16},
+            },
+            {
+                "id": "empty-flowchart-shape",
+                "type": "text",
+                "x": 0,
+                "y": 150,
+                "width": 100,
+                "height": 100,
+                "text": "",
+                "styleAttributes": {"shape": "flow_chart_predefined_process"},
+            },
+        ]
+
+        _resolve_text_text_vertical_overlaps(nodes)
+
+        self.assertEqual(nodes[1]["y"], 80)
+
     def test_text_text_horizontal_edge_clearance_moves_right_text_sideways(self) -> None:
         nodes = [
             {
