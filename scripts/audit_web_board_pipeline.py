@@ -142,6 +142,67 @@ def summarize_source(miro_root: Any) -> dict[str, Any]:
     }
 
 
+def _source_item_requires_asset(item: dict[str, Any]) -> bool:
+    item_type = str(item.get("type") or "").lower()
+    data = item.get("data") if isinstance(item.get("data"), dict) else {}
+    if item_type == "image":
+        return any(str(data.get(key) or "").strip() for key in ("imageUrl", "url", "downloadUrl"))
+    if item_type == "document":
+        return any(str(data.get(key) or "").strip() for key in ("documentUrl", "url", "downloadUrl"))
+    if item_type == "doc_format":
+        return bool(str(data.get("html") or "").strip())
+    return False
+
+
+def summarize_source_assets(miro_root: Any, source_json: Path) -> dict[str, Any]:
+    attachments_dir = source_json.with_name(f"{source_json.stem}_files")
+    examples: list[dict[str, str]] = []
+    total = 0
+
+    for item in iter_objects(miro_root):
+        if not isinstance(item, dict):
+            continue
+        local_name = str(item.get("local_name") or "").strip()
+        requires_asset = _source_item_requires_asset(item)
+        if not local_name and not requires_asset:
+            continue
+
+        total += 1
+        if not local_name:
+            examples.append(
+                {
+                    "id": str(item.get("id") or ""),
+                    "type": str(item.get("type") or ""),
+                    "local_name": "",
+                    "expected_path": str(attachments_dir),
+                    "reason": "missing local_name",
+                }
+            )
+            continue
+
+        expected = attachments_dir / local_name
+        if expected.is_file():
+            continue
+
+        reason = "missing source file" if attachments_dir.exists() else "missing source sidecar"
+        examples.append(
+            {
+                "id": str(item.get("id") or ""),
+                "type": str(item.get("type") or ""),
+                "local_name": local_name,
+                "expected_path": str(expected),
+                "reason": reason,
+            }
+        )
+
+    return {
+        "local_refs": total,
+        "missing": len(examples),
+        "sidecar_exists": attachments_dir.exists(),
+        "missing_examples": examples[:20],
+    }
+
+
 def summarize_canvas(canvas: dict[str, Any], vault_root: Path) -> dict[str, Any]:
     nodes = [node for node in canvas.get("nodes", []) if isinstance(node, dict)]
     edges = [edge for edge in canvas.get("edges", []) if isinstance(edge, dict)]
@@ -279,6 +340,7 @@ def audit_one_board(
     with tempfile.TemporaryDirectory(prefix=f"miro2obs_web_audit_{safe_name(board.board_id)}_") as tmp:
         work_json = copy_export_to_workdir(source_json, Path(tmp))
         miro_root = load_json(work_json)
+        source_assets = summarize_source_assets(miro_root, work_json)
         scale, scale_ctx = compute_scale(miro_root, scale_mode=scale_mode, min_zoom=min_zoom)
         canvas_path = Path(
             convert_miro_to_canvas(
@@ -300,13 +362,16 @@ def audit_one_board(
             "scale": scale,
             "scale_context": scale_ctx,
             "source": summarize_source(miro_root),
+            "source_assets": source_assets,
             "canvas": summarize_canvas(canvas, vault_root),
             "missing_miro_items": summarize_missing(miro_root, canvas),
             "mapping": summarize_mapping(miro_root, canvas, scale=scale),
             "overlaps": summarize_overlaps(miro_root, canvas, scale=scale),
         }
     )
-    if record["canvas"]["missing_files"]:
+    if record["source_assets"]["missing"]:
+        record["status"] = "source_missing_assets"
+    elif record["canvas"]["missing_files"]:
         record["status"] = "canvas_missing_files"
     if record["missing_miro_items"]["actionable"] or record["mapping"]["actionable"] or record["overlaps"]["generated"]:
         record["status"] = "needs_review"
@@ -370,6 +435,7 @@ def render_markdown_report(payload: dict[str, Any]) -> str:
     for board in payload["boards"]:
         if board["status"] not in {
             "needs_review",
+            "source_missing_assets",
             "canvas_missing_files",
             "no_json_export",
             "export_failed",
@@ -389,6 +455,14 @@ def render_markdown_report(payload: dict[str, Any]) -> str:
             lines.append(f"- canvas: `{board['canvas_path']}`")
         if board.get("error"):
             lines.append(f"- error: `{board['error']}`")
+        source_assets = board.get("source_assets") or {}
+        if source_assets.get("missing"):
+            lines.append(f"- source assets missing: `{source_assets['missing']}`")
+            for item in source_assets.get("missing_examples", [])[:5]:
+                lines.append(
+                    f"  - `{item['id']}` `{item['type']}`: "
+                    f"`{item['local_name']}` ({item['reason']})"
+                )
         missing = board.get("missing_miro_items") or {}
         if missing.get("actionable"):
             lines.append(f"- actionable missing: `{missing['actionable']}`")
@@ -443,6 +517,9 @@ def issue_tags(record: dict[str, Any]) -> list[str]:
         tags.append("conversion failed")
     if record["status"] == "render_failed":
         tags.append("render failed")
+    source_assets = record.get("source_assets") or {}
+    if source_assets.get("missing"):
+        tags.append("source attachments missing")
     canvas = record.get("canvas") or {}
     if canvas.get("missing_files"):
         tags.append("missing attachments")
@@ -486,7 +563,14 @@ def render_queue_report(payload: dict[str, Any]) -> str:
 
 def build_summary(records: list[dict[str, Any]]) -> dict[str, Any]:
     statuses = Counter(record["status"] for record in records)
-    review_statuses = {"needs_review", "canvas_missing_files", "render_failed", "convert_failed", "export_failed"}
+    review_statuses = {
+        "needs_review",
+        "source_missing_assets",
+        "canvas_missing_files",
+        "render_failed",
+        "convert_failed",
+        "export_failed",
+    }
     board_ids = {record["board"]["board_id"] for record in records if record.get("board")}
     return {
         "boards": len(board_ids),

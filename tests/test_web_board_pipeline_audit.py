@@ -128,6 +128,84 @@ class WebBoardPipelineAuditTests(unittest.TestCase):
         self.assertEqual(record["mapping"]["total"], 0)
         self.assertEqual(record["overlaps"]["generated"], 0)
 
+    def test_audit_one_board_reports_source_missing_assets(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="miro2obs_web_pipeline_assets_") as tmp:
+            root = Path(tmp)
+            source_json = root / "uXjVAssets=.json"
+            source_json.write_text(
+                json.dumps(
+                    [
+                        {
+                            "id": "image-1",
+                            "type": "image",
+                            "local_name": "rest_uXjVAssets=_image-1.svg",
+                            "position": {"x": 0, "y": 0, "origin": "center", "relativeTo": "canvas_center"},
+                            "geometry": {"width": 80, "height": 60},
+                            "data": {
+                                "imageUrl": "https://api.miro.test/images/1?format=preview&redirect=false"
+                            },
+                        }
+                    ],
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+
+            record = audit_one_board(
+                BoardRef(board_id="uXjVAssets=", label="Assets", url="https://miro.com/app/board/uXjVAssets=/"),
+                source_json=source_json,
+                out_dir=root / "out",
+                scale_mode="readable",
+                min_zoom=2 ** -12,
+                text_style_mode="obsidian",
+                min_font_px=8,
+            )
+
+        self.assertEqual(record["status"], "source_missing_assets")
+        self.assertEqual(record["source_assets"]["local_refs"], 1)
+        self.assertEqual(record["source_assets"]["missing"], 1)
+        self.assertFalse(record["source_assets"]["sidecar_exists"])
+        self.assertEqual(record["source_assets"]["missing_examples"][0]["id"], "image-1")
+        self.assertEqual(record["canvas"]["missing_files"], 1)
+
+    def test_audit_one_board_reports_required_image_without_local_name(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="miro2obs_web_pipeline_assets_") as tmp:
+            root = Path(tmp)
+            source_json = root / "uXjVAssets=.json"
+            source_json.write_text(
+                json.dumps(
+                    [
+                        {
+                            "id": "image-without-local-name",
+                            "type": "image",
+                            "position": {"x": 0, "y": 0, "origin": "center", "relativeTo": "canvas_center"},
+                            "geometry": {"width": 80, "height": 60},
+                            "data": {
+                                "imageUrl": "https://api.miro.test/images/1?format=preview&redirect=false"
+                            },
+                        }
+                    ],
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+
+            record = audit_one_board(
+                BoardRef(board_id="uXjVAssets=", label="Assets", url="https://miro.com/app/board/uXjVAssets=/"),
+                source_json=source_json,
+                out_dir=root / "out",
+                scale_mode="readable",
+                min_zoom=2 ** -12,
+                text_style_mode="obsidian",
+                min_font_px=8,
+            )
+
+        self.assertEqual(record["status"], "source_missing_assets")
+        self.assertEqual(record["source_assets"]["local_refs"], 1)
+        self.assertEqual(record["source_assets"]["missing"], 1)
+        self.assertEqual(record["source_assets"]["missing_examples"][0]["reason"], "missing local_name")
+        self.assertEqual(record["canvas"]["missing_files"], 1)
+
 
 if __name__ == "__main__":
     unittest.main()
