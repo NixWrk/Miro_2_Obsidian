@@ -125,6 +125,7 @@ class WebBoardPipelineAuditTests(unittest.TestCase):
         self.assertEqual(record["source"]["items"], 1)
         self.assertEqual(record["canvas"]["nodes"], 1)
         self.assertEqual(record["missing_miro_items"]["total"], 0)
+        self.assertEqual(record["mapping"]["total"], 0)
         self.assertEqual(record["overlaps"]["generated"], 0)
 
 

@@ -26,6 +26,7 @@ sys.path.insert(0, str(REPO_ROOT / "scripts"))
 
 from Converter import OBSIDIAN_FONT_SIZE, convert_miro_to_canvas, iter_objects  # noqa: E402
 from Scale_engine import ViewProfile, pick_recommended_scale  # noqa: E402
+from audit_item_node_mapping import summarize_mapping  # noqa: E402
 from audit_missing_miro_items import audit_missing_items  # noqa: E402
 from audit_node_overlaps import audit_nodes, build_miro_source_rects, overlap_to_dict  # noqa: E402
 from miro_rest_export_board import download_export_assets, export_board_items, write_json  # noqa: E402
@@ -301,12 +302,13 @@ def audit_one_board(
             "source": summarize_source(miro_root),
             "canvas": summarize_canvas(canvas, vault_root),
             "missing_miro_items": summarize_missing(miro_root, canvas),
+            "mapping": summarize_mapping(miro_root, canvas, scale=scale),
             "overlaps": summarize_overlaps(miro_root, canvas, scale=scale),
         }
     )
     if record["canvas"]["missing_files"]:
         record["status"] = "canvas_missing_files"
-    if record["missing_miro_items"]["actionable"] or record["overlaps"]["generated"]:
+    if record["missing_miro_items"]["actionable"] or record["mapping"]["actionable"] or record["overlaps"]["generated"]:
         record["status"] = "needs_review"
     if render:
         actual_render_dir = render_dir or (out_dir / "renders")
@@ -336,8 +338,8 @@ def render_markdown_report(payload: dict[str, Any]) -> str:
         f"needs_review: {payload['summary']['needs_review']}",
         f"missing_json: {payload['summary']['missing_json']}",
         "",
-        "| Board | Mode | Status | Miro items | Canvas nodes/edges | Missing/actionable | Generated overlaps | Missing files | Render |",
-        "|---|---:|---:|---:|---:|---:|---:|---:|---:|",
+        "| Board | Mode | Status | Miro items | Canvas nodes/edges | Missing/actionable | Mapping issues | Generated overlaps | Missing files | Render |",
+        "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
     ]
     for board in payload["boards"]:
         source_items = (board.get("source") or {}).get("items", "")
@@ -349,6 +351,10 @@ def render_markdown_report(payload: dict[str, Any]) -> str:
         missing_count = ""
         if missing:
             missing_count = f"{missing.get('total', 0)}/{missing.get('actionable', 0)}"
+        mapping = board.get("mapping") or {}
+        mapping_count = ""
+        if mapping:
+            mapping_count = f"{mapping.get('total', 0)}/{mapping.get('actionable', 0)}"
         overlaps = board.get("overlaps") or {}
         generated = overlaps.get("generated", "") if overlaps else ""
         missing_files = canvas.get("missing_files", "") if canvas else ""
@@ -356,7 +362,7 @@ def render_markdown_report(payload: dict[str, Any]) -> str:
         mode = board.get("text_style_mode") or ""
         lines.append(
             f"| [{label}]({board['board']['url']}) | {mode} | {board['status']} | {source_items} | "
-            f"{canvas_count} | {missing_count} | {generated} | {missing_files} | {render_status(board)} |"
+            f"{canvas_count} | {missing_count} | {mapping_count} | {generated} | {missing_files} | {render_status(board)} |"
         )
 
     lines.append("")
@@ -388,6 +394,24 @@ def render_markdown_report(payload: dict[str, Any]) -> str:
             lines.append(f"- actionable missing: `{missing['actionable']}`")
             for item in missing.get("actionable_examples", [])[:5]:
                 lines.append(f"  - `{item['item_id']}` `{item['item_type']}`: {item['reason']}")
+        mapping = board.get("mapping") or {}
+        if mapping.get("actionable"):
+            lines.append(f"- mapping issues: `{mapping['actionable']}`")
+            by_reason = mapping.get("by_reason") or {}
+            if by_reason:
+                lines.append(
+                    "- mapping by reason: `"
+                    + ", ".join(f"{key}:{value}" for key, value in by_reason.items())
+                    + "`"
+                )
+            for item in mapping.get("examples", [])[:5]:
+                detail = item.get("detail") or ""
+                detail_suffix = f" - {detail}" if detail else ""
+                lines.append(
+                    f"  - `{item['item_id']}` `{item['item_type']}`: "
+                    f"{item['reason']} ({item.get('canvas_kind', '')}:{item.get('canvas_type', '')})"
+                    f"{detail_suffix}"
+                )
         overlaps = board.get("overlaps") or {}
         if overlaps.get("generated"):
             lines.append(f"- generated overlaps: `{overlaps['generated']}`")
@@ -425,6 +449,9 @@ def issue_tags(record: dict[str, Any]) -> list[str]:
     missing = record.get("missing_miro_items") or {}
     if missing.get("actionable"):
         tags.append("actionable missing Miro items")
+    mapping = record.get("mapping") or {}
+    if mapping.get("actionable"):
+        tags.append("source/canvas mapping mismatch")
     overlaps = record.get("overlaps") or {}
     if overlaps.get("generated"):
         tags.append("generated overlaps")
