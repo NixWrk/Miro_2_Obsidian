@@ -141,6 +141,35 @@ class TextLayoutTests(unittest.TestCase):
         self.assertEqual(nodes[0]["y"], -820)
         self.assertGreaterEqual(nodes[1]["y"], nodes[0]["y"] + nodes[0]["height"] + 16)
 
+    def test_text_text_vertical_clearance_handles_equal_centers(self) -> None:
+        nodes = [
+            {
+                "id": "root-cause-label",
+                "type": "text",
+                "x": 0,
+                "y": 100,
+                "width": 148,
+                "height": 67,
+                "text": '<span style="background-color:rgb(128,128,128);color:white">Root Cause Analysis</span>',
+                "styleAttributes": {"border": "invisible", "fontSize": 15},
+            },
+            {
+                "id": "cohort-label",
+                "type": "text",
+                "x": 16,
+                "y": 100,
+                "width": 118,
+                "height": 67,
+                "text": '<span style="background-color:rgb(128,128,128);color:white">Cohort Analysis</span>',
+                "styleAttributes": {"border": "invisible", "fontSize": 15},
+            },
+        ]
+
+        _resolve_text_text_vertical_overlaps(nodes)
+
+        self.assertEqual(nodes[0]["y"], 100)
+        self.assertGreaterEqual(nodes[1]["y"], nodes[0]["y"] + nodes[0]["height"] + 16)
+
     def test_text_text_vertical_clearance_does_not_create_empty_shape_overlap(self) -> None:
         nodes = [
             {

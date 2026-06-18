@@ -1939,7 +1939,7 @@ def _resolve_text_text_vertical_overlaps(
                     continue
                 lx0, ly0, lx1, ly1 = lower_rect
                 lower_center_y = (ly0 + ly1) / 2.0
-                if lower_center_y <= upper_center_y:
+                if lower_center_y < upper_center_y:
                     continue
 
                 overlap_w, _overlap_h = _rect_overlap(upper_rect, lower_rect)
