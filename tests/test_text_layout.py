@@ -179,6 +179,45 @@ class TextLayoutTests(unittest.TestCase):
 
         self.assertEqual(nodes[1]["y"], 80)
 
+    def test_text_text_vertical_clearance_does_not_create_text_shape_overlap(self) -> None:
+        nodes = [
+            {
+                "id": "upper-text",
+                "type": "text",
+                "x": 0,
+                "y": 0,
+                "width": 100,
+                "height": 100,
+                "text": '<div style="font-size:16px; line-height:1.35">Upper text</div>',
+                "styleAttributes": {"border": "invisible", "fontSize": 16},
+            },
+            {
+                "id": "lower-text",
+                "type": "text",
+                "x": 0,
+                "y": 80,
+                "width": 100,
+                "height": 50,
+                "text": '<div style="font-size:16px; line-height:1.35">Lower text</div>',
+                "styleAttributes": {"border": "invisible", "fontSize": 16},
+            },
+            {
+                "id": "filled-shape-text",
+                "type": "text",
+                "x": 0,
+                "y": 150,
+                "width": 100,
+                "height": 100,
+                "color": "#889aac",
+                "text": '<div style="font-size:16px; line-height:1.35">Optimization Function</div>',
+                "styleAttributes": {"shape": "rectangle", "fontSize": 16, "border": "normal"},
+            },
+        ]
+
+        _resolve_text_text_vertical_overlaps(nodes)
+
+        self.assertEqual(nodes[1]["y"], 80)
+
     def test_text_text_horizontal_edge_clearance_moves_right_text_sideways(self) -> None:
         nodes = [
             {

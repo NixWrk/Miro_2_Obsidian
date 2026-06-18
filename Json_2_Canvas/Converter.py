@@ -1382,6 +1382,33 @@ def _candidate_creates_empty_decorative_overlap(
     return False
 
 
+def _candidate_creates_blocking_node_overlap(
+    nodes: List[Dict[str, Any]],
+    current_rect: tuple[float, float, float, float],
+    candidate_rect: tuple[float, float, float, float],
+    *,
+    skip_id: str,
+    overlap_tolerance_px: float = 1.0,
+) -> bool:
+    for node in nodes:
+        if str(node.get("id", "")) == skip_id:
+            continue
+        if node.get("type") not in ("text", "file", "link"):
+            continue
+        if _is_clearance_text_node(node):
+            continue
+        rect = _node_rect(node)
+        if not rect:
+            continue
+        current_w, current_h = _rect_overlap(current_rect, rect)
+        if current_w > overlap_tolerance_px and current_h > overlap_tolerance_px:
+            continue
+        candidate_w, candidate_h = _rect_overlap(candidate_rect, rect)
+        if candidate_w > overlap_tolerance_px and candidate_h > overlap_tolerance_px:
+            return True
+    return False
+
+
 def _move_node_down_with_cascade(
     nodes: List[Dict[str, Any]],
     moved_node: Dict[str, Any],
@@ -1925,7 +1952,7 @@ def _resolve_text_text_vertical_overlaps(
                     continue
 
                 candidate_rect = (lx0, required_y, lx1, required_y + (ly1 - ly0))
-                if _candidate_creates_empty_decorative_overlap(
+                if _candidate_creates_blocking_node_overlap(
                     nodes,
                     lower_rect,
                     candidate_rect,
