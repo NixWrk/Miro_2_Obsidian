@@ -1480,6 +1480,13 @@ def _expand_short_inline_label_widths(
         candidate_rect = (new_x, ly0, new_x + need_w, ly1)
         if _candidate_rect_overlaps_any_node(nodes, candidate_rect, skip_id=str(label_node.get("id", ""))):
             continue
+        if _candidate_creates_empty_decorative_overlap(
+            nodes,
+            label_rect,
+            candidate_rect,
+            skip_id=str(label_node.get("id", "")),
+        ):
+            continue
 
         label_node["x"] = new_x
         label_node["width"] = need_w

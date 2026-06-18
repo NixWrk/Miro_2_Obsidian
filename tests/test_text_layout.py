@@ -1400,6 +1400,34 @@ class TextLayoutTests(unittest.TestCase):
 
         self.assertEqual(nodes[0]["width"], 200)
 
+    def test_short_label_width_does_not_expand_into_empty_decorative_shape(self) -> None:
+        nodes = [
+            {
+                "id": "product-competition-label",
+                "type": "text",
+                "x": 0,
+                "y": 0,
+                "width": 260,
+                "height": 80,
+                "text": '<div style="font-size:40px; line-height:1.35"><strong>Product Competition</strong></div>',
+                "styleAttributes": {"border": "invisible", "fontSize": 40, "textAlign": "left"},
+            },
+            {
+                "id": "empty-rounded-box",
+                "type": "text",
+                "x": 320,
+                "y": -20,
+                "width": 180,
+                "height": 120,
+                "text": "",
+                "styleAttributes": {"shape": "round-rectangle", "fontSize": 20},
+            },
+        ]
+
+        _expand_short_inline_label_widths(nodes)
+
+        self.assertEqual(nodes[0]["width"], 260)
+
     def test_short_label_width_tolerates_tiny_edge_overlap(self) -> None:
         nodes = [
             {
