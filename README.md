@@ -3,6 +3,8 @@
 Инструмент для экспорта досок Miro в формат [Obsidian Canvas](https://obsidian.md/canvas) (`.canvas`).
 Состоит из двух независимых модулей с собственными GUI.
 
+> Текущий снимок состояния проекта, направления работ и план наведения порядка зафиксированы в [`tasks/current_state.md`](tasks/current_state.md). Актуальная матрица доступности Miro items находится в [`tasks/miro_capabilities.md`](tasks/miro_capabilities.md).
+
 ---
 
 ## Архитектура
