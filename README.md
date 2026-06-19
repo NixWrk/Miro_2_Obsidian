@@ -1,234 +1,290 @@
-# Miro → Obsidian Canvas
+# Miro -> Obsidian Canvas
 
-Инструмент для экспорта досок Miro в формат [Obsidian Canvas](https://obsidian.md/canvas) (`.canvas`).
-Состоит из двух независимых модулей с собственными GUI.
+Инструментальный набор для переноса досок Miro в Obsidian Advanced Canvas.
 
-> Текущий снимок состояния проекта, направления работ и план наведения порядка зафиксированы в [`tasks/current_state.md`](tasks/current_state.md). Актуальная матрица доступности Miro items находится в [`tasks/miro_capabilities.md`](tasks/miro_capabilities.md).
+Проект сейчас развивается как проверяемый pipeline, а не как один монолитный GUI:
 
----
+1. Получить данные из Miro через REST, Web SDK exporter или локальный JSON.
+2. Скачать обязательные вложения рядом с JSON.
+3. Сконвертировать Miro JSON в JSONCanvas `.canvas`.
+4. Проверить структуру, маппинг, пересечения, вложения и визуальный рендер.
+5. Исправлять дефекты через LLM-in-the-loop цикл: одна проблема, один fixture, полный regression.
 
-## Архитектура
+Текущий снимок состояния проекта: [`tasks/current_state.md`](tasks/current_state.md).
+Матрица доступности Miro items: [`tasks/miro_capabilities.md`](tasks/miro_capabilities.md).
+Инвентаризация репозитория: [`tasks/repo_inventory.md`](tasks/repo_inventory.md).
 
-```
-Miro (REST API)
-      ↓
- Miro_2_Json          ← скачивает доску + вложения → .json + _files/
-      ↓
- Json_2_Canvas         ← конвертирует .json → .canvas (Obsidian)
-      ↓
- Obsidian Canvas
-```
+## Что уже есть
 
----
+- REST exporter для Miro board items и вложений.
+- GUI downloader для Miro -> JSON.
+- GUI converter для JSON -> Obsidian Canvas.
+- Конвертер с поддержкой text/shape/sticky/image/document/card/app_card/embed/frame/connector/comment sidecar/mindmap_node/code и части slide_container.
+- Два режима текста: `miro` сохраняет больше HTML/CSS, `obsidian` минимизирует HTML.
+- Scale policies: `balanced`, `overview`, `readable`.
+- Zoom-unlocked validation profile для больших досок через локальный Obsidian plugin.
+- Regression fixtures и visual baselines.
+- Web-board audit, node-overlap audit, missing/mapping audit.
+- Miro Web SDK exporter app для диагностики и сравнения REST/Web SDK.
 
-## Miro_2_Json — Загрузчик
+## Текущие ограничения
 
-### Что делает
-Авторизуется в Miro через OAuth, скачивает данные выбранной доски через REST API и сохраняет:
-- `{team}_{board}.json` — все элементы доски
-- `{team}_{board}_files/` — вложения (изображения, документы, PDF, embed-превью)
+- В проекте пока нет единого production CLI для прямой команды `json -> canvas`; основной ручной путь конвертации идет через `Json_2_Canvas/Json_2_Canvas_V5.py`, а автоматизированный путь - через regression/local/web-board runners.
+- В репозитории пока нет `requirements.txt` или `pyproject.toml`; зависимости надо формализовать отдельной cleanup-задачей.
+- Часть Miro items является source-limited: Miro API/Web SDK не отдают нужное содержимое или точную геометрию. Такие элементы фиксируются в `tasks/miro_capabilities.md`.
+- Miro app/Web SDK exporter пока не доказан как обязательная часть production pipeline. Его ценность нужно измерить против REST.
+- `work/` и `_obsidian_oracle_vault/` являются локальными рабочими артефактами и не коммитятся.
 
-### Интерфейс
+## Карта репозитория
 
-| Элемент | Описание |
-|---|---|
-| **Авторизоваться** | Открывает браузер для OAuth-авторизации. После успеха список досок заполняется автоматически |
-| **Выбор доски** | Выпадающий список досок аккаунта. Опция «Публичная доска» — ввод ссылки вручную |
-| **Папка сохранения** | Куда будут сохранены .json и _files/ |
-| **Переименовать файлы** | Добавляет префикс `{team}_{board}_` к именам вложений |
-| **API** | V2 Stable / V2 Experimental. Experimental быстрее, но данные могут быть частичными |
-| **Скачать** | Запускает многопоточную загрузку |
-
-### Четыре фазы загрузки
-
-1. **Изображения** — `data.imageUrl` для type=image
-2. **Документы** — PDF для type=document
-3. **Doc_formats** — PDF + встроенные изображения (с заменой `<img src>` на локальные пути)
-4. **Embed-превью** — `data.previewUrl` только если ответ сервера — реальное изображение (jpg/png/webp и т.д.); JSON/HTML-ответы игнорируются
-
-### Конфликты файлов
-При повторной загрузке спрашивает стратегию: **перезаписать / переименовать (stem(1), stem(2)…) / пропустить**.
-
----
-
-## Json_2_Canvas — Конвертер
-
-### Что делает
-Читает `.json` из Miro_2_Json, конвертирует каждый элемент в ноды/рёбра формата [JsonCanvas](https://jsoncanvas.org/spec/1.0/) и сохраняет `.canvas` файл в папку Obsidian Vault.
-
-### Интерфейс
-
-| Элемент | Описание |
-|---|---|
-| **JSON файл** | Путь к файлу, полученному из Miro_2_Json. При выборе автоматически рассчитывается рекомендуемый Scale |
-| **Папка** | Целевая папка внутри Vault. Vault-root определяется автоматически поиском `.obsidian/` вверх по дереву |
-| **Scale** | Масштаб. Изменение пересчитывает Кегль max/min и Мин. объект. Ручное редактирование отключает барьер s_fit |
-| **Кегль max / min** | Размер шрифта (px) для самого крупного/мелкого текста при текущем Scale. Редактирование любого поля пересчитывает Scale |
-| **Мин. объект W×H** | Ширина/высота наименьшего элемента при текущем Scale. Редактирование ширины пересчитывает Scale |
-| **Тема** | Тёмная/Светлая. Влияет на обработку цвета текста |
-| **Удалить JSON** | Удаляет исходный .json после успешной конвертации |
-| **Удалить _files** | Удаляет папку вложений после конвертации |
-| **Конвертировать** | Запускает конвертацию |
-
----
-
-## Расчёт Scale
-
-Scale — единый коэффициент масштабирования, применяемый ко **всем** координатам, размерам нод и кеглю шрифтов.
-
-```
-x_canvas      = x_miro      × Scale
-y_canvas      = y_miro      × Scale
-width_canvas  = width_miro  × Scale
-height_canvas = height_miro × Scale
-font_canvas   = font_miro   × Scale
-```
-
-Расстояния между нодами тоже масштабируются — компоновка доски полностью сохраняется.
-
-### Три барьера
-
-Scale policy имеет три режима:
-
-- `balanced` — режим по умолчанию: `min(max(s_node, s_font), s_fit)`;
-- `overview` — всегда выбирает `s_fit`, чтобы получить обзор всей доски;
-- `readable` — выбирает `max(s_node, s_font)`, даже если вся доска не помещается в экран.
-
-В `balanced`:
-
-- `max(s_node, s_font)` — желательный масштаб читаемости;
-- `s_fit` — обязательный верхний предел, чтобы доска помещалась во FullHD при минимальном zoom Obsidian;
-- если читаемость конфликтует с FullHD-fit, побеждает `s_fit`.
-
-Если `readable` конфликтует с FullHD-fit, это не считается ошибкой режима: runner выводит `fit=no`, чтобы конфликт был виден явно.
-
-#### s_fit — барьер видимости
-Гарантирует, что вся доска видна при минимальном зуме Obsidian Canvas (≈12%).
-```
-s_fit = min(
-    (viewport_w × fit_margin) / (bbox_w × min_zoom),
-    (viewport_h × fit_margin) / (bbox_h × min_zoom)
-)
-```
-
-По умолчанию `fit_margin = 0.95`, чтобы оставить запас под post-conversion рост нод и UI-рамки.
-
-#### s_node — барьер минимальной ноды
-Гарантирует, что наименьший элемент доски ≥ минимально взаимодействуемому размеру (60×40 px).
-```
-s_node = max(min_node_w / smallest_w, min_node_h / smallest_h)
-```
-
-#### s_font — барьер читаемости шрифта
-Гарантирует, что самый мелкий шрифт ≥ 8 px.
-```
-s_font = min_font_px / font_min_miro
-```
-
-### Что исключается из расчёта Scale
-
-Следующие типы **не участвуют** в bbox, min_node и font-анализе:
-
-| Тип | Причина |
-|---|---|
-| `slide_container` + все потомки | Слайды не конвертируются (нет геометрии в JSON) |
-| `board`, `board_member` | Мета-элементы, не контент |
-| `preview`, `table_text` | Нет смысловой нагрузки в Canvas |
-| `connector` | Рёбра, не ноды |
-| `comment`, `emoji`, `kanban`, `mindmap`, `stroke`, `svg`, `grid`, `usm`, `webscreen`, `wireframe` | Read ❌ в Miro REST API |
-
----
-
-## Что доступно через Miro REST API
-
-### Доступно (Read ✅)
-
-| Тип в JSON | Название | Как конвертируется |
+| Путь | Назначение | Статус |
 |---|---|---|
-| `text` | Текст | `type:text` нода с HTML |
-| `shape` | Фигура | `type:text` нода, форма по subtype |
-| `sticky_note` | Стикер | `type:text` нода с цветным фоном |
-| `image` | Изображение | `type:file` нода |
-| `document` | Документ | `type:file` нода (макс. 500×700 px) |
-| `doc_format` | Документ (Rich) | `type:file` PDF (макс. 500×700 px) |
-| `card` | Карточка | `type:text` нода: title + desc + дата + исполнитель |
-| `app_card` | App-карточка | `type:text` нода: title + desc (fields[] в планах) |
-| `embed` | Встроенный объект | `type:file` если есть превью-картинка; `type:link` иначе |
-| `frame` | Фрейм | `type:group` контейнер |
-| `diagram` | Диаграмма | `type:group` контейнер |
-| `connector` | Соединитель | `type:edge` ребро |
-| `tag` | Тег | `type:text` метка |
+| `Json_2_Canvas/` | Ядро конвертера, scale engine и GUI JSON -> Canvas | production code |
+| `Miro_2_Json/` | GUI downloader и REST downloader helpers | production/legacy GUI |
+| `scripts/` | CLI automation: REST export, OAuth, audits, probes, source merge, regression wrappers | supported tools |
+| `tests/` | Unit tests и fixture corpus | required for every converter rule |
+| `tools/canvas_render/` | Диагностический web-renderer `.canvas` | validation tool |
+| `tools/obsidian_oracle/` | Staging/check helpers для реального Obsidian vault | validation tool |
+| `tools/obsidian_plugins/canvas-zoom-unlock/` | Маленький локальный Obsidian plugin для снятия zoom limit | project tool |
+| `tools/miro_websdk_exporter/` | Локальное Miro app/Web SDK приложение для export/probe | experimental/source probe |
+| `tasks/` | LLM-loop правила, problem library, roadmap, capability matrix | project memory |
+| `work/` | Локальный vault, реальные exports и временные canvas outputs | ignored local data |
+| `_obsidian_oracle_vault/` | Локальный oracle vault | ignored local data |
 
-### Недоступно (Read ❌)
+## Быстрый старт для разработки
 
-| Тип | Причина |
-|---|---|
-| `comment` | Только Enterprise Board Export API |
-| `emoji` | Read ❌ |
-| `kanban` | Read ❌ |
-| `mindmap` | Read ❌ |
-| `stroke` / `svg` | Read ❌ |
-| `grid` | Read ❌ |
-| `usm` | Read ❌ |
-| `webscreen` / `wireframe` | Read ❌ |
-| `slide_container` + содержимое | Нет геометрии/порядка слайдов в JSON |
-| `flip_card`, `people`, `widgets_stack` | `isSupported: false` в API, нет геометрии |
-| `code` (блок кода) | `isSupported: false`, содержимое недоступно |
-| Beta widgets: Doc, Slides, Table, Timeline | Read ❌ |
+Проверить, что рабочее дерево чистое:
 
-### Неизвестные типы с геометрией
-
-Элементы с неизвестным типом, у которых есть координаты на доске (geometry), конвертируются в ноду-заглушку вида:
-```
-[dynamic poll]
-Тип не поддерживается API Miro
+```powershell
+git status --short
 ```
 
-Элементы без геометрии (нет позиции на доске) молча пропускаются.
+Запустить полный regression loop:
 
----
+```powershell
+python scripts\run_regression.py
+```
 
-## Маппинг форм Miro → Obsidian Canvas
+Быстрый вариант без web-render screenshots:
 
-| Miro subtype | Canvas shape |
+```powershell
+python scripts\run_regression.py --skip-render
+```
+
+Запустить только unit tests:
+
+```powershell
+python -m unittest discover -s tests -v
+```
+
+## Получение данных из Miro через REST
+
+REST-команды используют access token из переменной окружения `MIRO_ACCESS_TOKEN`, если не выбран OAuth flow.
+
+Список доступных досок:
+
+```powershell
+python scripts\miro_list_boards.py --output work\MIRO2OBSIDIAN\boards.json
+```
+
+Экспорт конкретной доски с вложениями:
+
+```powershell
+python scripts\miro_rest_export_board.py `
+  --board-id uXj... `
+  --output work\MIRO2OBSIDIAN\Miro_2_JSON\board.json
+```
+
+Экспорт без скачивания вложений нужен только для диагностики источника:
+
+```powershell
+python scripts\miro_rest_export_board.py `
+  --board-id uXj... `
+  --output work\MIRO2OBSIDIAN\Miro_2_JSON\board.json `
+  --no-download-assets
+```
+
+Если обязательные вложения не скачались, такой экспорт считается неполным. `--allow-missing-assets` используйте только когда это намеренный диагностический прогон.
+
+## GUI workflows
+
+Miro downloader GUI:
+
+```powershell
+python Miro_2_Json\GUI.py
+```
+
+JSON -> Canvas converter GUI:
+
+```powershell
+python Json_2_Canvas\Json_2_Canvas_V5.py
+```
+
+GUI converter сейчас остается основным ручным способом получить `.canvas` из конкретного JSON. Для массовых проверок используйте runners ниже.
+
+## Проверка локальных примеров
+
+Прогон локальных JSON из `work`:
+
+```powershell
+python scripts\run_local_samples.py --include-miro-json
+```
+
+Zoom-unlocked readable profile для больших досок:
+
+```powershell
+python scripts\run_local_samples.py `
+  --include-miro-json `
+  --scale-mode readable `
+  --min-zoom 0.000244140625 `
+  --text-style-mode miro
+```
+
+Стадирование результата в локальный oracle vault:
+
+```powershell
+python scripts\run_local_samples.py --include-miro-json --stage-vault
+```
+
+## Полный web-board audit
+
+Основная команда для массовой проверки известных web-досок:
+
+```powershell
+python scripts\audit_web_board_pipeline.py `
+  --export-rest `
+  --text-style-mode both `
+  --scale-mode readable `
+  --min-zoom 0.000244140625 `
+  --render
+```
+
+Без `--export-rest` audit использует уже имеющиеся локальные JSON.
+
+Полезные флаги:
+
+| Флаг | Когда использовать |
 |---|---|
-| `rectangle`, `round_rectangle` | `round-rectangle` |
-| `circle` | `circle` |
-| `triangle`, `rhombus` | `diamond` |
-| `right_arrow`, `left_arrow`, `left_right_arrow` | `pill` |
-| `can` | `database` |
-| `flow_chart_decision`, `flow_chart_merge`, `flow_chart_or` | `diamond` |
-| `flow_chart_document`, `flow_chart_multidocuments` | `document` |
-| `flow_chart_database`, `flow_chart_magnetic_disk` | `database` |
-| `flow_chart_terminator` | `pill` |
-| `flow_chart_predefined_process*` | `predefined-process` |
-| Все остальные | `round-rectangle` |
+| `--limit N` | Быстрый прогон первых N досок |
+| `--text-style-mode miro` | Проверить только Miro-style HTML mode |
+| `--text-style-mode obsidian` | Проверить только Obsidian-style text mode |
+| `--allow-missing-assets` | Только для намеренно неполных source exports |
+| `--render` | Добавить smoke screenshots |
 
----
+## Аудиты
 
-## Цвет текста и выделение
+Проверить пересечения нод:
 
-- **Тёмная тема**: чёрный цвет из Miro (`#1a1a1a`, `#000000`) удаляется — текст наследует цвет темы Obsidian
-- **Цветное выделение** (`<span style="background-color:...>`): для каждого span без явного color автоматически подбирается контрастный цвет (#000 или #fff) по формуле W3C relative luminance
+```powershell
+python scripts\audit_node_overlaps.py path\to\board.canvas --miro-json path\to\board.json
+```
 
----
+Проверить, какие Miro items не представлены в Canvas:
 
-## Ноды-ссылки (type:link)
+```powershell
+python scripts\audit_missing_miro_items.py path\to\board.json path\to\board.canvas
+```
 
-Следующие элементы конвертируются в нативные ссылки Obsidian Canvas (`type:link`), которые отображаются как карточки превью веб-страниц:
+Проверить соответствие source ids и Canvas nodes/edges:
 
-1. **Embed без скачанного превью** — `data.url` используется как URL
-2. **Text-нода с единственной ссылкой** — HTML вида `<p><a href="...">...</a></p>` или голая URL-строка
+```powershell
+python scripts\audit_item_node_mapping.py path\to\board.json path\to\board.canvas
+```
 
-Размер таких нод: `miro_width × Scale` по ширине, `width × 9/16` по высоте (соотношение 16:9).
+## Miro Web SDK exporter
 
----
+Локальное приложение находится в:
 
-## Известные ограничения
+```text
+tools/miro_websdk_exporter/
+```
 
-- **Слайды Miro** — в JSON нет ни геометрии слайдов, ни их порядка → экспорт невозможен
-- **Комментарии** — доступны только через Enterprise Board Export API
-- **Таблицы** — beta widget, содержимое ячеек недоступно через REST API
-- **Повороты элементов** — Obsidian Canvas не поддерживает rotation
-- **Непривязанные стрелки** — коннекторы без start/end item пропускаются
-- **Размер шрифта в стикерах** — Miro не сохраняет fontSize стикеров в JSON; используется автоподбор по размеру стикера и объёму текста
+Локальный dev server:
+
+```powershell
+python tools\miro_websdk_exporter\serve_no_cache.py --port 8766
+```
+
+App URL в Miro:
+
+```text
+http://localhost:8766/index.html
+```
+
+Текущая роль Miro app:
+
+- создать probe items;
+- экспортировать board/selection из открытой доски;
+- сравнить Web SDK surface с REST;
+- найти item families, где Web SDK дает больше данных.
+
+Перед тем как считать приложение обязательным, нужно выполнить задачу из `tasks/todo.md`: измерить выигрыш Miro app против REST на representative boards.
+
+## Obsidian validation
+
+Локальный zoom plugin:
+
+```text
+tools/obsidian_plugins/canvas-zoom-unlock/
+```
+
+Проверка oracle окружения:
+
+```powershell
+python tools\obsidian_oracle\check_environment.py
+```
+
+Установка runtime plugins в локальный oracle vault:
+
+```powershell
+python tools\obsidian_oracle\install_plugin_runtime.py
+```
+
+Диагностический renderer:
+
+```powershell
+python tools\canvas_render\smoke_test.py
+python tools\canvas_render\capture_fixture.py --all
+```
+
+Для финального визуального решения приоритет у настоящего Obsidian/Advanced Canvas, а не у диагностического web-renderer.
+
+## LLM-in-the-loop правило
+
+Перед новым converter fix:
+
+1. Найдите или создайте проблему в `tasks/problem_library.md`.
+2. Добавьте минимальный fixture в `tests/fixtures/<case>/`.
+3. Зафиксируйте ожидаемое поведение в `case.json` и `notes.md`.
+4. Убедитесь, что тест ловит правило.
+5. Исправьте код минимально.
+6. Запустите `python scripts\run_regression.py`.
+7. Для реальных досок запустите relevant web/local audit.
+8. Обновите problem library, lessons или capability matrix, если изменилось правило.
+
+Один цикл решает одну проблему. Инфраструктурные задачи ведутся через `tasks/todo.md`, а дефекты конвертации - через `tasks/problem_library.md`.
+
+## Что не коммитить
+
+Не коммитятся:
+
+- OAuth/access tokens, client secrets, callback URLs с кодами авторизации;
+- `work/`;
+- `_obsidian_oracle_vault/`;
+- `.pytest_cache/`, `__pycache__/`;
+- `tools/canvas_render/.out/`;
+- временные exports, если они не превращены в fixture.
+
+Если реальный Miro JSON нужен для regression, минимизируйте его и положите в `tests/fixtures/<case>/`.
+
+## Следующие cleanup-задачи
+
+Актуальная очередь: [`tasks/todo.md`](tasks/todo.md).
+
+Ближайшие большие темы:
+
+1. Формализовать зависимости проекта в `requirements.txt` или `pyproject.toml`.
+2. Добавить единый CLI для `json -> canvas`.
+3. Измерить полезность Miro app против REST.
+4. Консолидировать capability evidence в одну таблицу.
+5. Продолжить web-board audit и закрывать generated-overlap/mapping-actionable проблемы по одному классу за цикл.
