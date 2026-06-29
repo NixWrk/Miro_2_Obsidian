@@ -106,21 +106,82 @@ python scripts\miro_rest_export_board.py `
 
 Если обязательные вложения не скачались, такой экспорт считается неполным. `--allow-missing-assets` используйте только когда это намеренный диагностический прогон.
 
+## Canonical REST-first pipeline
+
+The supported reproducible path is:
+
+```text
+Miro board
+  -> REST v2-experimental export
+  -> asset sidecar download
+  -> one canonical .miro JSON
+  -> Json_2_Canvas/Converter.py
+  -> Obsidian .canvas
+```
+
+Run it from CLI:
+
+```powershell
+python scripts\miro_pipeline.py `
+  --board-id uXj... `
+  --source-json work\MIRO2OBSIDIAN\Miro_2_JSON\board.json `
+  --vault-root path\to\ObsidianVault `
+  --target-dir path\to\ObsidianVault\MIRO2OBSIDIAN\board
+```
+
+Or launch the GUI wrapper:
+
+```powershell
+python Miro_2_Obsidian_GUI.py
+```
+
+The GUI is the main user-facing entry point. It keeps the user paths separate:
+
+- `Miro account`: authenticate, load boards, choose one board.
+- `Miro URL`: paste one Miro board link.
+- `Miro URL list`: choose a Markdown/JSON file with Miro board links.
+- `Existing JSON`: choose an already exported canonical JSON; no Miro token or
+  board controls are shown.
+
+For Miro export paths the GUI automatically uses `MIRO_ACCESS_TOKEN` when
+present, and falls back to the OAuth flow used by the old downloader GUI when no
+token is available. Locally the user chooses the Canvas folder inside an
+Obsidian vault; the GUI detects the vault root, derives temporary source JSON
+paths for Miro exports, and reads Obsidian `Files & Links` attachment settings
+from `.obsidian/app.json`.
+
+The shared conversion controls include a checkbox to install/enable Advanced
+Canvas plus the local `canvas-zoom-unlock` plugin in the selected vault. With
+that checkbox enabled, the default scale profile is zoom-unlocked: `readable`
+with `min_zoom=0.000244140625`.
+
+Web SDK export remains a diagnostic/enrichment source. It should feed a merged
+canonical JSON first; it should not grow a separate JSON -> Canvas converter path.
+
 ## GUI workflows
 
-Miro downloader GUI:
+Primary GUI:
+
+```powershell
+python Miro_2_Obsidian_GUI.py
+```
+
+Legacy/manual tools, kept for focused debugging:
+
+Miro downloader only:
 
 ```powershell
 python Miro_2_Json\GUI.py
 ```
 
-JSON -> Canvas converter GUI:
+JSON -> Canvas converter only:
 
 ```powershell
 python Json_2_Canvas\Json_2_Canvas_V5.py
 ```
 
-GUI converter сейчас остается основным ручным способом получить `.canvas` из конкретного JSON. Для массовых проверок используйте runners ниже.
+For normal use, prefer `Miro_2_Obsidian_GUI.py`; it uses the same canonical
+pipeline as the CLI and keeps Miro -> JSON and JSON -> Canvas in one flow.
 
 ## Проверка локальных примеров
 

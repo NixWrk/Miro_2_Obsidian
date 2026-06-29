@@ -865,13 +865,15 @@ def _extract_mindmap_node_bg(style: Dict[str, Any]) -> Optional[str]:
 # Vault / Files
 # =========================
 
-def ensure_move_attachments(json_file: str, target_dir: str) -> str:
+def ensure_move_attachments(json_file: str, target_dir: str, attachment_dir: Optional[str] = None) -> str:
     """
-    Гарантирует, что рядом с целевым .canvas будет <base>_files с вложениями.
+    Гарантирует, что папка вложений перемещена в целевое место.
+    Если attachment_dir не задан, сохраняет старое поведение: рядом с .canvas
+    будет <base>_files.
     """
     base_name = os.path.splitext(os.path.basename(json_file))[0]
     src_files = os.path.join(os.path.dirname(json_file), base_name + "_files")
-    dst_files = os.path.join(target_dir, base_name + "_files")
+    dst_files = attachment_dir or os.path.join(target_dir, base_name + "_files")
 
     if os.path.abspath(src_files) == os.path.abspath(dst_files):
         return dst_files
@@ -4603,6 +4605,7 @@ def convert_miro_to_canvas(
     theme: str = "light",
     grow_text_nodes: bool = False,
     text_style_mode: str = "miro",
+    attachment_dir: str | None = None,
 ) -> str:
     """
     Основной конвейер конвертации Miro JSON → Obsidian Canvas.
@@ -4613,7 +4616,11 @@ def convert_miro_to_canvas(
     canvas_path = os.path.join(target_dir, base_name + ".canvas")
 
     src_files_folder = os.path.join(os.path.dirname(json_path), base_name + "_files")
-    new_files_folder = ensure_move_attachments(json_file=json_path, target_dir=target_dir)
+    new_files_folder = ensure_move_attachments(
+        json_file=json_path,
+        target_dir=target_dir,
+        attachment_dir=attachment_dir,
+    )
 
     with open(json_path, "r", encoding="utf-8") as f:
         miro_root = json.load(f)
