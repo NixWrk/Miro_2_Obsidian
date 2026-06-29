@@ -8,14 +8,14 @@ import webbrowser
 from pathlib import Path
 from flask import Flask, request, jsonify
 import requests
-from urllib.parse import quote_plus
+from urllib.parse import quote_plus, urlparse
 
 # ====== Miro OAuth ======
 CLIENT_ID_ENV = "MIRO_CLIENT_ID"
 CLIENT_SECRET_ENV = "MIRO_CLIENT_SECRET"
 REDIRECT_URI_ENV = "MIRO_REDIRECT_URI"
 SCOPES_ENV = "MIRO_SCOPES"
-DEFAULT_REDIRECT_URI = "http://localhost:8000/callback"
+DEFAULT_REDIRECT_URI = "http://localhost:8765/callback"
 DEFAULT_SCOPES = "boards:read team:read"
 LOCAL_CONFIG_ENV = "MIRO_OAUTH_CONFIG"
 LOCAL_CONFIG_NAME = ".miro_oauth.local.json"
@@ -167,14 +167,15 @@ def authorize_and_get_token() -> str:
 
     if not _flask_started:
         def run_flask():
-            app.run(port=8000, debug=False, use_reloader=False)
+            callback = urlparse(_oauth_settings()[2])
+            app.run(port=callback.port or 80, debug=False, use_reloader=False)
 
         th = threading.Thread(target=run_flask, daemon=True)
         th.start()
         _flask_started = True
         time.sleep(0.5)  # даём серверу подняться перед открытием браузера
 
-    print("🔐 Запускаю авторизацию в Miro…")
+    print("Запускаю авторизацию в Miro...")
     if not open_authentication_page():
         raise RuntimeError(
             "Не удалось открыть браузер автоматически. "
@@ -189,5 +190,5 @@ def authorize_and_get_token() -> str:
     if not auth_code:
         raise RuntimeError("Не получили код авторизации.")
 
-    print("🔑 Обмениваю code на access_token…")
+    print("Обмениваю code на access_token...")
     return get_access_token(auth_code)

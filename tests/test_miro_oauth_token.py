@@ -62,7 +62,7 @@ class MiroOAuthTokenTests(unittest.TestCase):
         config = OAuthConfig(
             client_id="client-1",
             client_secret="secret-1",
-            redirect_uri="http://localhost:8000/callback",
+            redirect_uri="http://localhost:8765/callback",
             scopes="boards:read boards:write",
             authorize_url="https://miro.com/oauth/authorize",
         )
@@ -71,7 +71,7 @@ class MiroOAuthTokenTests(unittest.TestCase):
 
         self.assertIn("response_type=code", url)
         self.assertIn("client_id=client-1", url)
-        self.assertIn("redirect_uri=http%3A%2F%2Flocalhost%3A8000%2Fcallback", url)
+        self.assertIn("redirect_uri=http%3A%2F%2Flocalhost%3A8765%2Fcallback", url)
         self.assertIn("scope=boards%3Aread+boards%3Awrite", url)
         self.assertIn("state=state-1", url)
 
@@ -88,8 +88,8 @@ class MiroOAuthTokenTests(unittest.TestCase):
 
         message = format_callback_timeout_message(config, "https://miro.com/oauth/authorize?client_id=client-1")
 
-        self.assertIn("http://localhost:8000/callback", message)
-        self.assertIn("http://127.0.0.1:8000/callback", message)
+        self.assertIn("http://localhost:8765/callback", message)
+        self.assertIn("http://127.0.0.1:8765/callback", message)
         self.assertIn("authorization URL", message)
         self.assertIn("Redirect URI matching is exact", message)
         self.assertIn('{"error":"Not found."}', message)
@@ -99,14 +99,14 @@ class MiroOAuthTokenTests(unittest.TestCase):
         hint = callback_recovery_hint(OAuthConfig(client_id="client-1", client_secret="secret-1"))
 
         self.assertIsNotNone(hint)
-        self.assertIn("127.0.0.1:8000", hint or "")
+        self.assertIn("127.0.0.1:8765", hint or "")
         self.assertIn("another local service", hint or "")
         self.assertIsNone(
             callback_recovery_hint(
                 OAuthConfig(
                     client_id="client-1",
                     client_secret="secret-1",
-                    redirect_uri="http://127.0.0.1:8000/callback",
+                    redirect_uri="http://127.0.0.1:8765/callback",
                 )
             )
         )
@@ -114,14 +114,14 @@ class MiroOAuthTokenTests(unittest.TestCase):
     def test_callback_bind_error_explains_why_it_is_not_automatic(self) -> None:
         message = format_callback_bind_error(
             OAuthConfig(client_id="client-1", client_secret="secret-1"),
-            8000,
+            8765,
             [("127.0.0.1", "address already in use")],
         )
 
         self.assertIn("already owns the callback address", message)
         self.assertIn("cannot be fixed automatically", message)
         self.assertIn("redirect_uri values are exact", message)
-        self.assertIn("127.0.0.1:8000", message)
+        self.assertIn("127.0.0.1:8765", message)
         self.assertNotIn("secret-1", message)
 
     def test_config_from_env_requires_client_credentials(self) -> None:
@@ -137,15 +137,15 @@ class MiroOAuthTokenTests(unittest.TestCase):
 
         self.assertEqual(config.client_id, "client-1")
         self.assertEqual(config.client_secret, "secret-1")
-        self.assertEqual(config.redirect_uri, "http://localhost:8000/callback")
+        self.assertEqual(config.redirect_uri, "http://localhost:8765/callback")
         self.assertEqual(config.authorize_url, "https://example.invalid/authorize")
-        self.assertEqual(ALTERNATE_LOOPBACK_REDIRECT_URI, "http://127.0.0.1:8000/callback")
+        self.assertEqual(ALTERNATE_LOOPBACK_REDIRECT_URI, "http://127.0.0.1:8765/callback")
 
     def test_config_from_env_reads_optional_oauth_settings_from_env(self) -> None:
         env = {
             "MIRO_CLIENT_ID": "client-1",
             "MIRO_CLIENT_SECRET": "secret-1",
-            "MIRO_REDIRECT_URI": "http://127.0.0.1:8000/callback",
+            "MIRO_REDIRECT_URI": "http://127.0.0.1:8765/callback",
             "MIRO_SCOPES": "boards:read",
             "MIRO_TOKEN_URL": "https://example.invalid/token",
         }
@@ -153,7 +153,7 @@ class MiroOAuthTokenTests(unittest.TestCase):
             with patch("miro_oauth_token.load_local_oauth_config", return_value={}):
                 config = config_from_env()
 
-        self.assertEqual(config.redirect_uri, "http://127.0.0.1:8000/callback")
+        self.assertEqual(config.redirect_uri, "http://127.0.0.1:8765/callback")
         self.assertEqual(config.scopes, "boards:read")
         self.assertEqual(config.token_url, "https://example.invalid/token")
 
@@ -168,7 +168,7 @@ class MiroOAuthTokenTests(unittest.TestCase):
                         "{",
                         '  "client_id": "local-client",',
                         '  "client_secret": "local-secret",',
-                        '  "redirect_uri": "http://127.0.0.1:8000/callback",',
+                        '  "redirect_uri": "http://127.0.0.1:8765/callback",',
                         '  "scopes": "boards:read"',
                         "}",
                     ]
@@ -180,7 +180,7 @@ class MiroOAuthTokenTests(unittest.TestCase):
 
         self.assertEqual(config.client_id, "local-client")
         self.assertEqual(config.client_secret, "local-secret")
-        self.assertEqual(config.redirect_uri, "http://127.0.0.1:8000/callback")
+        self.assertEqual(config.redirect_uri, "http://127.0.0.1:8765/callback")
         self.assertEqual(config.scopes, "boards:read")
 
     def test_resolves_yandex_browser_from_local_app_data(self) -> None:
@@ -215,7 +215,7 @@ class MiroOAuthTokenTests(unittest.TestCase):
     def test_extract_authorization_code_accepts_raw_code_or_callback_url(self) -> None:
         self.assertEqual(extract_authorization_code("code-1"), "code-1")
         self.assertEqual(
-            extract_authorization_code("http://localhost:8000/callback?code=code-2&state=state-1"),
+            extract_authorization_code("http://localhost:8765/callback?code=code-2&state=state-1"),
             "code-2",
         )
 
@@ -228,7 +228,7 @@ class MiroOAuthTokenTests(unittest.TestCase):
             exchange_manual_authorization(
                 config,
                 code="code-1",
-                callback_url="http://localhost:8000/callback?code=code-2",
+                callback_url="http://localhost:8765/callback?code=code-2",
             )
 
     def test_exchange_manual_authorization_exchanges_callback_url(self) -> None:
@@ -237,7 +237,7 @@ class MiroOAuthTokenTests(unittest.TestCase):
 
         token = exchange_manual_authorization(
             config,
-            callback_url="http://localhost:8000/callback?code=code-1",
+            callback_url="http://localhost:8765/callback?code=code-1",
             session=session,
         )
 
@@ -271,7 +271,7 @@ class MiroOAuthTokenTests(unittest.TestCase):
         config = OAuthConfig(
             client_id="client-1",
             client_secret="secret-1",
-            redirect_uri="http://localhost:8000/callback",
+            redirect_uri="http://localhost:8765/callback",
         )
         session = FakeSession()
 
@@ -284,7 +284,7 @@ class MiroOAuthTokenTests(unittest.TestCase):
             {
                 "grant_type": "authorization_code",
                 "code": "code-1",
-                "redirect_uri": "http://localhost:8000/callback",
+                "redirect_uri": "http://localhost:8765/callback",
                 "client_id": "client-1",
                 "client_secret": "secret-1",
             },

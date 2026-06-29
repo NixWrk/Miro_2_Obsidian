@@ -15,8 +15,8 @@ from urllib.parse import parse_qs, urlencode, urlparse
 
 DEFAULT_AUTHORIZE_URL = "https://miro.com/oauth/authorize"
 DEFAULT_TOKEN_URL = "https://api.miro.com/v1/oauth/token"
-DEFAULT_REDIRECT_URI = "http://localhost:8000/callback"
-ALTERNATE_LOOPBACK_REDIRECT_URI = "http://127.0.0.1:8000/callback"
+DEFAULT_REDIRECT_URI = "http://localhost:8765/callback"
+ALTERNATE_LOOPBACK_REDIRECT_URI = "http://127.0.0.1:8765/callback"
 DEFAULT_SCOPES = "boards:read boards:write team:read"
 DEFAULT_TIMEOUT_SECONDS = 300
 DEFAULT_BROWSER = "yandex"

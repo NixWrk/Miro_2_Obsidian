@@ -24,23 +24,23 @@ class MiroGuiAuthTests(unittest.TestCase):
         self.assertNotIn("bddm", source)
 
     def test_gui_auth_uses_localhost_loopback_redirect(self) -> None:
-        self.assertEqual(auth.REDIRECT_URI, "http://localhost:8000/callback")
+        self.assertEqual(auth.REDIRECT_URI, "http://localhost:8765/callback")
         with patch.dict(os.environ, {"MIRO_CLIENT_ID": "client-1"}, clear=True):
             with patch("auth.load_local_oauth_config", return_value={}):
-                self.assertIn("redirect_uri=http://localhost:8000/callback", auth.build_authorize_url())
+                self.assertIn("redirect_uri=http://localhost:8765/callback", auth.build_authorize_url())
 
     def test_gui_auth_reads_ignored_local_oauth_config(self) -> None:
         local_config = {
             "client_id": "local-client",
             "client_secret": "local-secret",
-            "redirect_uri": "http://127.0.0.1:8000/callback",
+            "redirect_uri": "http://127.0.0.1:8765/callback",
             "scopes": "boards:read",
         }
         with patch.dict(os.environ, {}, clear=True):
             with patch("auth.load_local_oauth_config", return_value=local_config):
                 self.assertEqual(
                     auth.require_oauth_settings(),
-                    ("local-client", "local-secret", "http://127.0.0.1:8000/callback", "boards:read"),
+                    ("local-client", "local-secret", "http://127.0.0.1:8765/callback", "boards:read"),
                 )
 
     def test_open_in_yandex_uses_local_app_data_browser(self) -> None:
@@ -88,6 +88,24 @@ class MiroGuiAuthTests(unittest.TestCase):
             with patch("auth.load_local_oauth_config", return_value={}):
                 with self.assertRaisesRegex(RuntimeError, "MIRO_CLIENT_ID and MIRO_CLIENT_SECRET"):
                     auth.authorize_and_get_token()
+
+    def test_authorize_flask_server_uses_redirect_uri_port(self) -> None:
+        auth._flask_started = False
+        local_config = {
+            "client_id": "local-client",
+            "client_secret": "local-secret",
+            "redirect_uri": "http://localhost:8765/callback",
+        }
+        with patch.dict(os.environ, {}, clear=True):
+            with patch("auth.load_local_oauth_config", return_value=local_config):
+                with patch("auth.app.run") as run:
+                    with patch("auth.open_authentication_page", return_value=False):
+                        with patch("auth.threading.Thread") as thread:
+                            with self.assertRaisesRegex(RuntimeError, "браузер"):
+                                auth.authorize_and_get_token()
+                            thread.call_args.kwargs["target"]()
+                            run.assert_called_once_with(port=8765, debug=False, use_reloader=False)
+        auth._flask_started = False
 
 
 if __name__ == "__main__":

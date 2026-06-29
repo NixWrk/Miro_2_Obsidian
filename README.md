@@ -153,7 +153,7 @@ from `.obsidian/app.json`.
 
 Miro OAuth is not stored in the repo. A `client_id` belongs to a Miro Developer
 App registered in Miro, with exact redirect URI values. For local OAuth, register
-`http://localhost:8000/callback` in that app; `http://127.0.0.1:8000/callback`
+`http://localhost:8765/callback` in that app; `http://127.0.0.1:8765/callback`
 is a different value and must be registered separately if you use it. Set
 `MIRO_REDIRECT_URI` when your app is registered with a different local callback.
 The old `Miro_2_Json` GUI looked app-free to the user only because OAuth app
@@ -182,7 +182,7 @@ Benefit:
 Setup:
 
 1. Open the Miro Developer console and create an app.
-2. Add OAuth redirect URI `http://localhost:8000/callback`.
+2. Add OAuth redirect URI `http://localhost:8765/callback`.
 3. Grant the app access to the Miro team that owns the boards.
 4. Use scopes `boards:read team:read` for normal export. Add `boards:write` only
    for probe/generator scripts that create test boards.
@@ -191,7 +191,7 @@ Setup:
 ```powershell
 $env:MIRO_CLIENT_ID = "<your app client id>"
 $env:MIRO_CLIENT_SECRET = "<your app client secret>"
-$env:MIRO_REDIRECT_URI = "http://localhost:8000/callback"
+$env:MIRO_REDIRECT_URI = "http://localhost:8765/callback"
 python Miro_2_Obsidian_GUI.py
 ```
 
@@ -199,11 +199,11 @@ For local testing you can also copy `.miro_oauth.local.example.json` to
 `.miro_oauth.local.json` and paste the same values there. That file is ignored by
 git and is read by both the unified GUI and the old `Miro_2_Json` downloader.
 
-If the browser returns to `http://localhost:8000/callback?...` and shows
+If the browser returns to `http://localhost:8765/callback?...` and shows
 `{"error":"Not found."}`, another local service is handling `localhost`. Keep the
 whole URL, replace only `localhost` with `127.0.0.1`, and press Enter while the
 GUI/CLI is still waiting for OAuth. The Miro app can still use the registered
-`http://localhost:8000/callback` redirect URI; this replacement is only for
+`http://localhost:8765/callback` redirect URI; this replacement is only for
 delivering the already-issued callback to the local helper.
 
 Do not commit tokens, client secrets, callback URLs containing `code=...`, or

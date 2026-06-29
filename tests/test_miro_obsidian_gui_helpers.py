@@ -64,7 +64,7 @@ class MiroObsidianGuiHelperTests(unittest.TestCase):
 
         config_from_env.assert_called_once_with()
         modern.assert_called_once_with(config)
-        self.assertTrue(any("127.0.0.1:8000" in message for message in messages))
+        self.assertTrue(any("127.0.0.1:8765" in message for message in messages))
 
     def test_authorize_gui_token_uses_ignored_local_oauth_config(self) -> None:
         config = OAuthConfig(client_id="local-client", client_secret="local-secret")

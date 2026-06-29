@@ -78,9 +78,9 @@ The local manifest sketch is stored in `manifest.example.yml`. If the Miro UI
 offers manifest editing, keep the same values:
 
 - App URL / `sdkUri`: `http://localhost:8766/index-20260611-deep-table.html`;
-- OAuth Redirect URI: `http://localhost:8000/callback`;
+- OAuth Redirect URI: `http://localhost:8765/callback`;
 - in the Redirect URI `Options` menu, select `Use this URI for SDK authorization`;
-- optional loopback Redirect URI: `http://127.0.0.1:8000/callback`;
+- optional loopback Redirect URI: `http://127.0.0.1:8765/callback`;
 - scopes: `boards:read`, `boards:write`, `team:read`.
 
 ## Follow-up flow

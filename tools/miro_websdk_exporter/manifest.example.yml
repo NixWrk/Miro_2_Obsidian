@@ -1,9 +1,9 @@
 appName: Miro2Obsidian Web SDK Exporter
 sdkUri: http://localhost:8766/index-20260611-deep-table.html
 redirectUris:
-  - http://localhost:8000/callback
-  - http://127.0.0.1:8000/callback
-# In Miro settings, open Options for http://localhost:8000/callback and select
+  - http://localhost:8765/callback
+  - http://127.0.0.1:8765/callback
+# In Miro settings, open Options for http://localhost:8765/callback and select
 # "Use this URI for SDK authorization" when the app uses both Web SDK and REST.
 scopes:
   - boards:read
