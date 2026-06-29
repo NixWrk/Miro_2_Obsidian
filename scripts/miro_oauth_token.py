@@ -131,9 +131,27 @@ def callback_recovery_hint(config: OAuthConfig) -> str | None:
         [
             'If the browser shows {"error":"Not found."} at localhost, another local service is handling localhost.',
             f"Keep the full callback URL, replace only http://localhost:{port} with http://127.0.0.1:{port}, and press Enter.",
-            f"The helper is also listening at {alternate}.",
+            f"This works when the helper is listening at {alternate}.",
         ]
     )
+
+
+def format_callback_bind_error(config: OAuthConfig, port: int, bind_failures: list[tuple[str, str]]) -> str:
+    lines = [
+        f"Could not start local OAuth callback server on port {port}.",
+        "Another local service already owns the callback address, so Miro's browser redirect cannot reach this helper.",
+    ]
+    if bind_failures:
+        lines.append("Bind failures:")
+        lines.extend(f"- {host}:{port}: {error}" for host, error in bind_failures)
+    lines.extend(
+        [
+            "This cannot be fixed automatically for an existing Miro app because OAuth redirect_uri values are exact.",
+            f"The current app flow is using: {config.redirect_uri}",
+            "Free the port, use a Miro app that also registers another loopback redirect URI, or copy the callback URL and exchange it manually.",
+        ]
+    )
+    return "\n".join(lines)
 
 
 def parse_callback_path(path: str) -> CallbackResult:
@@ -348,7 +366,7 @@ def authorize_and_get_token(
             bind_failures.append((bind_host, str(exc)))
             continue
     if not servers:
-        raise OSError(f"Could not start local OAuth callback server on port {port}")
+        raise OSError(format_callback_bind_error(config, port, bind_failures))
 
     try:
         for _, server in servers:

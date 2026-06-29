@@ -66,10 +66,21 @@ class MiroObsidianGuiHelperTests(unittest.TestCase):
         modern.assert_called_once_with(config)
         self.assertTrue(any("127.0.0.1:8000" in message for message in messages))
 
+    def test_authorize_gui_token_uses_ignored_local_oauth_config(self) -> None:
+        config = OAuthConfig(client_id="local-client", client_secret="local-secret")
+        with patch.dict(os.environ, {}, clear=True):
+            with patch("Miro_2_Obsidian_GUI.config_from_env", return_value=config) as config_from_env:
+                with patch("Miro_2_Obsidian_GUI.authorize_and_get_token", return_value="local-token") as modern:
+                    self.assertEqual(authorize_gui_token(), "local-token")
+
+        config_from_env.assert_called_once_with()
+        modern.assert_called_once_with(config)
+
     def test_authorize_gui_token_requires_a_token_or_oauth_app(self) -> None:
         with patch.dict(os.environ, {}, clear=True):
-            with self.assertRaisesRegex(RuntimeError, "Existing JSON"):
-                authorize_gui_token()
+            with patch("Miro_2_Obsidian_GUI.config_from_env", side_effect=ValueError("missing")):
+                with self.assertRaisesRegex(RuntimeError, "Existing JSON"):
+                    authorize_gui_token()
 
     def test_show_error_later_keeps_exception_message_after_except_scope(self) -> None:
         callbacks = []

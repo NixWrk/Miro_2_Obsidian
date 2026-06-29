@@ -103,19 +103,21 @@ def authorize_gui_token(logger: Callable[[str], None] | None = None) -> str:
         log("Using MIRO_ACCESS_TOKEN from environment.")
         return token
 
-    if os.environ.get("MIRO_CLIENT_ID") and os.environ.get("MIRO_CLIENT_SECRET"):
-        log("Starting OAuth from MIRO_CLIENT_ID/MIRO_CLIENT_SECRET.")
+    try:
         config = config_from_env()
-        hint = callback_recovery_hint(config)
-        if hint:
-            log(hint)
-        return authorize_and_get_token(config)
+    except ValueError as exc:
+        raise RuntimeError(
+            "Direct Miro export needs credentials. Use Existing JSON without Miro auth, "
+            "set MIRO_ACCESS_TOKEN, or configure Miro OAuth credentials with "
+            "MIRO_CLIENT_ID/MIRO_CLIENT_SECRET or ignored .miro_oauth.local.json. "
+            "The old Miro->JSON GUI looked app-free only because bundled app secrets existed."
+        ) from exc
 
-    raise RuntimeError(
-        "Direct Miro export needs credentials. Use Existing JSON without Miro auth, "
-        "set MIRO_ACCESS_TOKEN, or set MIRO_CLIENT_ID and MIRO_CLIENT_SECRET for your own app. "
-        "The old Miro->JSON GUI used bundled app secrets; the repo no longer ships them."
-    )
+    log("Starting OAuth from configured Miro app credentials.")
+    hint = callback_recovery_hint(config)
+    if hint:
+        log(hint)
+    return authorize_and_get_token(config)
 
 
 class MiroPipelineApp(ctk.CTk):

@@ -25,6 +25,7 @@ from miro_oauth_token import (  # noqa: E402
     exchange_access_token,
     exchange_manual_authorization,
     extract_authorization_code,
+    format_callback_bind_error,
     format_callback_timeout_message,
     format_token_exchange_error,
     open_authorize_url,
@@ -109,6 +110,19 @@ class MiroOAuthTokenTests(unittest.TestCase):
                 )
             )
         )
+
+    def test_callback_bind_error_explains_why_it_is_not_automatic(self) -> None:
+        message = format_callback_bind_error(
+            OAuthConfig(client_id="client-1", client_secret="secret-1"),
+            8000,
+            [("127.0.0.1", "address already in use")],
+        )
+
+        self.assertIn("already owns the callback address", message)
+        self.assertIn("cannot be fixed automatically", message)
+        self.assertIn("redirect_uri values are exact", message)
+        self.assertIn("127.0.0.1:8000", message)
+        self.assertNotIn("secret-1", message)
 
     def test_config_from_env_requires_client_credentials(self) -> None:
         with patch.dict(os.environ, {}, clear=True):
