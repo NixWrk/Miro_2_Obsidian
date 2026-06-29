@@ -37,6 +37,23 @@ class MiroGuiAuthTests(unittest.TestCase):
 
         popen.assert_not_called()
 
+    def test_open_authentication_page_opens_direct_oauth_url_instead_of_popup(self) -> None:
+        with patch("auth.open_in_yandex", return_value=True) as yandex:
+            with patch("auth.webbrowser.open") as browser:
+                self.assertTrue(auth.open_authentication_page())
+
+        yandex.assert_called_once_with(auth.AUTH_URL)
+        self.assertNotIn("/popup", yandex.call_args.args[0])
+        browser.assert_not_called()
+
+    def test_open_authentication_page_falls_back_to_default_browser(self) -> None:
+        with patch("auth.open_in_yandex", return_value=False) as yandex:
+            with patch("auth.webbrowser.open", return_value=True) as browser:
+                self.assertTrue(auth.open_authentication_page())
+
+        yandex.assert_called_once_with(auth.AUTH_URL)
+        browser.assert_called_once_with(auth.AUTH_URL)
+
 
 if __name__ == "__main__":
     unittest.main()

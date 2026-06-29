@@ -3,6 +3,7 @@ import threading
 import time
 import os
 import subprocess
+import webbrowser
 from flask import Flask, request, jsonify
 import requests
 from urllib.parse import quote_plus
@@ -40,6 +41,18 @@ def open_in_yandex(url: str) -> bool:
             subprocess.Popen([candidate, url], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             return True
     return False
+
+
+def open_authentication_page() -> bool:
+    """Open the real Miro OAuth page directly.
+
+    The old /popup route is kept for compatibility, but opening a browser page
+    that calls window.open() is fragile: popup blockers can prevent the auth tab
+    from appearing. A direct OAuth URL behaves like an ordinary browser open.
+    """
+    if open_in_yandex(AUTH_URL):
+        return True
+    return bool(webbrowser.open(AUTH_URL))
 
 @app.route("/popup")
 def popup():
@@ -104,8 +117,11 @@ def authorize_and_get_token() -> str:
         time.sleep(0.5)  # даём серверу подняться перед открытием браузера
 
     print("🔐 Запускаю авторизацию в Miro…")
-    if not open_in_yandex("http://127.0.0.1:8000/popup"):
-        raise RuntimeError("Yandex Browser не найден. Укажите путь через YANDEX_BROWSER_PATH.")
+    if not open_authentication_page():
+        raise RuntimeError(
+            "Не удалось открыть браузер автоматически. "
+            f"Откройте ссылку вручную: {AUTH_URL}"
+        )
 
     for _ in range(300):  # ждём до 5 минут
         if auth_code:
