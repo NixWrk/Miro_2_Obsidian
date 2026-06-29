@@ -6,6 +6,7 @@ import sys
 import threading
 from pathlib import Path
 from tkinter import filedialog, messagebox
+from typing import Callable
 
 import customtkinter as ctk
 
@@ -92,6 +93,24 @@ def safe_name(value: str) -> str:
     return cleaned or "board"
 
 
+def authorize_gui_token(logger: Callable[[str], None] | None = None) -> str:
+    def log(message: str) -> None:
+        if logger:
+            logger(message)
+
+    token = os.environ.get("MIRO_ACCESS_TOKEN")
+    if token:
+        log("Using MIRO_ACCESS_TOKEN from environment.")
+        return token
+
+    if legacy_authorize_and_get_token is not None:
+        log("Starting OAuth through the bundled legacy Miro GUI flow.")
+        return legacy_authorize_and_get_token()
+
+    log("Starting OAuth from environment app credentials.")
+    return authorize_and_get_token(config_from_env())
+
+
 class MiroPipelineApp(ctk.CTk):
     def __init__(self) -> None:
         super().__init__()
@@ -136,7 +155,7 @@ class MiroPipelineApp(ctk.CTk):
         ctk.CTkLabel(self.account_frame, text="Board").grid(row=0, column=0, sticky="e", **pad)
         self.board_menu = ctk.CTkOptionMenu(self.account_frame, values=["load boards"], command=self.on_board_selected)
         self.board_menu.grid(row=0, column=1, sticky="we", **pad)
-        ctk.CTkButton(self.account_frame, text="Authenticate", width=130, command=self.authorize_oauth).grid(row=0, column=2, **pad)
+        ctk.CTkButton(self.account_frame, text="Authenticate", width=130, command=self.authorize_and_load_boards).grid(row=0, column=2, **pad)
         self.load_boards_button = ctk.CTkButton(self.account_frame, text="Load boards", width=130, command=self.load_boards)
         self.load_boards_button.grid(row=0, column=3, **pad)
 
@@ -283,22 +302,8 @@ class MiroPipelineApp(ctk.CTk):
         return value or "board"
 
     def _authorize_token(self) -> str:
-        token = os.environ.get("MIRO_ACCESS_TOKEN")
-        if token:
-            self.token = token
-            self._log("Using MIRO_ACCESS_TOKEN from environment.")
-            return token
-        try:
-            self._log("Starting OAuth from environment app credentials.")
-            self.token = authorize_and_get_token(config_from_env())
-            return self.token
-        except Exception as exc:  # noqa: BLE001
-            if legacy_authorize_and_get_token is None:
-                raise
-            self._log(f"Standard OAuth is not configured or failed: {exc}")
-            self._log("Trying the bundled legacy OAuth flow used by the old GUI.")
-            self.token = legacy_authorize_and_get_token()
-            return self.token
+        self.token = authorize_gui_token(self._log)
+        return self.token
 
     def _token(self) -> str:
         if self.token:
@@ -316,23 +321,37 @@ class MiroPipelineApp(ctk.CTk):
 
         threading.Thread(target=worker, daemon=True).start()
 
+    def _apply_boards(self, boards: list[dict]) -> None:
+        labels = []
+        by_label: dict[str, dict] = {}
+        for board in boards:
+            name = str(board.get("name") or board.get("id") or "board")
+            label = f"{name} ({board.get('id')})"
+            labels.append(label)
+            by_label[label] = board
+        self.boards_by_label = by_label
+        self.after(0, lambda: self.board_menu.configure(values=labels or ["load boards"]))
+        if labels:
+            self.after(0, lambda: self.board_menu.set(labels[0]))
+            self.after(0, lambda: self.on_board_selected(labels[0]))
+        self._log(f"Loaded boards: {len(labels)}")
+
+    def authorize_and_load_boards(self) -> None:
+        def worker() -> None:
+            try:
+                token = self._authorize_token()
+                self._log("OAuth token obtained for this GUI session.")
+                self._apply_boards(get_boards(token))
+            except Exception as exc:  # noqa: BLE001
+                self._log(f"OAuth failed: {exc}")
+                self.after(0, lambda: messagebox.showerror("OAuth failed", str(exc)))
+
+        threading.Thread(target=worker, daemon=True).start()
+
     def load_boards(self) -> None:
         def worker() -> None:
             try:
-                boards = get_boards(self._token())
-                labels = []
-                by_label: dict[str, dict] = {}
-                for board in boards:
-                    name = str(board.get("name") or board.get("id") or "board")
-                    label = f"{name} ({board.get('id')})"
-                    labels.append(label)
-                    by_label[label] = board
-                self.boards_by_label = by_label
-                self.after(0, lambda: self.board_menu.configure(values=labels or ["load boards"]))
-                if labels:
-                    self.after(0, lambda: self.board_menu.set(labels[0]))
-                    self.after(0, lambda: self.on_board_selected(labels[0]))
-                self._log(f"Loaded boards: {len(labels)}")
+                self._apply_boards(get_boards(self._token()))
             except Exception as exc:  # noqa: BLE001
                 self._log(f"Board load failed: {exc}")
                 self.after(0, lambda: messagebox.showerror("Board load failed", str(exc)))

@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
-from Miro_2_Obsidian_GUI import board_id_from_text, board_refs_from_file
+from Miro_2_Obsidian_GUI import authorize_gui_token, board_id_from_text, board_refs_from_file
 
 
 class MiroObsidianGuiHelperTests(unittest.TestCase):
@@ -45,6 +47,33 @@ class MiroObsidianGuiHelperTests(unittest.TestCase):
             refs = board_refs_from_file(path)
 
         self.assertEqual(refs, [("uXjAlpha=", "Alpha")])
+
+    def test_authorize_gui_token_prefers_existing_env_token(self) -> None:
+        with patch.dict(os.environ, {"MIRO_ACCESS_TOKEN": "env-token"}, clear=True):
+            with patch("Miro_2_Obsidian_GUI.legacy_authorize_and_get_token") as legacy:
+                self.assertEqual(authorize_gui_token(), "env-token")
+
+        legacy.assert_not_called()
+
+    def test_authorize_gui_token_uses_legacy_gui_flow_before_modern_env_oauth(self) -> None:
+        with patch.dict(os.environ, {}, clear=True):
+            with patch("Miro_2_Obsidian_GUI.legacy_authorize_and_get_token", return_value="legacy-token") as legacy:
+                with patch("Miro_2_Obsidian_GUI.authorize_and_get_token") as modern:
+                    self.assertEqual(authorize_gui_token(), "legacy-token")
+
+        legacy.assert_called_once_with()
+        modern.assert_not_called()
+
+    def test_authorize_gui_token_falls_back_to_modern_oauth_when_legacy_is_missing(self) -> None:
+        config = object()
+        with patch.dict(os.environ, {}, clear=True):
+            with patch("Miro_2_Obsidian_GUI.legacy_authorize_and_get_token", None):
+                with patch("Miro_2_Obsidian_GUI.config_from_env", return_value=config) as config_from_env:
+                    with patch("Miro_2_Obsidian_GUI.authorize_and_get_token", return_value="modern-token") as modern:
+                        self.assertEqual(authorize_gui_token(), "modern-token")
+
+        config_from_env.assert_called_once_with()
+        modern.assert_called_once_with(config)
 
 
 if __name__ == "__main__":

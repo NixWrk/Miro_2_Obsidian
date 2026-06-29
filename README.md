@@ -144,8 +144,8 @@ The GUI is the main user-facing entry point. It keeps the user paths separate:
   board controls are shown.
 
 For Miro export paths the GUI automatically uses `MIRO_ACCESS_TOKEN` when
-present, and falls back to the OAuth flow used by the old downloader GUI when no
-token is available. Locally the user chooses the Canvas folder inside an
+present; otherwise it uses the same OAuth flow as the old downloader GUI.
+Locally the user chooses the Canvas folder inside an
 Obsidian vault; the GUI detects the vault root, derives temporary source JSON
 paths for Miro exports, and reads Obsidian `Files & Links` attachment settings
 from `.obsidian/app.json`.
