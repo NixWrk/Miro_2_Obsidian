@@ -37,6 +37,7 @@ def require_oauth_settings() -> tuple[str, str, str, str]:
     if missing:
         raise RuntimeError(
             "Miro OAuth app credentials are not configured. "
+            "Old Miro->JSON bundled credentials were removed. "
             "Set MIRO_CLIENT_ID and MIRO_CLIENT_SECRET, or use MIRO_ACCESS_TOKEN."
         )
     return client_id, client_secret, redirect_uri, scopes

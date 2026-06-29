@@ -110,7 +110,7 @@ def authorize_gui_token(logger: Callable[[str], None] | None = None) -> str:
     raise RuntimeError(
         "Direct Miro export needs credentials. Use Existing JSON without Miro auth, "
         "set MIRO_ACCESS_TOKEN, or set MIRO_CLIENT_ID and MIRO_CLIENT_SECRET for your own app. "
-        "The repo no longer ships bundled Miro app secrets."
+        "The old Miro->JSON GUI used bundled app secrets; the repo no longer ships them."
     )
 
 

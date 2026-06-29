@@ -23,6 +23,13 @@ from miro_downloader import get_boards
 from utils import safe_filename
 
 
+def resolve_gui_token() -> str:
+    token = os.environ.get("MIRO_ACCESS_TOKEN")
+    if token:
+        return token
+    return authorize_and_get_token()
+
+
 # =============================================================================
 # Главное окно приложения
 # =============================================================================
@@ -170,7 +177,7 @@ class MiroDownloaderApp(ctk.CTk):
 
     def authorize(self):
         try:
-            self.token = authorize_and_get_token()
+            self.token = resolve_gui_token()
             if self.token:
                 boards = get_boards(self.token)
                 self.boards_by_name = {b["name"]: b for b in boards}
