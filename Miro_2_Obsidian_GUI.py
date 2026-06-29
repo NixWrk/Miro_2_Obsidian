@@ -26,11 +26,6 @@ from miro_oauth_token import authorize_and_get_token, config_from_env  # noqa: E
 from miro_pipeline import run_existing_json_pipeline, run_rest_experimental_pipeline  # noqa: E402
 from obsidian_vault_settings import resolve_vault_paths  # noqa: E402
 
-try:
-    from auth import authorize_and_get_token as legacy_authorize_and_get_token  # type: ignore  # noqa: E402
-except Exception:  # noqa: BLE001
-    legacy_authorize_and_get_token = None
-
 
 ACCOUNT_SOURCE_MODE = "Miro account"
 URL_SOURCE_MODE = "Miro URL"
@@ -106,10 +101,6 @@ def authorize_gui_token(logger: Callable[[str], None] | None = None) -> str:
     if os.environ.get("MIRO_CLIENT_ID") and os.environ.get("MIRO_CLIENT_SECRET"):
         log("Starting OAuth from MIRO_CLIENT_ID/MIRO_CLIENT_SECRET.")
         return authorize_and_get_token(config_from_env())
-
-    if legacy_authorize_and_get_token is not None:
-        log("Starting OAuth through the bundled legacy Miro GUI flow.")
-        return legacy_authorize_and_get_token()
 
     raise RuntimeError(
         "Miro OAuth requires a Miro Developer App. Set MIRO_ACCESS_TOKEN, "

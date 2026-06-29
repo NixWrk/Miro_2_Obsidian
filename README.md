@@ -145,8 +145,7 @@ The GUI is the main user-facing entry point. It keeps the user paths separate:
 
 For Miro export paths the GUI automatically uses `MIRO_ACCESS_TOKEN` when
 present. If `MIRO_CLIENT_ID` and `MIRO_CLIENT_SECRET` are set, it runs OAuth
-through that Miro Developer App. Without those values it can only try the
-legacy bundled app credentials kept for backward compatibility.
+through that Miro Developer App. The repo does not ship OAuth client secrets.
 Locally the user chooses the Canvas folder inside an
 Obsidian vault; the GUI detects the vault root, derives temporary source JSON
 paths for Miro exports, and reads Obsidian `Files & Links` attachment settings
@@ -157,6 +156,43 @@ App registered in Miro, with exact redirect URI values. For local OAuth, registe
 `http://localhost:8000/callback` in that app; `http://127.0.0.1:8000/callback`
 is a different value and must be registered separately if you use it. Set
 `MIRO_REDIRECT_URI` when your app is registered with a different local callback.
+
+### Optional Miro OAuth app setup
+
+You do not need a Miro Developer App for `Existing JSON` conversion. You also do
+not need it if you already have a valid `MIRO_ACCESS_TOKEN`. Create an app only
+when you want the GUI/CLI to list boards and export directly from Miro through
+REST.
+
+Expected time:
+
+- 5-10 minutes if you can create/install Miro apps in the target team.
+- 15-30 minutes or more if a team admin must approve/install the app.
+
+Benefit:
+
+- `Miro account` can authenticate and list boards.
+- `Miro URL` and `Miro URL list` can export REST experimental JSON plus assets.
+- You avoid manually copying short-lived access tokens.
+
+Setup:
+
+1. Open the Miro Developer console and create an app.
+2. Add OAuth redirect URI `http://localhost:8000/callback`.
+3. Grant the app access to the Miro team that owns the boards.
+4. Use scopes `boards:read team:read` for normal export. Add `boards:write` only
+   for probe/generator scripts that create test boards.
+5. Set local environment variables before launching the GUI:
+
+```powershell
+$env:MIRO_CLIENT_ID = "<your app client id>"
+$env:MIRO_CLIENT_SECRET = "<your app client secret>"
+$env:MIRO_REDIRECT_URI = "http://localhost:8000/callback"
+python Miro_2_Obsidian_GUI.py
+```
+
+Do not commit tokens, client secrets, callback URLs containing `code=...`, or
+local `.env` files.
 
 The shared conversion controls include a checkbox to install/enable Advanced
 Canvas plus the local `canvas-zoom-unlock` plugin in the selected vault. With

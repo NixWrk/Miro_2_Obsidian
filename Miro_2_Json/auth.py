@@ -9,17 +9,49 @@ import requests
 from urllib.parse import quote_plus
 
 # ====== Miro OAuth ======
-CLIENT_ID = os.environ.get("MIRO_CLIENT_ID", "<redacted-long-id>")
-CLIENT_SECRET = os.environ.get("MIRO_CLIENT_SECRET", "<redacted-miro-client-secret>")
-REDIRECT_URI = os.environ.get("MIRO_REDIRECT_URI", "http://localhost:8000/callback")
-SCOPES = os.environ.get("MIRO_SCOPES", "boards:read team:read")
+CLIENT_ID_ENV = "MIRO_CLIENT_ID"
+CLIENT_SECRET_ENV = "MIRO_CLIENT_SECRET"
+REDIRECT_URI_ENV = "MIRO_REDIRECT_URI"
+SCOPES_ENV = "MIRO_SCOPES"
+DEFAULT_REDIRECT_URI = "http://localhost:8000/callback"
+DEFAULT_SCOPES = "boards:read team:read"
 
-AUTH_URL = (
-    "https://miro.com/oauth/authorize"
-    f"?response_type=code&client_id={CLIENT_ID}"
-    f"&redirect_uri={REDIRECT_URI}"
-    f"&scope={quote_plus(SCOPES)}"
-)
+CLIENT_ID = os.environ.get(CLIENT_ID_ENV, "")
+CLIENT_SECRET = ""
+REDIRECT_URI = os.environ.get(REDIRECT_URI_ENV, DEFAULT_REDIRECT_URI)
+SCOPES = os.environ.get(SCOPES_ENV, DEFAULT_SCOPES)
+
+
+def _oauth_settings() -> tuple[str, str, str, str]:
+    return (
+        os.environ.get(CLIENT_ID_ENV, ""),
+        os.environ.get(CLIENT_SECRET_ENV, ""),
+        os.environ.get(REDIRECT_URI_ENV, DEFAULT_REDIRECT_URI),
+        os.environ.get(SCOPES_ENV, DEFAULT_SCOPES),
+    )
+
+
+def require_oauth_settings() -> tuple[str, str, str, str]:
+    client_id, client_secret, redirect_uri, scopes = _oauth_settings()
+    missing = [name for name, value in ((CLIENT_ID_ENV, client_id), (CLIENT_SECRET_ENV, client_secret)) if not value]
+    if missing:
+        raise RuntimeError(
+            "Miro OAuth app credentials are not configured. "
+            "Set MIRO_CLIENT_ID and MIRO_CLIENT_SECRET, or use MIRO_ACCESS_TOKEN."
+        )
+    return client_id, client_secret, redirect_uri, scopes
+
+
+def build_authorize_url() -> str:
+    client_id, _, redirect_uri, scopes = _oauth_settings()
+    return (
+        "https://miro.com/oauth/authorize"
+        f"?response_type=code&client_id={client_id}"
+        f"&redirect_uri={redirect_uri}"
+        f"&scope={quote_plus(scopes)}"
+    )
+
+AUTH_URL = build_authorize_url()
 
 app = Flask(__name__)
 auth_code = None
@@ -50,9 +82,10 @@ def open_authentication_page() -> bool:
     that calls window.open() is fragile: popup blockers can prevent the auth tab
     from appearing. A direct OAuth URL behaves like an ordinary browser open.
     """
-    if open_in_yandex(AUTH_URL):
+    authorize_url = build_authorize_url()
+    if open_in_yandex(authorize_url):
         return True
-    return bool(webbrowser.open(AUTH_URL))
+    return bool(webbrowser.open(authorize_url))
 
 @app.route("/popup")
 def popup():
@@ -61,7 +94,7 @@ def popup():
     <html>
         <body>
             <script>
-                var win = window.open("{AUTH_URL}", "MiroAuth", "width=600,height=800");
+                var win = window.open("{build_authorize_url()}", "MiroAuth", "width=600,height=800");
                 window.close();
             </script>
         </body>
@@ -86,13 +119,14 @@ def callback():
 
 
 def get_access_token(code: str) -> str:
+    client_id, client_secret, redirect_uri, _ = require_oauth_settings()
     token_url = "https://api.miro.com/v1/oauth/token"
     payload = {
         "grant_type": "authorization_code",
         "code": code,
-        "redirect_uri": REDIRECT_URI,
-        "client_id": CLIENT_ID,
-        "client_secret": CLIENT_SECRET,
+        "redirect_uri": redirect_uri,
+        "client_id": client_id,
+        "client_secret": client_secret,
     }
     r = requests.post(token_url, data=payload, timeout=30)
     r.raise_for_status()
@@ -106,6 +140,7 @@ def authorize_and_get_token() -> str:
     """
     global auth_code, _flask_started
     auth_code = None
+    require_oauth_settings()
 
     if not _flask_started:
         def run_flask():
@@ -120,7 +155,7 @@ def authorize_and_get_token() -> str:
     if not open_authentication_page():
         raise RuntimeError(
             "Не удалось открыть браузер автоматически. "
-            f"Откройте ссылку вручную: {AUTH_URL}"
+            f"Откройте ссылку вручную: {build_authorize_url()}"
         )
 
     for _ in range(300):  # ждём до 5 минут
