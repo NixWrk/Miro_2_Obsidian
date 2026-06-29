@@ -13,6 +13,7 @@ SCRIPTS_DIR = REPO_ROOT / "scripts"
 sys.path.insert(0, str(SCRIPTS_DIR))
 
 from miro_oauth_token import (  # noqa: E402
+    ALTERNATE_LOOPBACK_REDIRECT_URI,
     DEFAULT_REDIRECT_URI,
     OAuthConfig,
     OAuthTokenExchangeError,
@@ -84,9 +85,10 @@ class MiroOAuthTokenTests(unittest.TestCase):
 
         message = format_callback_timeout_message(config, "https://miro.com/oauth/authorize?client_id=client-1")
 
+        self.assertIn("http://localhost:8000/callback", message)
         self.assertIn("http://127.0.0.1:8000/callback", message)
         self.assertIn("authorization URL", message)
-        self.assertIn("old localhost redirect", message)
+        self.assertIn("Redirect URI matching is exact", message)
         self.assertNotIn("secret-1", message)
 
     def test_config_from_env_requires_client_credentials(self) -> None:
@@ -100,8 +102,24 @@ class MiroOAuthTokenTests(unittest.TestCase):
 
         self.assertEqual(config.client_id, "client-1")
         self.assertEqual(config.client_secret, "secret-1")
-        self.assertEqual(config.redirect_uri, "http://127.0.0.1:8000/callback")
+        self.assertEqual(config.redirect_uri, "http://localhost:8000/callback")
         self.assertEqual(config.authorize_url, "https://example.invalid/authorize")
+        self.assertEqual(ALTERNATE_LOOPBACK_REDIRECT_URI, "http://127.0.0.1:8000/callback")
+
+    def test_config_from_env_reads_optional_oauth_settings_from_env(self) -> None:
+        env = {
+            "MIRO_CLIENT_ID": "client-1",
+            "MIRO_CLIENT_SECRET": "secret-1",
+            "MIRO_REDIRECT_URI": "http://127.0.0.1:8000/callback",
+            "MIRO_SCOPES": "boards:read",
+            "MIRO_TOKEN_URL": "https://example.invalid/token",
+        }
+        with patch.dict(os.environ, env, clear=True):
+            config = config_from_env()
+
+        self.assertEqual(config.redirect_uri, "http://127.0.0.1:8000/callback")
+        self.assertEqual(config.scopes, "boards:read")
+        self.assertEqual(config.token_url, "https://example.invalid/token")
 
     def test_resolves_yandex_browser_from_local_app_data(self) -> None:
         expected = str(Path("C:/Users/me/AppData/Local/Yandex/YandexBrowser/Application/browser.exe"))

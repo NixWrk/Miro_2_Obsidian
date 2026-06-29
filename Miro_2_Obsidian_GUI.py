@@ -103,12 +103,18 @@ def authorize_gui_token(logger: Callable[[str], None] | None = None) -> str:
         log("Using MIRO_ACCESS_TOKEN from environment.")
         return token
 
+    if os.environ.get("MIRO_CLIENT_ID") and os.environ.get("MIRO_CLIENT_SECRET"):
+        log("Starting OAuth from MIRO_CLIENT_ID/MIRO_CLIENT_SECRET.")
+        return authorize_and_get_token(config_from_env())
+
     if legacy_authorize_and_get_token is not None:
         log("Starting OAuth through the bundled legacy Miro GUI flow.")
         return legacy_authorize_and_get_token()
 
-    log("Starting OAuth from environment app credentials.")
-    return authorize_and_get_token(config_from_env())
+    raise RuntimeError(
+        "Miro OAuth requires a Miro Developer App. Set MIRO_ACCESS_TOKEN, "
+        "or set MIRO_CLIENT_ID and MIRO_CLIENT_SECRET for your own app."
+    )
 
 
 class MiroPipelineApp(ctk.CTk):

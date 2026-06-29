@@ -16,9 +16,9 @@ import auth  # noqa: E402
 
 
 class MiroGuiAuthTests(unittest.TestCase):
-    def test_gui_auth_uses_127_loopback_redirect(self) -> None:
-        self.assertEqual(auth.REDIRECT_URI, "http://127.0.0.1:8000/callback")
-        self.assertIn("redirect_uri=http://127.0.0.1:8000/callback", auth.AUTH_URL)
+    def test_gui_auth_uses_localhost_loopback_redirect(self) -> None:
+        self.assertEqual(auth.REDIRECT_URI, "http://localhost:8000/callback")
+        self.assertIn("redirect_uri=http://localhost:8000/callback", auth.AUTH_URL)
 
     def test_open_in_yandex_uses_local_app_data_browser(self) -> None:
         browser = str(Path("C:/Users/me/AppData/Local/Yandex/YandexBrowser/Application/browser.exe"))

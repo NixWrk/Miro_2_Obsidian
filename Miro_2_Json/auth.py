@@ -8,11 +8,11 @@ from flask import Flask, request, jsonify
 import requests
 from urllib.parse import quote_plus
 
-# ====== Ваши ключи Miro OAuth ======
-CLIENT_ID = "<redacted-long-id>"
-CLIENT_SECRET = "<redacted-miro-client-secret>"
-REDIRECT_URI = "http://127.0.0.1:8000/callback"
-SCOPES = "boards:read team:read"
+# ====== Miro OAuth ======
+CLIENT_ID = os.environ.get("MIRO_CLIENT_ID", "<redacted-long-id>")
+CLIENT_SECRET = os.environ.get("MIRO_CLIENT_SECRET", "<redacted-miro-client-secret>")
+REDIRECT_URI = os.environ.get("MIRO_REDIRECT_URI", "http://localhost:8000/callback")
+SCOPES = os.environ.get("MIRO_SCOPES", "boards:read team:read")
 
 AUTH_URL = (
     "https://miro.com/oauth/authorize"

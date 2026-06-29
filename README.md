@@ -144,11 +144,19 @@ The GUI is the main user-facing entry point. It keeps the user paths separate:
   board controls are shown.
 
 For Miro export paths the GUI automatically uses `MIRO_ACCESS_TOKEN` when
-present; otherwise it uses the same OAuth flow as the old downloader GUI.
+present. If `MIRO_CLIENT_ID` and `MIRO_CLIENT_SECRET` are set, it runs OAuth
+through that Miro Developer App. Without those values it can only try the
+legacy bundled app credentials kept for backward compatibility.
 Locally the user chooses the Canvas folder inside an
 Obsidian vault; the GUI detects the vault root, derives temporary source JSON
 paths for Miro exports, and reads Obsidian `Files & Links` attachment settings
 from `.obsidian/app.json`.
+
+Miro OAuth is not stored in the repo. A `client_id` belongs to a Miro Developer
+App registered in Miro, with exact redirect URI values. For local OAuth, register
+`http://localhost:8000/callback` in that app; `http://127.0.0.1:8000/callback`
+is a different value and must be registered separately if you use it. Set
+`MIRO_REDIRECT_URI` when your app is registered with a different local callback.
 
 The shared conversion controls include a checkbox to install/enable Advanced
 Canvas plus the local `canvas-zoom-unlock` plugin in the selected vault. With

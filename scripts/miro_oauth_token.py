@@ -13,7 +13,8 @@ from urllib.parse import parse_qs, urlencode, urlparse
 
 DEFAULT_AUTHORIZE_URL = "https://miro.com/oauth/authorize"
 DEFAULT_TOKEN_URL = "https://api.miro.com/v1/oauth/token"
-DEFAULT_REDIRECT_URI = "http://127.0.0.1:8000/callback"
+DEFAULT_REDIRECT_URI = "http://localhost:8000/callback"
+ALTERNATE_LOOPBACK_REDIRECT_URI = "http://127.0.0.1:8000/callback"
 DEFAULT_SCOPES = "boards:read boards:write team:read"
 DEFAULT_TIMEOUT_SECONDS = 300
 DEFAULT_BROWSER = "yandex"
@@ -57,10 +58,10 @@ def config_from_env(
     return OAuthConfig(
         client_id=str(client_id),
         client_secret=str(client_secret),
-        redirect_uri=redirect_uri or DEFAULT_REDIRECT_URI,
-        scopes=scopes or DEFAULT_SCOPES,
-        authorize_url=authorize_url or DEFAULT_AUTHORIZE_URL,
-        token_url=token_url or DEFAULT_TOKEN_URL,
+        redirect_uri=redirect_uri or os.environ.get("MIRO_REDIRECT_URI") or DEFAULT_REDIRECT_URI,
+        scopes=scopes or os.environ.get("MIRO_SCOPES") or DEFAULT_SCOPES,
+        authorize_url=authorize_url or os.environ.get("MIRO_AUTHORIZE_URL") or DEFAULT_AUTHORIZE_URL,
+        token_url=token_url or os.environ.get("MIRO_TOKEN_URL") or DEFAULT_TOKEN_URL,
     )
 
 
@@ -85,8 +86,10 @@ def format_callback_timeout_message(config: OAuthConfig, authorize_url: str) -> 
             config.redirect_uri,
             "Then open or retry this authorization URL in the same browser session:",
             authorize_url,
-            "If this app still has only the old localhost redirect registered, add this exact URI too:",
+            "Redirect URI matching is exact; localhost and 127.0.0.1 are different values.",
+            "Useful loopback values to register:",
             DEFAULT_REDIRECT_URI,
+            ALTERNATE_LOOPBACK_REDIRECT_URI,
         ]
     )
 
