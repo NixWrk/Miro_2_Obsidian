@@ -2,12 +2,15 @@ from __future__ import annotations
 
 import json
 import os
+import threading
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
 from Miro_2_Obsidian_GUI import (
+    MiroPipelineApp,
     authorize_gui_token,
     board_id_from_text,
     board_label,
@@ -120,6 +123,36 @@ class MiroObsidianGuiHelperTests(unittest.TestCase):
 
         self.assertEqual(callbacks[0][0], 0)
         showerror.assert_called_once_with("OAuth failed", "auth needs credentials")
+
+    def test_authorize_token_reuses_inflight_oauth_result(self) -> None:
+        app = object.__new__(MiroPipelineApp)
+        app.token = None
+        app.token_lock = threading.Lock()
+        app._log = lambda _message: None
+        release = threading.Event()
+
+        def fake_authorize(_logger):
+            release.wait(1)
+            return "token-1"
+
+        results: list[str] = []
+        threads = [
+            threading.Thread(target=lambda: results.append(MiroPipelineApp._authorize_token(app))),
+            threading.Thread(target=lambda: results.append(MiroPipelineApp._authorize_token(app))),
+        ]
+        with patch("Miro_2_Obsidian_GUI.authorize_gui_token", side_effect=fake_authorize) as authorize:
+            for thread in threads:
+                thread.start()
+            for _ in range(50):
+                if authorize.call_count:
+                    break
+                time.sleep(0.01)
+            release.set()
+            for thread in threads:
+                thread.join(timeout=2)
+
+        self.assertEqual(sorted(results), ["token-1", "token-1"])
+        authorize.assert_called_once()
 
 
 if __name__ == "__main__":

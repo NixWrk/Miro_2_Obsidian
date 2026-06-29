@@ -148,6 +148,7 @@ class MiroPipelineApp(ctk.CTk):
         self.minsize(940, 680)
 
         self.token: str | None = os.environ.get("MIRO_ACCESS_TOKEN")
+        self.token_lock = threading.Lock()
         self.boards_by_label: dict[str, dict] = {}
         self.selected_account_board_id = ""
 
@@ -329,8 +330,11 @@ class MiroPipelineApp(ctk.CTk):
         return value or "board"
 
     def _authorize_token(self) -> str:
-        self.token = authorize_gui_token(self._log)
-        return self.token
+        with self.token_lock:
+            if self.token:
+                return self.token
+            self.token = authorize_gui_token(self._log)
+            return self.token
 
     def _token(self) -> str:
         if self.token:
