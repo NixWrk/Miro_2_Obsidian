@@ -2,8 +2,10 @@
 import threading
 import time
 import os
+import json
 import subprocess
 import webbrowser
+from pathlib import Path
 from flask import Flask, request, jsonify
 import requests
 from urllib.parse import quote_plus
@@ -15,6 +17,8 @@ REDIRECT_URI_ENV = "MIRO_REDIRECT_URI"
 SCOPES_ENV = "MIRO_SCOPES"
 DEFAULT_REDIRECT_URI = "http://localhost:8000/callback"
 DEFAULT_SCOPES = "boards:read team:read"
+LOCAL_CONFIG_ENV = "MIRO_OAUTH_CONFIG"
+LOCAL_CONFIG_NAME = ".miro_oauth.local.json"
 
 CLIENT_ID = os.environ.get(CLIENT_ID_ENV, "")
 CLIENT_SECRET = ""
@@ -22,12 +26,29 @@ REDIRECT_URI = os.environ.get(REDIRECT_URI_ENV, DEFAULT_REDIRECT_URI)
 SCOPES = os.environ.get(SCOPES_ENV, DEFAULT_SCOPES)
 
 
+def load_local_oauth_config() -> dict[str, str]:
+    candidates: list[Path] = []
+    if os.environ.get(LOCAL_CONFIG_ENV):
+        candidates.append(Path(str(os.environ[LOCAL_CONFIG_ENV])).expanduser())
+    candidates.extend([Path.cwd() / LOCAL_CONFIG_NAME, Path(__file__).resolve().parents[1] / LOCAL_CONFIG_NAME])
+
+    for path in candidates:
+        if not path.is_file():
+            continue
+        payload = json.loads(path.read_text(encoding="utf-8-sig"))
+        if not isinstance(payload, dict):
+            raise RuntimeError(f"OAuth config must be a JSON object: {path}")
+        return {str(key): str(value) for key, value in payload.items() if value is not None}
+    return {}
+
+
 def _oauth_settings() -> tuple[str, str, str, str]:
+    local_config = load_local_oauth_config()
     return (
-        os.environ.get(CLIENT_ID_ENV, ""),
-        os.environ.get(CLIENT_SECRET_ENV, ""),
-        os.environ.get(REDIRECT_URI_ENV, DEFAULT_REDIRECT_URI),
-        os.environ.get(SCOPES_ENV, DEFAULT_SCOPES),
+        os.environ.get(CLIENT_ID_ENV, "") or local_config.get("client_id", ""),
+        os.environ.get(CLIENT_SECRET_ENV, "") or local_config.get("client_secret", ""),
+        os.environ.get(REDIRECT_URI_ENV, "") or local_config.get("redirect_uri", DEFAULT_REDIRECT_URI),
+        os.environ.get(SCOPES_ENV, "") or local_config.get("scopes", DEFAULT_SCOPES),
     )
 
 
@@ -38,7 +59,8 @@ def require_oauth_settings() -> tuple[str, str, str, str]:
         raise RuntimeError(
             "Miro OAuth app credentials are not configured. "
             "Old Miro->JSON bundled credentials were removed. "
-            "Set MIRO_CLIENT_ID and MIRO_CLIENT_SECRET, or use MIRO_ACCESS_TOKEN."
+            f"Set MIRO_CLIENT_ID and MIRO_CLIENT_SECRET, create ignored {LOCAL_CONFIG_NAME}, "
+            "or use MIRO_ACCESS_TOKEN."
         )
     return client_id, client_secret, redirect_uri, scopes
 

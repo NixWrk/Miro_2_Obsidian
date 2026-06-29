@@ -15,6 +15,7 @@ sys.path.insert(0, str(SCRIPTS_DIR))
 from miro_oauth_token import (  # noqa: E402
     ALTERNATE_LOOPBACK_REDIRECT_URI,
     DEFAULT_REDIRECT_URI,
+    LOCAL_CONFIG_ENV,
     OAuthConfig,
     OAuthTokenExchangeError,
     build_authorize_url,
@@ -93,12 +94,14 @@ class MiroOAuthTokenTests(unittest.TestCase):
 
     def test_config_from_env_requires_client_credentials(self) -> None:
         with patch.dict(os.environ, {}, clear=True):
-            with self.assertRaisesRegex(ValueError, "MIRO_CLIENT_ID, MIRO_CLIENT_SECRET"):
-                config_from_env()
+            with patch("miro_oauth_token.load_local_oauth_config", return_value={}):
+                with self.assertRaisesRegex(ValueError, "MIRO_CLIENT_ID, MIRO_CLIENT_SECRET"):
+                    config_from_env()
 
     def test_config_from_env_reads_credentials_without_printing_them(self) -> None:
         with patch.dict(os.environ, {"MIRO_CLIENT_ID": "client-1", "MIRO_CLIENT_SECRET": "secret-1"}):
-            config = config_from_env(authorize_url="https://example.invalid/authorize")
+            with patch("miro_oauth_token.load_local_oauth_config", return_value={}):
+                config = config_from_env(authorize_url="https://example.invalid/authorize")
 
         self.assertEqual(config.client_id, "client-1")
         self.assertEqual(config.client_secret, "secret-1")
@@ -115,11 +118,38 @@ class MiroOAuthTokenTests(unittest.TestCase):
             "MIRO_TOKEN_URL": "https://example.invalid/token",
         }
         with patch.dict(os.environ, env, clear=True):
-            config = config_from_env()
+            with patch("miro_oauth_token.load_local_oauth_config", return_value={}):
+                config = config_from_env()
 
         self.assertEqual(config.redirect_uri, "http://127.0.0.1:8000/callback")
         self.assertEqual(config.scopes, "boards:read")
         self.assertEqual(config.token_url, "https://example.invalid/token")
+
+    def test_config_from_env_reads_ignored_local_oauth_config(self) -> None:
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            config_path = Path(tmp) / ".miro_oauth.local.json"
+            config_path.write_text(
+                "\n".join(
+                    [
+                        "{",
+                        '  "client_id": "local-client",',
+                        '  "client_secret": "local-secret",',
+                        '  "redirect_uri": "http://127.0.0.1:8000/callback",',
+                        '  "scopes": "boards:read"',
+                        "}",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            with patch.dict(os.environ, {LOCAL_CONFIG_ENV: str(config_path)}, clear=True):
+                config = config_from_env()
+
+        self.assertEqual(config.client_id, "local-client")
+        self.assertEqual(config.client_secret, "local-secret")
+        self.assertEqual(config.redirect_uri, "http://127.0.0.1:8000/callback")
+        self.assertEqual(config.scopes, "boards:read")
 
     def test_resolves_yandex_browser_from_local_app_data(self) -> None:
         expected = str(Path("C:/Users/me/AppData/Local/Yandex/YandexBrowser/Application/browser.exe"))

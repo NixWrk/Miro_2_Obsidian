@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import socket
 import subprocess
 import threading
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlencode, urlparse
 
@@ -18,6 +20,8 @@ ALTERNATE_LOOPBACK_REDIRECT_URI = "http://127.0.0.1:8000/callback"
 DEFAULT_SCOPES = "boards:read boards:write team:read"
 DEFAULT_TIMEOUT_SECONDS = 300
 DEFAULT_BROWSER = "yandex"
+LOCAL_CONFIG_ENV = "MIRO_OAUTH_CONFIG"
+LOCAL_CONFIG_NAME = ".miro_oauth.local.json"
 
 
 @dataclass(frozen=True)
@@ -41,6 +45,22 @@ class OAuthTokenExchangeError(RuntimeError):
     pass
 
 
+def load_local_oauth_config() -> dict[str, str]:
+    candidates: list[Path] = []
+    if os.environ.get(LOCAL_CONFIG_ENV):
+        candidates.append(Path(str(os.environ[LOCAL_CONFIG_ENV])).expanduser())
+    candidates.extend([Path.cwd() / LOCAL_CONFIG_NAME, Path(__file__).resolve().parents[1] / LOCAL_CONFIG_NAME])
+
+    for path in candidates:
+        if not path.is_file():
+            continue
+        payload = json.loads(path.read_text(encoding="utf-8-sig"))
+        if not isinstance(payload, dict):
+            raise ValueError(f"OAuth config must be a JSON object: {path}")
+        return {str(key): str(value) for key, value in payload.items() if value is not None}
+    return {}
+
+
 def config_from_env(
     *,
     client_id_env: str = "MIRO_CLIENT_ID",
@@ -50,18 +70,22 @@ def config_from_env(
     authorize_url: str | None = None,
     token_url: str | None = None,
 ) -> OAuthConfig:
-    client_id = os.environ.get(client_id_env)
-    client_secret = os.environ.get(client_secret_env)
+    local_config = load_local_oauth_config()
+    client_id = os.environ.get(client_id_env) or local_config.get("client_id")
+    client_secret = os.environ.get(client_secret_env) or local_config.get("client_secret")
     missing = [name for name, value in ((client_id_env, client_id), (client_secret_env, client_secret)) if not value]
     if missing:
-        raise ValueError(f"Missing OAuth environment variable(s): {', '.join(missing)}")
+        raise ValueError(
+            f"Missing OAuth environment variable(s): {', '.join(missing)}. "
+            f"Set them or create ignored {LOCAL_CONFIG_NAME}."
+        )
     return OAuthConfig(
         client_id=str(client_id),
         client_secret=str(client_secret),
-        redirect_uri=redirect_uri or os.environ.get("MIRO_REDIRECT_URI") or DEFAULT_REDIRECT_URI,
-        scopes=scopes or os.environ.get("MIRO_SCOPES") or DEFAULT_SCOPES,
-        authorize_url=authorize_url or os.environ.get("MIRO_AUTHORIZE_URL") or DEFAULT_AUTHORIZE_URL,
-        token_url=token_url or os.environ.get("MIRO_TOKEN_URL") or DEFAULT_TOKEN_URL,
+        redirect_uri=redirect_uri or os.environ.get("MIRO_REDIRECT_URI") or local_config.get("redirect_uri") or DEFAULT_REDIRECT_URI,
+        scopes=scopes or os.environ.get("MIRO_SCOPES") or local_config.get("scopes") or DEFAULT_SCOPES,
+        authorize_url=authorize_url or os.environ.get("MIRO_AUTHORIZE_URL") or local_config.get("authorize_url") or DEFAULT_AUTHORIZE_URL,
+        token_url=token_url or os.environ.get("MIRO_TOKEN_URL") or local_config.get("token_url") or DEFAULT_TOKEN_URL,
     )
 
 

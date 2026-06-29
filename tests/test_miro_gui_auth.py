@@ -26,7 +26,22 @@ class MiroGuiAuthTests(unittest.TestCase):
     def test_gui_auth_uses_localhost_loopback_redirect(self) -> None:
         self.assertEqual(auth.REDIRECT_URI, "http://localhost:8000/callback")
         with patch.dict(os.environ, {"MIRO_CLIENT_ID": "client-1"}, clear=True):
-            self.assertIn("redirect_uri=http://localhost:8000/callback", auth.build_authorize_url())
+            with patch("auth.load_local_oauth_config", return_value={}):
+                self.assertIn("redirect_uri=http://localhost:8000/callback", auth.build_authorize_url())
+
+    def test_gui_auth_reads_ignored_local_oauth_config(self) -> None:
+        local_config = {
+            "client_id": "local-client",
+            "client_secret": "local-secret",
+            "redirect_uri": "http://127.0.0.1:8000/callback",
+            "scopes": "boards:read",
+        }
+        with patch.dict(os.environ, {}, clear=True):
+            with patch("auth.load_local_oauth_config", return_value=local_config):
+                self.assertEqual(
+                    auth.require_oauth_settings(),
+                    ("local-client", "local-secret", "http://127.0.0.1:8000/callback", "boards:read"),
+                )
 
     def test_open_in_yandex_uses_local_app_data_browser(self) -> None:
         browser = str(Path("C:/Users/me/AppData/Local/Yandex/YandexBrowser/Application/browser.exe"))
@@ -47,10 +62,11 @@ class MiroGuiAuthTests(unittest.TestCase):
 
     def test_open_authentication_page_opens_direct_oauth_url_instead_of_popup(self) -> None:
         with patch.dict(os.environ, {"MIRO_CLIENT_ID": "client-1"}, clear=True):
-            expected_url = auth.build_authorize_url()
-            with patch("auth.open_in_yandex", return_value=True) as yandex:
-                with patch("auth.webbrowser.open") as browser:
-                    self.assertTrue(auth.open_authentication_page())
+            with patch("auth.load_local_oauth_config", return_value={}):
+                expected_url = auth.build_authorize_url()
+                with patch("auth.open_in_yandex", return_value=True) as yandex:
+                    with patch("auth.webbrowser.open") as browser:
+                        self.assertTrue(auth.open_authentication_page())
 
         yandex.assert_called_once_with(expected_url)
         self.assertNotIn("/popup", yandex.call_args.args[0])
@@ -58,18 +74,20 @@ class MiroGuiAuthTests(unittest.TestCase):
 
     def test_open_authentication_page_falls_back_to_default_browser(self) -> None:
         with patch.dict(os.environ, {"MIRO_CLIENT_ID": "client-1"}, clear=True):
-            expected_url = auth.build_authorize_url()
-            with patch("auth.open_in_yandex", return_value=False) as yandex:
-                with patch("auth.webbrowser.open", return_value=True) as browser:
-                    self.assertTrue(auth.open_authentication_page())
+            with patch("auth.load_local_oauth_config", return_value={}):
+                expected_url = auth.build_authorize_url()
+                with patch("auth.open_in_yandex", return_value=False) as yandex:
+                    with patch("auth.webbrowser.open", return_value=True) as browser:
+                        self.assertTrue(auth.open_authentication_page())
 
         yandex.assert_called_once_with(expected_url)
         browser.assert_called_once_with(expected_url)
 
     def test_authorize_requires_user_oauth_credentials(self) -> None:
         with patch.dict(os.environ, {}, clear=True):
-            with self.assertRaisesRegex(RuntimeError, "MIRO_CLIENT_ID and MIRO_CLIENT_SECRET"):
-                auth.authorize_and_get_token()
+            with patch("auth.load_local_oauth_config", return_value={}):
+                with self.assertRaisesRegex(RuntimeError, "MIRO_CLIENT_ID and MIRO_CLIENT_SECRET"):
+                    auth.authorize_and_get_token()
 
 
 if __name__ == "__main__":

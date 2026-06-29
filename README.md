@@ -195,6 +195,10 @@ $env:MIRO_REDIRECT_URI = "http://localhost:8000/callback"
 python Miro_2_Obsidian_GUI.py
 ```
 
+For local testing you can also copy `.miro_oauth.local.example.json` to
+`.miro_oauth.local.json` and paste the same values there. That file is ignored by
+git and is read by both the unified GUI and the old `Miro_2_Json` downloader.
+
 Do not commit tokens, client secrets, callback URLs containing `code=...`, or
 local `.env` files.
 
