@@ -108,8 +108,9 @@ def authorize_gui_token(logger: Callable[[str], None] | None = None) -> str:
     except ValueError as exc:
         raise RuntimeError(
             "Direct Miro export needs credentials. Use Existing JSON without Miro auth, "
-            "set MIRO_ACCESS_TOKEN, or configure Miro OAuth credentials with "
+            "or configure your own Miro Developer App with "
             "MIRO_CLIENT_ID/MIRO_CLIENT_SECRET or ignored .miro_oauth.local.json. "
+            "MIRO_ACCESS_TOKEN is only a developer shortcut when it came from your own app. "
             "The old Miro->JSON GUI looked app-free only because bundled app secrets existed."
         ) from exc
 

@@ -79,7 +79,10 @@ python -m unittest discover -s tests -v
 
 ## Получение данных из Miro через REST
 
-REST-команды используют access token из переменной окружения `MIRO_ACCESS_TOKEN`, если не выбран OAuth flow.
+REST-команды для прямого Miro export требуют собственное Miro Developer App.
+Основной путь: `MIRO_CLIENT_ID` + `MIRO_CLIENT_SECRET` + OAuth flow.
+`MIRO_ACCESS_TOKEN` допустим только как developer shortcut, если этот token
+получен через ваше собственное Miro app.
 
 Список доступных досок:
 
@@ -143,9 +146,10 @@ The GUI is the main user-facing entry point. It keeps the user paths separate:
 - `Existing JSON`: choose an already exported canonical JSON; no Miro token or
   board controls are shown.
 
-For Miro export paths the GUI automatically uses `MIRO_ACCESS_TOKEN` when
-present. If `MIRO_CLIENT_ID` and `MIRO_CLIENT_SECRET` are set, it runs OAuth
-through that Miro Developer App. The repo does not ship OAuth client secrets.
+For Miro export paths, a user-owned Miro Developer App is mandatory. The normal
+GUI path uses `MIRO_CLIENT_ID` and `MIRO_CLIENT_SECRET` from that app and then
+runs OAuth. `MIRO_ACCESS_TOKEN` is accepted only as a developer shortcut when it
+was issued by your own app. The repo does not ship OAuth client secrets.
 Locally the user chooses the Canvas folder inside an
 Obsidian vault; the GUI detects the vault root, derives temporary source JSON
 paths for Miro exports, and reads Obsidian `Files & Links` attachment settings
@@ -158,15 +162,13 @@ is a different value and must be registered separately if you use it. Set
 `MIRO_REDIRECT_URI` when your app is registered with a different local callback.
 The old `Miro_2_Json` GUI looked app-free to the user only because OAuth app
 credentials were bundled in the repo. Those secrets are intentionally removed.
-If `MIRO_ACCESS_TOKEN` is already available, both the old downloader and the
-unified GUI use it directly without creating a new Miro app.
 
-### Optional Miro OAuth app setup
+### Required Miro Developer App Setup
 
-You do not need a Miro Developer App for `Existing JSON` conversion. You also do
-not need it if you already have a valid `MIRO_ACCESS_TOKEN`. Create an app only
-when you want the GUI/CLI to list boards and export directly from Miro through
-REST.
+You do not need a Miro Developer App only for `Existing JSON` conversion, because
+that path does not contact Miro. Every direct Miro path requires your own app:
+`Miro account`, `Miro URL`, `Miro URL list`, REST export scripts, and Web SDK
+probe/export tools.
 
 Expected time:
 
@@ -181,12 +183,19 @@ Benefit:
 
 Setup:
 
-1. Open the Miro Developer console and create an app.
-2. Add OAuth redirect URI `http://localhost:8765/callback`.
-3. Grant the app access to the Miro team that owns the boards.
-4. Use scopes `boards:read team:read` for normal export. Add `boards:write` only
-   for probe/generator scripts that create test boards.
-5. Set local environment variables before launching the GUI:
+1. Open Miro in the browser with the account that can access the target boards.
+2. Open the Miro Developer console / `Your apps`.
+3. Create a new app, for example `Miro 2 Obsidian local export`.
+4. In app settings, add OAuth redirect URI `http://localhost:8765/callback`.
+   Add `http://127.0.0.1:8765/callback` only if you intentionally use that host.
+5. In permissions/scopes, enable `boards:read` and `team:read` for normal
+   export. Add `boards:write` only for probe/generator scripts that create or
+   mutate test boards.
+6. Install or authorize the app for the Miro team that owns the boards.
+   If your Miro organization restricts app installation, ask a team/admin owner
+   to approve the app.
+7. Copy the app `client_id` and `client_secret`.
+8. Set local environment variables before launching the GUI:
 
 ```powershell
 $env:MIRO_CLIENT_ID = "<your app client id>"
@@ -198,6 +207,11 @@ python Miro_2_Obsidian_GUI.py
 For local testing you can also copy `.miro_oauth.local.example.json` to
 `.miro_oauth.local.json` and paste the same values there. That file is ignored by
 git and is read by both the unified GUI and the old `Miro_2_Json` downloader.
+
+Official references:
+
+- OAuth guide: https://developers.miro.com/docs/getting-started-with-oauth
+- Your apps: https://miro.com/app/settings/user-profile/apps
 
 If the browser returns to `http://localhost:8765/callback?...` and shows
 `{"error":"Not found."}`, another local service is handling `localhost`. Keep the
@@ -331,14 +345,17 @@ App URL в Miro:
 http://localhost:8766/index.html
 ```
 
-Текущая роль Miro app:
+Текущая роль Web SDK Miro app:
 
 - создать probe items;
 - экспортировать board/selection из открытой доски;
 - сравнить Web SDK surface с REST;
 - найти item families, где Web SDK дает больше данных.
 
-Перед тем как считать приложение обязательным, нужно выполнить задачу из `tasks/todo.md`: измерить выигрыш Miro app против REST на representative boards.
+Важно: это не то же самое, что обязательное OAuth app для REST/GUI export.
+OAuth app с `client_id`/`client_secret` обязателен для прямого Miro export.
+Web SDK app остаётся диагностическим/обогащающим инструментом и не должен
+создавать отдельную JSON -> Canvas логику.
 
 ## Obsidian validation
 
