@@ -20,6 +20,7 @@ from miro_oauth_token import (  # noqa: E402
     OAuthTokenExchangeError,
     build_authorize_url,
     callback_bind_hosts,
+    callback_recovery_hint,
     config_from_env,
     exchange_access_token,
     exchange_manual_authorization,
@@ -90,7 +91,24 @@ class MiroOAuthTokenTests(unittest.TestCase):
         self.assertIn("http://127.0.0.1:8000/callback", message)
         self.assertIn("authorization URL", message)
         self.assertIn("Redirect URI matching is exact", message)
+        self.assertIn('{"error":"Not found."}', message)
         self.assertNotIn("secret-1", message)
+
+    def test_callback_recovery_hint_only_for_localhost_redirect(self) -> None:
+        hint = callback_recovery_hint(OAuthConfig(client_id="client-1", client_secret="secret-1"))
+
+        self.assertIsNotNone(hint)
+        self.assertIn("127.0.0.1:8000", hint or "")
+        self.assertIn("another local service", hint or "")
+        self.assertIsNone(
+            callback_recovery_hint(
+                OAuthConfig(
+                    client_id="client-1",
+                    client_secret="secret-1",
+                    redirect_uri="http://127.0.0.1:8000/callback",
+                )
+            )
+        )
 
     def test_config_from_env_requires_client_credentials(self) -> None:
         with patch.dict(os.environ, {}, clear=True):

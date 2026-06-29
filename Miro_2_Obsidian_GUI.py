@@ -22,7 +22,7 @@ sys.path.insert(0, str(CONVERTER_DIR))
 
 from Scale_engine import ViewProfile  # noqa: E402
 from miro_downloader import get_boards  # noqa: E402
-from miro_oauth_token import authorize_and_get_token, config_from_env  # noqa: E402
+from miro_oauth_token import authorize_and_get_token, callback_recovery_hint, config_from_env  # noqa: E402
 from miro_pipeline import run_existing_json_pipeline, run_rest_experimental_pipeline  # noqa: E402
 from obsidian_vault_settings import resolve_vault_paths  # noqa: E402
 
@@ -105,7 +105,11 @@ def authorize_gui_token(logger: Callable[[str], None] | None = None) -> str:
 
     if os.environ.get("MIRO_CLIENT_ID") and os.environ.get("MIRO_CLIENT_SECRET"):
         log("Starting OAuth from MIRO_CLIENT_ID/MIRO_CLIENT_SECRET.")
-        return authorize_and_get_token(config_from_env())
+        config = config_from_env()
+        hint = callback_recovery_hint(config)
+        if hint:
+            log(hint)
+        return authorize_and_get_token(config)
 
     raise RuntimeError(
         "Direct Miro export needs credentials. Use Existing JSON without Miro auth, "

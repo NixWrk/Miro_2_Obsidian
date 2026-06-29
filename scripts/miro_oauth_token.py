@@ -102,18 +102,36 @@ def build_authorize_url(config: OAuthConfig, *, state: str | None = None) -> str
 
 
 def format_callback_timeout_message(config: OAuthConfig, authorize_url: str) -> str:
+    lines = [
+        f"Timed out waiting for Miro OAuth callback at {config.redirect_uri}.",
+        "The authorization page did not redirect back to the local callback server.",
+        "Check that the Miro app has this exact Redirect URI for OAuth2.0:",
+        config.redirect_uri,
+        "Then open or retry this authorization URL in the same browser session:",
+        authorize_url,
+        "Redirect URI matching is exact; localhost and 127.0.0.1 are different values.",
+        "Useful loopback values to register:",
+        DEFAULT_REDIRECT_URI,
+        ALTERNATE_LOOPBACK_REDIRECT_URI,
+    ]
+    hint = callback_recovery_hint(config)
+    if hint:
+        lines.extend(["", hint])
+    return "\n".join(lines)
+
+
+def callback_recovery_hint(config: OAuthConfig) -> str | None:
+    redirect = urlparse(config.redirect_uri)
+    if redirect.scheme != "http" or (redirect.hostname or "").lower() != "localhost":
+        return None
+
+    port = redirect.port or 80
+    alternate = redirect._replace(netloc=f"127.0.0.1:{port}").geturl()
     return "\n".join(
         [
-            f"Timed out waiting for Miro OAuth callback at {config.redirect_uri}.",
-            "The authorization page did not redirect back to the local callback server.",
-            "Check that the Miro app has this exact Redirect URI for OAuth2.0:",
-            config.redirect_uri,
-            "Then open or retry this authorization URL in the same browser session:",
-            authorize_url,
-            "Redirect URI matching is exact; localhost and 127.0.0.1 are different values.",
-            "Useful loopback values to register:",
-            DEFAULT_REDIRECT_URI,
-            ALTERNATE_LOOPBACK_REDIRECT_URI,
+            'If the browser shows {"error":"Not found."} at localhost, another local service is handling localhost.',
+            f"Keep the full callback URL, replace only http://localhost:{port} with http://127.0.0.1:{port}, and press Enter.",
+            f"The helper is also listening at {alternate}.",
         ]
     )
 
@@ -345,6 +363,9 @@ def authorize_and_get_token(
         authorize_url = build_authorize_url(config)
         print(f"authorization_url={authorize_url}")
         print(f"waiting_for_callback={config.redirect_uri}")
+        hint = callback_recovery_hint(config)
+        if hint:
+            print(hint)
         if open_browser:
             open_authorize_url(authorize_url, browser=browser)
 

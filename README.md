@@ -199,6 +199,13 @@ For local testing you can also copy `.miro_oauth.local.example.json` to
 `.miro_oauth.local.json` and paste the same values there. That file is ignored by
 git and is read by both the unified GUI and the old `Miro_2_Json` downloader.
 
+If the browser returns to `http://localhost:8000/callback?...` and shows
+`{"error":"Not found."}`, another local service is handling `localhost`. Keep the
+whole URL, replace only `localhost` with `127.0.0.1`, and press Enter while the
+GUI/CLI is still waiting for OAuth. The Miro app can still use the registered
+`http://localhost:8000/callback` redirect URI; this replacement is only for
+delivering the already-issued callback to the local helper.
+
 Do not commit tokens, client secrets, callback URLs containing `code=...`, or
 local `.env` files.
 

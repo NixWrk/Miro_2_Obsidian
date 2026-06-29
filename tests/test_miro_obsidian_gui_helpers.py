@@ -8,6 +8,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from Miro_2_Obsidian_GUI import authorize_gui_token, board_id_from_text, board_refs_from_file, show_error_later
+from miro_oauth_token import OAuthConfig
 
 
 class MiroObsidianGuiHelperTests(unittest.TestCase):
@@ -53,15 +54,17 @@ class MiroObsidianGuiHelperTests(unittest.TestCase):
             self.assertEqual(authorize_gui_token(), "env-token")
 
     def test_authorize_gui_token_uses_env_oauth_credentials(self) -> None:
-        config = object()
+        config = OAuthConfig(client_id="client-1", client_secret="secret-1")
+        messages = []
         env = {"MIRO_CLIENT_ID": "client-1", "MIRO_CLIENT_SECRET": "secret-1"}
         with patch.dict(os.environ, env, clear=True):
             with patch("Miro_2_Obsidian_GUI.config_from_env", return_value=config) as config_from_env:
                 with patch("Miro_2_Obsidian_GUI.authorize_and_get_token", return_value="modern-token") as modern:
-                    self.assertEqual(authorize_gui_token(), "modern-token")
+                    self.assertEqual(authorize_gui_token(messages.append), "modern-token")
 
         config_from_env.assert_called_once_with()
         modern.assert_called_once_with(config)
+        self.assertTrue(any("127.0.0.1:8000" in message for message in messages))
 
     def test_authorize_gui_token_requires_a_token_or_oauth_app(self) -> None:
         with patch.dict(os.environ, {}, clear=True):
