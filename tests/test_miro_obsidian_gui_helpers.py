@@ -7,7 +7,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from Miro_2_Obsidian_GUI import authorize_gui_token, board_id_from_text, board_refs_from_file
+from Miro_2_Obsidian_GUI import authorize_gui_token, board_id_from_text, board_refs_from_file, show_error_later
 
 
 class MiroObsidianGuiHelperTests(unittest.TestCase):
@@ -65,8 +65,25 @@ class MiroObsidianGuiHelperTests(unittest.TestCase):
 
     def test_authorize_gui_token_requires_a_token_or_oauth_app(self) -> None:
         with patch.dict(os.environ, {}, clear=True):
-            with self.assertRaisesRegex(RuntimeError, "Miro Developer App"):
+            with self.assertRaisesRegex(RuntimeError, "Existing JSON"):
                 authorize_gui_token()
+
+    def test_show_error_later_keeps_exception_message_after_except_scope(self) -> None:
+        callbacks = []
+
+        def after(delay_ms, callback):
+            callbacks.append((delay_ms, callback))
+
+        try:
+            raise RuntimeError("auth needs credentials")
+        except RuntimeError as exc:
+            show_error_later(after, "OAuth failed", exc)
+
+        with patch("Miro_2_Obsidian_GUI.messagebox.showerror") as showerror:
+            callbacks[0][1]()
+
+        self.assertEqual(callbacks[0][0], 0)
+        showerror.assert_called_once_with("OAuth failed", "auth needs credentials")
 
 
 if __name__ == "__main__":

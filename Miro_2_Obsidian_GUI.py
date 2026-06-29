@@ -88,6 +88,11 @@ def safe_name(value: str) -> str:
     return cleaned or "board"
 
 
+def show_error_later(after: Callable[[int, Callable[[], None]], object], title: str, error: BaseException) -> None:
+    message = str(error)
+    after(0, lambda: messagebox.showerror(title, message))
+
+
 def authorize_gui_token(logger: Callable[[str], None] | None = None) -> str:
     def log(message: str) -> None:
         if logger:
@@ -103,8 +108,9 @@ def authorize_gui_token(logger: Callable[[str], None] | None = None) -> str:
         return authorize_and_get_token(config_from_env())
 
     raise RuntimeError(
-        "Miro OAuth requires a Miro Developer App. Set MIRO_ACCESS_TOKEN, "
-        "or set MIRO_CLIENT_ID and MIRO_CLIENT_SECRET for your own app."
+        "Direct Miro export needs credentials. Use Existing JSON without Miro auth, "
+        "set MIRO_ACCESS_TOKEN, or set MIRO_CLIENT_ID and MIRO_CLIENT_SECRET for your own app. "
+        "The repo no longer ships bundled Miro app secrets."
     )
 
 
@@ -314,7 +320,7 @@ class MiroPipelineApp(ctk.CTk):
                 self._log("OAuth token obtained for this GUI session.")
             except Exception as exc:  # noqa: BLE001
                 self._log(f"OAuth failed: {exc}")
-                self.after(0, lambda: messagebox.showerror("OAuth failed", str(exc)))
+                show_error_later(self.after, "OAuth failed", exc)
 
         threading.Thread(target=worker, daemon=True).start()
 
@@ -341,7 +347,7 @@ class MiroPipelineApp(ctk.CTk):
                 self._apply_boards(get_boards(token))
             except Exception as exc:  # noqa: BLE001
                 self._log(f"OAuth failed: {exc}")
-                self.after(0, lambda: messagebox.showerror("OAuth failed", str(exc)))
+                show_error_later(self.after, "OAuth failed", exc)
 
         threading.Thread(target=worker, daemon=True).start()
 
@@ -351,7 +357,7 @@ class MiroPipelineApp(ctk.CTk):
                 self._apply_boards(get_boards(self._token()))
             except Exception as exc:  # noqa: BLE001
                 self._log(f"Board load failed: {exc}")
-                self.after(0, lambda: messagebox.showerror("Board load failed", str(exc)))
+                show_error_later(self.after, "Board load failed", exc)
 
         threading.Thread(target=worker, daemon=True).start()
 
@@ -555,7 +561,7 @@ class MiroPipelineApp(ctk.CTk):
                 self.after(0, lambda: messagebox.showinfo("Pipeline complete", done_path))
             except Exception as exc:  # noqa: BLE001
                 self._log(f"Pipeline failed: {exc}")
-                self.after(0, lambda: messagebox.showerror("Pipeline failed", str(exc)))
+                show_error_later(self.after, "Pipeline failed", exc)
             finally:
                 self._set_busy(False)
 

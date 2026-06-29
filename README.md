@@ -156,6 +156,8 @@ App registered in Miro, with exact redirect URI values. For local OAuth, registe
 `http://localhost:8000/callback` in that app; `http://127.0.0.1:8000/callback`
 is a different value and must be registered separately if you use it. Set
 `MIRO_REDIRECT_URI` when your app is registered with a different local callback.
+Older app-free GUI auth worked only because OAuth app credentials were bundled
+in the repo. Those secrets are intentionally removed.
 
 ### Optional Miro OAuth app setup
 
