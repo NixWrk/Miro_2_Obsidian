@@ -88,6 +88,25 @@ def safe_name(value: str) -> str:
     return cleaned or "board"
 
 
+def _name_from_payload(value: object) -> str:
+    if isinstance(value, dict):
+        return str(value.get("name") or value.get("title") or value.get("id") or "").strip()
+    return ""
+
+
+def board_label(board: dict) -> str:
+    name = str(board.get("name") or board.get("id") or "board")
+    team = _name_from_payload(board.get("team"))
+    collection = (
+        _name_from_payload(board.get("project"))
+        or _name_from_payload(board.get("collection"))
+        or _name_from_payload(board.get("folder"))
+    )
+    context = " / ".join(part for part in (team, collection) if part)
+    prefix = f"{context} - " if context else ""
+    return f"{prefix}{name} ({board.get('id')})"
+
+
 def show_error_later(after: Callable[[int, Callable[[], None]], object], title: str, error: BaseException) -> None:
     message = str(error)
     after(0, lambda: messagebox.showerror(title, message))
@@ -163,11 +182,9 @@ class MiroPipelineApp(ctk.CTk):
         self.account_frame = ctk.CTkFrame(self.path_frame, fg_color="transparent")
         self.account_frame.grid_columnconfigure(1, weight=1)
         ctk.CTkLabel(self.account_frame, text="Board").grid(row=0, column=0, sticky="e", **pad)
-        self.board_menu = ctk.CTkOptionMenu(self.account_frame, values=["load boards"], command=self.on_board_selected)
+        self.board_menu = ctk.CTkOptionMenu(self.account_frame, values=["Authenticate first"], command=self.on_board_selected)
         self.board_menu.grid(row=0, column=1, sticky="we", **pad)
-        ctk.CTkButton(self.account_frame, text="Authenticate", width=130, command=self.authorize_and_load_boards).grid(row=0, column=2, **pad)
-        self.load_boards_button = ctk.CTkButton(self.account_frame, text="Load boards", width=130, command=self.load_boards)
-        self.load_boards_button.grid(row=0, column=3, **pad)
+        ctk.CTkButton(self.account_frame, text="Authenticate / refresh", width=170, command=self.authenticate_and_refresh_boards).grid(row=0, column=2, columnspan=2, **pad)
 
         self.url_frame = ctk.CTkFrame(self.path_frame, fg_color="transparent")
         self.url_frame.grid_columnconfigure(1, weight=1)
@@ -334,37 +351,46 @@ class MiroPipelineApp(ctk.CTk):
     def _apply_boards(self, boards: list[dict]) -> None:
         labels = []
         by_label: dict[str, dict] = {}
-        for board in boards:
-            name = str(board.get("name") or board.get("id") or "board")
-            label = f"{name} ({board.get('id')})"
+        sorted_boards = sorted(
+            boards,
+            key=lambda board: (
+                _name_from_payload(board.get("team")).casefold(),
+                _name_from_payload(board.get("project")).casefold(),
+                str(board.get("name") or "").casefold(),
+                str(board.get("id") or ""),
+            ),
+        )
+        for board in sorted_boards:
+            base_label = board_label(board)
+            label = base_label
+            suffix = 2
+            while label in by_label:
+                label = f"{base_label} #{suffix}"
+                suffix += 1
             labels.append(label)
             by_label[label] = board
         self.boards_by_label = by_label
-        self.after(0, lambda: self.board_menu.configure(values=labels or ["load boards"]))
+        self.after(0, lambda: self.board_menu.configure(values=labels or ["No boards available"]))
         if labels:
             self.after(0, lambda: self.board_menu.set(labels[0]))
             self.after(0, lambda: self.on_board_selected(labels[0]))
-        self._log(f"Loaded boards: {len(labels)}")
+        team_keys = {
+            str((board.get("team") or {}).get("id") or (board.get("team") or {}).get("name") or "")
+            for board in boards
+        }
+        teams = len({team for team in team_keys if team})
+        self._log(f"Loaded boards: {len(labels)} across {teams} team(s) visible to this Miro app/user.")
 
-    def authorize_and_load_boards(self) -> None:
+    def authenticate_and_refresh_boards(self) -> None:
         def worker() -> None:
             try:
-                token = self._authorize_token()
-                self._log("OAuth token obtained for this GUI session.")
+                token = self._token()
+                if self.token:
+                    self._log("Miro token ready for this GUI session.")
                 self._apply_boards(get_boards(token))
             except Exception as exc:  # noqa: BLE001
                 self._log(f"OAuth failed: {exc}")
                 show_error_later(self.after, "OAuth failed", exc)
-
-        threading.Thread(target=worker, daemon=True).start()
-
-    def load_boards(self) -> None:
-        def worker() -> None:
-            try:
-                self._apply_boards(get_boards(self._token()))
-            except Exception as exc:  # noqa: BLE001
-                self._log(f"Board load failed: {exc}")
-                show_error_later(self.after, "Board load failed", exc)
 
         threading.Thread(target=worker, daemon=True).start()
 
@@ -546,7 +572,7 @@ class MiroPipelineApp(ctk.CTk):
                     if source_mode == ACCOUNT_SOURCE_MODE:
                         board_id = self.selected_account_board_id
                         if not board_id:
-                            raise ValueError("Load boards and choose a board.")
+                            raise ValueError("Authenticate and choose a board.")
                         label = self._selected_board_label()
                     else:
                         board_id = board_id_from_text(self.board_id.get())

@@ -7,7 +7,13 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from Miro_2_Obsidian_GUI import authorize_gui_token, board_id_from_text, board_refs_from_file, show_error_later
+from Miro_2_Obsidian_GUI import (
+    authorize_gui_token,
+    board_id_from_text,
+    board_label,
+    board_refs_from_file,
+    show_error_later,
+)
 from miro_oauth_token import OAuthConfig
 
 
@@ -48,6 +54,22 @@ class MiroObsidianGuiHelperTests(unittest.TestCase):
             refs = board_refs_from_file(path)
 
         self.assertEqual(refs, [("uXjAlpha=", "Alpha")])
+
+    def test_board_label_includes_team_and_collection_when_present(self) -> None:
+        self.assertEqual(
+            board_label(
+                {
+                    "id": "board-1",
+                    "name": "Roadmap",
+                    "team": {"name": "Team A"},
+                    "project": {"name": "Project X"},
+                }
+            ),
+            "Team A / Project X - Roadmap (board-1)",
+        )
+
+    def test_board_label_handles_missing_context(self) -> None:
+        self.assertEqual(board_label({"id": "board-1", "name": "Roadmap"}), "Roadmap (board-1)")
 
     def test_authorize_gui_token_prefers_existing_env_token(self) -> None:
         with patch.dict(os.environ, {"MIRO_ACCESS_TOKEN": "env-token"}, clear=True):

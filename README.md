@@ -140,7 +140,8 @@ python Miro_2_Obsidian_GUI.py
 
 The GUI is the main user-facing entry point. It keeps the user paths separate:
 
-- `Miro account`: authenticate, load boards, choose one board.
+- `Miro account`: authenticate once, automatically load every board Miro returns
+  for this app/user, then choose one board.
 - `Miro URL`: paste one Miro board link.
 - `Miro URL list`: choose a Markdown/JSON file with Miro board links.
 - `Existing JSON`: choose an already exported canonical JSON; no Miro token or
@@ -181,6 +182,13 @@ Benefit:
 - `Miro URL` and `Miro URL list` can export REST experimental JSON plus assets.
 - You avoid manually copying short-lived access tokens.
 
+The board picker is permission-bound. After one OAuth flow the GUI calls the
+paginated Miro boards API and shows all boards returned for the authorized user
+and app across visible teams. If a team or private board is missing, install or
+approve the same Miro app in that team and make sure the user can access the
+board. Team/project/collection names are shown in the picker when Miro includes
+them in the board-list response.
+
 Setup:
 
 1. Open Miro in the browser with the account that can access the target boards.
@@ -211,6 +219,7 @@ git and is read by both the unified GUI and the old `Miro_2_Json` downloader.
 Official references:
 
 - OAuth guide: https://developers.miro.com/docs/getting-started-with-oauth
+- List boards API: https://developers.miro.com/reference/get-boards
 - Your apps: https://miro.com/app/settings/user-profile/apps
 
 If the browser returns to `http://localhost:8765/callback?...` and shows

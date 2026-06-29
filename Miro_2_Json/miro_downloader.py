@@ -207,11 +207,9 @@ def get_boards(token: str) -> list[dict]:
         r.raise_for_status()
         data = r.json()
         for b in data.get("data", []):
-            boards_data.append({
-                "id": b["id"],
-                "name": b.get("name"),
-                "team": b.get("team", {}),
-            })
+            board = dict(b)
+            board.setdefault("team", {})
+            boards_data.append(board)
         url = data.get("links", {}).get("next")
         time.sleep(0.2)
 
