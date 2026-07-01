@@ -118,6 +118,28 @@ class MiroCommentProbeTests(unittest.TestCase):
         self.assertEqual(payload["decision"], "comments_available_with_items")
         self.assertEqual(payload["comments"][0]["id"], "comment-1")
 
+    def test_probe_follows_available_comments_pagination(self) -> None:
+        session = FakeSession([
+            FakeResponse({"data": []}, status_code=400),
+            FakeResponse(
+                {
+                    "data": [{"id": "comment-1", "text": "First"}],
+                    "links": {"next": "https://api.miro.test/v2/boards/board-1/comments?cursor=2"},
+                },
+                status_code=200,
+            ),
+            FakeResponse({"error": "Not found."}, status_code=404),
+            FakeResponse({"data": [{"id": "comment-2", "text": "Second"}]}, status_code=200),
+        ])
+
+        payload = run_comment_probe(board_id="board-1", token="secret-token", session=session)
+
+        self.assertEqual([comment["id"] for comment in payload["comments"]], ["comment-1", "comment-2"])
+        self.assertEqual(payload["summary"]["comment_items"], 2)
+        self.assertEqual(len(session.calls), 4)
+        self.assertIn("cursor=2", session.calls[-1]["url"])
+        self.assertIn("pages", payload["requests"][1])
+
     def test_probe_marks_empty_available_source(self) -> None:
         session = FakeSession([
             FakeResponse({"data": []}, status_code=400),

@@ -67,7 +67,7 @@ class MiroSourceExpansionWorkflowTests(unittest.TestCase):
 
         report = render_next_actions(rows)
 
-        self.assertIn("`slide_container`", report)
+        self.assertIn("`kanban`", report)
         self.assertIn("source_limited", report)
 
     def test_analyze_writes_report_and_merged_json(self) -> None:

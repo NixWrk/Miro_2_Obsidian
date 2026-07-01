@@ -12,7 +12,13 @@ SCRIPTS_DIR = REPO_ROOT / "scripts"
 
 sys.path.insert(0, str(SCRIPTS_DIR))
 
-from miro_rest_export_board import download_export_assets, export_board_items, write_json  # noqa: E402
+from miro_rest_export_board import (  # noqa: E402
+    build_board_source_payload,
+    download_export_assets,
+    export_board_comments,
+    export_board_items,
+    write_json,
+)
 
 
 class MiroRestExportBoardTests(unittest.TestCase):
@@ -40,6 +46,41 @@ class MiroRestExportBoardTests(unittest.TestCase):
 
             self.assertTrue(path.exists())
             self.assertIn('"item-1"', path.read_text(encoding="utf-8"))
+
+    def test_export_board_comments_uses_comment_probe_and_dedupes(self) -> None:
+        comments = [
+            {"id": "comment-1", "type": "comment", "content": "Hello"},
+            {"id": "comment-1", "type": "comment", "content": "Hello again"},
+        ]
+        messages: list[str] = []
+
+        with patch(
+            "miro_comment_probe.run_comment_probe",
+            return_value={"decision": "comments_available_with_items", "comments": comments},
+        ) as probe:
+            result = export_board_comments(board_id="board-1", token="token-1", logger=messages.append)
+
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0]["id"], "comment-1")
+        probe.assert_called_once_with(board_id="board-1", token="token-1")
+        self.assertTrue(any("comments=1" in message for message in messages))
+
+    def test_export_board_comments_is_optional_when_probe_fails(self) -> None:
+        messages: list[str] = []
+
+        with patch("miro_comment_probe.run_comment_probe", side_effect=RuntimeError("boom")):
+            result = export_board_comments(board_id="board-1", token="token-1", logger=messages.append)
+
+        self.assertEqual(result, [])
+        self.assertTrue(any("decision=probe_failed" in message for message in messages))
+
+    def test_build_board_source_payload_keeps_items_and_comment_sidecar(self) -> None:
+        items = [{"id": "text-1", "type": "text"}]
+        comments = [{"id": "comment-1", "type": "comment"}]
+
+        payload = build_board_source_payload(items, comments)
+
+        self.assertEqual(payload, {"items": items, "comments": comments})
 
     def test_download_export_assets_creates_sidecar_and_sets_local_names(self) -> None:
         items = [

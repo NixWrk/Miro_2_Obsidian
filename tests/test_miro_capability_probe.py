@@ -154,6 +154,56 @@ class MiroCapabilityProbeTests(unittest.TestCase):
         self.assertEqual(rows["mindmap_node"].coverage, "rest_only")
         self.assertEqual(rows["mindmap_node"].action, "covered_or_audit_needed")
 
+    def test_code_items_are_covered_after_converter_fixture(self) -> None:
+        rest_root = [
+            {
+                "id": "code-1",
+                "type": "code",
+                "position": {"x": 10, "y": 20},
+                "geometry": {"width": 320, "height": 160},
+                "data": {"code": "print('hello')", "language": "python"},
+            }
+        ]
+
+        rows = {row.item_type: row for row in build_coverage_rows(rest_root, [])}
+
+        self.assertEqual(rows["code"].coverage, "rest_only")
+        self.assertEqual(rows["code"].rest.with_content, 1)
+        self.assertEqual(rows["code"].action, "covered_or_audit_needed")
+
+    def test_comment_sidecar_is_covered_when_present(self) -> None:
+        rest_root = {
+            "items": [{"id": "text-1", "type": "text"}],
+            "comments": [
+                {
+                    "id": "comment-1",
+                    "type": "comment",
+                    "messages": [{"content": "Please check this"}],
+                }
+            ],
+        }
+
+        rows = {row.item_type: row for row in build_coverage_rows(rest_root, [])}
+
+        self.assertEqual(rows["comment"].coverage, "rest_only")
+        self.assertEqual(rows["comment"].rest.with_content, 1)
+        self.assertEqual(rows["comment"].action, "covered_or_audit_needed")
+
+    def test_slide_container_is_covered_when_rest_exposes_it(self) -> None:
+        rest_root = [
+            {
+                "id": "deck-1",
+                "type": "slide_container",
+                "position": {"x": 10, "y": 20},
+                "geometry": {"width": 1200, "height": 675},
+            }
+        ]
+
+        rows = {row.item_type: row for row in build_coverage_rows(rest_root, [])}
+
+        self.assertEqual(rows["slide_container"].coverage, "rest_only")
+        self.assertEqual(rows["slide_container"].action, "covered_or_audit_needed")
+
     def test_report_contains_actionable_candidate_rows(self) -> None:
         rows = build_coverage_rows([], [{"id": "tag-1", "type": "tag", "x": 0, "y": 0, "width": 80, "height": 24}])
 

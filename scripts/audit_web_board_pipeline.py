@@ -29,7 +29,13 @@ from Scale_engine import ViewProfile, pick_recommended_scale  # noqa: E402
 from audit_item_node_mapping import summarize_mapping  # noqa: E402
 from audit_missing_miro_items import audit_missing_items  # noqa: E402
 from audit_node_overlaps import audit_nodes, build_miro_source_rects, overlap_to_dict  # noqa: E402
-from miro_rest_export_board import download_export_assets, export_board_items, write_json  # noqa: E402
+from miro_rest_export_board import (  # noqa: E402
+    build_board_source_payload,
+    download_export_assets,
+    export_board_comments,
+    export_board_items,
+    write_json,
+)
 
 
 BOARD_LINK_RE = re.compile(r"\[(?P<label>[^\]]+)\]\((?P<url>https://miro\.com/app/board/(?P<id>[^/?#]+)[^)]*)\)")
@@ -267,6 +273,7 @@ def compute_scale(miro_root: Any, *, scale_mode: str, min_zoom: float) -> tuple[
 def export_rest_board(board: BoardRef, output_json: Path, *, token: str, allow_missing_assets: bool) -> dict[str, Any]:
     messages: list[str] = []
     items = export_board_items(board_id=board.board_id, token=token, logger=messages.append)
+    comments = export_board_comments(board_id=board.board_id, token=token, logger=messages.append)
     download_stats = download_export_assets(
         items,
         output_path=output_json,
@@ -274,10 +281,11 @@ def export_rest_board(board: BoardRef, output_json: Path, *, token: str, allow_m
         logger=messages.append,
         strict=not allow_missing_assets,
     )
-    write_json(output_json, items)
+    write_json(output_json, build_board_source_payload(items, comments))
     return {
         "path": str(output_json),
         "items": len(items),
+        "comments": len(comments),
         "download_stats": download_stats,
         "log_tail": messages[-10:],
     }

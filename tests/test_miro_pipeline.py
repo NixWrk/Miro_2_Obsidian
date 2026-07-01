@@ -14,6 +14,7 @@ CONVERTER_DIR = REPO_ROOT / "Json_2_Canvas"
 sys.path.insert(0, str(CONVERTER_DIR))
 sys.path.insert(0, str(SCRIPTS_DIR))
 
+import miro_pipeline  # noqa: E402
 from Scale_engine import ViewProfile  # noqa: E402
 from miro_pipeline import resolve_scale, run_existing_json_pipeline, run_rest_experimental_pipeline  # noqa: E402
 
@@ -29,9 +30,11 @@ class MiroPipelineTests(unittest.TestCase):
             vault_root = root / "vault"
             attachment_dir = vault_root / "Files" / "Attachments"
             expected_canvas = target_dir / "board.canvas"
+            comments = [{"id": "comment-1", "type": "comment", "content": "Nice"}]
 
             with (
                 patch("miro_pipeline.export_board_items", return_value=items) as export_items,
+                patch("miro_pipeline.export_board_comments", return_value=comments) as export_comments,
                 patch("miro_pipeline.download_export_assets", return_value={"images": 0, "documents": 0, "doc_formats": 0, "embeds": 0, "failed": 0}) as assets,
                 patch("miro_pipeline.write_json") as write_json,
                 patch("miro_pipeline.resolve_scale", return_value=(0.5, {"scale_source": "auto"})) as scale,
@@ -49,9 +52,10 @@ class MiroPipelineTests(unittest.TestCase):
 
         export_items.assert_called_once()
         self.assertTrue(export_items.call_args.kwargs["prefer_experimental"])
+        export_comments.assert_called_once()
         assets.assert_called_once()
         self.assertTrue(assets.call_args.kwargs["strict"])
-        write_json.assert_called_once_with(source_json, items)
+        write_json.assert_called_once_with(source_json, {"items": items, "comments": comments})
         scale.assert_called_once()
         convert.assert_called_once()
         self.assertEqual(convert.call_args.args[:3], (str(source_json), str(target_dir), str(vault_root)))
@@ -66,6 +70,7 @@ class MiroPipelineTests(unittest.TestCase):
             root = Path(tmp)
             with (
                 patch("miro_pipeline.export_board_items", return_value=[]),
+                patch("miro_pipeline.export_board_comments", return_value=[]),
                 patch("miro_pipeline.download_export_assets", return_value={"images": 0, "documents": 0, "doc_formats": 0, "embeds": 0, "failed": 1}) as assets,
                 patch("miro_pipeline.write_json"),
                 patch("miro_pipeline.resolve_scale", return_value=(1.0, {"scale_source": "auto"})),
@@ -88,6 +93,7 @@ class MiroPipelineTests(unittest.TestCase):
             with (
                 patch("miro_pipeline.setup_obsidian_plugins") as plugins,
                 patch("miro_pipeline.export_board_items", return_value=[]),
+                patch("miro_pipeline.export_board_comments", return_value=[]),
                 patch("miro_pipeline.download_export_assets", return_value={}),
                 patch("miro_pipeline.write_json"),
                 patch("miro_pipeline.resolve_scale", return_value=(1.0, {"scale_source": "auto"})),
@@ -132,6 +138,51 @@ class MiroPipelineTests(unittest.TestCase):
         self.assertEqual(convert.call_args.kwargs["text_style_mode"], "obsidian")
         self.assertEqual(convert.call_args.kwargs["attachment_dir"], str(attachment_dir))
         self.assertEqual(result.canvas_path, expected_canvas)
+
+    def test_cli_existing_json_skips_miro_auth_and_rest_export(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source_json = root / "board.json"
+            target_dir = root / "target"
+            vault_root = root / "vault"
+            attachment_dir = vault_root / "Files" / "Attachments"
+            expected = miro_pipeline.PipelineResult(
+                source_json=source_json,
+                canvas_path=target_dir / "board.canvas",
+                item_count=0,
+                asset_stats={},
+                scale=1.0,
+                scale_context={"scale_source": "explicit"},
+                messages=[],
+            )
+
+            argv = [
+                "miro_pipeline.py",
+                "--existing-json",
+                "--source-json",
+                str(source_json),
+                "--target-dir",
+                str(target_dir),
+                "--vault-root",
+                str(vault_root),
+                "--scale",
+                "1",
+            ]
+            with (
+                patch.object(sys, "argv", argv),
+                patch("miro_pipeline.resolve_attachment_dir", return_value=attachment_dir),
+                patch("miro_pipeline.resolve_token_from_args") as auth,
+                patch("miro_pipeline.run_rest_experimental_pipeline") as rest,
+                patch("miro_pipeline.run_existing_json_pipeline", return_value=expected) as existing,
+            ):
+                result = miro_pipeline.main()
+
+        self.assertEqual(result, 0)
+        auth.assert_not_called()
+        rest.assert_not_called()
+        existing.assert_called_once()
+        self.assertEqual(existing.call_args.kwargs["source_json"], source_json)
+        self.assertEqual(existing.call_args.kwargs["attachment_dir"], attachment_dir)
 
     def test_resolve_scale_uses_scale_engine_for_auto_scale(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

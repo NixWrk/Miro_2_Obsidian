@@ -20,6 +20,14 @@ from Miro_2_Obsidian_GUI import (
 from miro_oauth_token import OAuthConfig
 
 
+class _Value:
+    def __init__(self, value: object) -> None:
+        self.value = value
+
+    def get(self) -> object:
+        return self.value
+
+
 class MiroObsidianGuiHelperTests(unittest.TestCase):
     def test_board_id_from_text_accepts_full_miro_url_or_raw_id(self) -> None:
         self.assertEqual(
@@ -153,6 +161,44 @@ class MiroObsidianGuiHelperTests(unittest.TestCase):
 
         self.assertEqual(sorted(results), ["token-1", "token-1"])
         authorize.assert_called_once()
+
+    def test_miro_export_modes_use_canonical_pipeline(self) -> None:
+        app = object.__new__(MiroPipelineApp)
+        app._token = lambda: "token-1"
+        app._log = lambda _message: None
+        app.scale = _Value("")
+        app.theme = _Value("dark")
+        app.text_style_mode = _Value("miro")
+        app.allow_missing_assets = _Value(False)
+        app.install_obsidian_plugins = _Value(False)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source_json = root / "source.json"
+            target_dir = root / "target"
+            vault_root = root / "vault"
+            attachment_dir = vault_root / "Files" / "Attachments"
+            profile = object()
+
+            with patch("Miro_2_Obsidian_GUI.run_rest_experimental_pipeline", return_value="ok") as pipeline:
+                result = MiroPipelineApp._run_one_board(
+                    app,
+                    board_id="board-1",
+                    label="Board",
+                    source_json=source_json,
+                    target_dir=target_dir,
+                    vault_root=vault_root,
+                    attachment_dir=attachment_dir,
+                    profile=profile,
+                    min_font_px=8,
+                )
+
+        self.assertEqual(result, "ok")
+        pipeline.assert_called_once()
+        self.assertEqual(pipeline.call_args.kwargs["board_id"], "board-1")
+        self.assertEqual(pipeline.call_args.kwargs["token"], "token-1")
+        self.assertEqual(pipeline.call_args.kwargs["source_json"], source_json)
+        self.assertEqual(pipeline.call_args.kwargs["attachment_dir"], attachment_dir)
 
 
 if __name__ == "__main__":

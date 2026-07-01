@@ -4,7 +4,7 @@
 
 Проект сейчас развивается как проверяемый pipeline, а не как один монолитный GUI:
 
-1. Получить данные из Miro через REST, Web SDK exporter или локальный JSON.
+1. Получить данные из Miro через REST, REST comments sidecar, Web SDK exporter или локальный JSON.
 2. Скачать обязательные вложения рядом с JSON.
 3. Сконвертировать Miro JSON в JSONCanvas `.canvas`.
 4. Проверить структуру, маппинг, пересечения, вложения и визуальный рендер.
@@ -16,7 +16,7 @@
 
 ## Что уже есть
 
-- REST exporter для Miro board items и вложений.
+- REST exporter для Miro board items, comments sidecar и вложений.
 - GUI downloader для Miro -> JSON.
 - GUI converter для JSON -> Obsidian Canvas.
 - Конвертер с поддержкой text/shape/sticky/image/document/card/app_card/embed/frame/connector/comment sidecar/mindmap_node/code и части slide_container.
@@ -29,10 +29,10 @@
 
 ## Текущие ограничения
 
-- В проекте пока нет единого production CLI для прямой команды `json -> canvas`; основной ручной путь конвертации идет через `Json_2_Canvas/Json_2_Canvas_V5.py`, а автоматизированный путь - через regression/local/web-board runners.
+- Legacy GUI/runner paths still exist; the supported reproducible CLI path is `scripts/miro_pipeline.py`.
 - В репозитории пока нет `requirements.txt` или `pyproject.toml`; зависимости надо формализовать отдельной cleanup-задачей.
 - Часть Miro items является source-limited: Miro API/Web SDK не отдают нужное содержимое или точную геометрию. Такие элементы фиксируются в `tasks/miro_capabilities.md`.
-- Miro app/Web SDK exporter пока не доказан как обязательная часть production pipeline. Его ценность нужно измерить против REST.
+- Miro app/Web SDK exporter остается диагностическим/обогащающим инструментом; production path is REST-first until Web SDK proves recoverable content that REST lacks.
 - `work/` и `_obsidian_oracle_vault/` являются локальными рабочими артефактами и не коммитятся.
 
 ## Карта репозитория
@@ -115,12 +115,16 @@ The supported reproducible path is:
 
 ```text
 Miro board
-  -> REST v2-experimental export
+  -> REST v2-experimental items + comments sidecar
   -> asset sidecar download
-  -> one canonical .miro JSON
+  -> one canonical .miro JSON with {items, comments}
   -> Json_2_Canvas/Converter.py
   -> Obsidian .canvas
 ```
+
+The REST export and canonical pipeline write comments into root `comments[]`
+when Miro exposes them through the checked comments endpoint. Comments are
+converted as Canvas text annotations by the normal converter path.
 
 Run it from CLI:
 
@@ -128,6 +132,16 @@ Run it from CLI:
 python scripts\miro_pipeline.py `
   --board-id uXj... `
   --source-json work\MIRO2OBSIDIAN\Miro_2_JSON\board.json `
+  --vault-root path\to\ObsidianVault `
+  --target-dir path\to\ObsidianVault\MIRO2OBSIDIAN\board
+```
+
+Convert an existing canonical Miro JSON without contacting Miro:
+
+```powershell
+python scripts\miro_pipeline.py `
+  --existing-json `
+  --source-json path\to\board.json `
   --vault-root path\to\ObsidianVault `
   --target-dir path\to\ObsidianVault\MIRO2OBSIDIAN\board
 ```
@@ -431,6 +445,6 @@ python tools\canvas_render\capture_fixture.py --all
 
 1. Формализовать зависимости проекта в `requirements.txt` или `pyproject.toml`.
 2. Добавить единый CLI для `json -> canvas`.
-3. Измерить полезность Miro app против REST.
+3. Use Web SDK only for proven REST gaps, not as a parallel converter path.
 4. Консолидировать capability evidence в одну таблицу.
 5. Продолжить web-board audit и закрывать generated-overlap/mapping-actionable проблемы по одному классу за цикл.

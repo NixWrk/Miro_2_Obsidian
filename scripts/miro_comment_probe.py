@@ -100,6 +100,57 @@ def extract_comment_items(results: list[dict[str, Any]]) -> list[dict[str, Any]]
     return comments
 
 
+def _next_page_url(body: Any) -> str:
+    if not isinstance(body, dict):
+        return ""
+    links = body.get("links")
+    if not isinstance(links, dict):
+        return ""
+    return str(links.get("next") or links.get("nextPage") or "").strip()
+
+
+def _fetch_paginated_comment_items(
+    *,
+    first_result: dict[str, Any],
+    session: Any,
+    token: str,
+    include_body: bool,
+) -> list[dict[str, Any]]:
+    comments: list[dict[str, Any]] = []
+    pages: list[dict[str, Any]] = []
+    next_url = _next_page_url(first_result.get("body"))
+    seen_urls: set[str] = set()
+
+    while next_url and next_url not in seen_urls:
+        seen_urls.add(next_url)
+        response = session.get(
+            next_url,
+            params={},
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=30,
+        )
+        status_code = int(getattr(response, "status_code", 0) or 0)
+        page = {
+            "key": first_result.get("key"),
+            "method": "GET",
+            "url": next_url,
+            "params": {},
+            "expectation": "Fetches the next page from an available comments collection.",
+            "status_code": status_code,
+            "classification": classify_status(status_code),
+            "body": _response_body(response, include_body=include_body),
+        }
+        pages.append(page)
+        if page["classification"] != "available":
+            break
+        comments.extend(extract_comment_items([page]))
+        next_url = _next_page_url(page.get("body"))
+
+    if pages:
+        first_result["pages"] = pages
+    return comments
+
+
 def decide_probe_result(available_count: int, comment_count: int) -> str:
     if comment_count > 0:
         return "comments_available_with_items"
@@ -154,6 +205,15 @@ def run_comment_probe(
     by_classification = Counter(result["classification"] for result in results)
     available = [result for result in results if result["classification"] == "available"]
     comments = extract_comment_items(results)
+    for result in available:
+        comments.extend(
+            _fetch_paginated_comment_items(
+                first_result=result,
+                session=session,
+                token=token,
+                include_body=include_body,
+            )
+        )
     return {
         "kind": "miro_comment_source_probe",
         "board_id": board_id,

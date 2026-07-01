@@ -19,7 +19,9 @@ from Converter import convert_miro_to_canvas  # noqa: E402
 from Scale_engine import OBSIDIAN_FONT_SIZE, ViewProfile, compute_scale_preview  # noqa: E402
 from miro_oauth_token import DEFAULT_AUTHORIZE_URL, DEFAULT_BROWSER, DEFAULT_REDIRECT_URI  # noqa: E402
 from miro_rest_export_board import (  # noqa: E402
+    build_board_source_payload,
     download_export_assets,
+    export_board_comments,
     export_board_items,
     resolve_token_from_args,
     write_json,
@@ -105,6 +107,11 @@ def run_rest_experimental_pipeline(
         prefer_experimental=True,
         logger=log,
     )
+    comments = export_board_comments(
+        board_id=board_id,
+        token=token,
+        logger=log,
+    )
 
     log("Downloading required assets next to the source JSON.")
     asset_stats = download_export_assets(
@@ -114,7 +121,7 @@ def run_rest_experimental_pipeline(
         logger=log,
         strict=not allow_missing_assets,
     )
-    write_json(source_json, items)
+    write_json(source_json, build_board_source_payload(items, comments))
 
     selected_scale, scale_context = resolve_scale(
         source_json,
@@ -241,7 +248,12 @@ def build_parser() -> argparse.ArgumentParser:
             "REST v2-experimental export, asset download, one Converter.py call."
         )
     )
-    parser.add_argument("--board-id", required=True)
+    parser.add_argument(
+        "--existing-json",
+        action="store_true",
+        help="Convert --source-json directly without contacting Miro.",
+    )
+    parser.add_argument("--board-id", help="Required unless --existing-json is used.")
     parser.add_argument("--source-json", type=Path, required=True)
     parser.add_argument("--target-dir", type=Path, required=True)
     parser.add_argument("--vault-root", type=Path, required=True)
@@ -283,25 +295,45 @@ def view_profile_from_args(args: argparse.Namespace) -> ViewProfile:
 
 
 def main() -> int:
-    args = build_parser().parse_args()
-    token = resolve_token_from_args(args)
-    result = run_rest_experimental_pipeline(
-        board_id=args.board_id,
-        token=token,
-        source_json=args.source_json,
-        target_dir=args.target_dir,
-        vault_root=args.vault_root,
-        scale=args.scale,
-        view_profile=view_profile_from_args(args),
-        min_font_px=args.min_font_px,
-        theme=args.theme,
-        text_style_mode=args.text_style_mode,
-        allow_missing_assets=args.allow_missing_assets,
-        install_obsidian_plugins=args.install_obsidian_plugins,
-        advanced_canvas_source_plugins_dir=args.advanced_canvas_source_plugins_dir,
-        advanced_canvas_version=args.advanced_canvas_version,
-        attachment_dir=args.attachment_dir or resolve_attachment_dir(args.vault_root, args.target_dir),
-    )
+    parser = build_parser()
+    args = parser.parse_args()
+    attachment_dir = args.attachment_dir or resolve_attachment_dir(args.vault_root, args.target_dir)
+    if args.existing_json:
+        result = run_existing_json_pipeline(
+            source_json=args.source_json,
+            target_dir=args.target_dir,
+            vault_root=args.vault_root,
+            scale=args.scale,
+            view_profile=view_profile_from_args(args),
+            min_font_px=args.min_font_px,
+            theme=args.theme,
+            text_style_mode=args.text_style_mode,
+            install_obsidian_plugins=args.install_obsidian_plugins,
+            advanced_canvas_source_plugins_dir=args.advanced_canvas_source_plugins_dir,
+            advanced_canvas_version=args.advanced_canvas_version,
+            attachment_dir=attachment_dir,
+        )
+    else:
+        if not args.board_id:
+            parser.error("--board-id is required unless --existing-json is used")
+        token = resolve_token_from_args(args)
+        result = run_rest_experimental_pipeline(
+            board_id=args.board_id,
+            token=token,
+            source_json=args.source_json,
+            target_dir=args.target_dir,
+            vault_root=args.vault_root,
+            scale=args.scale,
+            view_profile=view_profile_from_args(args),
+            min_font_px=args.min_font_px,
+            theme=args.theme,
+            text_style_mode=args.text_style_mode,
+            allow_missing_assets=args.allow_missing_assets,
+            install_obsidian_plugins=args.install_obsidian_plugins,
+            advanced_canvas_source_plugins_dir=args.advanced_canvas_source_plugins_dir,
+            advanced_canvas_version=args.advanced_canvas_version,
+            attachment_dir=attachment_dir,
+        )
     print(f"items={result.item_count}")
     print(f"source_json={result.source_json}")
     print(f"canvas={result.canvas_path}")

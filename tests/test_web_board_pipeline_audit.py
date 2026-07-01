@@ -5,6 +5,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -16,6 +17,7 @@ from audit_web_board_pipeline import (  # noqa: E402
     audit_one_board,
     board_artifact_key,
     build_summary,
+    export_rest_board,
     expand_text_style_modes,
     find_local_export,
     parse_board_markdown,
@@ -88,6 +90,28 @@ class WebBoardPipelineAuditTests(unittest.TestCase):
         self.assertEqual(summary["ok"], 1)
         self.assertEqual(summary["needs_review"], 1)
         self.assertEqual(summary["missing_json"], 1)
+
+    def test_export_rest_board_writes_canonical_source_payload(self) -> None:
+        board = BoardRef(board_id="uXjVAlpha=", label="Alpha", url="https://miro.com/app/board/uXjVAlpha=/")
+        items = [{"id": "text-1", "type": "text"}]
+        comments = [{"id": "comment-1", "type": "comment"}]
+
+        with tempfile.TemporaryDirectory(prefix="miro2obs_web_export_") as tmp:
+            output_json = Path(tmp) / "board.json"
+            with (
+                patch("audit_web_board_pipeline.export_board_items", return_value=items) as export_items,
+                patch("audit_web_board_pipeline.export_board_comments", return_value=comments) as export_comments,
+                patch("audit_web_board_pipeline.download_export_assets", return_value={"failed": 0}) as assets,
+                patch("audit_web_board_pipeline.write_json") as write_json,
+            ):
+                result = export_rest_board(board, output_json, token="token-1", allow_missing_assets=False)
+
+        export_items.assert_called_once()
+        export_comments.assert_called_once()
+        assets.assert_called_once()
+        write_json.assert_called_once_with(output_json, {"items": items, "comments": comments})
+        self.assertEqual(result["items"], 1)
+        self.assertEqual(result["comments"], 1)
 
     def test_audit_one_board_converts_and_reports_clean_minimal_export(self) -> None:
         with tempfile.TemporaryDirectory(prefix="miro2obs_web_pipeline_") as tmp:

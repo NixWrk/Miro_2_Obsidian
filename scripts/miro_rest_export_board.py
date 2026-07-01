@@ -48,6 +48,37 @@ def export_board_items(
     return add_browser_links(board_id, _dedupe_miro_items(items))
 
 
+def export_board_comments(
+    *,
+    board_id: str,
+    token: str,
+    logger: Any | None = None,
+) -> list[dict[str, Any]]:
+    try:
+        from miro_comment_probe import run_comment_probe  # noqa: PLC0415
+
+        payload = run_comment_probe(board_id=board_id, token=token)
+    except Exception as exc:  # noqa: BLE001
+        if logger:
+            logger(f"comments=0 decision=probe_failed error={exc}")
+        return []
+
+    comments = payload.get("comments")
+    if not isinstance(comments, list):
+        comments = []
+    comments = _dedupe_miro_items([comment for comment in comments if isinstance(comment, dict)])
+    if logger:
+        logger(f"comments={len(comments)} decision={payload.get('decision') or 'unknown'}")
+    return comments
+
+
+def build_board_source_payload(
+    items: list[dict[str, Any]],
+    comments: list[dict[str, Any]],
+) -> dict[str, list[dict[str, Any]]]:
+    return {"items": items, "comments": comments}
+
+
 def write_json(path: Path, payload: Any) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
@@ -411,6 +442,11 @@ def main() -> int:
         prefer_experimental=not args.stable_items,
         logger=messages.append,
     )
+    comments = export_board_comments(
+        board_id=args.board_id,
+        token=token,
+        logger=messages.append,
+    )
     if not args.no_download_assets:
         download_export_assets(
             items,
@@ -419,8 +455,9 @@ def main() -> int:
             logger=messages.append,
             strict=not args.allow_missing_assets,
         )
-    write_json(args.output, items)
+    write_json(args.output, build_board_source_payload(items, comments))
     print(f"items={len(items)}")
+    print(f"comments={len(comments)}")
     print(f"output={args.output}")
     for message in messages[-5:]:
         print(f"log={message}")
