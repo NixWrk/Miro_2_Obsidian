@@ -72,6 +72,7 @@ def run_rest_experimental_pipeline(
     theme: str = "dark",
     text_style_mode: str = "miro",
     allow_missing_assets: bool = False,
+    prefer_experimental: bool = True,
     install_obsidian_plugins: bool = False,
     advanced_canvas_source_plugins_dir: Path | None = None,
     advanced_canvas_version: str = ADVANCED_CANVAS_VERSION,
@@ -100,11 +101,12 @@ def run_rest_experimental_pipeline(
             logger=log,
         )
 
-    log("Exporting board through REST v2-experimental items.")
+    rest_label = "REST v2-experimental" if prefer_experimental else "REST v2 stable"
+    log(f"Exporting board through {rest_label} items.")
     items = export_board_items(
         board_id=board_id,
         token=token,
-        prefer_experimental=True,
+        prefer_experimental=prefer_experimental,
         logger=log,
     )
     comments = export_board_comments(
@@ -269,6 +271,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--theme", choices=["dark", "light"], default="dark")
     parser.add_argument("--text-style-mode", choices=["miro", "obsidian"], default="miro")
     parser.add_argument("--allow-missing-assets", action="store_true")
+    parser.add_argument("--stable-items", action="store_true", help="Use stable v2 items instead of v2-experimental.")
     parser.add_argument("--install-obsidian-plugins", action="store_true")
     parser.add_argument("--advanced-canvas-source-plugins-dir", type=Path)
     parser.add_argument("--advanced-canvas-version", default=ADVANCED_CANVAS_VERSION)
@@ -329,6 +332,7 @@ def main() -> int:
             theme=args.theme,
             text_style_mode=args.text_style_mode,
             allow_missing_assets=args.allow_missing_assets,
+            prefer_experimental=not args.stable_items,
             install_obsidian_plugins=args.install_obsidian_plugins,
             advanced_canvas_source_plugins_dir=args.advanced_canvas_source_plugins_dir,
             advanced_canvas_version=args.advanced_canvas_version,

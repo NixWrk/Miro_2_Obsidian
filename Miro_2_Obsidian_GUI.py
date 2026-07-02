@@ -271,6 +271,21 @@ class MiroPipelineApp(ctk.CTk):
             pady=(0, 8),
         )
 
+        self.stable_items = ctk.BooleanVar(value=False)
+        self.stable_items_checkbox = ctk.CTkCheckBox(
+            options,
+            text="Use stable REST items",
+            variable=self.stable_items,
+        )
+        self.stable_items_checkbox.grid(
+            row=2,
+            column=4,
+            columnspan=2,
+            sticky="w",
+            padx=8,
+            pady=(0, 8),
+        )
+
         self.install_obsidian_plugins = ctk.BooleanVar(value=True)
         self.install_obsidian_plugins_checkbox = ctk.CTkCheckBox(
             options,
@@ -505,6 +520,7 @@ class MiroPipelineApp(ctk.CTk):
             theme=self.theme.get(),
             text_style_mode=self.text_style_mode.get(),
             allow_missing_assets=self.allow_missing_assets.get(),
+            prefer_experimental=not self.stable_items.get(),
             install_obsidian_plugins=self.install_obsidian_plugins.get(),
             attachment_dir=attachment_dir,
             logger=lambda message: self._log(f"{label}: {message}"),

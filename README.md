@@ -136,6 +136,10 @@ python scripts\miro_pipeline.py `
   --target-dir path\to\ObsidianVault\MIRO2OBSIDIAN\board
 ```
 
+If source comparison shows stable REST has better asset coverage for a board,
+add `--stable-items`. Use `--allow-missing-assets` only when you intentionally
+want a partial Canvas with missing asset references preserved for review.
+
 Convert an existing canonical Miro JSON without contacting Miro:
 
 ```powershell

@@ -170,6 +170,7 @@ class MiroObsidianGuiHelperTests(unittest.TestCase):
         app.theme = _Value("dark")
         app.text_style_mode = _Value("miro")
         app.allow_missing_assets = _Value(False)
+        app.stable_items = _Value(True)
         app.install_obsidian_plugins = _Value(False)
 
         with tempfile.TemporaryDirectory() as tmp:
@@ -199,6 +200,7 @@ class MiroObsidianGuiHelperTests(unittest.TestCase):
         self.assertEqual(pipeline.call_args.kwargs["token"], "token-1")
         self.assertEqual(pipeline.call_args.kwargs["source_json"], source_json)
         self.assertEqual(pipeline.call_args.kwargs["attachment_dir"], attachment_dir)
+        self.assertFalse(pipeline.call_args.kwargs["prefer_experimental"])
 
 
 if __name__ == "__main__":
