@@ -226,18 +226,12 @@ def _missing_asset_items(resources: list[dict[str, Any]], *, attachments_dir: Pa
     ]
 
 
-def download_export_assets(
-    items: list[dict[str, Any]],
-    *,
-    output_path: Path,
-    token: str,
-    logger: Any | None = None,
-    strict: bool = True,
-) -> dict[str, int]:
-    attachments_dir = _asset_dir_for_output(output_path)
-    attachments_dir.mkdir(parents=True, exist_ok=True)
-    safe_board = output_path.stem
-
+def _required_asset_resources(items: list[dict[str, Any]]) -> tuple[
+    list[dict[str, Any]],
+    list[dict[str, Any]],
+    list[dict[str, Any]],
+    list[dict[str, Any]],
+]:
     images = [
         item for item in items
         if item.get("type") == "image" and _ensure_data_url(item, "imageUrl", IMAGE_URL_KEYS)
@@ -254,6 +248,40 @@ def download_export_assets(
         item for item in items
         if item.get("type") == "embed" and _ensure_data_url(item, "previewUrl", EMBED_PREVIEW_URL_KEYS)
     ]
+    return images, documents, doc_formats, embeds
+
+
+def summarize_export_asset_requirements(items: list[dict[str, Any]]) -> dict[str, int]:
+    images, documents, doc_formats, embeds = _required_asset_resources(items)
+    return {
+        "images": len(images),
+        "documents": len(documents),
+        "doc_formats": len(doc_formats),
+        "embeds": len(embeds),
+    }
+
+
+def validate_export_assets(items: list[dict[str, Any]], *, output_path: Path) -> list[str]:
+    images, documents, doc_formats, _embeds = _required_asset_resources(items)
+    return _validate_downloaded_assets(
+        images + documents + doc_formats,
+        attachments_dir=_asset_dir_for_output(output_path),
+    )
+
+
+def download_export_assets(
+    items: list[dict[str, Any]],
+    *,
+    output_path: Path,
+    token: str,
+    logger: Any | None = None,
+    strict: bool = True,
+) -> dict[str, int]:
+    attachments_dir = _asset_dir_for_output(output_path)
+    attachments_dir.mkdir(parents=True, exist_ok=True)
+    safe_board = output_path.stem
+
+    images, documents, doc_formats, embeds = _required_asset_resources(items)
 
     def run_download_passes(
         resources: list[dict[str, Any]],

@@ -109,7 +109,7 @@ class MiroPipelineTests(unittest.TestCase):
 
         self.assertFalse(export_items.call_args.kwargs["prefer_experimental"])
 
-    def test_experimental_asset_failure_retries_stable_items(self) -> None:
+    def test_experimental_asset_failure_bridges_stable_asset_names(self) -> None:
         exp_items = [{"id": "image-1", "type": "image"}]
         stable_items = [{"id": "image-1", "type": "image", "local_name": "image-1.png"}]
         comments = [{"id": "comment-1", "type": "comment"}]
@@ -124,6 +124,11 @@ class MiroPipelineTests(unittest.TestCase):
                     "miro_pipeline.download_export_assets",
                     side_effect=[RuntimeError("Asset download incomplete"), {"images": 1, "failed": 0}],
                 ) as assets,
+                patch("miro_pipeline.validate_export_assets", return_value=[]),
+                patch(
+                    "miro_pipeline.summarize_export_asset_requirements",
+                    return_value={"images": 1, "documents": 0, "doc_formats": 0, "embeds": 0},
+                ),
                 patch("miro_pipeline.write_json") as write_json,
                 patch("miro_pipeline.resolve_scale", return_value=(1.0, {"scale_source": "auto"})),
                 patch("miro_pipeline.convert_miro_to_canvas", return_value=str(root / "out.canvas")),
@@ -141,7 +146,11 @@ class MiroPipelineTests(unittest.TestCase):
             [True, False],
         )
         self.assertEqual(assets.call_count, 2)
-        write_json.assert_called_once_with(source_json, {"items": stable_items, "comments": comments})
+        self.assertFalse(assets.call_args_list[1].kwargs["strict"])
+        write_json.assert_called_once_with(
+            source_json,
+            {"items": [{"id": "image-1", "type": "image", "local_name": "image-1.png"}], "comments": comments},
+        )
 
     def test_pipeline_can_install_obsidian_plugins_before_export(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

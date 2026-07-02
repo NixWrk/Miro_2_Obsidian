@@ -136,11 +136,13 @@ python scripts\miro_pipeline.py `
   --target-dir path\to\ObsidianVault\MIRO2OBSIDIAN\board
 ```
 
-By default, the pipeline starts with REST v2-experimental items and retries
-REST v2 stable items automatically when strict asset download is incomplete.
-Use `--stable-items` to force stable REST from the start. Use
-`--allow-missing-assets` only when you intentionally want a partial Canvas with
-missing asset references preserved for review.
+By default, the pipeline keeps REST v2-experimental as the source JSON and
+retries missing asset downloads. If strict asset download is still incomplete,
+it may use REST v2 stable only to fill missing asset `local_name` references for
+the same item ids; it does not replace the experimental JSON. Use
+`--stable-items` to force stable REST from the start. Use `--allow-missing-assets`
+only when you intentionally want a partial Canvas with missing asset references
+preserved for review.
 
 Convert an existing canonical Miro JSON without contacting Miro:
 

@@ -24,6 +24,8 @@ from miro_rest_export_board import (  # noqa: E402
     export_board_comments,
     export_board_items,
     resolve_token_from_args,
+    summarize_export_asset_requirements,
+    validate_export_assets,
     write_json,
 )
 from obsidian_plugin_setup import (  # noqa: E402
@@ -57,6 +59,23 @@ def resolve_scale(
     context = dict(info.get("context") or {})
     context["scale_source"] = "auto"
     return float(info["scale"]), context
+
+
+def copy_asset_local_names(base_items: list[dict[str, Any]], donor_items: list[dict[str, Any]]) -> int:
+    donor_by_id = {
+        str(item.get("id")): str(item.get("local_name") or "")
+        for item in donor_items
+        if item.get("id") is not None and item.get("local_name")
+    }
+    copied = 0
+    for item in base_items:
+        item_id = str(item.get("id") or "")
+        donor_local_name = donor_by_id.get(item_id)
+        if not donor_local_name or item.get("local_name"):
+            continue
+        item["local_name"] = donor_local_name
+        copied += 1
+    return copied
 
 
 def run_rest_experimental_pipeline(
@@ -101,38 +120,52 @@ def run_rest_experimental_pipeline(
             logger=log,
         )
 
-    def export_and_download(*, use_experimental: bool) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, int]]:
+    def export_items(*, use_experimental: bool) -> list[dict[str, Any]]:
         rest_label = "REST v2-experimental" if use_experimental else "REST v2 stable"
         log(f"Exporting board through {rest_label} items.")
-        exported_items = export_board_items(
+        return export_board_items(
             board_id=board_id,
             token=token,
             prefer_experimental=use_experimental,
             logger=log,
         )
-        exported_comments = export_board_comments(
-            board_id=board_id,
-            token=token,
-            logger=log,
-        )
+
+    def download_assets(exported_items: list[dict[str, Any]], *, strict: bool) -> dict[str, int]:
         log("Downloading required assets next to the source JSON.")
-        exported_asset_stats = download_export_assets(
+        return download_export_assets(
             exported_items,
             output_path=source_json,
             token=token,
             logger=log,
-            strict=not allow_missing_assets,
+            strict=strict,
         )
-        return exported_items, exported_comments, exported_asset_stats
+
+    items = export_items(use_experimental=prefer_experimental)
+    comments = export_board_comments(
+        board_id=board_id,
+        token=token,
+        logger=log,
+    )
 
     try:
-        items, comments, asset_stats = export_and_download(use_experimental=prefer_experimental)
+        asset_stats = download_assets(items, strict=not allow_missing_assets)
     except RuntimeError as exc:
         if not prefer_experimental or allow_missing_assets:
             raise
         log(f"REST v2-experimental assets incomplete: {exc}")
-        log("Retrying through REST v2 stable items.")
-        items, comments, asset_stats = export_and_download(use_experimental=False)
+        log("Using REST v2 stable only to fill missing asset local_names.")
+        stable_items = export_items(use_experimental=False)
+        download_assets(stable_items, strict=False)
+        copied = copy_asset_local_names(items, stable_items)
+        missing_assets = validate_export_assets(items, output_path=source_json)
+        asset_stats = summarize_export_asset_requirements(items)
+        asset_stats["failed"] = len(missing_assets)
+        asset_stats["bridged"] = copied
+        log(f"asset_bridge copied={copied} missing={len(missing_assets)}")
+        if missing_assets:
+            shown = "; ".join(missing_assets[:5])
+            more = "" if len(missing_assets) <= 5 else f"; +{len(missing_assets) - 5} more"
+            raise RuntimeError(f"Asset download incomplete after stable asset bridge: {shown}{more}") from exc
 
     write_json(source_json, build_board_source_payload(items, comments))
 
