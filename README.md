@@ -348,6 +348,68 @@ python scripts\audit_missing_miro_items.py path\to\board.json path\to\board.canv
 python scripts\audit_item_node_mapping.py path\to\board.json path\to\board.canvas
 ```
 
+## Export source comparison
+
+Use this when the question is not just "does production pass?", but "which Miro
+source or source combination gives the best recoverable data?".
+
+By default this uses the curated web-board list:
+
+```text
+work\MIRO2OBSIDIAN\Obs_Miro\Концепт\Web_boards.md
+```
+
+Prepare paths and auth config without contacting Miro:
+
+```powershell
+python -m scripts.compare_miro_export_sources `
+  --sources all `
+  --preflight
+```
+
+Run a small pilot:
+
+```powershell
+python -m scripts.compare_miro_export_sources `
+  --sources all `
+  --oauth `
+  --limit 1 `
+  --text-style-mode obsidian
+```
+
+Full comparison:
+
+```powershell
+python -m scripts.compare_miro_export_sources `
+  --sources all `
+  --oauth `
+  --text-style-mode both `
+  --scale-mode readable `
+  --min-zoom 0.000244140625 `
+  --render
+```
+
+The runner compares REST experimental, REST stable, no-asset diagnostics,
+legacy downloader exports, raw Web SDK JSON when present under
+`work\MIRO2OBSIDIAN\websdk_exports`, and merged REST+WebSDK sources. It
+writes:
+
+- `tools\canvas_render\.out\export_source_compare\miro_export_source_comparison.json`
+- `tools\canvas_render\.out\export_source_compare\miro_export_source_comparison.md`
+- `tools\canvas_render\.out\export_source_compare\websdk_needed_queue.md`
+- `tools\canvas_render\.out\export_source_compare\production_source_recommendation.md`
+
+To inspect only the boards visible to the current OAuth account, use the
+optional API-generated list:
+
+```powershell
+python -m scripts.compare_miro_export_sources `
+  --board-list work\MIRO2OBSIDIAN\boards_all_available_2026-07-02.json `
+  --sources all `
+  --oauth `
+  --refresh-board-list-only
+```
+
 ## Miro Web SDK exporter
 
 Локальное приложение находится в:
