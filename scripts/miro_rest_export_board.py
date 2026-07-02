@@ -218,6 +218,14 @@ def _validate_downloaded_assets(
     return missing
 
 
+def _missing_asset_items(resources: list[dict[str, Any]], *, attachments_dir: Path) -> list[dict[str, Any]]:
+    return [
+        item
+        for item in resources
+        if _validate_downloaded_assets([item], attachments_dir=attachments_dir)
+    ]
+
+
 def download_export_assets(
     items: list[dict[str, Any]],
     *,
@@ -247,11 +255,47 @@ def download_export_assets(
         if item.get("type") == "embed" and _ensure_data_url(item, "previewUrl", EMBED_PREVIEW_URL_KEYS)
     ]
 
-    failed = 0
+    def run_download_passes(
+        resources: list[dict[str, Any]],
+        *,
+        is_image: bool,
+        label: str,
+        inline_slot_map: dict[str, dict[str, Path]] | None = None,
+        inline_image_url_map: dict[str, Path] | None = None,
+        inline_image_id_map: dict[str, Path] | None = None,
+    ) -> None:
+        if not resources:
+            return
+        final_paths = _id_to_final_paths(
+            resources,
+            attachments_dir=attachments_dir,
+            safe_board=safe_board,
+            is_image=is_image,
+        )
+        remaining = list(resources)
+        for attempt in range(1, 4):
+            download_all(
+                remaining,
+                attachments_dir,
+                token,
+                "rest",
+                safe_board,
+                is_image=is_image,
+                strategy="overwrite",
+                id_to_final_path=final_paths,
+                inline_slot_map=inline_slot_map,
+                inline_image_url_map=inline_image_url_map,
+                inline_image_id_map=inline_image_id_map,
+                gui_root=_ImmediateCallbackTarget(),
+                on_file_fail=on_fail,
+            )
+            remaining = _missing_asset_items(resources, attachments_dir=attachments_dir)
+            if not remaining:
+                return
+            if logger and attempt < 3:
+                logger(f"asset_retry label={label} attempt={attempt + 1} remaining={len(remaining)}")
 
     def on_fail(item_id: str, reason: str) -> None:
-        nonlocal failed
-        failed += 1
         if logger:
             logger(f"asset_failed id={item_id} reason={reason}")
 
@@ -259,67 +303,20 @@ def download_export_assets(
         if logger:
             logger(f"asset_optional_failed id={item_id} reason={reason}")
 
-    if images:
-        download_all(
-            images,
-            attachments_dir,
-            token,
-            "rest",
-            safe_board,
-            is_image=True,
-            strategy="overwrite",
-            id_to_final_path=_id_to_final_paths(
-                images,
-                attachments_dir=attachments_dir,
-                safe_board=safe_board,
-                is_image=True,
-            ),
-            gui_root=_ImmediateCallbackTarget(),
-            on_file_fail=on_fail,
-        )
+    run_download_passes(images, is_image=True, label="images")
 
     image_src_map, slot_map, image_id_map = _build_image_maps(images, attachments_dir)
 
-    if documents:
-        download_all(
-            documents,
-            attachments_dir,
-            token,
-            "rest",
-            safe_board,
-            is_image=False,
-            strategy="overwrite",
-            id_to_final_path=_id_to_final_paths(
-                documents,
-                attachments_dir=attachments_dir,
-                safe_board=safe_board,
-                is_image=False,
-            ),
-            gui_root=_ImmediateCallbackTarget(),
-            on_file_fail=on_fail,
-        )
+    run_download_passes(documents, is_image=False, label="documents")
 
-    if doc_formats:
-        download_all(
-            doc_formats,
-            attachments_dir,
-            token,
-            "rest",
-            safe_board,
-            is_image=False,
-            strategy="overwrite",
-            id_to_final_path=_id_to_final_paths(
-                doc_formats,
-                attachments_dir=attachments_dir,
-                safe_board=safe_board,
-                is_image=False,
-            ),
-            inline_slot_map=slot_map,
-            inline_image_url_map=image_src_map,
-            inline_image_id_map=image_id_map,
-            gui_root=_ImmediateCallbackTarget(),
-            on_file_fail=on_fail,
-        )
+    run_download_passes(
+        doc_formats,
+        is_image=False,
+        label="doc_formats",
+        inline_slot_map=slot_map,
+        inline_image_url_map=image_src_map,
+        inline_image_id_map=image_id_map,
+    )
 
     embed_paths = _id_to_final_paths(
         embeds,
@@ -351,8 +348,8 @@ def download_export_assets(
 
     required_resources = images + documents + doc_formats
     missing_assets = _validate_downloaded_assets(required_resources, attachments_dir=attachments_dir)
+    failed = len(missing_assets)
     if missing_assets:
-        failed += len(missing_assets)
         for reason in missing_assets:
             if logger:
                 logger(f"asset_missing {reason}")

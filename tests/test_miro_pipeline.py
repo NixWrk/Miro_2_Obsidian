@@ -109,6 +109,40 @@ class MiroPipelineTests(unittest.TestCase):
 
         self.assertFalse(export_items.call_args.kwargs["prefer_experimental"])
 
+    def test_experimental_asset_failure_retries_stable_items(self) -> None:
+        exp_items = [{"id": "image-1", "type": "image"}]
+        stable_items = [{"id": "image-1", "type": "image", "local_name": "image-1.png"}]
+        comments = [{"id": "comment-1", "type": "comment"}]
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source_json = root / "board.json"
+            with (
+                patch("miro_pipeline.export_board_items", side_effect=[exp_items, stable_items]) as export_items,
+                patch("miro_pipeline.export_board_comments", return_value=comments),
+                patch(
+                    "miro_pipeline.download_export_assets",
+                    side_effect=[RuntimeError("Asset download incomplete"), {"images": 1, "failed": 0}],
+                ) as assets,
+                patch("miro_pipeline.write_json") as write_json,
+                patch("miro_pipeline.resolve_scale", return_value=(1.0, {"scale_source": "auto"})),
+                patch("miro_pipeline.convert_miro_to_canvas", return_value=str(root / "out.canvas")),
+            ):
+                run_rest_experimental_pipeline(
+                    board_id="board-1",
+                    token="token-1",
+                    source_json=source_json,
+                    target_dir=root / "target",
+                    vault_root=root / "vault",
+                )
+
+        self.assertEqual(
+            [call.kwargs["prefer_experimental"] for call in export_items.call_args_list],
+            [True, False],
+        )
+        self.assertEqual(assets.call_count, 2)
+        write_json.assert_called_once_with(source_json, {"items": stable_items, "comments": comments})
+
     def test_pipeline_can_install_obsidian_plugins_before_export(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

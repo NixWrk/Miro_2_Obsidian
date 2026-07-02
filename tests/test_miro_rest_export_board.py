@@ -180,6 +180,35 @@ class MiroRestExportBoardTests(unittest.TestCase):
                 with self.assertRaisesRegex(RuntimeError, "img-1"):
                     download_export_assets(items, output_path=output, token="token-1")
 
+    def test_download_export_assets_retries_missing_required_assets(self) -> None:
+        items = [
+            {"id": "img-1", "type": "image", "data": {"imageUrl": "https://api.miro.test/images/1"}},
+        ]
+        calls = 0
+        messages: list[str] = []
+
+        def flaky_download_all(resources, _save_path, _token, _safe_team, _safe_board, **kwargs):
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                return
+            id_to_final_path = kwargs["id_to_final_path"]
+            for resource in resources:
+                final_path = id_to_final_path[str(resource["id"])]
+                final_path.parent.mkdir(parents=True, exist_ok=True)
+                final_path.write_bytes(b"asset")
+                resource["local_name"] = final_path.name
+
+        with tempfile.TemporaryDirectory() as tmp:
+            output = Path(tmp) / "exports" / "board.json"
+            with patch("miro_rest_export_board.download_all", side_effect=flaky_download_all):
+                stats = download_export_assets(items, output_path=output, token="token-1", logger=messages.append)
+
+        self.assertEqual(stats["failed"], 0)
+        self.assertEqual(calls, 2)
+        self.assertTrue(items[0]["local_name"])
+        self.assertTrue(any("asset_retry label=images" in message for message in messages))
+
     def test_download_export_assets_can_allow_missing_assets(self) -> None:
         items = [
             {"id": "img-1", "type": "image", "data": {"url": "https://api.miro.test/images/1"}},

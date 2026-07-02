@@ -101,28 +101,39 @@ def run_rest_experimental_pipeline(
             logger=log,
         )
 
-    rest_label = "REST v2-experimental" if prefer_experimental else "REST v2 stable"
-    log(f"Exporting board through {rest_label} items.")
-    items = export_board_items(
-        board_id=board_id,
-        token=token,
-        prefer_experimental=prefer_experimental,
-        logger=log,
-    )
-    comments = export_board_comments(
-        board_id=board_id,
-        token=token,
-        logger=log,
-    )
+    def export_and_download(*, use_experimental: bool) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, int]]:
+        rest_label = "REST v2-experimental" if use_experimental else "REST v2 stable"
+        log(f"Exporting board through {rest_label} items.")
+        exported_items = export_board_items(
+            board_id=board_id,
+            token=token,
+            prefer_experimental=use_experimental,
+            logger=log,
+        )
+        exported_comments = export_board_comments(
+            board_id=board_id,
+            token=token,
+            logger=log,
+        )
+        log("Downloading required assets next to the source JSON.")
+        exported_asset_stats = download_export_assets(
+            exported_items,
+            output_path=source_json,
+            token=token,
+            logger=log,
+            strict=not allow_missing_assets,
+        )
+        return exported_items, exported_comments, exported_asset_stats
 
-    log("Downloading required assets next to the source JSON.")
-    asset_stats = download_export_assets(
-        items,
-        output_path=source_json,
-        token=token,
-        logger=log,
-        strict=not allow_missing_assets,
-    )
+    try:
+        items, comments, asset_stats = export_and_download(use_experimental=prefer_experimental)
+    except RuntimeError as exc:
+        if not prefer_experimental or allow_missing_assets:
+            raise
+        log(f"REST v2-experimental assets incomplete: {exc}")
+        log("Retrying through REST v2 stable items.")
+        items, comments, asset_stats = export_and_download(use_experimental=False)
+
     write_json(source_json, build_board_source_payload(items, comments))
 
     selected_scale, scale_context = resolve_scale(
