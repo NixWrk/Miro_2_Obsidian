@@ -17,7 +17,12 @@ sys.path.insert(0, str(CONVERTER_DIR))
 sys.path.insert(0, str(SCRIPTS_DIR))
 
 from Converter import convert_miro_to_canvas, source_completeness_issues  # noqa: E402
-from Scale_engine import OBSIDIAN_FONT_SIZE, ViewProfile, compute_scale_preview  # noqa: E402
+from Scale_engine import (  # noqa: E402
+    DEFAULT_FIT_MARGIN,
+    OBSIDIAN_FONT_SIZE,
+    ViewProfile,
+    compute_scale_preview,
+)
 from miro_oauth_token import (  # noqa: E402
     DEFAULT_AUTHORIZE_URL,
     DEFAULT_BROWSER,
@@ -245,7 +250,11 @@ def inspect_existing_source(source_json: Path) -> tuple[Any, dict[str, Any]]:
             for issue in source_completeness_issues(payload)
             if issue != "completeness.board_complete is false"
         )
-        for section_name in ("items", "comments", "assets"):
+        required_sections = {
+            "rest": ("items", "comments", "assets"),
+            "canonical": ("rest", "web_sdk", "comments", "assets"),
+        }.get(str(surface), ())
+        for section_name in required_sections:
             if section_name not in declared:
                 issues.append(f"completeness.{section_name} is missing")
         assets = declared.get("assets")
@@ -400,7 +409,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--viewport-width", type=int, default=1920)
     parser.add_argument("--viewport-height", type=int, default=1080)
     parser.add_argument("--min-zoom", type=float, default=0.12)
-    parser.add_argument("--fit-margin", type=float, default=0.95)
+    parser.add_argument("--fit-margin", type=float, default=DEFAULT_FIT_MARGIN)
     parser.add_argument("--min-node-width", type=int, default=60)
     parser.add_argument("--min-node-height", type=int, default=40)
     parser.add_argument("--min-font-px", type=int, default=8)

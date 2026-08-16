@@ -125,6 +125,31 @@ class MiroPipelineTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "Existing JSON cannot be read"):
                 miro_pipeline.inspect_existing_source(source)
 
+    def test_canonical_existing_source_uses_canonical_completeness_sections(self) -> None:
+        payload = {
+            "source_surface": "canonical",
+            "items": [],
+            "completeness": {
+                "complete": True,
+                "capture_complete": True,
+                "board_complete": False,
+                "rest": {"complete": True},
+                "web_sdk": {"complete": True},
+                "comments": {"complete": True},
+                "assets": {"complete": True, "checked": True},
+            },
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            source = Path(tmp) / "canonical.json"
+            source.write_text(json.dumps(payload), encoding="utf-8")
+            with patch("miro_pipeline.validate_canonical_export") as validate:
+                loaded, completeness = miro_pipeline.inspect_existing_source(source)
+
+        validate.assert_called_once_with(payload, max_age_hours=-1)
+        self.assertEqual(loaded, payload)
+        self.assertTrue(completeness["verified"])
+        self.assertEqual(completeness["issues"], [])
+
     def test_rest_pipeline_exports_assets_and_calls_single_converter(self) -> None:
         items = [{"id": "text-1", "type": "text", "data": {"content": "<p>Hello</p>"}}]
         comments = [{"id": "comment-1", "type": "comment", "content": "Nice"}]

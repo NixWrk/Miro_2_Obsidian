@@ -60,6 +60,21 @@ class ConverterRecoverableContentTests(unittest.TestCase):
         self.assertEqual(node["type"], "text")
         self.assertIn("https://example.test/preview.png", node["text"])
 
+    def test_preview_target_url_uses_native_link_node(self) -> None:
+        node = convert(
+            {
+                "id": "preview-link",
+                "type": "preview",
+                "data": {"url": "https://example.test/article"},
+                "geometry": {"width": 240, "height": 120},
+                "position": {"x": 10, "y": 20},
+            }
+        )
+
+        self.assertIsNotNone(node)
+        self.assertEqual(node["type"], "link")
+        self.assertEqual(node["url"], "https://example.test/article")
+
     def test_empty_table_cell_with_web_link_is_not_dropped(self) -> None:
         node = convert(
             {

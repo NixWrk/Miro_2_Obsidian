@@ -113,6 +113,12 @@
   }
 
   const SERIALIZATION_MARKER = "__miro_export_serialization__";
+  const JSON_PRESERVING_MARKER_KINDS = new Set([
+    "undefined",
+    "non_finite_number",
+    "bigint",
+    "invalid_date",
+  ]);
 
   function serializationMarker(issues, path, kind, detail) {
     const issue = { path, kind };
@@ -123,6 +129,10 @@
       issues.push(issue);
     }
     return { [SERIALIZATION_MARKER]: issue };
+  }
+
+  function isSerializationError(issue) {
+    return !JSON_PRESERVING_MARKER_KINDS.has(issue.kind);
   }
 
   function toPlain(value, seen, issues, path) {
@@ -464,13 +474,17 @@
     } else if (!String(board.id == null ? "" : board.id).trim()) {
       boardStructuralErrors.push("board_missing_id");
     }
+    const itemSerializationErrors = itemSerializationIssues.filter(isSerializationError);
+    const selectionSerializationErrors =
+      selectionSerializationIssues.filter(isSerializationError);
+    const boardSerializationErrors = boardSerializationIssues.filter(isSerializationError);
     const serializationErrors = [
       ...structuralErrors,
-      ...itemSerializationIssues.map((issue) => `${issue.path}:${issue.kind}`),
+      ...itemSerializationErrors.map((issue) => `${issue.path}:${issue.kind}`),
     ];
     const selectionErrors = [
       ...selectionStructuralErrors,
-      ...selectionSerializationIssues.map((issue) => `${issue.path}:${issue.kind}`),
+      ...selectionSerializationErrors.map((issue) => `${issue.path}:${issue.kind}`),
     ];
     const captureErrors = [
       ...structuralErrors,
@@ -482,6 +496,11 @@
       ...selectionSerializationIssues,
       ...boardSerializationIssues,
     ];
+    const allSerializationErrors = [
+      ...itemSerializationErrors,
+      ...selectionSerializationErrors,
+      ...boardSerializationErrors,
+    ];
     const itemsComplete = plainItems.length === items.length && serializationErrors.length === 0;
     const selectionComplete =
       plainSelection.length === selection.length && selectionErrors.length === 0;
@@ -490,7 +509,7 @@
       itemsComplete &&
       selectionComplete &&
       boardIdentityComplete &&
-      allSerializationIssues.length === 0;
+      allSerializationErrors.length === 0;
     const payload = {
       schema_version: 1,
       exporter_version: EXPORTER_VERSION,
@@ -514,6 +533,8 @@
         serialization: {
           issue_count: allSerializationIssues.length,
           issues: allSerializationIssues,
+          error_count: allSerializationErrors.length,
+          errors: allSerializationErrors,
         },
       },
       completeness: {
@@ -544,8 +565,9 @@
           errors: boardStructuralErrors,
         },
         serialization: {
-          complete: allSerializationIssues.length === 0,
+          complete: allSerializationErrors.length === 0,
           issues: allSerializationIssues,
+          errors: allSerializationErrors,
         },
       },
       selected_item_ids: uniqueItemIds(selection),

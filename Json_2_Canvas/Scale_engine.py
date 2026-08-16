@@ -37,6 +37,7 @@ _FONT_TYPES: frozenset[str] = frozenset(
 )
 _META_TYPES: frozenset[str] = frozenset({"board", "board_member"})
 SCALE_MODES: frozenset[str] = frozenset({"overview", "readable", "balanced"})
+DEFAULT_FIT_MARGIN = 0.75
 
 
 # ===== Профиль целевого экрана/ограничений =====
@@ -45,7 +46,7 @@ class ViewProfile:
     width: int = 1920  # целевой viewport ширина (px)
     height: int = 1080  # целевой viewport высота (px)
     min_zoom: float = 0.12  # минимальный зум Obsidian Canvas (оценочный параметр)
-    fit_margin: float = 0.95  # запас под post-conversion рост nodes и UI-рамки
+    fit_margin: float = DEFAULT_FIT_MARGIN  # reserve for rendered text growth and UI
     min_node_w: int = 60  # минимальная ширина узла в Canvas, px
     min_node_h: int = 40  # минимальная высота узла в Canvas, px
     min_font_px: int = 8  # минимальный кегль текста после масштабирования

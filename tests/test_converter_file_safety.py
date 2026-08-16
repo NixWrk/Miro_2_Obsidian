@@ -307,6 +307,61 @@ class ConverterFileSafetyTests(unittest.TestCase):
             self.assertFalse((destination / "new.bin").exists())
             self.assertEqual((destination / "conflict.bin").read_bytes(), b"existing")
 
+    def test_conversion_refreshes_its_existing_attachment_directory(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="miro2obs_attachment_refresh_") as tmp:
+            root = Path(tmp)
+            source = root / "source" / "board.json"
+            sidecar = source.with_name("board_files")
+            vault = root / "vault"
+            target = vault / "out"
+            source.parent.mkdir()
+            sidecar.mkdir()
+            vault.mkdir()
+            source.write_text(json.dumps({"items": []}), encoding="utf-8")
+            (sidecar / "asset.bin").write_bytes(b"old")
+            (sidecar / "removed.bin").write_bytes(b"removed")
+
+            convert_miro_to_canvas(str(source), str(target), str(vault))
+            (sidecar / "asset.bin").write_bytes(b"new")
+            (sidecar / "removed.bin").unlink()
+            (sidecar / "added.bin").write_bytes(b"added")
+
+            convert_miro_to_canvas(str(source), str(target), str(vault))
+
+            destination = target / "board_files"
+            self.assertEqual((destination / "asset.bin").read_bytes(), b"new")
+            self.assertEqual((destination / "added.bin").read_bytes(), b"added")
+            self.assertFalse((destination / "removed.bin").exists())
+
+    def test_attachment_refresh_restores_previous_output_on_failure(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="miro2obs_attachment_restore_") as tmp:
+            root = Path(tmp)
+            source = root / "source" / "board.json"
+            sidecar = source.with_name("board_files")
+            vault = root / "vault"
+            target = vault / "out"
+            source.parent.mkdir()
+            sidecar.mkdir()
+            vault.mkdir()
+            source.write_text(json.dumps({"items": []}), encoding="utf-8")
+            (sidecar / "asset.bin").write_bytes(b"old")
+            canvas = Path(convert_miro_to_canvas(str(source), str(target), str(vault)))
+            previous_canvas = canvas.read_bytes()
+            (sidecar / "asset.bin").write_bytes(b"new")
+
+            with patch(
+                "Converter._convert_miro_to_canvas_impl",
+                side_effect=RuntimeError("simulated conversion failure"),
+            ):
+                with self.assertRaisesRegex(RuntimeError, "simulated"):
+                    convert_miro_to_canvas(str(source), str(target), str(vault))
+
+            destination = target / "board_files"
+            self.assertEqual((destination / "asset.bin").read_bytes(), b"old")
+            self.assertEqual(canvas.read_bytes(), previous_canvas)
+            self.assertEqual((sidecar / "asset.bin").read_bytes(), b"new")
+            self.assertEqual(list(target.glob(".board_files.backup-*")), [])
+
     def test_declared_complete_missing_asset_fails_before_copy_or_canvas(self) -> None:
         with tempfile.TemporaryDirectory(prefix="miro2obs_strict_asset_") as tmp:
             root = Path(tmp)

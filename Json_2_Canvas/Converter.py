@@ -1548,12 +1548,16 @@ def default_flow_label(subtype: str) -> str:
 
 
 def get_miro_subtype(d: Dict[str, Any]) -> str:
+    shape = d.get("shape")
+    data = d.get("data")
+    nested_shape = shape.get("shape") if isinstance(shape, dict) else shape
+    data = data if isinstance(data, dict) else {}
     for v in (
         d.get("subtype"),
-        (d.get("shape") or {}).get("shape"),
-        (d.get("data") or {}).get("shape"),
-        (d.get("data") or {}).get("subtype"),
-        (d.get("data") or {}).get("type"),
+        nested_shape,
+        data.get("shape"),
+        data.get("subtype"),
+        data.get("type"),
     ):
         if isinstance(v, str) and v:
             return v.lower()
@@ -4834,6 +4838,15 @@ def _convert_item_to_canvas_node(
         if item_type == "app_card":
             parts.extend(_format_app_card_fields(data.get("fields")))
         item_url = _recover_attachment_url(item, "url")
+        if item_type == "preview" and item_url:
+            link_width, link_height = _link_card_16x9_size(base["width"])
+            return {
+                **base,
+                "type": "link",
+                "url": item_url,
+                "width": link_width,
+                "height": link_height,
+            }
         if item_url:
             parts.append(f"<p>{_html_escape(item_url, False)}</p>")
         html = "".join(parts) if parts else ""
@@ -5363,6 +5376,11 @@ def convert_item_to_canvas_node(
         text_style_mode,
     )
     item_type = str(item.get("type") or "").lower()
+    if item_type in {"image", "document"} and (
+        item["position"].get("slotId")
+        or "/doc_formats/" in str(item["parent"]["links"].get("self") or "")
+    ):
+        return None
     if node is not None or item_type in {"board", "board_member", "connector"}:
         return node
     if not has_recoverable_item_content(item):
@@ -6410,6 +6428,30 @@ def convert_miro_to_canvas(
         _require_regular_file(canvas_path, label="Existing Canvas output")
 
     created_paths: List[Path] = []
+    attachment_quarantine: Path | None = None
+    attachment_backup: Path | None = None
+    if (
+        canvas_path.exists()
+        and source_sidecar.exists()
+        and final_attachments.exists()
+        and source_sidecar.resolve(strict=False)
+        != final_attachments.resolve(strict=False)
+    ):
+        _regular_tree_entries(source_sidecar, label="Attachment sidecar")
+        _regular_tree_entries(final_attachments, label="Attachment destination")
+        attachment_quarantine = Path(
+            tempfile.mkdtemp(
+                prefix=f".{final_attachments.name}.backup-",
+                dir=str(final_attachments.parent),
+            )
+        )
+        attachment_backup = attachment_quarantine / final_attachments.name
+        try:
+            final_attachments.replace(attachment_backup)
+        except Exception:
+            attachment_quarantine.rmdir()
+            raise
+
     try:
         result = _convert_miro_to_canvas_impl(
             str(source),
@@ -6425,9 +6467,32 @@ def convert_miro_to_canvas(
             attachment_dir=str(attachment_root) if attachment_root else None,
             _created_attachment_paths=created_paths,
         )
-    except Exception:
+    except Exception as exc:
         _rollback_created_paths(created_paths)
+        if attachment_backup is not None and attachment_quarantine is not None:
+            if final_attachments.exists() or _is_link_or_reparse(final_attachments):
+                raise OSError(
+                    "Fresh attachments could not be rolled back; previous output "
+                    f"remains at {attachment_backup}"
+                ) from exc
+            try:
+                attachment_backup.replace(final_attachments)
+                attachment_quarantine.rmdir()
+            except Exception as restore_exc:
+                raise OSError(
+                    "Previous attachments could not be restored; they remain at "
+                    f"{attachment_backup}"
+                ) from restore_exc
         raise
+
+    if attachment_quarantine is not None:
+        try:
+            shutil.rmtree(attachment_quarantine)
+        except Exception as exc:
+            raise OSError(
+                "Previous attachments remain quarantined at "
+                f"{attachment_quarantine}"
+            ) from exc
 
     cleanup_sources(
         json_file=str(source),

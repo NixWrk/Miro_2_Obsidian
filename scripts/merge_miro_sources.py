@@ -43,6 +43,12 @@ WEBSDK_KNOWN_LIMITATIONS = (
     "unsupported_parent_children_not_enumerated",
     "comment_content_unavailable",
 )
+WEBSDK_JSON_PRESERVING_MARKER_KINDS = {
+    "undefined",
+    "non_finite_number",
+    "bigint",
+    "invalid_date",
+}
 CANONICAL_COVERAGE_BASIS = "rest_plus_web_sdk_union"
 CANONICAL_KNOWN_LIMITATIONS = (
     "public_api_exposed_data_only",
@@ -273,6 +279,33 @@ def _validate_item_list(
     return items
 
 
+def _validate_serialization_annotations(
+    value: Any, *, label: str
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    if not isinstance(value, dict):
+        raise ValueError(f"{label} must be an object")
+    issues = value.get("issues")
+    if not isinstance(issues, list):
+        raise ValueError(f"{label}.issues must be a list")
+    errors = value.get("errors", issues)
+    if not isinstance(errors, list):
+        raise ValueError(f"{label}.errors must be a list")
+    if errors:
+        raise ValueError(f"{label} must contain no serialization errors")
+    for index, issue in enumerate(issues):
+        if not isinstance(issue, dict):
+            raise ValueError(f"{label}.issues[{index}] must be an object")
+        kind = str(issue.get("kind") or "").strip()
+        path = str(issue.get("path") or "").strip()
+        if not path:
+            raise ValueError(f"{label}.issues[{index}].path is required")
+        if kind not in WEBSDK_JSON_PRESERVING_MARKER_KINDS:
+            raise ValueError(
+                f"{label}.issues[{index}].kind is not JSON-preserving: {kind!r}"
+            )
+    return issues, errors
+
+
 def validate_websdk_export(
     payload: Any,
     *,
@@ -357,12 +390,11 @@ def validate_websdk_export(
             "Web SDK completeness.items.serialization_errors must be an empty list"
         )
     serialization = completeness.get("serialization")
-    if (
-        not isinstance(serialization, dict)
-        or serialization.get("complete") is not True
-        or serialization.get("issues") != []
-    ):
-        raise ValueError("Web SDK serialization must be complete with no issues")
+    if not isinstance(serialization, dict) or serialization.get("complete") is not True:
+        raise ValueError("Web SDK serialization must be complete")
+    _validate_serialization_annotations(
+        serialization, label="Web SDK completeness.serialization"
+    )
 
     provenance = payload.get("provenance")
     item_provenance = provenance.get("items") if isinstance(provenance, dict) else None
@@ -379,13 +411,25 @@ def validate_websdk_export(
                 f"Web SDK provenance.items.{field} must match items length"
             )
     serialization_provenance = provenance.get("serialization")
-    if (
-        not isinstance(serialization_provenance, dict)
-        or isinstance(serialization_provenance.get("issue_count"), bool)
-        or serialization_provenance.get("issue_count") != 0
-        or serialization_provenance.get("issues") != []
-    ):
-        raise ValueError("Web SDK provenance.serialization must prove zero issues")
+    provenance_issues, provenance_errors = _validate_serialization_annotations(
+        serialization_provenance, label="Web SDK provenance.serialization"
+    )
+    issue_count = _nonnegative_int(
+        serialization_provenance.get("issue_count"),
+        label="Web SDK provenance.serialization.issue_count",
+    )
+    if issue_count != len(provenance_issues):
+        raise ValueError(
+            "Web SDK provenance.serialization.issue_count must match issues"
+        )
+    error_count = _nonnegative_int(
+        serialization_provenance.get("error_count", len(provenance_errors)),
+        label="Web SDK provenance.serialization.error_count",
+    )
+    if error_count != len(provenance_errors):
+        raise ValueError(
+            "Web SDK provenance.serialization.error_count must match errors"
+        )
     comments: list[dict[str, Any]] = []
     if "comments" in payload:
         comments = _validate_comment_list(payload, source_label="Web SDK")

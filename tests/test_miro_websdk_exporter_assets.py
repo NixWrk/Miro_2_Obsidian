@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import importlib.util
+import socket
 import unittest
 from pathlib import Path
 
@@ -8,7 +10,36 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 EXPORTER_DIR = REPO_ROOT / "tools" / "miro_websdk_exporter"
 
 
+def load_server_module():
+    path = EXPORTER_DIR / "serve_no_cache.py"
+    spec = importlib.util.spec_from_file_location("miro_websdk_server", path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 class MiroWebsdkExporterAssetTests(unittest.TestCase):
+    def test_server_maps_sdk_callback_to_current_entrypoint(self) -> None:
+        server = load_server_module()
+
+        self.assertEqual(
+            server.resolve_request_path("/callback?_miro=1.2.3&_sdk=stable"),
+            "/index-20260727-complete-json.html?_miro=1.2.3&_sdk=stable",
+        )
+        self.assertEqual(
+            server.resolve_request_path("/callback?code=one-time-code"),
+            "/callback?code=one-time-code",
+        )
+
+    def test_server_listens_on_both_localhost_families(self) -> None:
+        server = load_server_module()
+
+        specs = server.server_specs("localhost")
+        self.assertEqual([host for host, _ in specs], ["127.0.0.1", "::1"])
+        self.assertEqual(specs[0][1].address_family, socket.AF_INET)
+        self.assertEqual(specs[1][1].address_family, socket.AF_INET6)
+
     def test_exporter_calls_board_and_selection_apis(self) -> None:
         js = (EXPORTER_DIR / "exporter.js").read_text(encoding="utf-8")
 
@@ -57,7 +88,10 @@ class MiroWebsdkExporterAssetTests(unittest.TestCase):
         self.assertIn('"non_finite_number"', js)
         self.assertIn('"bigint"', js)
         self.assertIn('"circular_reference"', js)
-        self.assertIn("allSerializationIssues.length === 0", js)
+        self.assertIn("JSON_PRESERVING_MARKER_KINDS", js)
+        self.assertIn('"undefined"', js)
+        self.assertIn('"non_finite_number"', js)
+        self.assertIn("allSerializationErrors.length === 0", js)
         self.assertIn("TABLE_DIAGNOSTIC_TYPES", js)
         self.assertIn("function deepInspectTableLikeItem", js)
         self.assertIn("Object.getOwnPropertyNames", js)

@@ -24,6 +24,7 @@ sys.path.insert(0, str(CONVERTER_DIR))
 
 from Converter import convert_miro_to_canvas  # noqa: E402
 from Scale_engine import (  # noqa: E402
+    DEFAULT_FIT_MARGIN,
     OBSIDIAN_FONT_SIZE,
     ViewProfile,
     compute_scale_preview,
@@ -330,7 +331,7 @@ def main() -> int:
     parser.add_argument("--viewport-width", type=int, default=1920)
     parser.add_argument("--viewport-height", type=int, default=1080)
     parser.add_argument("--min-zoom", type=float, default=0.12)
-    parser.add_argument("--fit-margin", type=float, default=0.95)
+    parser.add_argument("--fit-margin", type=float, default=DEFAULT_FIT_MARGIN)
     parser.add_argument(
         "--scale-mode",
         choices=["balanced", "overview", "readable"],

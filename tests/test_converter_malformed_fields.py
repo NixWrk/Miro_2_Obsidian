@@ -11,6 +11,7 @@ from Converter import (  # noqa: E402
     _source_canvas_metadata,
     convert_item_to_canvas_node,
     convert_item_to_edge,
+    get_miro_subtype,
 )
 
 
@@ -40,6 +41,30 @@ def test_malformed_mapping_fields_do_not_abort_known_item_conversion() -> None:
         )
         is None
     )
+
+
+def test_shape_subtype_accepts_string_object_and_malformed_data() -> None:
+    assert get_miro_subtype({"shape": "round_rectangle"}) == "round_rectangle"
+    assert get_miro_subtype({"shape": {"shape": "Circle"}}) == "circle"
+    assert get_miro_subtype({"data": {"shape": "Rectangle"}}) == "rectangle"
+    assert get_miro_subtype({"data": "raw-data"}) == ""
+
+
+def test_doc_format_image_slot_is_not_reintroduced_as_placeholder() -> None:
+    node = convert_item_to_canvas_node(
+        {
+            "id": "slot-image",
+            "type": "image",
+            "data": {"imageUrl": "https://example.test/image.png"},
+            "position": {"x": 10, "y": 20, "slotId": "slot-1"},
+            "geometry": {"width": 50, "height": 30},
+            "local_name": "image.png",
+        },
+        str(REPO_ROOT),
+        str(REPO_ROOT),
+    )
+
+    assert node is None
 
 
 def test_canvas_source_metadata_keeps_original_malformed_values() -> None:

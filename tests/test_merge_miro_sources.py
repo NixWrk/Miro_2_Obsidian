@@ -50,7 +50,12 @@ def websdk_export(
                 "raw_count": len(items),
                 "serialized_count": len(items),
             },
-            "serialization": {"issue_count": 0, "issues": []},
+            "serialization": {
+                "issue_count": 0,
+                "issues": [],
+                "error_count": 0,
+                "errors": [],
+            },
             **(
                 {
                     "comments": {
@@ -80,7 +85,7 @@ def websdk_export(
                 "serialized_count": len(items),
                 "serialization_errors": [],
             },
-            "serialization": {"complete": True, "issues": []},
+            "serialization": {"complete": True, "issues": [], "errors": []},
             **(
                 {
                     "comments": {
@@ -345,6 +350,54 @@ class MergeMiroSourcesTests(unittest.TestCase):
         web["completeness"]["items"]["serialization_errors"] = ["item_0_not_object"]
 
         with self.assertRaisesRegex(ValueError, "serialization_errors"):
+            merge_sources(rest_export([]), web)
+
+    def test_accepts_websdk_json_preserving_annotations(self) -> None:
+        marker = {
+            "path": "$.items[0].linkedTo",
+            "kind": "undefined",
+        }
+        item = {
+            "id": "sdk-item",
+            "type": "shape",
+            "linkedTo": {"__miro_export_serialization__": marker},
+        }
+        web = websdk_export([item])
+        web["completeness"]["serialization"] = {
+            "complete": True,
+            "issues": [marker],
+            "errors": [],
+        }
+        web["provenance"]["serialization"] = {
+            "issue_count": 1,
+            "issues": [marker],
+            "error_count": 0,
+            "errors": [],
+        }
+
+        merged = merge_sources(rest_export([]), web)
+
+        self.assertEqual(merged["items"][0]["id"], "sdk-item")
+
+    def test_rejects_non_preserving_issue_hidden_from_errors(self) -> None:
+        issue = {
+            "path": "$.items[0].content",
+            "kind": "property_read_error",
+        }
+        web = websdk_export([])
+        web["completeness"]["serialization"] = {
+            "complete": True,
+            "issues": [issue],
+            "errors": [],
+        }
+        web["provenance"]["serialization"] = {
+            "issue_count": 1,
+            "issues": [issue],
+            "error_count": 0,
+            "errors": [],
+        }
+
+        with self.assertRaisesRegex(ValueError, "not JSON-preserving"):
             merge_sources(rest_export([]), web)
 
     def test_rejects_duplicate_rest_comment_ids(self) -> None:
