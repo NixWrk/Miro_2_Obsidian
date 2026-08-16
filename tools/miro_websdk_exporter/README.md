@@ -1,92 +1,102 @@
 # Miro Web SDK exporter
 
-Minimal static Miro app used to export the board through the Web SDK surface.
+Buildless Miro app for capturing the maximum board JSON exposed by the Web SDK.
+It is a complementary source for the canonical REST+Web SDK production union
+and a probe tool for source-limited item families.
 
-The exporter is intentionally buildless:
+## Install and open
 
-- host this folder with any static HTTP server;
-- create a Miro Web SDK app that points to the current versioned entrypoint;
-- upload `icon-outline.svg` as the outline icon and `icon-color.svg` as the color icon;
-- install the app into the same team as the target board;
-- open the app from the board toolbar icon;
-- press `Export board` or `Export selection`;
-- download the JSON and compare it with the REST export using `scripts/miro_capability_probe.py`.
-
-`index.html` is only the Miro toolbar bootstrap. It registers the `icon:click`
-handler and opens `panel.html`, where the exporter controls live. If the app is
-installed but not visible in the board tools menu, verify the App URL, team, and
-uploaded outline icon first.
-
-The Team Admin `Apps` page confirms installation in the current team, but it may
-not show the developer App URL. If several `export to Json` apps exist, verify
-the App URL in `Profile settings` -> `Your apps`, then rename the Web SDK app or
-use its uploaded icon to distinguish it on the team Apps page. An app installed
-in another Miro team does not appear on this board.
-
-To open the installed app on a board, use the `+ More apps` button at the bottom
-of the left-hand app toolbar. In some Miro UI versions this entry is labeled
-`+ More tools`; it is the same board toolbar entry point. Miro shows installed
-apps there under their app name. The monochrome outline icon is the one that
-appears on the board app toolbar; clicking it triggers the app's `icon:click`
-handler and opens `panel.html`.
-
-If the target team does not show apps in the board `+ More tools` panel, do not
-continue the Web SDK comparison in that team. Create or duplicate the probe
-board in an app-visible team where the board app launcher shows installed apps,
-then run both REST and Web SDK exports against that same board.
-
-Some Miro plans reject REST board creation with `Creating more boards is not
-allowed in this plan`. In that case, create or choose an empty board in the
-app-visible team and pass that board id to the REST probe generator with
-`--board-id`.
-
-The exported payload has:
-
-- `schema_version: 1`;
-- `exporter_version`, used to detect stale cached panels during experiments;
-- `source_surface: "web_sdk"`;
-- `items[]` from `miro.board.get()`;
-- `selection[]` from `miro.board.getSelection()`;
-- `diagnostics.table_like_items[]` for deep inspection of unsupported table/table_text items;
-- a compact `summary.by_type` count.
-
-Table diagnostics intentionally use `item_id` and `item_type` instead of `id`
-and `type`, so generic source scanners do not count diagnostics as extra Miro
-items. For table text recovery checks, inspect `textish_values`,
-`known_field_reads`, and `prototype_chain` in each diagnostic entry.
-
-This tool does not call the REST API and does not need a token. REST enrichment should be added later as a separate adapter after raw Web SDK samples are saved.
-
-## Local hosting
+1. Start the no-cache server:
 
 ```powershell
 python tools\miro_websdk_exporter\serve_no_cache.py --port 8766
 ```
 
-Use `http://localhost:8766/index-20260611-deep-table.html` as the app URL while
-developing. Keep the URL as `localhost` in Miro settings because Miro explicitly
-allows local HTTP for localhost development. The no-cache server is preferred over
-`python -m http.server` because Miro and the browser can keep an older panel
-loaded while Web SDK experiments are changing quickly.
+2. Register this App URL in Miro:
 
-Every fresh export should include `exporter_version`. If the field is missing,
-close the app panel, reload the Miro board, verify that the visible panel says
-`Exporter version: 20260611-deep-table`, and open the app again before using the
-JSON as evidence.
-
-The local manifest sketch is stored in `manifest.example.yml`. If the Miro UI
-offers manifest editing, keep the same values:
-
-- App URL / `sdkUri`: `http://localhost:8766/index-20260611-deep-table.html`;
-- OAuth Redirect URI: `http://localhost:8765/callback`;
-- in the Redirect URI `Options` menu, select `Use this URI for SDK authorization`;
-- optional loopback Redirect URI: `http://127.0.0.1:8765/callback`;
-- scopes: `boards:read`, `boards:write`, `team:read`.
-
-## Follow-up flow
-
-```powershell
-python scripts\miro_capability_probe.py --rest-json path\to\rest.json --websdk-json path\to\websdk-export.json
+```text
+http://localhost:8766/index-20260727-complete-json.html
 ```
 
-Rows marked `websdk_export_candidate` are the next source-expansion candidates.
+3. Upload `icon-outline.svg` and `icon-color.svg`, install the app into the
+   target board's team, and open it from `+ More apps` / `+ More tools`.
+4. Press `Export board` and download the JSON.
+
+`index.html` and the older `20260611-deep-table` entrypoints are compatibility
+aliases that open the current `20260727-complete-json` panel. The versioned URL
+above is preferred because it makes stale Miro/browser caches visible.
+
+Install the app into the same team as the target board. If several similarly
+named exporter apps exist, verify the App URL in `Profile settings` ->
+`Your apps`, then distinguish this one by its uploaded icon or app name.
+
+Open the installed app through `+ More apps` at the bottom of the left-hand app toolbar; some Miro versions label the same entry `+ More tools`. The monochrome outline icon appears in that toolbar and opens the exporter panel.
+
+If installed apps are unavailable in the target team, use an app-visible team
+and run both REST and Web SDK exports against the same board. Some plans reject
+REST board creation with `Creating more boards is not allowed in this plan`;
+choose an existing board and pass its id to the probe with `--board-id`.
+If the app is installed but absent from the board toolbar, verify the App URL,
+uploaded outline icon and team installation. An app installed in another team
+does not appear on the target board.
+
+## Board payload contract
+
+Only `Export board` produces the profile accepted by the canonical merge:
+
+- `schema_version: 1`;
+- `exporter_version: "20260727-complete-json"`;
+- `source_surface: "web_sdk"` and `export_scope: "board"`;
+- `capture_profile: "maximum_board_v1"`;
+- `exported_at` and board identity from `miro.board.getInfo()` when available;
+- `items[]` from one complete `miro.board.get()` call;
+- `provenance` with raw/serialized counts and serialization issues;
+- `completeness` with capture status, coverage basis and known API limitations;
+- `selection[]` and `selected_item_ids` as context only;
+- deep `diagnostics` for unsupported/table-like items;
+- `summary.by_type`.
+
+`Export selection` and `Create probe items` remain diagnostics and are rejected
+as production board sources. Every fresh board export must show the current
+exporter version and `completeness.complete: true`.
+
+Diagnostics intentionally use `item_id` and `item_type` instead of `id` and
+`type`, so generic item scanners do not count them as extra board items. For
+table recovery checks inspect `textish_values`, `known_field_reads` and
+`prototype_chain`.
+
+The app does not call REST and does not need a REST token. It cannot expose full
+details of unsupported widgets, hidden children of unsupported parents, or
+comment content. Those limitations are written into the payload instead of
+being presented as a complete Miro backup.
+
+## Production union
+
+Run the strict REST export and merge the downloaded Web SDK board JSON in one
+transactional pipeline:
+
+```powershell
+python scripts\miro_pipeline.py `
+  --board-id <board_id> `
+  --websdk-json path\to\websdk-board.json `
+  --source-json path\to\canonical-board.json `
+  --vault-root path\to\ObsidianVault `
+  --target-dir path\to\ObsidianVault\CanvasFolder
+```
+
+The pipeline verifies board identity, profile, source completeness and
+freshness. REST values remain authoritative for shared ids; Web SDK fills empty
+fields and adds Web SDK-only items. Original source objects and field-level
+provenance remain in the canonical JSON, and missing required union assets are
+downloaded before publication.
+
+For source comparison without conversion:
+
+```powershell
+python scripts\miro_capability_probe.py `
+  --rest-json path\to\rest.json `
+  --websdk-json path\to\websdk-board.json
+```
+
+The local manifest sketch is `manifest.example.yml`. Keep OAuth callback port
+`8765` separate from the static app server on `8766`.

@@ -1,0 +1,37 @@
+{
+  "items": [
+    {
+      "id": "anchor",
+      "type": "text",
+      "position": {"x": 0, "y": 0, "origin": "center", "relativeTo": "canvas_center"},
+      "geometry": {"width": 200, "height": 80},
+      "data": {"content": "<p>Board item</p>"}
+    }
+  ],
+  "comments": [
+    {
+      "id": "comment-lane-1",
+      "type": "comment",
+      "content": "First unpositioned comment",
+      "createdBy": {"id": "user-1", "name": "Alice"}
+    },
+    {
+      "id": "comment-lane-2",
+      "type": "comment",
+      "content": "Second unpositioned comment",
+      "replies": [
+        {
+          "id": "reply-1",
+          "content": "Reply body",
+          "createdBy": {"id": "user-2", "name": "Bob"}
+        }
+      ]
+    },
+    {
+      "id": "comment-target",
+      "type": "comment",
+      "content": "Attached comment",
+      "position": {"type": "item", "itemId": "anchor"}
+    }
+  ]
+}

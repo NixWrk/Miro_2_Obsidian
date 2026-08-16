@@ -1,0 +1,14 @@
+{
+  "description": "Recoverable source-limited placeholders grow vertically to preserve all JSON details.",
+  "converter": {"scale": 1.0, "min_font_px": 8, "theme": "dark"},
+  "assertions": {
+    "node_count": 1,
+    "edge_count": 0,
+    "nodes": [
+      {"id": "table-rich", "type": "text", "text_contains": "implementation notes", "min_height": 80}
+    ],
+    "text_fits": [
+      {"id": "table-rich", "padding": 32, "line_height": 1.4, "tolerance": 1.05}
+    ]
+  }
+}

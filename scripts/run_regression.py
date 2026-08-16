@@ -19,11 +19,9 @@ def main() -> int:
     unit_cmd = [
         sys.executable,
         "-m",
-        "unittest",
-        "discover",
-        "-s",
+        "pytest",
         str(repo_root / "tests"),
-        "-v",
+        "-q",
     ]
     unit_rc = subprocess.call(unit_cmd, cwd=repo_root)
     if unit_rc != 0:

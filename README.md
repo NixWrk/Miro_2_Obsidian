@@ -1,5 +1,22 @@
 # Miro -> Obsidian Canvas
 
+## Установка
+
+Проверенная версия среды: Python 3.13. Производственные и тестовые зависимости закреплены отдельно:
+
+Production runtime:
+
+```powershell
+python -m pip install -r requirements.txt
+```
+
+Development, tests and visual regression:
+
+```powershell
+python -m pip install -r requirements-dev.txt
+python -m playwright install chromium
+```
+
 Инструментальный набор для переноса досок Miro в Obsidian Advanced Canvas.
 
 Проект сейчас развивается как проверяемый pipeline, а не как один монолитный GUI:
@@ -25,14 +42,13 @@
 - Zoom-unlocked validation profile для больших досок через локальный Obsidian plugin.
 - Regression fixtures и visual baselines.
 - Web-board audit, node-overlap audit, missing/mapping audit.
-- Miro Web SDK exporter app для диагностики и сравнения REST/Web SDK.
+- Miro Web SDK exporter для максимального board JSON, диагностики и сравнения REST/Web SDK.
 
 ## Текущие ограничения
 
 - Legacy GUI/runner paths still exist; the supported reproducible CLI path is `scripts/miro_pipeline.py`.
-- В репозитории пока нет `requirements.txt` или `pyproject.toml`; зависимости надо формализовать отдельной cleanup-задачей.
 - Часть Miro items является source-limited: Miro API/Web SDK не отдают нужное содержимое или точную геометрию. Такие элементы фиксируются в `tasks/miro_capabilities.md`.
-- Miro app/Web SDK exporter остается диагностическим/обогащающим инструментом; production path is REST-first until Web SDK proves recoverable content that REST lacks.
+- Автоматический production-экспорт использует строгий REST. Для максимального доступного объединения свежий Web SDK board export передаётся тому же pipeline через `--websdk-json`; ограничения публичных API остаются явно записаны в JSON.
 - `work/` и `_obsidian_oracle_vault/` являются локальными рабочими артефактами и не коммитятся.
 
 ## Карта репозитория
@@ -46,7 +62,7 @@
 | `tools/canvas_render/` | Диагностический web-renderer `.canvas` | validation tool |
 | `tools/obsidian_oracle/` | Staging/check helpers для реального Obsidian vault | validation tool |
 | `tools/obsidian_plugins/canvas-zoom-unlock/` | Маленький локальный Obsidian plugin для снятия zoom limit | project tool |
-| `tools/miro_websdk_exporter/` | Локальное Miro app/Web SDK приложение для export/probe | experimental/source probe |
+| `tools/miro_websdk_exporter/` | Локальное Miro app/Web SDK приложение для maximum board export/probe | supported complementary source |
 | `tasks/` | LLM-loop правила, problem library, roadmap, capability matrix | project memory |
 | `work/` | Локальный vault, реальные exports и временные canvas outputs | ignored local data |
 | `_obsidian_oracle_vault/` | Локальный oracle vault | ignored local data |
@@ -109,22 +125,18 @@ python scripts\miro_rest_export_board.py `
 
 Если обязательные вложения не скачались, такой экспорт считается неполным. `--allow-missing-assets` используйте только когда это намеренный диагностический прогон.
 
-## Canonical REST-first pipeline
+## Production pipeline
 
-The supported reproducible path is:
+The supported unattended path is strict REST export:
 
 ```text
 Miro board
-  -> REST v2-experimental items + comments sidecar
-  -> asset sidecar download
-  -> one canonical .miro JSON with {items, comments}
+  -> all REST board-item pages + complete comments sidecar
+  -> required image/document/doc_format assets
+  -> validated REST JSON with provenance and completeness metadata
   -> Json_2_Canvas/Converter.py
   -> Obsidian .canvas
 ```
-
-The REST export and canonical pipeline write comments into root `comments[]`
-when Miro exposes them through the checked comments endpoint. Comments are
-converted as Canvas text annotations by the normal converter path.
 
 Run it from CLI:
 
@@ -136,13 +148,38 @@ python scripts\miro_pipeline.py `
   --target-dir path\to\ObsidianVault\MIRO2OBSIDIAN\board
 ```
 
-By default, the pipeline keeps REST v2-experimental as the source JSON and
-retries missing asset downloads. If strict asset download is still incomplete,
-it may use REST v2 stable only to fill missing asset `local_name` references for
-the same item ids; it does not replace the experimental JSON. Use
-`--stable-items` to force stable REST from the start. Use `--allow-missing-assets`
-only when you intentionally want a partial Canvas with missing asset references
-preserved for review.
+The default run fails instead of publishing a source when item pagination,
+comments, or required assets are incomplete. Missing embed preview thumbnails
+are optional: they are recorded in `completeness.assets.optional_missing`, while
+the embed remains a link. If experimental REST cannot supply a required asset,
+stable REST may donate `local_name` for the same item id; the full stable donor
+items are retained under `provenance.assets.stable_enrichment.items` rather than
+replacing the richer experimental source.
+
+For the maximum data exposed by the supported APIs, export the same open board
+with the Web SDK app's `Export board` action and pass that JSON to the pipeline:
+
+```powershell
+python scripts\miro_pipeline.py `
+  --board-id uXj... `
+  --websdk-json path\to\websdk-board.json `
+  --source-json work\MIRO2OBSIDIAN\Miro_2_JSON\board.json `
+  --vault-root path\to\ObsidianVault `
+  --target-dir path\to\ObsidianVault\MIRO2OBSIDIAN\board
+```
+
+This mode accepts only a complete `maximum_board_v1` board export for the same
+board. By default both sources must be no more than 24 hours old and no more
+than 60 minutes apart. REST remains authoritative for shared ids, Web SDK fills
+empty fields and contributes Web SDK-only items, and every original source item
+is retained in `source_provenance.original_items`. Required assets introduced by
+the union are downloaded before the canonical bundle is published
+transactionally.
+
+This is the maximum public-API JSON, not a pixel-perfect Miro backup. Web SDK
+does not expose full details for unsupported items, does not enumerate hidden
+children of unsupported parents, and does not provide comment content. Strict
+REST comments and assets therefore remain required parts of the union.
 
 Convert an existing canonical Miro JSON without contacting Miro:
 
@@ -259,8 +296,9 @@ Canvas plus the local `canvas-zoom-unlock` plugin in the selected vault. With
 that checkbox enabled, the default scale profile is zoom-unlocked: `readable`
 with `min_zoom=0.000244140625`.
 
-Web SDK export remains a diagnostic/enrichment source. It should feed a merged
-canonical JSON first; it should not grow a separate JSON -> Canvas converter path.
+Web SDK board export is a complementary production source when maximum coverage
+is requested. It always enters through the canonical merge and the same
+JSON -> Canvas converter; there is no parallel converter path.
 
 ## GUI workflows
 
@@ -420,35 +458,30 @@ python -m scripts.compare_miro_export_sources `
 
 ## Miro Web SDK exporter
 
-Локальное приложение находится в:
-
-```text
-tools/miro_websdk_exporter/
-```
-
-Локальный dev server:
+The buildless app lives in `tools/miro_websdk_exporter/`. Start its no-cache
+server with:
 
 ```powershell
 python tools\miro_websdk_exporter\serve_no_cache.py --port 8766
 ```
 
-App URL в Miro:
+Register this versioned App URL in Miro:
 
 ```text
-http://localhost:8766/index.html
+http://localhost:8766/index-20260727-complete-json.html
 ```
 
-Текущая роль Web SDK Miro app:
+Use `Export board`, not `Export selection`, for a production union. A valid
+board payload declares `capture_profile: "maximum_board_v1"`, records
+serialization issues, provenance and known API limitations, and marks capture
+completeness explicitly. The app itself does not need a REST token. The normal
+pipeline performs the strict REST export and canonical union afterwards with
+`--websdk-json`.
 
-- создать probe items;
-- экспортировать board/selection из открытой доски;
-- сравнить Web SDK surface с REST;
-- найти item families, где Web SDK дает больше данных.
-
-Важно: это не то же самое, что обязательное OAuth app для REST/GUI export.
-OAuth app с `client_id`/`client_secret` обязателен для прямого Miro export.
-Web SDK app остаётся диагностическим/обогащающим инструментом и не должен
-создавать отдельную JSON -> Canvas логику.
+The Web SDK source can add fields or items exposed only in the open-board API
+surface. It cannot replace REST comments or recover private internals of Miro's
+unsupported widgets. See `tools/miro_websdk_exporter/README.md` for installation,
+cache control and payload details.
 
 ## Obsidian validation
 
@@ -507,14 +540,11 @@ python tools\canvas_render\capture_fixture.py --all
 
 Если реальный Miro JSON нужен для regression, минимизируйте его и положите в `tests/fixtures/<case>/`.
 
-## Следующие cleanup-задачи
+## Текущая очередь
 
-Актуальная очередь: [`tasks/todo.md`](tasks/todo.md).
+Актуальные задачи ведутся в [tasks/todo.md](tasks/todo.md). Ближайшие темы:
 
-Ближайшие большие темы:
-
-1. Формализовать зависимости проекта в `requirements.txt` или `pyproject.toml`.
-2. Добавить единый CLI для `json -> canvas`.
-3. Use Web SDK only for proven REST gaps, not as a parallel converter path.
-4. Консолидировать capability evidence в одну таблицу.
-5. Продолжить web-board audit и закрывать generated-overlap/mapping-actionable проблемы по одному классу за цикл.
+1. Поддерживать capability matrix при появлении новых подтверждённых API-данных.
+2. Продолжать web-board audit и закрывать один класс converter-дефектов за цикл.
+3. Сравнить text modes на тяжёлых досках и зафиксировать production default.
+4. Автоматизировать реальный Obsidian window check, когда ручной шаг станет узким местом.

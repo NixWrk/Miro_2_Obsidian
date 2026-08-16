@@ -1,5 +1,6 @@
 (function () {
-  const EXPORTER_VERSION = "20260611-deep-table";
+  const EXPORTER_VERSION = "20260727-complete-json";
+  const CAPTURE_PROFILE = "maximum_board_v1";
   const output = document.getElementById("output");
   const createGeneratedProbeButton = document.getElementById("create-generated-probe");
   const exportBoardButton = document.getElementById("export-board");
@@ -111,34 +112,134 @@
     };
   }
 
-  function toPlain(value, seen) {
-    if (value === null || typeof value !== "object") {
-      if (typeof value === "function") {
-        return undefined;
-      }
+  const SERIALIZATION_MARKER = "__miro_export_serialization__";
+
+  function serializationMarker(issues, path, kind, detail) {
+    const issue = { path, kind };
+    if (detail !== undefined && detail !== "") {
+      issue.detail = String(detail);
+    }
+    if (Array.isArray(issues)) {
+      issues.push(issue);
+    }
+    return { [SERIALIZATION_MARKER]: issue };
+  }
+
+  function toPlain(value, seen, issues, path) {
+    const currentPath = path || "$";
+    if (value === null || typeof value === "string" || typeof value === "boolean") {
       return value;
+    }
+    if (typeof value === "number") {
+      return Number.isFinite(value)
+        ? value
+        : serializationMarker(issues, currentPath, "non_finite_number", String(value));
+    }
+    if (typeof value === "bigint") {
+      return serializationMarker(issues, currentPath, "bigint", value.toString());
+    }
+    if (typeof value === "undefined") {
+      return serializationMarker(issues, currentPath, "undefined");
+    }
+    if (typeof value === "function") {
+      return serializationMarker(issues, currentPath, "function", value.name || "anonymous");
+    }
+    if (typeof value === "symbol") {
+      return serializationMarker(issues, currentPath, "symbol", String(value));
     }
 
     if (!seen) {
       seen = new WeakSet();
     }
     if (seen.has(value)) {
-      return "[Circular]";
+      return serializationMarker(issues, currentPath, "circular_reference");
     }
     seen.add(value);
 
-    if (Array.isArray(value)) {
-      return value.map((item) => toPlain(item, seen)).filter((item) => item !== undefined);
-    }
-
-    const plain = {};
-    for (const key of Object.keys(value)) {
-      const converted = toPlain(value[key], seen);
-      if (converted !== undefined) {
-        plain[key] = converted;
+    try {
+      if (value instanceof Date) {
+        return Number.isFinite(value.getTime())
+          ? value.toISOString()
+          : serializationMarker(issues, currentPath, "invalid_date");
       }
+      if (value instanceof Map) {
+        return {
+          __miro_export_type__: "Map",
+          entries: [...value.entries()].map(([key, entryValue], index) => ({
+            key: toPlain(key, seen, issues, `${currentPath}.entries[${index}].key`),
+            value: toPlain(entryValue, seen, issues, `${currentPath}.entries[${index}].value`),
+          })),
+        };
+      }
+      if (value instanceof Set) {
+        return {
+          __miro_export_type__: "Set",
+          values: [...value.values()].map((entryValue, index) =>
+            toPlain(entryValue, seen, issues, `${currentPath}.values[${index}]`)
+          ),
+        };
+      }
+      if (Array.isArray(value)) {
+        return value.map((item, index) =>
+          toPlain(item, seen, issues, `${currentPath}[${index}]`)
+        );
+      }
+
+      let keys;
+      try {
+        keys = Object.keys(value);
+      } catch (error) {
+        return serializationMarker(
+          issues,
+          currentPath,
+          "property_enumeration_error",
+          error && error.message ? error.message : error
+        );
+      }
+      const result = Object.create(null);
+      for (const key of keys) {
+        try {
+          result[key] = toPlain(value[key], seen, issues, `${currentPath}.${key}`);
+        } catch (error) {
+          result[key] = serializationMarker(
+            issues,
+            `${currentPath}.${key}`,
+            "property_read_error",
+            error && error.message ? error.message : error
+          );
+        }
+      }
+      return result;
+    } finally {
+      seen.delete(value);
     }
-    return plain;
+  }
+  function uniqueItemIds(items) {
+    return [...new Set(items.map((item) => String(item && item.id != null ? item.id : "")).filter(Boolean))];
+  }
+
+  function itemStructureErrors(items, label) {
+    const errors = [];
+    const seenIds = new Set();
+    items.forEach((item, index) => {
+      if (!item || typeof item !== "object" || Array.isArray(item)) {
+        errors.push(`${label}_${index}_not_object`);
+        return;
+      }
+      const itemId = String(item.id == null ? "" : item.id).trim();
+      const itemType = String(item.type == null ? "" : item.type).trim();
+      if (!itemId) {
+        errors.push(`${label}_${index}_missing_id`);
+      } else if (seenIds.has(itemId)) {
+        errors.push(`${label}_${index}_duplicate_id:${itemId}`);
+      } else {
+        seenIds.add(itemId);
+      }
+      if (!itemType) {
+        errors.push(`${label}_${index}_missing_type`);
+      }
+    });
+    return errors;
   }
 
   function valuePreview(value) {
@@ -296,7 +397,10 @@
   function summarize(items) {
     const byType = {};
     for (const item of items) {
-      const type = item.type || item.itemType || "unknown";
+      const type =
+        item && typeof item === "object"
+          ? item.type || item.itemType || "unknown"
+          : "unknown";
       byType[type] = (byType[type] || 0) + 1;
     }
     return {
@@ -332,33 +436,126 @@
     return miro.board.experimental[name].bind(miro.board.experimental);
   }
 
-  async function getBoardInfo() {
+  async function getBoardInfo(serializationIssues) {
     if (typeof miro.board.getInfo !== "function") {
       return null;
     }
-    return toPlain(await miro.board.getInfo());
+    return toPlain(await miro.board.getInfo(), undefined, serializationIssues, "$.board");
   }
-
   async function exportBoard() {
     assertMiroReady();
     const items = await miro.board.get();
     const selection = await miro.board.getSelection();
-    const plainItems = items.map((item) => toPlain(item));
+    const itemSerializationIssues = [];
+    const selectionSerializationIssues = [];
+    const boardSerializationIssues = [];
+    const plainItems = items.map((item, index) =>
+      toPlain(item, undefined, itemSerializationIssues, `$.items[${index}]`)
+    );
+    const plainSelection = selection.map((item, index) =>
+      toPlain(item, undefined, selectionSerializationIssues, `$.selection[${index}]`)
+    );
+    const board = await getBoardInfo(boardSerializationIssues);
+    const structuralErrors = itemStructureErrors(plainItems, "item");
+    const selectionStructuralErrors = itemStructureErrors(plainSelection, "selection_item");
+    const boardStructuralErrors = [];
+    if (!board || typeof board !== "object" || Array.isArray(board)) {
+      boardStructuralErrors.push("board_not_object");
+    } else if (!String(board.id == null ? "" : board.id).trim()) {
+      boardStructuralErrors.push("board_missing_id");
+    }
+    const serializationErrors = [
+      ...structuralErrors,
+      ...itemSerializationIssues.map((issue) => `${issue.path}:${issue.kind}`),
+    ];
+    const selectionErrors = [
+      ...selectionStructuralErrors,
+      ...selectionSerializationIssues.map((issue) => `${issue.path}:${issue.kind}`),
+    ];
+    const captureErrors = [
+      ...structuralErrors,
+      ...selectionStructuralErrors,
+      ...boardStructuralErrors,
+    ];
+    const allSerializationIssues = [
+      ...itemSerializationIssues,
+      ...selectionSerializationIssues,
+      ...boardSerializationIssues,
+    ];
+    const itemsComplete = plainItems.length === items.length && serializationErrors.length === 0;
+    const selectionComplete =
+      plainSelection.length === selection.length && selectionErrors.length === 0;
+    const boardIdentityComplete = boardStructuralErrors.length === 0;
+    const captureComplete =
+      itemsComplete &&
+      selectionComplete &&
+      boardIdentityComplete &&
+      allSerializationIssues.length === 0;
     const payload = {
       schema_version: 1,
       exporter_version: EXPORTER_VERSION,
       source_surface: "web_sdk",
       export_scope: "board",
+      capture_profile: CAPTURE_PROFILE,
       exported_at: new Date().toISOString(),
-      board: await getBoardInfo(),
+      board,
       items: plainItems,
-      selection: selection.map((item) => toPlain(item)),
+      provenance: {
+        items: {
+          method: "miro.board.get",
+          scope: "api_exposed_board_items",
+          raw_count: items.length,
+          serialized_count: plainItems.length,
+        },
+        board: {
+          method: typeof miro.board.getInfo === "function" ? "miro.board.getInfo" : "unavailable",
+          identity_complete: boardIdentityComplete,
+        },
+        serialization: {
+          issue_count: allSerializationIssues.length,
+          issues: allSerializationIssues,
+        },
+      },
+      completeness: {
+        complete: captureComplete,
+        capture_complete: captureComplete,
+        board_complete: false,
+        coverage_basis: "miro.board.get_api_surface",
+        known_limitations: [
+          "unsupported_item_details_unavailable",
+          "unsupported_parent_children_not_enumerated",
+          "comment_content_unavailable",
+        ],
+        capture_errors: captureErrors,
+        items: {
+          complete: itemsComplete,
+          raw_count: items.length,
+          serialized_count: plainItems.length,
+          serialization_errors: serializationErrors,
+        },
+        selection: {
+          complete: selectionComplete,
+          raw_count: selection.length,
+          serialized_count: plainSelection.length,
+          serialization_errors: selectionErrors,
+        },
+        board_identity: {
+          complete: boardIdentityComplete,
+          errors: boardStructuralErrors,
+        },
+        serialization: {
+          complete: allSerializationIssues.length === 0,
+          issues: allSerializationIssues,
+        },
+      },
+      selected_item_ids: uniqueItemIds(selection),
+      selection: plainSelection,
       diagnostics: buildDiagnostics(items),
+      selection_diagnostics: buildDiagnostics(selection),
       summary: summarize(plainItems),
     };
     setPayload(payload);
   }
-
   async function createGeneratedProbeItems() {
     assertMiroReady();
     const created = [];
@@ -789,6 +986,7 @@
       board: await getBoardInfo(),
       items: plainItems,
       selection: plainItems,
+      selected_item_ids: uniqueItemIds(selection),
       diagnostics: buildDiagnostics(selection),
       summary: summarize(plainItems),
     };

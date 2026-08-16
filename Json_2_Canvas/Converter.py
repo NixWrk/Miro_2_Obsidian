@@ -1,13 +1,19 @@
-﻿# converter.py
+# converter.py
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
+import filecmp
+import hashlib
 import json
+import math
 import os
 import re
 import shutil
+import stat
+import tempfile
+from copy import deepcopy
 from html import escape as _html_escape, unescape as _html_unescape
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any, Dict, Iterable, List, Optional
 from urllib.parse import parse_qs, unquote, urlparse
 
@@ -77,6 +83,26 @@ SOURCE_LIMITED_DROP_TYPES = {
     "table",
     "widgets_stack",
 }
+RECOVERABLE_DATA_KEYS = {
+    "title",
+    "content",
+    "description",
+    "text",
+    "html",
+    "code",
+    "url",
+    "imageUrl",
+    "documentUrl",
+    "downloadUrl",
+    "previewUrl",
+    "fields",
+    "rows",
+    "columns",
+    "data",
+    "values",
+    "dueDate",
+    "assigneeId",
+}
 SHORT_LABEL_SINGLE_LINE_PADDING = 64
 SHORT_LABEL_SINGLE_LINE_AVG_CHAR_WIDTH = 0.50
 SHORT_LABEL_WIDTH_MIN_GROW = 32
@@ -85,14 +111,127 @@ EMBED_LINK_MIN_WIDTH = 320
 COMMENT_NODE_WIDTH = 300
 COMMENT_NODE_MIN_HEIGHT = 96
 COMMENT_NODE_OFFSET_X = 64
+COMMENT_LANE_GAP = 96
+COMMENT_LANE_ITEM_GAP = 24
+
+
+def _is_link_or_reparse(path: Path) -> bool:
+    path = Path(path)
+    if path.is_symlink():
+        return True
+    try:
+        attributes = path.stat(follow_symlinks=False).st_file_attributes
+    except (AttributeError, FileNotFoundError, OSError):
+        return False
+    return bool(attributes & stat.FILE_ATTRIBUTE_REPARSE_POINT)
+
+
+def _require_regular_file(path: Path, *, label: str) -> None:
+    if _is_link_or_reparse(path) or not path.is_file():
+        raise ValueError(f"{label} must be a regular file: {path}")
+
+
+def _require_regular_directory(path: Path, *, label: str) -> None:
+    if _is_link_or_reparse(path) or not path.is_dir():
+        raise ValueError(f"{label} must be a regular directory: {path}")
+
+
+def _require_no_reparse_components(path: Path, *, label: str) -> None:
+    current = Path(path)
+    while True:
+        if _is_link_or_reparse(current):
+            raise ValueError(f"{label} contains a link or reparse point: {current}")
+        if current.parent == current:
+            return
+        current = current.parent
+
+
+def _reject_nonfinite_json_constant(value: str) -> None:
+    raise ValueError(f"Miro source contains non-JSON numeric constant: {value}")
+
+
+def _positive_finite_number(value: Any, *, label: str) -> float:
+    if isinstance(value, bool):
+        raise ValueError(f"{label} must be a positive finite number")
+    try:
+        result = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{label} must be a positive finite number") from exc
+    if not math.isfinite(result) or result <= 0:
+        raise ValueError(f"{label} must be a positive finite number")
+    return result
+
+
+def has_recoverable_item_content(item: Dict[str, Any]) -> bool:
+    """Return true when an item carries information beyond id/position/style."""
+    data = item.get("data") if isinstance(item.get("data"), dict) else {}
+    candidates = [
+        item.get(key)
+        for key in (
+            "title",
+            "content",
+            "text",
+            "messages",
+            "replies",
+            "reactions",
+            "mentionedUsers",
+        )
+    ]
+    candidates.extend(data.get(key) for key in RECOVERABLE_DATA_KEYS)
+    links = item.get("links") if isinstance(item.get("links"), dict) else {}
+    candidates.extend(links.get(key) for key in ("web", "download"))
+    for value in candidates:
+        if isinstance(value, str) and value.strip():
+            return True
+        if isinstance(value, (list, dict)) and value:
+            return True
+        if value not in (None, "", False, [], {}):
+            return True
+    return False
+
+
+def _recoverable_item_details_html(item: Dict[str, Any]) -> str:
+    payload: Dict[str, Any] = {}
+    for key in (
+        "title",
+        "content",
+        "text",
+        "messages",
+        "replies",
+        "reactions",
+        "mentionedUsers",
+    ):
+        value = item.get(key)
+        if value not in (None, "", [], {}):
+            payload[key] = value
+    data = item.get("data") if isinstance(item.get("data"), dict) else {}
+    if data:
+        payload["data"] = data
+    links = item.get("links") if isinstance(item.get("links"), dict) else {}
+    if links:
+        payload["links"] = links
+    encoded = json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True)
+    return f"<pre>{_html_escape(encoded, quote=False)}</pre>" if payload else ""
+
 
 # Цвета стикеров Miro
 MIRO_STICKY_HEX: Dict[str, str] = {
-    "light_yellow": "#FFF59D", "yellow": "#FFD54F", "orange": "#FF8A65",
-    "red": "#FF0000", "light_pink": "#F48FB1", "pink": "#F06292",
-    "light_blue": "#7986CB", "violet": "#9FA8DA", "blue": "#4FC3F7",
-    "dark_blue": "#42A5F5", "cyan": "#26A69A", "dark_green": "#66BB6A",
-    "light_green": "#C5E1A5", "green": "#AED581", "white": "#FFFFFF", "black": "#000000",
+    "light_yellow": "#FFF59D",
+    "yellow": "#FFD54F",
+    "orange": "#FF8A65",
+    "red": "#FF0000",
+    "light_pink": "#F48FB1",
+    "pink": "#F06292",
+    "light_blue": "#7986CB",
+    "violet": "#9FA8DA",
+    "blue": "#4FC3F7",
+    "dark_blue": "#42A5F5",
+    "cyan": "#26A69A",
+    "dark_green": "#66BB6A",
+    "light_green": "#C5E1A5",
+    "green": "#AED581",
+    "white": "#FFFFFF",
+    "black": "#000000",
 }
 
 ARROW_SYMBOLS = {"right_arrow": "→", "left_arrow": "←", "left_right_arrow": "↔"}
@@ -100,28 +239,51 @@ BRACE_SYMBOLS = {"left_brace": "{", "right_brace": "}"}
 
 MIRO_TO_CANVAS_SHAPE = {
     # Basic
-    "rectangle": "round-rectangle", "round_rectangle": "round-rectangle",
-    "circle": "circle", "triangle": "diamond", "rhombus": "diamond",
-    "parallelogram": "parallelogram", "trapezoid": "parallelogram",
-    "pentagon": "round-rectangle", "hexagon": "round-rectangle", "octagon": "round-rectangle",
-    "wedge_round_rectangle_callout": "round-rectangle", "star": "round-rectangle",
-    "flow_chart_predefined_process": "predefined-process", "cloud": "round-rectangle",
-    "cross": "round-rectangle", "can": "database",
-    "right_arrow": "pill", "left_arrow": "pill", "left_right_arrow": "pill",
-    "left_brace": "round-rectangle", "right_brace": "round-rectangle",
+    "rectangle": "round-rectangle",
+    "round_rectangle": "round-rectangle",
+    "circle": "circle",
+    "triangle": "diamond",
+    "rhombus": "diamond",
+    "parallelogram": "parallelogram",
+    "trapezoid": "parallelogram",
+    "pentagon": "round-rectangle",
+    "hexagon": "round-rectangle",
+    "octagon": "round-rectangle",
+    "wedge_round_rectangle_callout": "round-rectangle",
+    "star": "round-rectangle",
+    "flow_chart_predefined_process": "predefined-process",
+    "cloud": "round-rectangle",
+    "cross": "round-rectangle",
+    "can": "database",
+    "right_arrow": "pill",
+    "left_arrow": "pill",
+    "left_right_arrow": "pill",
+    "left_brace": "round-rectangle",
+    "right_brace": "round-rectangle",
     # Flowchart
-    "flow_chart_connector": "circle", "flow_chart_magnetic_disk": "database",
-    "flow_chart_input_output": "parallelogram", "flow_chart_decision": "diamond",
-    "flow_chart_delay": "pill", "flow_chart_display": "round-rectangle",
-    "flow_chart_document": "document", "flow_chart_magnetic_drum": "database",
-    "flow_chart_internal_storage": "round-rectangle", "flow_chart_manual_input": "parallelogram",
-    "flow_chart_manual_operation": "round-rectangle", "flow_chart_merge": "diamond",
-    "flow_chart_multidocuments": "document", "flow_chart_note_curly_left": "document",
-    "flow_chart_note_curly_right": "document", "flow_chart_note_square": "document",
-    "flow_chart_offpage_connector": "pill", "flow_chart_or": "diamond",
+    "flow_chart_connector": "circle",
+    "flow_chart_magnetic_disk": "database",
+    "flow_chart_input_output": "parallelogram",
+    "flow_chart_decision": "diamond",
+    "flow_chart_delay": "pill",
+    "flow_chart_display": "round-rectangle",
+    "flow_chart_document": "document",
+    "flow_chart_magnetic_drum": "database",
+    "flow_chart_internal_storage": "round-rectangle",
+    "flow_chart_manual_input": "parallelogram",
+    "flow_chart_manual_operation": "round-rectangle",
+    "flow_chart_merge": "diamond",
+    "flow_chart_multidocuments": "document",
+    "flow_chart_note_curly_left": "document",
+    "flow_chart_note_curly_right": "document",
+    "flow_chart_note_square": "document",
+    "flow_chart_offpage_connector": "pill",
+    "flow_chart_or": "diamond",
     "flow_chart_predefined_process_2": "predefined-process",
-    "flow_chart_preparation": "round-rectangle", "flow_chart_process": "round-rectangle",
-    "flow_chart_online_storage": "database", "flow_chart_summing_junction": "circle",
+    "flow_chart_preparation": "round-rectangle",
+    "flow_chart_process": "round-rectangle",
+    "flow_chart_online_storage": "database",
+    "flow_chart_summing_junction": "circle",
     "flow_chart_terminator": "pill",
 }
 
@@ -144,19 +306,35 @@ FLOWCHART_LABEL = {
     "flow_chart_summing_junction": "summing junction",
 }
 
-EXACT_BASE_SHAPES = {"round_rectangle", "rectangle", "circle", "rhombus", "parallelogram"}
+EXACT_BASE_SHAPES = {
+    "round_rectangle",
+    "rectangle",
+    "circle",
+    "rhombus",
+    "parallelogram",
+}
 
 KEY_SETS = [
-    "items", "item",
-    "connectors", "connector",
-    "tags", "tag",
-    "frames", "frame",
-    "documents", "document",
-    "embeds", "embed",
-    "images", "image",
-    "texts", "text",
-    "shapes", "shape",
-    "comments", "comment",
+    "items",
+    "item",
+    "connectors",
+    "connector",
+    "tags",
+    "tag",
+    "frames",
+    "frame",
+    "documents",
+    "document",
+    "embeds",
+    "embed",
+    "images",
+    "image",
+    "texts",
+    "text",
+    "shapes",
+    "shape",
+    "comments",
+    "comment",
 ]
 
 VALID_SIDES = {"left", "right", "top", "bottom"}
@@ -169,22 +347,36 @@ HTML_TAG_RE = re.compile(r"<[^>]+>")
 HAS_TAG_RE = re.compile(r"<[a-zA-Z/][^>]*>")
 P_CLOSE_RE = re.compile(r"</p\s*>", re.I)
 P_BLOCK_RE = re.compile(r"<p\b[^>]*>(.*?)</p\s*>", re.I | re.S)
-EDGE_EMPTY_P_RE = re.compile(r"^\s*(?:<p\b[^>]*>\s*(?:<br\s*/?>|&nbsp;|\s)*</p\s*>\s*)+", re.I)
-TRAILING_EMPTY_P_RE = re.compile(r"(?:\s*<p\b[^>]*>\s*(?:<br\s*/?>|&nbsp;|\s)*</p\s*>\s*)+\s*$", re.I)
+EDGE_EMPTY_P_RE = re.compile(
+    r"^\s*(?:<p\b[^>]*>\s*(?:<br\s*/?>|&nbsp;|\s)*</p\s*>\s*)+", re.I
+)
+TRAILING_EMPTY_P_RE = re.compile(
+    r"(?:\s*<p\b[^>]*>\s*(?:<br\s*/?>|&nbsp;|\s)*</p\s*>\s*)+\s*$", re.I
+)
 BR_RE = re.compile(r"<br\s*/?>", re.I)
 LI_RE = re.compile(r"<li\b", re.I)
 LI_BLOCK_RE = re.compile(r"<li\b[^>]*>(.*?)</li\s*>", re.I | re.S)
-A_HREF_RE = re.compile(r"<a\b[^>]*\bhref\s*=\s*[\"']([^\"']+)[\"'][^>]*>(.*?)</a\s*>", re.I | re.S)
+A_HREF_RE = re.compile(
+    r"<a\b[^>]*\bhref\s*=\s*[\"']([^\"']+)[\"'][^>]*>(.*?)</a\s*>", re.I | re.S
+)
 STRONG_RE = re.compile(r"<(?:strong|b)\b[^>]*>(.*?)</(?:strong|b)\s*>", re.I | re.S)
 EM_RE = re.compile(r"<(?:em|i)\b[^>]*>(.*?)</(?:em|i)\s*>", re.I | re.S)
 OPEN_P_RE = re.compile(r"<p\b[^>]*>", re.I)
 P_TAG_RE = re.compile(r"</?p\b[^>]*>", re.I)
 SIMPLE_HTML_TAG_RE = re.compile(r"</?\s*([a-zA-Z0-9:-]+)\b[^>]*>")
-RICH_HTML_TAG_RE = re.compile(r"<(?:table|thead|tbody|tr|td|th|iframe|img|svg|canvas|video|pre|code)\b", re.I)
-VISUAL_STYLE_RE = re.compile(r"\bstyle\s*=\s*[\"'][^\"']*(?:background|color|font-size)[^\"']*[\"']", re.I)
+RICH_HTML_TAG_RE = re.compile(
+    r"<(?:table|thead|tbody|tr|td|th|iframe|img|svg|canvas|video|pre|code)\b", re.I
+)
+VISUAL_STYLE_RE = re.compile(
+    r"\bstyle\s*=\s*[\"'][^\"']*(?:background|color|font-size)[^\"']*[\"']", re.I
+)
 PCT_RE = re.compile(r"^\s*([+-]?\d+(?:\.\d+)?)\s*%\s*$")
-COLOR_PROP_RE   = re.compile(r"(color\s*:\s*)(#[0-9a-fA-F]{3,8}|rgb\s*\(\s*\d+\s*,\s*\d+\s*,\s*\d+\s*\))", re.I)
-SPAN_BGCOLOR_RE = re.compile(r"<span\b[^>]*background-color\s*:", re.I)  # span с background-color
+COLOR_PROP_RE = re.compile(
+    r"(color\s*:\s*)(#[0-9a-fA-F]{3,8}|rgb\s*\(\s*\d+\s*,\s*\d+\s*,\s*\d+\s*\))", re.I
+)
+SPAN_BGCOLOR_RE = re.compile(
+    r"<span\b[^>]*background-color\s*:", re.I
+)  # span с background-color
 FONT_SIZE_STYLE_RE = re.compile(r"(font-size\s*:\s*)\d+(?:\.\d+)?px", re.I)
 LINE_HEIGHT_STYLE_RE = re.compile(r"line-height\s*:\s*([0-9]+(?:\.[0-9]+)?)", re.I)
 # Матчит открывающий тег span или strong с атрибутом style
@@ -196,7 +388,7 @@ _HIGHLIGHT_TAG_RE = re.compile(
 # Детектор: текстовый блок содержит ТОЛЬКО одну URL-ссылку, без другого текста.
 # Матчит href из <a href="..."> или голую http(s)/ftp URL.
 _SOLO_LINK_RE = re.compile(
-    r'^https?://\S+$|^ftp://\S+$',
+    r"^https?://\S+$|^ftp://\S+$",
     re.I,
 )
 _SOLO_A_HREF_RE = re.compile(
@@ -243,11 +435,15 @@ def _recover_embed_url(data: Dict[str, Any]) -> str | None:
 
     candidates = [
         match.group(1)
-        for match in re.finditer(r'\b(?:src|href)\s*=\s*["\']([^"\']+)["\']', html_value, re.I)
+        for match in re.finditer(
+            r'\b(?:src|href)\s*=\s*["\']([^"\']+)["\']', html_value, re.I
+        )
     ]
     candidates.extend(
         match.group(0)
-        for match in re.finditer(r"https?://[^\s\"'<>]+|//[^\s\"'<>]+", html_value, re.I)
+        for match in re.finditer(
+            r"https?://[^\s\"'<>]+|//[^\s\"'<>]+", html_value, re.I
+        )
     )
 
     for candidate in candidates:
@@ -280,7 +476,7 @@ def _extract_solo_url(html_or_plain: str) -> str | None:
     if _SOLO_LINK_RE.match(text):
         return text
     # HTML: считаем число тегов <a ...>
-    a_tags = re.findall(r'<a\b', text, re.I)
+    a_tags = re.findall(r"<a\b", text, re.I)
     if len(a_tags) != 1:
         return None
     # HTML с единственным <a href>: точный матч — только тег внутри <p>
@@ -296,7 +492,7 @@ def _extract_solo_url(html_or_plain: str) -> str | None:
     href_m = re.search(r'<a\b[^>]*\bhref\s*=\s*["\']([^"\']+)["\']', text, re.I)
     if not href_m:
         return None
-    stripped = re.sub(r'<[^>]+>', '', text).strip()
+    stripped = re.sub(r"<[^>]+>", "", text).strip()
     if not stripped or stripped == href_m.group(1).strip():
         return href_m.group(1).strip()
     return None
@@ -307,7 +503,9 @@ def _is_video_link_url(url: str) -> bool:
         host = urlparse(url).netloc.lower()
     except Exception:
         return False
-    return any(host == value or host.endswith(f".{value}") for value in VIDEO_LINK_HOSTS)
+    return any(
+        host == value or host.endswith(f".{value}") for value in VIDEO_LINK_HOSTS
+    )
 
 
 def _plain_field_text(value: Any) -> str:
@@ -324,7 +522,15 @@ def _plain_field_text(value: Any) -> str:
         parts = [_plain_field_text(v) for v in value]
         return ", ".join(p for p in parts if p)
     if isinstance(value, dict):
-        for key in ("displayValue", "display_value", "text", "title", "name", "value", "url"):
+        for key in (
+            "displayValue",
+            "display_value",
+            "text",
+            "title",
+            "name",
+            "value",
+            "url",
+        ):
             if key in value:
                 text = _plain_field_text(value.get(key))
                 if text:
@@ -367,7 +573,8 @@ def _format_app_card_fields(fields: Any) -> List[str]:
 
             if not value:
                 rest = {
-                    k: v for k, v in field.items()
+                    k: v
+                    for k, v in field.items()
                     if k not in set(label_keys) and k not in set(value_keys)
                 }
                 value = _plain_field_text(rest)
@@ -391,17 +598,25 @@ def _format_app_card_fields(fields: Any) -> List[str]:
 # Small utilities
 # =========================
 
-def _bbox_of_real_nodes(nodes: List[Dict[str, Any]], include_groups: bool = False) -> Optional[Dict[str, float]]:
+
+def _bbox_of_real_nodes(
+    nodes: List[Dict[str, Any]], include_groups: bool = False
+) -> Optional[Dict[str, float]]:
     xs, ys, xe, ye = [], [], [], []
     for n in nodes:
         if not include_groups and n.get("type") == "group":
             continue
         try:
-            x = float(n["x"]); y = float(n["y"])
-            w = float(n["width"]); h = float(n["height"])
+            x = float(n["x"])
+            y = float(n["y"])
+            w = float(n["width"])
+            h = float(n["height"])
         except Exception:
             continue
-        xs.append(x); ys.append(y); xe.append(x + w); ye.append(y + h)
+        xs.append(x)
+        ys.append(y)
+        xe.append(x + w)
+        ye.append(y + h)
     if not xs:
         return None
     x0, y0 = min(xs), min(ys)
@@ -414,9 +629,10 @@ def _norm_hex(s: str) -> str:
     if s.startswith("#") and len(s) in (4, 7):
         # #abc -> #aabbcc
         if len(s) == 4:
-            s = "#" + "".join(ch*2 for ch in s[1:])
+            s = "#" + "".join(ch * 2 for ch in s[1:])
         return s
     return s
+
 
 def _is_miro_black_color(s: Optional[str]) -> bool:
     if not s or not isinstance(s, str):
@@ -427,25 +643,35 @@ def _is_miro_black_color(s: Optional[str]) -> bool:
     if t.startswith("rgb"):
         # допускаем произвольные пробелы: rgb(26, 26, 26)
         nums = re.findall(r"\d+", t)
-        return len(nums) == 3 and all(n.isdigit() for n in nums) and tuple(map(int, nums)) == (26, 26, 26)
+        return (
+            len(nums) == 3
+            and all(n.isdigit() for n in nums)
+            and tuple(map(int, nums)) == (26, 26, 26)
+        )
     return False
+
 
 def _extract_inline_color(html: str) -> Optional[str]:
     m = COLOR_PROP_RE.search(html or "")
     return m.group(2) if m else None
 
+
 def _strip_inline_black_color(html: str) -> str:
     # удаляем только color: #1a1a1a или rgb(26,26,26) — остальные цвета не трогаем
     def _repl(m: re.Match) -> str:
-        prefix, val = m.group(1), m.group(2)
+        val = m.group(2)
         return "" if _is_miro_black_color(val) else m.group(0)
+
     return COLOR_PROP_RE.sub(_repl, html or "")
+
 
 def _contrast_color(r: int, g: int, b: int) -> str:
     """Возвращает '#000000' или '#ffffff' — контрастный цвет по W3C relative luminance."""
+
     def _lin(c: int) -> float:
         s = c / 255.0
         return s / 12.92 if s <= 0.04045 else ((s + 0.055) / 1.055) ** 2.4
+
     lum = 0.2126 * _lin(r) + 0.7152 * _lin(g) + 0.0722 * _lin(b)
     return "#000000" if lum > 0.179 else "#ffffff"
 
@@ -456,9 +682,13 @@ def _inject_contrast_color_on_bgcolor_spans(html: str) -> str:
     дописывает контрастный color в атрибут style.
     Срабатывает только при наличии background-color (highlight/маркер).
     """
-    _RGB_RE = re.compile(r"background-color\s*:\s*rgb\s*\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\)", re.I)
+    _RGB_RE = re.compile(
+        r"background-color\s*:\s*rgb\s*\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\)", re.I
+    )
     _HEX_RE = re.compile(r"background-color\s*:\s*(#[0-9a-fA-F]{3,8})", re.I)
-    _HAS_COLOR_RE = re.compile(r"(?<![a-z-])color\s*:", re.I)  # есть color (не background-color)
+    _HAS_COLOR_RE = re.compile(
+        r"(?<![a-z-])color\s*:", re.I
+    )  # есть color (не background-color)
 
     def _repl(m: re.Match) -> str:
         full_tag, style_val = m.group(1), m.group(2)
@@ -479,7 +709,9 @@ def _inject_contrast_color_on_bgcolor_spans(html: str) -> str:
                 return full_tag
             h = _norm_hex(hex_m.group(1))
             try:
-                r = int(h[1:3], 16); g = int(h[3:5], 16); b = int(h[5:7], 16)
+                r = int(h[1:3], 16)
+                g = int(h[3:5], 16)
+                b = int(h[5:7], 16)
             except Exception:
                 return full_tag
         contrast = _contrast_color(r, g, b)
@@ -492,6 +724,7 @@ def _inject_contrast_color_on_bgcolor_spans(html: str) -> str:
 
 def posix_path(p: str) -> str:
     return p.replace("\\", "/")
+
 
 def find_vault_roots_upwards(start_dir: str) -> List[str]:
     """
@@ -508,8 +741,17 @@ def find_vault_roots_upwards(start_dir: str) -> List[str]:
         current = parent
     return candidates
 
+
 def relpath_from_vault(abs_path: str, vault_root: str) -> str:
-    return posix_path(os.path.relpath(abs_path, vault_root))
+    resolved_path = Path(abs_path).resolve()
+    resolved_vault = Path(vault_root).resolve()
+    try:
+        return resolved_path.relative_to(resolved_vault).as_posix()
+    except ValueError as exc:
+        raise ValueError(
+            f"Canvas file reference must stay inside the Obsidian vault: {resolved_path}"
+        ) from exc
+
 
 def _parse_px(v: Any) -> Optional[float]:
     if isinstance(v, (int, float)):
@@ -523,6 +765,7 @@ def _parse_px(v: Any) -> Optional[float]:
         except Exception:
             return None
     return None
+
 
 def _pct_to_float(v: Any) -> Optional[float]:
     """'12%' -> 12.0; '50' -> 50.0; иначе None"""
@@ -538,8 +781,10 @@ def _pct_to_float(v: Any) -> Optional[float]:
             return None
     return None
 
+
 def strip_html(text: str) -> str:
     return HTML_TAG_RE.sub("", text or "").strip()
+
 
 def _is_html(s: str) -> bool:
     return bool(s) and bool(HAS_TAG_RE.search(s))
@@ -581,7 +826,9 @@ def _html_to_markdown_fragment(html: str) -> str:
     return text.strip()
 
 
-def _should_keep_html_for_obsidian_style(html: str, wrapper_extra_color: Optional[str] = None) -> bool:
+def _should_keep_html_for_obsidian_style(
+    html: str, wrapper_extra_color: Optional[str] = None
+) -> bool:
     if wrapper_extra_color:
         return True
     if RICH_HTML_TAG_RE.search(html or ""):
@@ -642,7 +889,9 @@ def _strip_edge_empty_paragraphs(html_or_text: str) -> str:
 
 def _empty_html_fragment(fragment: str) -> bool:
     without_breaks = BR_RE.sub("", fragment or "")
-    plain = _html_unescape(HTML_TAG_RE.sub("", without_breaks)).replace("\xa0", " ").strip()
+    plain = (
+        _html_unescape(HTML_TAG_RE.sub("", without_breaks)).replace("\xa0", " ").strip()
+    )
     return not plain
 
 
@@ -658,7 +907,9 @@ def _non_empty_paragraph_count(html_or_text: str) -> int:
 def _is_short_text_label(html_or_text: str) -> bool:
     if not html_or_text:
         return False
-    if LI_RE.search(html_or_text) or re.search(r"<(?:ol|ul|table)\b", html_or_text, re.I):
+    if LI_RE.search(html_or_text) or re.search(
+        r"<(?:ol|ul|table)\b", html_or_text, re.I
+    ):
         return False
     plain = _html_unescape(strip_html(html_or_text)).replace("\xa0", " ").strip()
     if not plain or len(plain) > 120:
@@ -672,7 +923,11 @@ def _compact_short_label_html(html_or_text: str) -> str:
     paragraphs = P_BLOCK_RE.findall(html_or_text or "")
     if not paragraphs:
         return html_or_text or ""
-    visible = [fragment.strip() for fragment in paragraphs if not _empty_html_fragment(fragment)]
+    visible = [
+        fragment.strip()
+        for fragment in paragraphs
+        if not _empty_html_fragment(fragment)
+    ]
     if not visible:
         return html_or_text or ""
     return "<br>".join(visible)
@@ -696,12 +951,23 @@ def _extract_line_height(style: Dict[str, Any], default: float = 1.35) -> float:
     except Exception:
         return default
 
-def _extract_font_base_px(it: Dict[str, Any], fallback: float = OBSIDIAN_FONT_SIZE) -> float:
-    style = (it.get("style") or {})
-    data = (it.get("data") or {})
+
+def _extract_font_base_px(
+    it: Dict[str, Any], fallback: float = OBSIDIAN_FONT_SIZE
+) -> float:
+    style = it.get("style") or {}
+    data = it.get("data") or {}
     # 1) явные px-ключи
     for src in (style, data):
-        for k in ("fontSize", "font_size", "fontSizePx", "textSizePx", "text_size_px", "font-size", "text-size"):
+        for k in (
+            "fontSize",
+            "font_size",
+            "fontSizePx",
+            "textSizePx",
+            "text_size_px",
+            "font-size",
+            "text-size",
+        ):
             px = _parse_px(src.get(k))
             if px is not None:
                 return px
@@ -719,10 +985,19 @@ def _extract_font_base_px(it: Dict[str, Any], fallback: float = OBSIDIAN_FONT_SI
     if isinstance(size_key, str):
         s = size_key.strip().lower()
         size_map = {
-            "xs": 10, "extra_small": 10, "extra-small": 10,
-            "s": 12, "small": 12, "m": 16, "medium": 16,
-            "l": 20, "large": 20, "xl": 28, "x-large": 28,
-            "extra_large": 28, "extra-large": 28,
+            "xs": 10,
+            "extra_small": 10,
+            "extra-small": 10,
+            "s": 12,
+            "small": 12,
+            "m": 16,
+            "medium": 16,
+            "l": 20,
+            "large": 20,
+            "xl": 28,
+            "x-large": 28,
+            "extra_large": 28,
+            "extra-large": 28,
         }
         if s in size_map:
             return float(size_map[s])
@@ -733,9 +1008,13 @@ def _extract_font_base_px(it: Dict[str, Any], fallback: float = OBSIDIAN_FONT_SI
             return float(fallback) * sc
     return float(fallback)
 
-def compute_font_px(scale: float, base_font_px: int = OBSIDIAN_FONT_SIZE, min_font_px: int = 8) -> int:
+
+def compute_font_px(
+    scale: float, base_font_px: int = OBSIDIAN_FONT_SIZE, min_font_px: int = 8
+) -> int:
     """Кегль = round(base*scale), но не меньше min_font_px."""
     return max(min_font_px, int(round(base_font_px * scale)))
+
 
 def resolve_local_file_name(item: Dict[str, Any], fallback_id: str) -> str:
     data = item.get("data", {}) or {}
@@ -744,8 +1023,11 @@ def resolve_local_file_name(item: Dict[str, Any], fallback_id: str) -> str:
 
 
 def resolve_image_file_name(item: Dict[str, Any], fallback_id: str) -> str:
-    data = item.get("data", {}) or {}
-    name = item.get("local_name") or os.path.basename(data.get("title") or "")
+    explicit_name = item.get("local_name")
+    if explicit_name:
+        return str(explicit_name)
+    data = item.get("data") if isinstance(item.get("data"), dict) else {}
+    name = os.path.basename(data.get("title") or "")
     if not name:
         name = f"file_{fallback_id}.png"
     if not Path(name).suffix:
@@ -766,21 +1048,77 @@ def prepare_compact_attachment_reference(
     fallback_id: str,
     prefix: str,
 ) -> str:
-    compact_name = compact_attachment_name(local_name, fallback_id, prefix)
-    if not local_name or local_name == compact_name:
-        return compact_name
+    """Keep the canonical asset name instead of creating a duplicate copy."""
+    return local_name or compact_attachment_name(local_name, fallback_id, prefix)
 
-    src = os.path.join(files_folder, local_name)
-    dst = os.path.join(files_folder, compact_name)
-    if os.path.exists(src) and not os.path.exists(dst):
-        shutil.copy2(src, dst)
-    return compact_name
+
+_WINDOWS_RESERVED_NAMES = {
+    "CON",
+    "PRN",
+    "AUX",
+    "NUL",
+    *(f"COM{index}" for index in range(1, 10)),
+    *(f"LPT{index}" for index in range(1, 10)),
+}
+
+
+def _unsafe_portable_name_part(part: str) -> bool:
+    stem = part.split(".", 1)[0].upper()
+    return bool(
+        not part
+        or ":" in part
+        or part.endswith((" ", "."))
+        or any(ord(character) < 32 for character in part)
+        or stem in _WINDOWS_RESERVED_NAMES
+    )
+
+
+def _attachment_file_path(files_folder: str, local_name: str) -> Path:
+    root = Path(files_folder).resolve()
+    original_name = str(local_name or "")
+    raw_name = original_name.strip()
+    portable_name = raw_name.replace("\\", "/")
+    posix_name = PurePosixPath(portable_name)
+    windows_name = PureWindowsPath(raw_name)
+    if (
+        not raw_name
+        or raw_name != original_name
+        or not posix_name.parts
+        or posix_name.is_absolute()
+        or windows_name.is_absolute()
+        or bool(windows_name.drive)
+        or any(
+            part in {".", ".."} or _unsafe_portable_name_part(part)
+            for part in posix_name.parts
+        )
+    ):
+        raise ValueError(f"Invalid attachment local_name: {local_name!r}")
+
+    relative = Path(*posix_name.parts)
+    candidate = root / relative
+    try:
+        resolved = candidate.resolve(strict=False)
+        resolved.relative_to(root)
+    except (OSError, ValueError) as exc:
+        raise ValueError(
+            f"Attachment local_name escapes its sidecar: {local_name!r}"
+        ) from exc
+
+    current = root
+    for part in relative.parts:
+        current /= part
+        if _is_link_or_reparse(current):
+            raise ValueError(
+                f"Links and reparse points are not allowed in attachment paths: {local_name!r}"
+            )
+    return resolved
 
 
 def _attachment_file_exists(files_folder: str, local_name: str) -> bool:
     if not local_name:
         return False
-    return os.path.isfile(os.path.join(files_folder, local_name))
+    path = _attachment_file_path(files_folder, local_name)
+    return not _is_link_or_reparse(path) and path.is_file()
 
 
 def _recover_attachment_url(item: Dict[str, Any], *data_keys: str) -> str | None:
@@ -796,6 +1134,7 @@ def _recover_attachment_url(item: Dict[str, Any], *data_keys: str) -> str | None
         if url:
             return url
     return None
+
 
 def extract_bg_color(item: Dict[str, Any]) -> Optional[str]:
     """
@@ -813,6 +1152,7 @@ def extract_bg_color(item: Dict[str, Any]) -> Optional[str]:
         fill_opacity = 1.0
     return fill if (fill and fill_opacity > 0.0) else None
 
+
 def _mindmap_node_view(item: Dict[str, Any]) -> Dict[str, Any]:
     data = item.get("data") if isinstance(item.get("data"), dict) else {}
     for value in (data.get("nodeView"), item.get("nodeView")):
@@ -820,10 +1160,13 @@ def _mindmap_node_view(item: Dict[str, Any]) -> Dict[str, Any]:
             return value
     return {}
 
+
 def _extract_mindmap_node_content(item: Dict[str, Any]) -> str:
     data = item.get("data") if isinstance(item.get("data"), dict) else {}
     node_view = _mindmap_node_view(item)
-    node_view_data = node_view.get("data") if isinstance(node_view.get("data"), dict) else {}
+    node_view_data = (
+        node_view.get("data") if isinstance(node_view.get("data"), dict) else {}
+    )
 
     for value in (
         node_view_data.get("content"),
@@ -837,13 +1180,19 @@ def _extract_mindmap_node_content(item: Dict[str, Any]) -> str:
             return _strip_edge_empty_paragraphs(str(value))
     return ""
 
+
 def _extract_mindmap_node_style(item: Dict[str, Any]) -> Dict[str, Any]:
     data = item.get("data") if isinstance(item.get("data"), dict) else {}
     style: Dict[str, Any] = {}
-    for source in (item.get("style"), data.get("style"), _mindmap_node_view(item).get("style")):
+    for source in (
+        item.get("style"),
+        data.get("style"),
+        _mindmap_node_view(item).get("style"),
+    ):
         if isinstance(source, dict):
             style.update(source)
     return style
+
 
 def _extract_mindmap_node_shape(style: Dict[str, Any]) -> Optional[str]:
     shape = str(style.get("shape") or "").strip().lower()
@@ -851,56 +1200,208 @@ def _extract_mindmap_node_shape(style: Dict[str, Any]) -> Optional[str]:
         return None
     return pick_canvas_shape(shape)
 
+
 def _extract_mindmap_node_bg(style: Dict[str, Any]) -> Optional[str]:
     fill = style.get("fillColor") or style.get("backgroundColor")
     if not fill and str(style.get("shape") or "").strip().lower() not in {"", "none"}:
         fill = style.get("nodeColor")
     try:
-        fill_opacity = float(style.get("fillOpacity") if style.get("fillOpacity") is not None else 1.0)
+        fill_opacity = float(
+            style.get("fillOpacity") if style.get("fillOpacity") is not None else 1.0
+        )
     except Exception:
         fill_opacity = 1.0
     return str(fill) if fill and fill_opacity > 0.0 else None
+
 
 # =========================
 # Vault / Files
 # =========================
 
-def ensure_move_attachments(json_file: str, target_dir: str, attachment_dir: Optional[str] = None) -> str:
-    """
-    Гарантирует, что папка вложений перемещена в целевое место.
-    Если attachment_dir не задан, сохраняет старое поведение: рядом с .canvas
-    будет <base>_files.
-    """
-    base_name = os.path.splitext(os.path.basename(json_file))[0]
-    src_files = os.path.join(os.path.dirname(json_file), base_name + "_files")
-    dst_files = attachment_dir or os.path.join(target_dir, base_name + "_files")
 
-    if os.path.abspath(src_files) == os.path.abspath(dst_files):
-        return dst_files
+def _attachment_destination(
+    json_file: str,
+    target_dir: str,
+    attachment_dir: Optional[str] = None,
+) -> Path:
+    base_name = Path(json_file).stem
+    if attachment_dir:
+        source_key = hashlib.sha256(
+            os.path.normcase(str(Path(json_file).resolve())).encode("utf-8")
+        ).hexdigest()[:10]
+        return Path(attachment_dir) / f"{base_name}_{source_key}_files"
+    return Path(target_dir) / f"{base_name}_files"
 
-    if os.path.exists(src_files):
-        if os.path.exists(dst_files):
-            shutil.rmtree(dst_files)
-        shutil.move(src_files, dst_files)
-    return dst_files
 
-def cleanup_sources(json_file: str, src_files_folder: str, delete_json: bool, delete_src_files: bool) -> None:
-    """Удаляет исходный JSON и/или исходную папку _files (если ещё существует)."""
+def _regular_tree_entries(path: Path, *, label: str) -> List[Path]:
+    _require_regular_directory(path, label=label)
+    entries: List[Path] = []
+    for root, directories, files in os.walk(path, followlinks=False):
+        directories.sort()
+        files.sort()
+        root_path = Path(root)
+        for name in [*directories, *files]:
+            candidate = root_path / name
+            if _is_link_or_reparse(candidate):
+                raise ValueError(
+                    f"{label} contains a link or reparse point: {candidate}"
+                )
+            if not candidate.is_dir() and not candidate.is_file():
+                raise ValueError(f"{label} contains a non-regular entry: {candidate}")
+            entries.append(candidate)
+    return entries
+
+
+def _mkdir_with_tracking(path: Path, created_paths: List[Path] | None) -> None:
+    missing: List[Path] = []
+    current = path
+    while not current.exists():
+        missing.append(current)
+        if current.parent == current:
+            break
+        current = current.parent
+    path.mkdir(parents=True, exist_ok=True)
+    if created_paths is not None:
+        created_paths.extend(reversed(missing))
+
+
+def _copy_file_atomic(source: Path, destination: Path) -> None:
+    fd, temp_name = tempfile.mkstemp(
+        prefix=f".{destination.name}.", suffix=".tmp", dir=str(destination.parent)
+    )
+    os.close(fd)
     try:
-        if delete_json and os.path.exists(json_file):
-            os.remove(json_file)
-    except Exception as e:
-        print(f"⚠ Не удалось удалить JSON: {e}")
+        shutil.copy2(source, temp_name)
+        os.replace(temp_name, destination)
+    finally:
+        if os.path.exists(temp_name):
+            os.remove(temp_name)
+
+
+def ensure_move_attachments(
+    json_file: str,
+    target_dir: str,
+    attachment_dir: Optional[str] = None,
+    *,
+    _created_paths: List[Path] | None = None,
+) -> str:
+    """Copy a source sidecar without overwriting unrelated destination files."""
+    source = Path(json_file).with_name(f"{Path(json_file).stem}_files")
+    destination = _attachment_destination(json_file, target_dir, attachment_dir)
+    destination_parent = Path(attachment_dir) if attachment_dir else Path(target_dir)
+    _require_no_reparse_components(destination_parent, label="Attachment destination")
+    if destination.exists() or _is_link_or_reparse(destination):
+        _require_regular_directory(destination, label="Attachment destination")
+    if source.resolve(strict=False) == destination.resolve(strict=False):
+        return str(destination)
+    if not source.exists() and not _is_link_or_reparse(source):
+        return str(destination)
+
+    entries = _regular_tree_entries(source, label="Attachment sidecar")
+    try:
+        destination.resolve(strict=False).relative_to(source.resolve())
+    except ValueError:
+        pass
+    else:
+        raise ValueError(
+            f"Attachment destination cannot be inside its source: {destination}"
+        )
+
+    if destination.exists():
+        _regular_tree_entries(destination, label="Attachment destination")
+    destination_root = destination.resolve(strict=False)
+    for source_path in entries:
+        relative = source_path.relative_to(source)
+        destination_path = destination / relative
+        try:
+            destination_path.resolve(strict=False).relative_to(destination_root)
+        except ValueError as exc:
+            raise ValueError(
+                f"Attachment path escapes destination: {relative}"
+            ) from exc
+        if (
+            source_path.is_dir()
+            and destination_path.exists()
+            and not destination_path.is_dir()
+        ):
+            raise ValueError(f"Conflicting attachment directory: {destination_path}")
+        if source_path.is_file() and destination_path.exists():
+            if (
+                _is_link_or_reparse(destination_path)
+                or not destination_path.is_file()
+                or not filecmp.cmp(source_path, destination_path, shallow=False)
+            ):
+                raise ValueError(f"Conflicting attachment file: {destination_path}")
+
+    _mkdir_with_tracking(destination, _created_paths)
+    for source_path in entries:
+        relative = source_path.relative_to(source)
+        destination_path = destination / relative
+        if source_path.is_dir():
+            if not destination_path.exists():
+                _mkdir_with_tracking(destination_path, _created_paths)
+        elif source_path.is_file() and not destination_path.exists():
+            _mkdir_with_tracking(destination_path.parent, _created_paths)
+            _copy_file_atomic(source_path, destination_path)
+            if _created_paths is not None:
+                _created_paths.append(destination_path)
+    return str(destination)
+
+
+def cleanup_sources(
+    json_file: str, src_files_folder: str, delete_json: bool, delete_src_files: bool
+) -> None:
+    """Delete only the JSON and its exact, real sidecar; surface every failure."""
+    json_path = Path(json_file)
+    sidecar = Path(src_files_folder)
+    expected_sidecar = json_path.with_name(f"{json_path.stem}_files")
+    if delete_src_files:
+        if sidecar.resolve(strict=False) != expected_sidecar.resolve(strict=False):
+            raise ValueError(
+                f"Refusing to delete an unexpected attachment directory: {sidecar}"
+            )
+        if sidecar.exists() or _is_link_or_reparse(sidecar):
+            _regular_tree_entries(sidecar, label="Attachment sidecar")
+    if delete_json and (json_path.exists() or _is_link_or_reparse(json_path)):
+        _require_regular_file(json_path, label="JSON source")
+
+    requested = []
+    if delete_json and json_path.exists():
+        requested.append(json_path)
+    if delete_src_files and sidecar.exists():
+        requested.append(sidecar)
+    if not requested:
+        return
+
+    quarantine = Path(
+        tempfile.mkdtemp(
+            prefix=f".{json_path.stem}.cleanup-",
+            dir=str(json_path.parent),
+        )
+    )
+    moved: list[tuple[Path, Path]] = []
+    try:
+        for original in requested:
+            staged = quarantine / original.name
+            original.replace(staged)
+            moved.append((original, staged))
+    except Exception:
+        for original, staged in reversed(moved):
+            if staged.exists() and not original.exists():
+                staged.replace(original)
+        quarantine.rmdir()
+        raise
 
     try:
-        if delete_src_files and os.path.exists(src_files_folder):
-            shutil.rmtree(src_files_folder)
-    except Exception as e:
-        print(f"⚠ Не удалось удалить исходную папку _files: {e}")
+        shutil.rmtree(quarantine)
+    except Exception as exc:
+        raise OSError(f"Source cleanup remains quarantined at {quarantine}") from exc
+
 
 # =========================
 # JSON iter helpers
 # =========================
+
 
 def iter_objects(miro_root: Any) -> Iterable[Dict[str, Any]]:
     """
@@ -930,12 +1431,98 @@ def iter_objects(miro_root: Any) -> Iterable[Dict[str, Any]]:
                         if isinstance(x, dict):
                             yield x
 
+
 # =========================
+def _source_declares_complete_assets(miro_root: Any) -> bool:
+    completeness = (
+        miro_root.get("completeness") if isinstance(miro_root, dict) else None
+    )
+    assets = completeness.get("assets") if isinstance(completeness, dict) else None
+    return (
+        isinstance(assets, dict)
+        and assets.get("complete") is True
+        and assets.get("checked") is True
+    )
+
+
+def _required_source_asset_issues(miro_root: Any, files_folder: str) -> List[str]:
+    issues: List[str] = []
+    for item in iter_objects(miro_root):
+        item_type = str(item.get("type") or "").lower()
+        if item_type not in {"image", "document", "doc_format", "embed"}:
+            continue
+        data = item.get("data") if isinstance(item.get("data"), dict) else {}
+        local_name = str(item.get("local_name") or "").strip()
+        required = bool(
+            local_name
+            or item_type in {"image", "document"}
+            or (item_type == "doc_format" and str(data.get("html") or "").strip())
+            or (item_type == "embed" and str(data.get("previewUrl") or "").strip())
+        )
+        if not required:
+            continue
+        item_id = str(item.get("id") or "<missing-id>")
+        if not local_name:
+            issues.append(f"{item_id}: required asset has no local_name")
+            continue
+        try:
+            path = _attachment_file_path(files_folder, local_name)
+            if not path.is_file():
+                issues.append(f"{item_id}: required asset is missing: {local_name}")
+            elif path.stat().st_size == 0:
+                issues.append(f"{item_id}: required asset is empty: {local_name}")
+        except (OSError, ValueError) as exc:
+            issues.append(f"{item_id}: invalid required asset {local_name}: {exc}")
+    return issues
+
+
+def source_completeness_issues(miro_root: Any) -> List[str]:
+    """Return declared source-envelope completeness violations and known coverage limits."""
+    if not isinstance(miro_root, dict) or "completeness" not in miro_root:
+        return []
+    completeness = miro_root.get("completeness")
+    if not isinstance(completeness, dict):
+        return ["completeness is not an object"]
+
+    issues: List[str] = []
+    if completeness.get("complete") is not True:
+        issues.append("completeness.complete is not true")
+    if (
+        "capture_complete" in completeness
+        and completeness.get("capture_complete") is not True
+    ):
+        issues.append("completeness.capture_complete is not true")
+    if completeness.get("board_complete") is False:
+        issues.append("completeness.board_complete is false")
+    for key in ("items", "comments", "assets"):
+        if key not in completeness:
+            continue
+        section = completeness.get(key)
+        if not isinstance(section, dict):
+            issues.append(f"completeness.{key} is not an object")
+        elif section.get("complete") is not True:
+            issues.append(f"completeness.{key}.complete is not true")
+    assets = completeness.get("assets")
+    if isinstance(assets, dict) and assets.get("checked") is False:
+        issues.append("completeness.assets.checked is false")
+    return issues
+
+
+def _source_canvas_metadata(miro_root: Any) -> Dict[str, Any]:
+    if isinstance(miro_root, dict):
+        return deepcopy(miro_root)
+    if isinstance(miro_root, list):
+        return {"items": deepcopy(miro_root)}
+    return {"source": deepcopy(miro_root)}
+
+
 # Shape/text helpers
 # =========================
 
+
 def convert_sticky_color(name: str) -> str:
     return MIRO_STICKY_HEX.get((name or "").lower(), name)
+
 
 def apply_note_brackets(subtype: str, inner_text: str) -> str:
     t = (inner_text or "").strip()
@@ -947,29 +1534,36 @@ def apply_note_brackets(subtype: str, inner_text: str) -> str:
         return f"[ {t} ]" if t else "[ ]"
     return inner_text
 
+
 def pick_canvas_shape(subtype: str) -> str:
     return MIRO_TO_CANVAS_SHAPE.get(subtype, "round-rectangle")
+
 
 def default_flow_label(subtype: str) -> str:
     if subtype in FLOWCHART_LABEL:
         return FLOWCHART_LABEL[subtype]
     if subtype.startswith(FLOW_PREFIX):
-        return subtype[len(FLOW_PREFIX):].replace("_", " ")
+        return subtype[len(FLOW_PREFIX) :].replace("_", " ")
     return subtype.replace("_", " ")
 
+
 def get_miro_subtype(d: Dict[str, Any]) -> str:
-    for v in (d.get("subtype"),
-              (d.get("shape") or {}).get("shape"),
-              (d.get("data") or {}).get("shape"),
-              (d.get("data") or {}).get("subtype"),
-              (d.get("data") or {}).get("type")):
+    for v in (
+        d.get("subtype"),
+        (d.get("shape") or {}).get("shape"),
+        (d.get("data") or {}).get("shape"),
+        (d.get("data") or {}).get("subtype"),
+        (d.get("data") or {}).get("type"),
+    ):
         if isinstance(v, str) and v:
             return v.lower()
     return ""
 
+
 def get_text_align(item: Dict[str, Any]) -> str:
     ta = (item.get("style") or {}).get("textAlign")
     return ta if ta in ("left", "center", "right") else "center"
+
 
 def map_node_border(style: Dict[str, Any]) -> Optional[str]:
     """
@@ -978,7 +1572,7 @@ def map_node_border(style: Dict[str, Any]) -> Optional[str]:
     if not style:
         return None
     try:
-        bw  = float(style.get("borderWidth") or 0)
+        bw = float(style.get("borderWidth") or 0)
         bop = float(style.get("borderOpacity") or 1)
     except Exception:
         bw, bop = 0.0, 1.0
@@ -986,6 +1580,7 @@ def map_node_border(style: Dict[str, Any]) -> Optional[str]:
         return "invisible"
     st = str(style.get("borderStyle") or "normal").lower()
     return st if st in ("dashed", "dotted") else None
+
 
 def map_edge_path(style: Dict[str, Any]) -> Optional[str]:
     """
@@ -998,7 +1593,7 @@ def map_edge_path(style: Dict[str, Any]) -> Optional[str]:
         return None
     st = str(style.get("strokeStyle") or "normal").lower()
     try:
-        sw  = float(style.get("strokeWidth") or 0)
+        sw = float(style.get("strokeWidth") or 0)
         sop = float(style.get("strokeOpacity") or 1)
     except Exception:
         sw, sop = 0.0, 1.0
@@ -1009,6 +1604,7 @@ def map_edge_path(style: Dict[str, Any]) -> Optional[str]:
     if st == "dashed":
         return "long-dashed" if sw >= 3 else "short-dashed"
     return None
+
 
 def _extract_side(anchor: Dict[str, Any]) -> Optional[str]:
     """
@@ -1053,6 +1649,7 @@ def _extract_side(anchor: Dict[str, Any]) -> Optional[str]:
                 return "top" if y < 50 else "bottom"
     return None
 
+
 def _extract_conn_shape(item: Dict[str, Any]) -> str:
     """Возвращает 'straight'|'elbowed'|'curved' из item['shape'] (строка или dict)."""
     s = item.get("shape")
@@ -1064,6 +1661,7 @@ def _extract_conn_shape(item: Dict[str, Any]) -> str:
             if isinstance(v, str):
                 return v.lower()
     return ""
+
 
 def map_edge_pathfinding(mi_shape: str) -> Optional[str]:
     """
@@ -1080,6 +1678,7 @@ def map_edge_pathfinding(mi_shape: str) -> Optional[str]:
     if s == "curved":
         return "bezier"
     return None
+
 
 def _extract_edge_label(item: Dict[str, Any]) -> str:
     """
@@ -1108,7 +1707,15 @@ def _extract_edge_label(item: Dict[str, Any]) -> str:
             return strip_html(t).strip()
     return ""
 
-def _estimate_render_height(html_or_text: str, *, width_px: float, font_px: float, line_height: float = 2.35, padding: int = 16) -> int:
+
+def _estimate_render_height(
+    html_or_text: str,
+    *,
+    width_px: float,
+    font_px: float,
+    line_height: float = 2.35,
+    padding: int = 16,
+) -> int:
     if width_px <= 0 or font_px <= 0:
         return int(padding)
     plain = strip_html(html_or_text or "")
@@ -1116,20 +1723,22 @@ def _estimate_render_height(html_or_text: str, *, width_px: float, font_px: floa
     usable_w = max(1, width_px - 12)
     max_cols = max(1, int(usable_w / avg_ch_w))
 
-    brs   = len(BR_RE.findall(html_or_text or ""))
+    brs = len(BR_RE.findall(html_or_text or ""))
     paras = len(P_CLOSE_RE.findall(html_or_text or ""))
-    lis   = len(LI_RE.findall(html_or_text or ""))
-    nls   = plain.count("\n")
+    lis = len(LI_RE.findall(html_or_text or ""))
+    nls = plain.count("\n")
 
     base_lines = max(1, paras, lis) + brs + nls
     wrap_extra = max(0, (len(plain) - 1) // max(1, max_cols))
     total_lines = base_lines + wrap_extra
     return int(total_lines * line_height * font_px + padding)
 
+
 # --- Sticky helpers ---
 
-STICKY_TEXT_PADDING = 30      # максимальные внутренние отступы sticky-ноды (px)
+STICKY_TEXT_PADDING = 30  # максимальные внутренние отступы sticky-ноды (px)
 STICKY_PAD_MAX_RATIO = 0.15  # отступ не более 15% от стороны бокса
+
 
 def _autofit_font_px_for_box(
     html_or_text: str,
@@ -1150,10 +1759,7 @@ def _autofit_font_px_for_box(
     while lo <= hi:
         mid = (lo + hi) // 2
         need_h = _estimate_render_height(
-            html_or_text,
-            width_px=max(1.0, box_w),
-            font_px=mid,
-            line_height=line_height
+            html_or_text, width_px=max(1.0, box_w), font_px=mid, line_height=line_height
         )
         if need_h <= box_h:
             best = mid
@@ -1183,9 +1789,11 @@ def _fit_font_px(
     box_w/box_h — доступная область (avail) уже с учётом padding снаружи.
     Возвращает (font_px, needs_grow).
     """
+
     def fits(px: int) -> bool:
-        need = _estimate_render_height(html_or_text, width_px=max(1.0, box_w),
-                                       font_px=px, line_height=line_height)
+        need = _estimate_render_height(
+            html_or_text, width_px=max(1.0, box_w), font_px=px, line_height=line_height
+        )
         return need <= box_h
 
     # Шаг 1: target вписывается?
@@ -1223,7 +1831,9 @@ def _node_rect(node: Dict[str, Any]) -> Optional[tuple[float, float, float, floa
     return x, y, x + w, y + h
 
 
-def _rect_overlap(a: tuple[float, float, float, float], b: tuple[float, float, float, float]) -> tuple[float, float]:
+def _rect_overlap(
+    a: tuple[float, float, float, float], b: tuple[float, float, float, float]
+) -> tuple[float, float]:
     overlap_w = min(a[2], b[2]) - max(a[0], b[0])
     overlap_h = min(a[3], b[3]) - max(a[1], b[1])
     return overlap_w, overlap_h
@@ -1345,7 +1955,9 @@ def _set_canvas_text_font_px(node: Dict[str, Any], font_px: int) -> None:
         node["text"] = updated
 
 
-def _refit_text_node_after_width_change(node: Dict[str, Any], *, min_font_px: int) -> None:
+def _refit_text_node_after_width_change(
+    node: Dict[str, Any], *, min_font_px: int
+) -> None:
     text = node.get("text")
     if not isinstance(text, str) or not text:
         return
@@ -1376,7 +1988,12 @@ def _estimate_short_label_single_line_width(html_or_text: str, font_px: int) -> 
     plain = re.sub(r"\s+", " ", plain).strip()
     if not plain:
         return SHORT_LABEL_SINGLE_LINE_PADDING
-    return int(round(len(plain) * font_px * SHORT_LABEL_SINGLE_LINE_AVG_CHAR_WIDTH + SHORT_LABEL_SINGLE_LINE_PADDING))
+    return int(
+        round(
+            len(plain) * font_px * SHORT_LABEL_SINGLE_LINE_AVG_CHAR_WIDTH
+            + SHORT_LABEL_SINGLE_LINE_PADDING
+        )
+    )
 
 
 def _link_card_16x9_size(width_px: float) -> tuple[float, int]:
@@ -1555,7 +2172,9 @@ def _expand_short_inline_label_widths(
             new_x = ((lx0 + lx1) / 2.0) - need_w / 2.0
 
         candidate_rect = (new_x, ly0, new_x + need_w, ly1)
-        if _candidate_rect_overlaps_any_node(nodes, candidate_rect, skip_id=str(label_node.get("id", ""))):
+        if _candidate_rect_overlaps_any_node(
+            nodes, candidate_rect, skip_id=str(label_node.get("id", ""))
+        ):
             continue
         if _candidate_creates_empty_decorative_overlap(
             nodes,
@@ -1596,7 +2215,8 @@ def _compact_short_inline_label_heights(
         if not label_rect:
             continue
         if not any(
-            _rect_overlap(label_rect, visual_rect)[0] > 0 and _rect_overlap(label_rect, visual_rect)[1] > 0
+            _rect_overlap(label_rect, visual_rect)[0] > 0
+            and _rect_overlap(label_rect, visual_rect)[1] > 0
             for visual in visuals
             for visual_rect in [_node_rect(visual)]
             if visual_rect
@@ -1690,7 +2310,9 @@ def _resolve_ultra_narrow_label_visual_overlaps(
                     distance = abs(new_x - lx0) + abs(new_y - ly0)
                     candidates.append((width, distance, new_x, new_y, height))
 
-            for width, _distance, new_x, new_y, height in sorted(candidates, key=lambda c: (-c[0], c[1])):
+            for width, _distance, new_x, new_y, height in sorted(
+                candidates, key=lambda c: (-c[0], c[1])
+            ):
                 candidate_rect = (new_x, new_y, new_x + width, new_y + height)
                 if _candidate_rect_overlaps_any_node(
                     nodes,
@@ -1792,7 +2414,10 @@ def _resolve_short_label_visual_vertical_overlaps(
 
                 above_y = vy0 - clearance_px - label_h
                 below_y = vy1 + clearance_px
-                candidates = [(abs(above_y - ly0), above_y), (abs(below_y - ly0), below_y)]
+                candidates = [
+                    (abs(above_y - ly0), above_y),
+                    (abs(below_y - ly0), below_y),
+                ]
                 if label_center_y > visual_center_y:
                     candidates.reverse()
 
@@ -1813,7 +2438,9 @@ def _resolve_short_label_visual_vertical_overlaps(
 
                 if not changed and label_center_y <= visual_center_y:
                     new_visual_y = ly1 + clearance_px
-                    if _move_node_down_with_cascade(nodes, visual_node, new_visual_y, clearance_px=clearance_px):
+                    if _move_node_down_with_cascade(
+                        nodes, visual_node, new_visual_y, clearance_px=clearance_px
+                    ):
                         changed = True
 
                 if changed:
@@ -1833,7 +2460,8 @@ def _resolve_text_visual_vertical_stack_overlaps(
     for _ in range(max_passes):
         changed = False
         texts = [
-            n for n in nodes
+            n
+            for n in nodes
             if _is_clearance_text_node(n) and not _is_short_clearance_label_node(n)
         ]
         visuals = [n for n in nodes if _is_visual_neighbor_node(n)]
@@ -1865,19 +2493,49 @@ def _resolve_text_visual_vertical_stack_overlaps(
 
                 visual_center_y = (vy0 + vy1) / 2.0
                 text_h = ty1 - ty0
-                candidates: list[tuple[float, Dict[str, Any], float, float, float, float]] = []
+                candidates: list[
+                    tuple[float, Dict[str, Any], float, float, float, float]
+                ] = []
                 if text_center_y <= visual_center_y:
                     candidates.extend(
                         [
-                            (abs((ty1 + clearance_px) - vy0), visual_node, vx0, ty1 + clearance_px, visual_w, visual_h),
-                            (abs((vy0 - clearance_px - text_h) - ty0), text_node, tx0, vy0 - clearance_px - text_h, text_w, text_h),
+                            (
+                                abs((ty1 + clearance_px) - vy0),
+                                visual_node,
+                                vx0,
+                                ty1 + clearance_px,
+                                visual_w,
+                                visual_h,
+                            ),
+                            (
+                                abs((vy0 - clearance_px - text_h) - ty0),
+                                text_node,
+                                tx0,
+                                vy0 - clearance_px - text_h,
+                                text_w,
+                                text_h,
+                            ),
                         ]
                     )
                 else:
                     candidates.extend(
                         [
-                            (abs((vy1 + clearance_px) - ty0), text_node, tx0, vy1 + clearance_px, text_w, text_h),
-                            (abs((ty0 - clearance_px - visual_h) - vy0), visual_node, vx0, ty0 - clearance_px - visual_h, visual_w, visual_h),
+                            (
+                                abs((vy1 + clearance_px) - ty0),
+                                text_node,
+                                tx0,
+                                vy1 + clearance_px,
+                                text_w,
+                                text_h,
+                            ),
+                            (
+                                abs((ty0 - clearance_px - visual_h) - vy0),
+                                visual_node,
+                                vx0,
+                                ty0 - clearance_px - visual_h,
+                                visual_w,
+                                visual_h,
+                            ),
                         ]
                     )
 
@@ -1918,7 +2576,9 @@ def _resolve_text_visual_vertical_stack_overlaps(
                     ]
                 )
 
-                for _distance, moved_node, new_x, new_y, moved_w, moved_h in sorted(candidates, key=lambda c: c[0]):
+                for _distance, moved_node, new_x, new_y, moved_w, moved_h in sorted(
+                    candidates, key=lambda c: c[0]
+                ):
                     candidate_rect = (new_x, new_y, new_x + moved_w, new_y + moved_h)
                     if _candidate_rect_overlaps_any_node(
                         nodes,
@@ -1933,7 +2593,9 @@ def _resolve_text_visual_vertical_stack_overlaps(
                         if (
                             abs(float(moved_node.get("x", 0) or 0) - new_x) <= 1e-9
                             and new_y > current_y
-                            and _move_node_down_with_cascade(nodes, moved_node, new_y, clearance_px=clearance_px)
+                            and _move_node_down_with_cascade(
+                                nodes, moved_node, new_y, clearance_px=clearance_px
+                            )
                         ):
                             changed = True
                             break
@@ -1974,7 +2636,9 @@ def _resolve_text_text_vertical_overlaps(
 
     for _ in range(max_passes):
         changed = False
-        obstacle_nodes.sort(key=lambda n: (float(n.get("y", 0) or 0), float(n.get("x", 0) or 0)))
+        obstacle_nodes.sort(
+            key=lambda n: (float(n.get("y", 0) or 0), float(n.get("x", 0) or 0))
+        )
 
         for upper_node in obstacle_nodes:
             upper_rect = _node_rect(upper_node)
@@ -2040,7 +2704,9 @@ def _resolve_text_text_horizontal_edge_overlaps(
 
     for _ in range(max_passes):
         changed = False
-        text_nodes.sort(key=lambda n: (float(n.get("x", 0) or 0), float(n.get("y", 0) or 0)))
+        text_nodes.sort(
+            key=lambda n: (float(n.get("x", 0) or 0), float(n.get("y", 0) or 0))
+        )
 
         for idx, left_node in enumerate(text_nodes):
             left_rect = _node_rect(left_node)
@@ -2050,7 +2716,7 @@ def _resolve_text_text_horizontal_edge_overlaps(
             left_w = lx1 - lx0
             left_center_x = (lx0 + lx1) / 2.0
 
-            for right_node in text_nodes[idx + 1:]:
+            for right_node in text_nodes[idx + 1 :]:
                 right_rect = _node_rect(right_node)
                 if not right_rect:
                     continue
@@ -2069,10 +2735,26 @@ def _resolve_text_text_horizontal_edge_overlaps(
                     continue
 
                 candidates = [
-                    (abs((lx1 + clearance_px) - rx0), right_node, lx1 + clearance_px, ry0, right_w, ry1 - ry0),
-                    (abs((rx0 - clearance_px - left_w) - lx0), left_node, rx0 - clearance_px - left_w, ly0, left_w, ly1 - ly0),
+                    (
+                        abs((lx1 + clearance_px) - rx0),
+                        right_node,
+                        lx1 + clearance_px,
+                        ry0,
+                        right_w,
+                        ry1 - ry0,
+                    ),
+                    (
+                        abs((rx0 - clearance_px - left_w) - lx0),
+                        left_node,
+                        rx0 - clearance_px - left_w,
+                        ly0,
+                        left_w,
+                        ly1 - ly0,
+                    ),
                 ]
-                for _distance, moved_node, new_x, new_y, moved_w, moved_h in sorted(candidates, key=lambda c: c[0]):
+                for _distance, moved_node, new_x, new_y, moved_w, moved_h in sorted(
+                    candidates, key=lambda c: c[0]
+                ):
                     candidate_rect = (new_x, new_y, new_x + moved_w, new_y + moved_h)
                     if _candidate_rect_overlaps_any_node(
                         nodes,
@@ -2190,7 +2872,10 @@ def _is_tiny_empty_slide_background(node: Dict[str, Any]) -> bool:
         height = float(node.get("height") or 0)
     except Exception:
         return False
-    return 0 < font_px <= TINY_SLIDE_TEXT_MAX_FONT_PX and 0 < height <= TINY_TEXT_TEXT_VERTICAL_EDGE_MAX_HEIGHT_PX
+    return (
+        0 < font_px <= TINY_SLIDE_TEXT_MAX_FONT_PX
+        and 0 < height <= TINY_TEXT_TEXT_VERTICAL_EDGE_MAX_HEIGHT_PX
+    )
 
 
 def _resolve_tiny_slide_marker_text_overlaps(
@@ -2250,15 +2935,19 @@ def _resolve_tiny_text_text_vertical_edge_overlaps(
     max_passes: int = TINY_TEXT_TEXT_VERTICAL_EDGE_MAX_PASSES,
 ) -> None:
     text_nodes = [
-        n for n in nodes
-        if (_is_clearance_text_node(n) and _has_visible_text(n)) or _is_tiny_empty_slide_background(n)
+        n
+        for n in nodes
+        if (_is_clearance_text_node(n) and _has_visible_text(n))
+        or _is_tiny_empty_slide_background(n)
     ]
     if len(text_nodes) < 2:
         return
 
     for _ in range(max_passes):
         changed = False
-        text_nodes.sort(key=lambda n: (float(n.get("y", 0) or 0), float(n.get("x", 0) or 0)))
+        text_nodes.sort(
+            key=lambda n: (float(n.get("y", 0) or 0), float(n.get("x", 0) or 0))
+        )
 
         for i, upper_node in enumerate(text_nodes):
             upper_rect = _node_rect(upper_node)
@@ -2271,7 +2960,7 @@ def _resolve_tiny_text_text_vertical_edge_overlaps(
                 continue
             upper_center_y = (uy0 + uy1) / 2.0
 
-            for lower_node in text_nodes[i + 1:]:
+            for lower_node in text_nodes[i + 1 :]:
                 lower_rect = _node_rect(lower_node)
                 if not lower_rect:
                     continue
@@ -2439,89 +3128,24 @@ def _resolve_link_text_edge_overlaps(
 
 # === GROUPS / FRAMES helpers ===
 
-def _val_px_or_pct(v: Any, total: float) -> Optional[float]:
-    """
-    Число в пикселях или строка вида 'NN%'. Возвращает пиксели.
-    """
-    if v is None:
-        return None
-    if isinstance(v, (int, float)):
-        return float(v)
-    s = str(v).strip().lower()
-    if s.endswith("%"):
-        try:
-            return float(s[:-1]) * 0.01 * float(total)
-        except Exception:
-            return None
-    # допускаем '123px'
-    try:
-        if s.endswith("px"):
-            s = s[:-2].strip()
-        return float(s)
-    except Exception:
-        return None
 
-def _rebase_from_diagram_local(item: Dict[str, Any], diag_rect_unscaled: Dict[str, float]) -> Optional[Dict[str, Any]]:
-    """
-    Трактуем position.x/y ребёнка как ЛОКАЛЬНЫЕ координаты ЦЕНТРА
-    от левого-верхнего угла диаграммы. Возвращаем обновлённый item
-    с глобальными центровыми координатами (canvas_center).
-    Проверяем, что бокс ребёнка попадает в диаграмму (с небольшим допуском).
-    """
-    pos = item.get("position") or {}
-    geom = item.get("geometry") or {}
-    try:
-        w = float(geom.get("width") or 0.0)
-        h = float(geom.get("height") or 0.0)
-    except Exception:
-        return None
-    if w <= 0 or h <= 0:
-        return None
-
-    DTLx = float(diag_rect_unscaled["x"])
-    DTLy = float(diag_rect_unscaled["y"])
-    Dw   = float(diag_rect_unscaled["width"])
-    Dh   = float(diag_rect_unscaled["height"])
-
-    dx = _val_px_or_pct(pos.get("x"), Dw)
-    dy = _val_px_or_pct(pos.get("y"), Dh)
-    if dx is None or dy is None:
-        return None
-
-    # глобальный центр ребёнка
-    cx = DTLx + dx
-    cy = DTLy + dy
-
-    # проверка: бокс ребёнка в диаграмме (с допуском)
-    cand = {"x": cx - w/2.0, "y": cy - h/2.0, "width": w, "height": h}
-    if not _rect_contains(diag_rect_unscaled, cand, eps=4.0):
-        # Слишком далеко — вероятно, это не «дитя» диаграммы
-        return None
-
-    new_item = dict(item)
-    new_pos = dict(pos)
-    new_pos.update({"x": cx, "y": cy, "relativeTo": "canvas_center", "origin": "center"})
-    new_item["position"] = new_pos
-    return new_item
-
-
-
-def _node_center_inside_rect(node: Dict[str, float], rect: Dict[str, float], tol: float = 0.0) -> bool:
+def _node_center_inside_rect(
+    node: Dict[str, float], rect: Dict[str, float], tol: float = 0.0
+) -> bool:
     """
     Проверяет, лежит ли центр ноды внутри rect (оба в координатах Canvas).
     tol — допуск (в пикселях Canvas).
     """
     cx = float(node["x"]) + float(node["width"]) / 2.0
     cy = float(node["y"]) + float(node["height"]) / 2.0
-    return (
-        (rect["x"] - tol) <= cx <= (rect["x"] + rect["width"] + tol) and
-        (rect["y"] - tol) <= cy <= (rect["y"] + rect["height"] + tol)
-    )
+    return (rect["x"] - tol) <= cx <= (rect["x"] + rect["width"] + tol) and (
+        rect["y"] - tol
+    ) <= cy <= (rect["y"] + rect["height"] + tol)
 
 
 def _frame_rect_unscaled(mi_frame: Dict[str, Any]) -> Optional[Dict[str, float]]:
-    geom = (mi_frame.get("geometry") or {})
-    pos  = (mi_frame.get("position") or {})
+    geom = mi_frame.get("geometry") or {}
+    pos = mi_frame.get("position") or {}
     try:
         w = float(geom.get("width") or 0.0)
         h = float(geom.get("height") or 0.0)
@@ -2531,10 +3155,11 @@ def _frame_rect_unscaled(mi_frame: Dict[str, Any]) -> Optional[Dict[str, float]]
         return None
     if w <= 0 or h <= 0:
         return None
-    return {"x": xc - w/2.0, "y": yc - h/2.0, "width": w, "height": h}
+    return {"x": xc - w / 2.0, "y": yc - h / 2.0, "width": w, "height": h}
+
 
 def _normalize_child_pos_to_canvas(item, parent_rect, *, margin_ratio: float = 0.05):
-    pos = (item.get("position") or {})
+    pos = item.get("position") or {}
     rel = str(pos.get("relativeTo") or "canvas_center").lower()
     if rel not in ("parent_top_left", "parent_center"):
         return item
@@ -2546,7 +3171,7 @@ def _normalize_child_pos_to_canvas(item, parent_rect, *, margin_ratio: float = 0
     except Exception:
         return item
 
-    geom = (item.get("geometry") or {})
+    geom = item.get("geometry") or {}
     w = float(geom.get("width") or 0.0)
     h = float(geom.get("height") or 0.0)
 
@@ -2566,17 +3191,18 @@ def _normalize_child_pos_to_canvas(item, parent_rect, *, margin_ratio: float = 0
 
     new_item = dict(item)
     new_pos = dict(pos)
-    new_pos.update({"x": cx, "y": cy, "relativeTo": "canvas_center", "origin": "center"})
+    new_pos.update(
+        {"x": cx, "y": cy, "relativeTo": "canvas_center", "origin": "center"}
+    )
     new_item["position"] = new_pos
     return new_item
 
 
-
-
-
-def _frame_rect(mi_frame: Dict[str, Any], scale: float = 1.0) -> Optional[Dict[str, float]]:
-    geom = (mi_frame.get("geometry") or {})
-    pos  = (mi_frame.get("position") or {})
+def _frame_rect(
+    mi_frame: Dict[str, Any], scale: float = 1.0
+) -> Optional[Dict[str, float]]:
+    geom = mi_frame.get("geometry") or {}
+    pos = mi_frame.get("position") or {}
     try:
         w = float(geom.get("width") or 0.0)
         h = float(geom.get("height") or 0.0)
@@ -2586,27 +3212,36 @@ def _frame_rect(mi_frame: Dict[str, Any], scale: float = 1.0) -> Optional[Dict[s
         return None
     if w <= 0 or h <= 0:
         return None
-    return {"x": (xc - w/2)*scale, "y": (yc - h/2)*scale, "width": w*scale, "height": h*scale}
+    return {
+        "x": (xc - w / 2) * scale,
+        "y": (yc - h / 2) * scale,
+        "width": w * scale,
+        "height": h * scale,
+    }
+
 
 def _rect_union(a: Dict[str, float], b: Dict[str, float]) -> Dict[str, float]:
     """Объединение двух прямоугольников в координатах Canvas (левый-верх)."""
     x0 = min(a["x"], b["x"])
     y0 = min(a["y"], b["y"])
-    x1 = max(a["x"] + a["width"],  b["x"] + b["width"])
+    x1 = max(a["x"] + a["width"], b["x"] + b["width"])
     y1 = max(a["y"] + a["height"], b["y"] + b["height"])
     return {"x": x0, "y": y0, "width": x1 - x0, "height": y1 - y0}
+
 
 def _rect_contains(a: Dict[str, float], b: Dict[str, float], eps: float = 0.5) -> bool:
     """True, если прямоугольник b полностью внутри a (с допуском eps)."""
     return (
-        b["x"]                 >= a["x"] - eps and
-        b["y"]                 >= a["y"] - eps and
-        b["x"] + b["width"]    <= a["x"] + a["width"]  + eps and
-        b["y"] + b["height"]   <= a["y"] + a["height"] + eps
+        b["x"] >= a["x"] - eps
+        and b["y"] >= a["y"] - eps
+        and b["x"] + b["width"] <= a["x"] + a["width"] + eps
+        and b["y"] + b["height"] <= a["y"] + a["height"] + eps
     )
 
 
-def _expand_rect_to_aspect_ratio(rect: Dict[str, float], ratio: float) -> Dict[str, float]:
+def _expand_rect_to_aspect_ratio(
+    rect: Dict[str, float], ratio: float
+) -> Dict[str, float]:
     if ratio <= 0:
         return dict(rect)
     width = max(float(rect["width"]), 1.0)
@@ -2663,7 +3298,9 @@ def _item_local_center_and_size(
     return x, y, max(width, 1.0), max(height, 1.0)
 
 
-def _slide_child_source_visual_height(item: Dict[str, Any], width: float) -> Optional[float]:
+def _slide_child_source_visual_height(
+    item: Dict[str, Any], width: float
+) -> Optional[float]:
     geom = item.get("geometry") if isinstance(item.get("geometry"), dict) else {}
     if geom.get("height") is not None:
         return None
@@ -2718,7 +3355,10 @@ def _slide_thumbnail_text_size_boost(item: Dict[str, Any], frame_boost: float) -
         return min(
             float(frame_boost),
             SLIDE_THUMBNAIL_TEXT_BOOST_MAX,
-            max(SLIDE_THUMBNAIL_MEDIUM_TEXT_BOOST, font_px / SLIDE_THUMBNAIL_TEXT_BOOST_FONT_DIVISOR),
+            max(
+                SLIDE_THUMBNAIL_MEDIUM_TEXT_BOOST,
+                font_px / SLIDE_THUMBNAIL_TEXT_BOOST_FONT_DIVISOR,
+            ),
         )
     if font_px >= SLIDE_THUMBNAIL_MEDIUM_TEXT_MIN_FONT_PX:
         return min(float(frame_boost), SLIDE_THUMBNAIL_MEDIUM_TEXT_BOOST)
@@ -2736,11 +3376,14 @@ def _layout_slide_frames_unscaled(
 ) -> set[str]:
     """Lay out slide frames when Miro exposes deck membership but no per-slide coordinates."""
     synthesized_frame_ids: set[str] = set()
-    max_thumbnail_side = max(float(target_max_side_unscaled or SYNTHETIC_SLIDE_MANUAL_DEFAULT_MAX_SIDE), 1.0)
+    max_thumbnail_side = max(
+        float(target_max_side_unscaled or SYNTHETIC_SLIDE_MANUAL_DEFAULT_MAX_SIDE), 1.0
+    )
 
     for did in deck_order:
         frame_ids = [
-            fid for fid in slide_frames_by_deck.get(did, [])
+            fid
+            for fid in slide_frames_by_deck.get(did, [])
             if fid in container_rects_unscaled and fid in by_id
         ]
         if not frame_ids:
@@ -2748,13 +3391,19 @@ def _layout_slide_frames_unscaled(
 
         source_positions: set = set()
         for fid in frame_ids:
-            pos = by_id[fid].get("position") if isinstance(by_id[fid].get("position"), dict) else {}
+            pos = (
+                by_id[fid].get("position")
+                if isinstance(by_id[fid].get("position"), dict)
+                else {}
+            )
             try:
-                source_positions.add((
-                    round(float(pos.get("x") or 0.0), 4),
-                    round(float(pos.get("y") or 0.0), 4),
-                    str(pos.get("relativeTo") or ""),
-                ))
+                source_positions.add(
+                    (
+                        round(float(pos.get("x") or 0.0), 4),
+                        round(float(pos.get("y") or 0.0), 4),
+                        str(pos.get("relativeTo") or ""),
+                    )
+                )
             except Exception:
                 source_positions.add((0.0, 0.0, ""))
 
@@ -2762,7 +3411,9 @@ def _layout_slide_frames_unscaled(
             continue
 
         deck = by_id.get(did) or {}
-        deck_pos = deck.get("position") if isinstance(deck.get("position"), dict) else {}
+        deck_pos = (
+            deck.get("position") if isinstance(deck.get("position"), dict) else {}
+        )
         try:
             anchor_x = float(deck_pos.get("x") or 0.0)
             anchor_y = float(deck_pos.get("y") or 0.0)
@@ -2792,8 +3443,7 @@ def _layout_slide_frames_unscaled(
         max_h = max(float(r["height"]) for r in rects)
         gap_x = max(24.0, min(80.0, max_w * 0.08))
         use_large_deck_overview = (
-            has_normalized_frame
-            and len(rects) > SYNTHETIC_SLIDE_DECK_TOP_ROW_COUNT
+            has_normalized_frame and len(rects) > SYNTHETIC_SLIDE_DECK_TOP_ROW_COUNT
         )
 
         if use_large_deck_overview:
@@ -2802,11 +3452,12 @@ def _layout_slide_frames_unscaled(
             trailing_rects = rects[top_count:]
             gap_y = max(48.0, min(96.0, max_h * 0.55))
 
-            top_w = (
-                sum(float(r["width"]) for r in top_rects)
-                + gap_x * max(0, len(top_rects) - 1)
+            top_w = sum(float(r["width"]) for r in top_rects) + gap_x * max(
+                0, len(top_rects) - 1
             )
-            total_w = max(top_w, max((float(r["width"]) for r in trailing_rects), default=0.0))
+            total_w = max(
+                top_w, max((float(r["width"]) for r in trailing_rects), default=0.0)
+            )
             total_h = max_h
             if trailing_rects:
                 total_h += gap_y * len(trailing_rects)
@@ -2841,7 +3492,9 @@ def _layout_slide_frames_unscaled(
                 synthesized_frame_ids.add(fid)
                 cur_y += height + gap_y
         else:
-            total_w = sum(float(r["width"]) for r in rects) + gap_x * max(0, len(rects) - 1)
+            total_w = sum(float(r["width"]) for r in rects) + gap_x * max(
+                0, len(rects) - 1
+            )
             total_h = max_h
             start_x = anchor_x - total_w / 2.0
             start_y = anchor_y - total_h / 2.0
@@ -2880,7 +3533,9 @@ def _collect_canvas_group_subtree_ids(
     return out
 
 
-def _translate_canvas_nodes(node_map: Dict[str, Dict[str, Any]], node_ids: Iterable[str], dx: float, dy: float) -> None:
+def _translate_canvas_nodes(
+    node_map: Dict[str, Dict[str, Any]], node_ids: Iterable[str], dx: float, dy: float
+) -> None:
     for node_id in node_ids:
         node = node_map.get(str(node_id))
         if not isinstance(node, dict):
@@ -2962,7 +3617,9 @@ def _resolve_synthetic_slide_deck_canvas_overlaps(
             _translate_canvas_nodes(node_map, moving_ids, 0.0, dy)
 
 
-def _slide_fit_data(frame_rect: Dict[str, float], boxes: List[tuple]) -> Dict[str, float]:
+def _slide_fit_data(
+    frame_rect: Dict[str, float], boxes: List[tuple]
+) -> Dict[str, float]:
     min_x = min(box[0] for box in boxes)
     min_y = min(box[1] for box in boxes)
     max_x = max(box[2] for box in boxes)
@@ -2974,14 +3631,26 @@ def _slide_fit_data(frame_rect: Dict[str, float], boxes: List[tuple]) -> Dict[st
 
     overflow_x = max(0.0, -min_x, max_x - frame_w)
     overflow_y = max(0.0, -min_y, max_y - frame_h)
-    substantial_overflow_x = overflow_x > max(SLIDE_CHILD_FIT_OVERFLOW_MIN_PX, frame_w * SLIDE_CHILD_FIT_OVERFLOW_RATIO)
-    substantial_overflow_y = overflow_y > max(SLIDE_CHILD_FIT_OVERFLOW_MIN_PX, frame_h * SLIDE_CHILD_FIT_OVERFLOW_RATIO)
-    oversized_bbox = bbox_w > frame_w * SLIDE_CHILD_FIT_BBOX_RATIO or bbox_h > frame_h * SLIDE_CHILD_FIT_BBOX_RATIO
-    dense_oversized_bbox = (
-        len(boxes) >= SLIDE_CHILD_FIT_DENSE_MIN_CHILDREN
-        and (bbox_w > frame_w * SLIDE_CHILD_FIT_DENSE_BBOX_RATIO or bbox_h > frame_h * SLIDE_CHILD_FIT_DENSE_BBOX_RATIO)
+    substantial_overflow_x = overflow_x > max(
+        SLIDE_CHILD_FIT_OVERFLOW_MIN_PX, frame_w * SLIDE_CHILD_FIT_OVERFLOW_RATIO
     )
-    needs_fit = substantial_overflow_x or substantial_overflow_y or oversized_bbox or dense_oversized_bbox
+    substantial_overflow_y = overflow_y > max(
+        SLIDE_CHILD_FIT_OVERFLOW_MIN_PX, frame_h * SLIDE_CHILD_FIT_OVERFLOW_RATIO
+    )
+    oversized_bbox = (
+        bbox_w > frame_w * SLIDE_CHILD_FIT_BBOX_RATIO
+        or bbox_h > frame_h * SLIDE_CHILD_FIT_BBOX_RATIO
+    )
+    dense_oversized_bbox = len(boxes) >= SLIDE_CHILD_FIT_DENSE_MIN_CHILDREN and (
+        bbox_w > frame_w * SLIDE_CHILD_FIT_DENSE_BBOX_RATIO
+        or bbox_h > frame_h * SLIDE_CHILD_FIT_DENSE_BBOX_RATIO
+    )
+    needs_fit = (
+        substantial_overflow_x
+        or substantial_overflow_y
+        or oversized_bbox
+        or dense_oversized_bbox
+    )
     if needs_fit:
         fit = min(1.0, frame_w / bbox_w, frame_h / bbox_h)
         origin_x = min_x
@@ -3020,7 +3689,9 @@ def _slide_child_boxes(
         if result is None:
             continue
         cx, cy, width, height = result
-        boxes.append((cx - width / 2.0, cy - height / 2.0, cx + width / 2.0, cy + height / 2.0))
+        boxes.append(
+            (cx - width / 2.0, cy - height / 2.0, cx + width / 2.0, cy + height / 2.0)
+        )
     return boxes
 
 
@@ -3083,7 +3754,8 @@ def _fit_slide_child_nodes_to_frame_rects(
             continue
 
         child_ids = [
-            cid for cid in (children.get(frame_id) or [])
+            cid
+            for cid in (children.get(frame_id) or [])
             if cid in node_map and cid in by_id
         ]
         if not child_ids:
@@ -3103,7 +3775,14 @@ def _fit_slide_child_nodes_to_frame_rects(
                 height = source_visual_height
             centers[cid] = (cx, cy)
             local_sizes[cid] = (width, height)
-            boxes.append((cx - width / 2.0, cy - height / 2.0, cx + width / 2.0, cy + height / 2.0))
+            boxes.append(
+                (
+                    cx - width / 2.0,
+                    cy - height / 2.0,
+                    cx + width / 2.0,
+                    cy + height / 2.0,
+                )
+            )
 
         if not boxes:
             continue
@@ -3127,7 +3806,10 @@ def _fit_slide_child_nodes_to_frame_rects(
             grew_for_min_font = False
             source_item = by_id.get(cid) or {}
             source_type = str(source_item.get("type") or "").lower()
-            if content_size_boosts_by_frame and frame_id in content_size_boosts_by_frame:
+            if (
+                content_size_boosts_by_frame
+                and frame_id in content_size_boosts_by_frame
+            ):
                 boost = float(content_size_boosts_by_frame[frame_id])
                 if source_type == "image":
                     size_fit *= boost
@@ -3139,16 +3821,21 @@ def _fit_slide_child_nodes_to_frame_rects(
                 scaled_height = float(local_height) * float(scale) * size_fit
                 text_size_multiplier = 1.0
                 attrs = node.get("styleAttributes")
-                if isinstance(attrs, dict) and isinstance(attrs.get("fontSize"), (int, float)):
+                if isinstance(attrs, dict) and isinstance(
+                    attrs.get("fontSize"), (int, float)
+                ):
                     source_font_px = _extract_font_base_px(
                         source_item,
                         fallback=float(attrs["fontSize"]) / max(float(scale), 1e-9),
                     )
-                    scaled_font = int(round(float(source_font_px) * float(scale) * size_fit))
+                    scaled_font = int(
+                        round(float(source_font_px) * float(scale) * size_fit)
+                    )
                     if size_fit < 1.0:
                         font_floor = (
                             SLIDE_THUMBNAIL_MIN_FONT_PX
-                            if sub_min_font_frame_ids and frame_id in sub_min_font_frame_ids
+                            if sub_min_font_frame_ids
+                            and frame_id in sub_min_font_frame_ids
                             else min_font_px
                         )
                     else:
@@ -3165,14 +3852,18 @@ def _fit_slide_child_nodes_to_frame_rects(
             center_y = float(frame_rect["y"]) + offset_y + (local_y - origin_y) * fit
             node["x"] = center_x * scale - float(node["width"]) / 2.0
             node["y"] = center_y * scale - float(node["height"]) / 2.0
-            can_expand_frame = bool(expandable_frame_ids and frame_id in expandable_frame_ids)
+            can_expand_frame = bool(
+                expandable_frame_ids and frame_id in expandable_frame_ids
+            )
             if not (grew_for_min_font and can_expand_frame):
                 _clamp_node_to_scaled_rect(node, frame_rect, scale=scale)
 
     return slide_child_ids
 
 
-def _canvas_rect_from_unscaled(rect: Dict[str, float], scale: float) -> Dict[str, float]:
+def _canvas_rect_from_unscaled(
+    rect: Dict[str, float], scale: float
+) -> Dict[str, float]:
     return {
         "x": float(rect["x"]) * scale,
         "y": float(rect["y"]) * scale,
@@ -3181,7 +3872,9 @@ def _canvas_rect_from_unscaled(rect: Dict[str, float], scale: float) -> Dict[str
     }
 
 
-def _unscaled_rect_from_canvas(rect: Dict[str, float], scale: float) -> Dict[str, float]:
+def _unscaled_rect_from_canvas(
+    rect: Dict[str, float], scale: float
+) -> Dict[str, float]:
     safe_scale = max(float(scale), 1e-9)
     return {
         "x": float(rect["x"]) / safe_scale,
@@ -3216,7 +3909,9 @@ def _expand_slide_frame_rects_to_child_bounds(
         union_canvas = _rect_union(frame_canvas, child_bbox)
         ratio = float(frame_rect["width"]) / max(float(frame_rect["height"]), 1e-9)
         expanded_canvas = _expand_rect_to_aspect_ratio(union_canvas, ratio)
-        container_rects_unscaled[frame_id] = _unscaled_rect_from_canvas(expanded_canvas, scale)
+        container_rects_unscaled[frame_id] = _unscaled_rect_from_canvas(
+            expanded_canvas, scale
+        )
         expanded_frame_ids.add(frame_id)
     return expanded_frame_ids
 
@@ -3269,7 +3964,8 @@ def _relayout_synthetic_slide_frames_from_current_sizes(
 ) -> None:
     for did in deck_order:
         frame_ids = [
-            fid for fid in slide_frames_by_deck.get(did, [])
+            fid
+            for fid in slide_frames_by_deck.get(did, [])
             if fid in synthetic_slide_frame_ids and fid in container_rects_unscaled
         ]
         if not frame_ids:
@@ -3293,8 +3989,12 @@ def _relayout_synthetic_slide_frames_from_current_sizes(
             top_rects = rects[:top_count]
             trailing_rects = rects[top_count:]
             gap_y = max(48.0, min(96.0, max_h * 0.55))
-            top_w = sum(float(r["width"]) for r in top_rects) + gap_x * max(0, len(top_rects) - 1)
-            total_w = max(top_w, max((float(r["width"]) for r in trailing_rects), default=0.0))
+            top_w = sum(float(r["width"]) for r in top_rects) + gap_x * max(
+                0, len(top_rects) - 1
+            )
+            total_w = max(
+                top_w, max((float(r["width"]) for r in trailing_rects), default=0.0)
+            )
             total_h = max_h
             if trailing_rects:
                 total_h += gap_y * len(trailing_rects)
@@ -3318,10 +4018,17 @@ def _relayout_synthetic_slide_frames_from_current_sizes(
             for fid, rect in zip(frame_ids[top_count:], trailing_rects):
                 width = float(rect["width"])
                 height = float(rect["height"])
-                new_rects[fid] = {"x": start_x, "y": cur_y, "width": width, "height": height}
+                new_rects[fid] = {
+                    "x": start_x,
+                    "y": cur_y,
+                    "width": width,
+                    "height": height,
+                }
                 cur_y += height + gap_y
         else:
-            total_w = sum(float(r["width"]) for r in rects) + gap_x * max(0, len(rects) - 1)
+            total_w = sum(float(r["width"]) for r in rects) + gap_x * max(
+                0, len(rects) - 1
+            )
             total_h = max_h
             start_x = anchor_x - total_w / 2.0
             start_y = anchor_y - total_h / 2.0
@@ -3348,12 +4055,12 @@ def _relayout_synthetic_slide_frames_from_current_sizes(
             container_rects_unscaled[fid] = new_rect
 
 
-
 def _is_white_like(hex_or_name: Optional[str]) -> bool:
     if not hex_or_name:
         return True
     s = str(hex_or_name).strip().lower()
     return s in {"#fff", "#ffffff", "white"}
+
 
 def _is_black_like(hex_or_name: Optional[str]) -> bool:
     if not hex_or_name:
@@ -3370,6 +4077,7 @@ def _is_black_like(hex_or_name: Optional[str]) -> bool:
             r, g, b = (int(nums[0]), int(nums[1]), int(nums[2]))
             return (r, g, b) in {(0, 0, 0), (26, 26, 26)}
     return False
+
 
 def _is_default_miro_stroke(color: Optional[str]) -> bool:
     """
@@ -3398,7 +4106,9 @@ def _group_label(item: Dict[str, Any]) -> str:
         or ""
     )
 
+
 # === COLORS helpers ===
+
 
 def _extract_frame_color(item: Dict[str, Any]) -> str:
     """
@@ -3454,6 +4164,7 @@ def _parent_id(item: Dict[str, Any]) -> Optional[str]:
             return str(pid)
     return None
 
+
 def _collect_explicit_group_items(mi_group: Dict[str, Any]) -> List[str]:
     arr = ((mi_group.get("data") or {}).get("items")) or []
     out: List[str] = []
@@ -3463,7 +4174,10 @@ def _collect_explicit_group_items(mi_group: Dict[str, Any]) -> List[str]:
                 out.append(str(v))
     return out
 
-def _bbox_of_nodes(node_map: Dict[str, Dict[str, Any]], child_ids: List[str], padding: int = 12) -> Optional[Dict[str, float]]:
+
+def _bbox_of_nodes(
+    node_map: Dict[str, Dict[str, Any]], child_ids: List[str], padding: int = 12
+) -> Optional[Dict[str, float]]:
     xs, ys, xe, ye = [], [], [], []
     for cid in child_ids:
         n = node_map.get(cid)
@@ -3499,40 +4213,203 @@ def _comment_fragment_to_html(value: Any) -> str:
     return _html_escape(text, quote=False).replace("\n", "<br>")
 
 
+def _comment_identity_label(value: Any) -> str:
+    if isinstance(value, dict):
+        name = str(
+            value.get("name") or value.get("displayName") or value.get("email") or ""
+        ).strip()
+        identity = str(value.get("id") or "").strip()
+        if name and identity and name != identity:
+            return f"{name} ({identity})"
+        return name or identity
+    return str(value or "").strip()
+
+
+def _comment_target_item_id(item: Dict[str, Any]) -> str:
+    position = item.get("position") if isinstance(item.get("position"), dict) else {}
+    target = item.get("target") if isinstance(item.get("target"), dict) else {}
+    parent = item.get("parent") if isinstance(item.get("parent"), dict) else {}
+    for value in (
+        position.get("itemId"),
+        position.get("item_id"),
+        position.get("targetId"),
+        position.get("target_id"),
+        item.get("itemId"),
+        item.get("item_id"),
+        target.get("id"),
+        parent.get("id"),
+    ):
+        text = str(value or "").strip()
+        if text:
+            return text
+    return ""
+
+
+def _comment_mention_labels(value: Any) -> List[str]:
+    if not isinstance(value, list):
+        return []
+    return [
+        label for label in (_comment_identity_label(entry) for entry in value) if label
+    ]
+
+
 def _format_comment_html(item: Dict[str, Any]) -> str:
     status = "Resolved" if item.get("resolved") else "Open"
-    created_at = str(item.get("createdAt") or "").strip()
-    author = ((item.get("createdBy") or {}).get("name") or "").strip()
-
-    header_bits = [f"<strong>Comment</strong>", _html_escape(status, quote=False)]
+    author = _comment_identity_label(item.get("createdBy"))
+    comment_id = str(item.get("id") or "").strip()
+    meta_bits = [status]
+    if comment_id:
+        meta_bits.append(f"id: {comment_id}")
     if author:
-        header_bits.append(_html_escape(author, quote=False))
-    if created_at:
-        header_bits.append(_html_escape(created_at[:10], quote=False))
+        meta_bits.append(author)
+    for label, key in (
+        ("created", "createdAt"),
+        ("updated", "updatedAt"),
+        ("resolved", "resolvedAt"),
+    ):
+        value = str(item.get(key) or "").strip()
+        if value:
+            meta_bits.append(f"{label}: {value}")
+    mentions = _comment_mention_labels(item.get("mentionedUsers"))
+    if mentions:
+        meta_bits.append("mentions: " + ", ".join(mentions))
+    reactions = item.get("reactions") if isinstance(item.get("reactions"), list) else []
+    if reactions:
+        meta_bits.append(
+            "reactions: "
+            + json.dumps(reactions, ensure_ascii=False, separators=(",", ":"))
+        )
+    target_id = _comment_target_item_id(item)
+    if target_id:
+        meta_bits.append(f"target: {target_id}")
+    source = str(item.get("source") or "").strip()
+    if source:
+        meta_bits.append(f"source: {source}")
 
-    parts = [f"<p>{' · '.join(header_bits)}</p>"]
-    messages = item.get("messages") if isinstance(item.get("messages"), list) else []
+    parts = [
+        f"<p><strong>Comment</strong> | {_html_escape(' | '.join(meta_bits), quote=False)}</p>"
+    ]
+    seen_content: set[str] = set()
+    root_content = _comment_fragment_to_html(
+        item.get("content") or item.get("text") or item.get("title")
+    )
+    if root_content:
+        parts.append(f"<p>{root_content}</p>")
+        seen_content.add(strip_html(root_content).strip())
+
+    messages: List[Any] = []
+    for key in ("messages", "replies"):
+        value = item.get(key)
+        if isinstance(value, list):
+            messages.extend(value)
+
+    seen_message_ids: set[str] = set()
     for message in messages:
         if not isinstance(message, dict):
+            content_html = _comment_fragment_to_html(message)
+            content_key = strip_html(content_html).strip()
+            if content_html and content_key not in seen_content:
+                parts.append(f"<p>{content_html}</p>")
+                seen_content.add(content_key)
             continue
-        msg_author = ((message.get("createdBy") or {}).get("name") or author or "").strip()
-        content_html = _comment_fragment_to_html(message.get("content") or message.get("text"))
-        if not content_html:
+
+        message_id = str(message.get("id") or "").strip()
+        if message_id and message_id in seen_message_ids:
             continue
-        if msg_author:
-            parts.append(f"<p><strong>{_html_escape(msg_author, quote=False)}:</strong> {content_html}</p>")
-        else:
-            parts.append(f"<p>{content_html}</p>")
+        if message_id:
+            seen_message_ids.add(message_id)
+        msg_author = _comment_identity_label(message.get("createdBy"))
+        msg_mentions = _comment_mention_labels(message.get("mentionedUsers"))
+        msg_reactions = (
+            message.get("reactions")
+            if isinstance(message.get("reactions"), list)
+            else []
+        )
+        msg_meta: List[str] = []
+        if message_id:
+            msg_meta.append(f"id: {message_id}")
+        for label, key in (("created", "createdAt"), ("updated", "updatedAt")):
+            value = str(message.get(key) or "").strip()
+            if value:
+                msg_meta.append(f"{label}: {value}")
+        if msg_mentions:
+            msg_meta.append("mentions: " + ", ".join(msg_mentions))
+        if msg_reactions:
+            msg_meta.append(
+                "reactions: "
+                + json.dumps(msg_reactions, ensure_ascii=False, separators=(",", ":"))
+            )
+
+        content_html = _comment_fragment_to_html(
+            message.get("content") or message.get("text")
+        )
+        content_key = strip_html(content_html).strip()
+        if content_key and content_key in seen_content and not msg_meta:
+            continue
+        if content_key:
+            seen_content.add(content_key)
+        meta_html = (
+            f" <small>{_html_escape(' | '.join(msg_meta), quote=False)}</small>"
+            if msg_meta
+            else ""
+        )
+        author_html = (
+            f"<strong>{_html_escape(msg_author, quote=False)}:</strong> "
+            if msg_author
+            else ""
+        )
+        parts.append(
+            f"<p>{author_html}{content_html or '<em>(metadata only)</em>'}{meta_html}</p>"
+        )
 
     if len(parts) == 1:
-        content_html = _comment_fragment_to_html(item.get("content") or item.get("text") or item.get("title"))
-        if content_html:
-            parts.append(f"<p>{content_html}</p>")
-
-    return "".join(parts) if len(parts) > 1 else ""
+        parts.append("<p><em>(metadata only)</em></p>")
+    return "".join(parts)
 
 
-def _format_code_block_html(item: Dict[str, Any], *, font_px: int, theme: str) -> tuple[str, int]:
+def _place_deferred_comment_nodes(
+    deferred: List[tuple[Dict[str, Any], Dict[str, Any]]],
+    nodes: List[Dict[str, Any]],
+    node_map: Dict[str, Dict[str, Any]],
+) -> None:
+    lane_nodes: List[Dict[str, Any]] = []
+    target_offsets: Dict[str, float] = {}
+    for node, item in deferred:
+        target_id = _comment_target_item_id(item)
+        target = node_map.get(target_id) if target_id else None
+        if not target:
+            lane_nodes.append(node)
+            continue
+        offset = target_offsets.get(target_id, 0.0)
+        node["x"] = float(target["x"]) + float(target["width"]) + COMMENT_NODE_OFFSET_X
+        node["y"] = (
+            float(target["y"])
+            + float(target["height"]) / 2.0
+            - float(node["height"]) / 2.0
+            + offset
+        )
+        target_offsets[target_id] = (
+            offset + float(node["height"]) + COMMENT_LANE_ITEM_GAP
+        )
+
+    if not lane_nodes:
+        return
+    lane_ids = {str(node.get("id") or "") for node in lane_nodes}
+    board_nodes = [node for node in nodes if str(node.get("id") or "") not in lane_ids]
+    board_rect = _bbox_of_real_nodes(board_nodes, include_groups=False)
+    lane_x = (
+        board_rect["x"] + board_rect["width"] + COMMENT_LANE_GAP if board_rect else 0.0
+    )
+    lane_y = board_rect["y"] if board_rect else 0.0
+    for node in lane_nodes:
+        node["x"] = lane_x
+        node["y"] = lane_y
+        lane_y += float(node["height"]) + COMMENT_LANE_ITEM_GAP
+
+
+def _format_code_block_html(
+    item: Dict[str, Any], *, font_px: int, theme: str
+) -> tuple[str, int]:
     data = item.get("data") if isinstance(item.get("data"), dict) else {}
     code = str(data.get("code") or "")
     title = str(data.get("title") or "Code").strip()
@@ -3557,9 +4434,7 @@ def _format_code_block_html(item: Dict[str, Any], *, font_px: int, theme: str) -
     html_parts = []
     if header_bits:
         html_parts.append(
-            '<p style="margin:0 0 6px 0;">'
-            + " · ".join(header_bits)
-            + "</p>"
+            '<p style="margin:0 0 6px 0;">' + " · ".join(header_bits) + "</p>"
         )
     html_parts.append(
         '<pre style="'
@@ -3583,7 +4458,7 @@ def _estimate_code_block_height(
     usable_w = max(1.0, float(width_px) - 40.0)
     max_cols = max(1, int(usable_w / max(1.0, font_px * 0.58)))
     code_lines = 0
-    for line in (code.splitlines() or [""]):
+    for line in code.splitlines() or [""]:
         code_lines += max(1, (len(line) + max_cols - 1) // max_cols)
     header_lines = 1 if has_header else 0
     return int((header_lines + code_lines) * font_px * 1.45 + 48)
@@ -3592,9 +4467,7 @@ def _estimate_code_block_height(
 def _has_canvas_position(item: Dict[str, Any]) -> bool:
     pos = item.get("position")
     return (
-        isinstance(pos, dict)
-        and pos.get("x") is not None
-        and pos.get("y") is not None
+        isinstance(pos, dict) and pos.get("x") is not None and pos.get("y") is not None
     )
 
 
@@ -3607,13 +4480,12 @@ def _position_only_placeholder_size(item_type: str) -> tuple[float, float]:
     return sizes.get(item_type, (220.0, 130.0))
 
 
-
-
 # =========================
 # Converters
 # =========================
 
-def convert_item_to_canvas_node(
+
+def _convert_item_to_canvas_node(
     item: Dict[str, Any],
     new_files_folder: str,
     vault_root: str,
@@ -3634,7 +4506,9 @@ def convert_item_to_canvas_node(
     item_type = (item.get("type") or "").lower()
     text_style_mode = normalize_text_style_mode(text_style_mode)
     pos = (item.get("position") or {}) if isinstance(item.get("position"), dict) else {}
-    geom = (item.get("geometry") or {}) if isinstance(item.get("geometry"), dict) else {}
+    geom = (
+        (item.get("geometry") or {}) if isinstance(item.get("geometry"), dict) else {}
+    )
 
     width = float(geom.get("width", 250) or 250)
 
@@ -3643,10 +4517,14 @@ def convert_item_to_canvas_node(
     if raw_h is None and item_type == "text":
         base_font_px0 = _extract_font_base_px(item, fallback=OBSIDIAN_FONT_SIZE)
         lh0 = _extract_line_height(item.get("style") or {}, default=1.35)
-        content_html = ((item.get("data") or {}).get("content")) or (item.get("plain_text") or "")
+        content_html = ((item.get("data") or {}).get("content")) or (
+            item.get("plain_text") or ""
+        )
         content_html = _strip_edge_empty_paragraphs(content_html)
 
-        height = _estimate_render_height(content_html, width_px=width, font_px=base_font_px0, line_height=lh0)
+        height = _estimate_render_height(
+            content_html, width_px=width, font_px=base_font_px0, line_height=lh0
+        )
     else:
         height = float(raw_h or 60)
 
@@ -3667,7 +4545,7 @@ def convert_item_to_canvas_node(
         local_name = item.get("local_name") or f"doc_{str(item.get('id', ''))}.pdf"
         if not Path(str(local_name)).suffix:
             local_name = f"{local_name}.pdf"
-        abs_path = os.path.join(new_files_folder, local_name)
+        abs_path = _attachment_file_path(new_files_folder, local_name)
         if not os.path.isfile(abs_path):
             url = _recover_attachment_url(item, "documentUrl", "url")
             if url:
@@ -3683,7 +4561,6 @@ def convert_item_to_canvas_node(
             node["width"], node["height"] = w * k, h * k
         return node
 
-
     # ---------- COMMENT SIDECAR -> TEXT ----------
     if item_type == "comment":
         html = _format_comment_html(item)
@@ -3693,7 +4570,9 @@ def convert_item_to_canvas_node(
         font_px = compute_font_px(scale, 14, min_font_px)
         lh = 1.35
         node_w = max(COMMENT_NODE_WIDTH * scale, 220.0)
-        need_h = _estimate_render_height(html, width_px=node_w, font_px=font_px, line_height=lh, padding=48)
+        need_h = _estimate_render_height(
+            html, width_px=node_w, font_px=font_px, line_height=lh, padding=48
+        )
         node_h = max(COMMENT_NODE_MIN_HEIGHT, need_h)
 
         anchor_x = float(pos.get("x", 0) or 0.0) * scale
@@ -3713,13 +4592,14 @@ def convert_item_to_canvas_node(
                 text_style_mode=text_style_mode,
             ),
         }
-        node.setdefault("styleAttributes", {}).update({
-            "shape": "round-rectangle",
-            "fontSize": font_px,
-            "textAlign": "left",
-        })
+        node.setdefault("styleAttributes", {}).update(
+            {
+                "shape": "round-rectangle",
+                "fontSize": font_px,
+                "textAlign": "left",
+            }
+        )
         return node
-
 
     # ---------- MINDMAP_NODE -> TEXT ----------
     if item_type == "mindmap_node":
@@ -3738,20 +4618,27 @@ def convert_item_to_canvas_node(
             sa["shape"] = shape
 
         text_align = style.get("textAlign")
-        sa["textAlign"] = text_align if text_align in ("left", "center", "right") else "center"
+        sa["textAlign"] = (
+            text_align if text_align in ("left", "center", "right") else "center"
+        )
 
         bg = _extract_mindmap_node_bg(style)
         if bg:
             node["color"] = bg
 
-        base_font_px = _extract_font_base_px({"style": style, "data": item.get("data") or {}}, fallback=OBSIDIAN_FONT_SIZE)
+        base_font_px = _extract_font_base_px(
+            {"style": style, "data": item.get("data") or {}},
+            fallback=OBSIDIAN_FONT_SIZE,
+        )
         lh = _extract_line_height(style, default=1.35)
         font_px = compute_font_px(scale, int(base_font_px), min_font_px)
         sa["fontSize"] = font_px
 
         text_color = str(style.get("color") or "").strip()
         wrapper_extra_color: Optional[str] = None
-        if text_color and not (theme.lower() == "dark" and _is_miro_black_color(text_color)):
+        if text_color and not (
+            theme.lower() == "dark" and _is_miro_black_color(text_color)
+        ):
             wrapper_extra_color = text_color
 
         node["text"] = _render_canvas_text(
@@ -3763,12 +4650,11 @@ def convert_item_to_canvas_node(
         )
         return node
 
-
     # ---------- TEXT / SHAPE / STICKY ----------
     if item_type in ("text", "shape", "sticky_note"):
-        raw_content = ((item.get("data") or {}).get("content")
-                       or item.get("plain_text")
-                       or "")
+        raw_content = (
+            (item.get("data") or {}).get("content") or item.get("plain_text") or ""
+        )
         raw_content = _strip_edge_empty_paragraphs(raw_content)
         subtype = get_miro_subtype(item)
 
@@ -3778,7 +4664,7 @@ def convert_item_to_canvas_node(
         sa["textAlign"] = get_text_align(item)
         sa["border"] = map_node_border(item.get("style") or {})
 
-        is_sticky = (item_type == "sticky_note")
+        is_sticky = item_type == "sticky_note"
 
         if item_type == "sticky_note":
             fill = (item.get("style") or {}).get("fillColor")
@@ -3801,15 +4687,20 @@ def convert_item_to_canvas_node(
                 raw_content = ARROW_SYMBOLS[subtype]
             elif subtype in BRACE_SYMBOLS:
                 raw_content = BRACE_SYMBOLS[subtype]
-            elif item_type == "sticky_note" and subtype and subtype not in EXACT_BASE_SHAPES:
+            elif (
+                item_type == "sticky_note"
+                and subtype
+                and subtype not in EXACT_BASE_SHAPES
+            ):
                 raw_content = subtype.replace("_", " ")
-
 
         # Базовый кегль из Miro + пересчёт по масштабу
         base_font_px = _extract_font_base_px(item, fallback=OBSIDIAN_FONT_SIZE)
         lh = _extract_line_height(item.get("style") or {}, default=1.35)
         target_px = max(min_font_px, int(round(base_font_px * scale)))
-        is_short_label = item_type == "text" and raw_h is None and _is_short_text_label(raw_content)
+        is_short_label = (
+            item_type == "text" and raw_h is None and _is_short_text_label(raw_content)
+        )
         if is_short_label:
             raw_content = _compact_short_label_html(raw_content)
 
@@ -3842,7 +4733,9 @@ def convert_item_to_canvas_node(
 
         # Подбор кегля: берём target из Miro, уменьшаем только если не влезает
         font_px, needs_grow = _fit_font_px(
-            raw_content, avail_w, avail_h,
+            raw_content,
+            avail_w,
+            avail_h,
             target_px=target_px,
             min_font_px=min_font_px,
             line_height=lh,
@@ -3853,18 +4746,23 @@ def convert_item_to_canvas_node(
         # Generic Miro text should not silently expand over neighboring nodes in
         # fit-oriented conversions. The old growth behavior remains opt-in.
         if needs_grow and grow_text_nodes:
-            need_h = _estimate_render_height(raw_content, width_px=avail_w,
-                                             font_px=font_px, line_height=lh)
+            need_h = _estimate_render_height(
+                raw_content, width_px=avail_w, font_px=font_px, line_height=lh
+            )
             if need_h > avail_h and avail_h > 0:
-                grow = need_h / avail_h          # коэффициент роста
-                node["width"]  = base_w  * grow
-                node["height"] = base_h  * grow
+                grow = need_h / avail_h  # коэффициент роста
+                node["width"] = base_w * grow
+                node["height"] = base_h * grow
 
         # ---- Цвет текста ----
         # Если в HTML есть span с background-color — контент из Miro, сохраняем как есть
         # (цвет текста и фон спанов не трогаем, тема игнорируется).
         # Иначе — обычная логика с учётом темы.
-        has_span_bgcolor = bool(SPAN_BGCOLOR_RE.search(raw_content)) if _is_html(raw_content) else False
+        has_span_bgcolor = (
+            bool(SPAN_BGCOLOR_RE.search(raw_content))
+            if _is_html(raw_content)
+            else False
+        )
 
         style_color = ((item.get("style") or {}).get("color") or "").strip()
         content_html = raw_content
@@ -3881,14 +4779,20 @@ def convert_item_to_canvas_node(
             content_html = _inject_contrast_color_on_bgcolor_spans(raw_content)
         elif _is_html(raw_content):
             inline_color = _extract_inline_color(raw_content)
-            if inline_color and theme.lower() == "dark" and _is_miro_black_color(inline_color):
+            if (
+                inline_color
+                and theme.lower() == "dark"
+                and _is_miro_black_color(inline_color)
+            ):
                 content_html = _strip_inline_black_color(raw_content)
             elif not inline_color and style_color:
                 if not (theme.lower() == "dark" and _is_miro_black_color(style_color)):
                     wrapper_extra_color = style_color
         else:
             # plain text
-            if style_color and not (theme.lower() == "dark" and _is_miro_black_color(style_color)):
+            if style_color and not (
+                theme.lower() == "dark" and _is_miro_black_color(style_color)
+            ):
                 wrapper_extra_color = style_color
 
         node["text"] = _render_canvas_text(
@@ -3907,22 +4811,20 @@ def convert_item_to_canvas_node(
                 # Canvas renders tiny native link nodes as nearly invisible cards.
                 _lw, _lh = _link_card_16x9_size(base["width"])
                 link_node = {
-                    "id":     base["id"],
-                    "type":   "link",
-                    "url":    solo_url,
-                    "x":      base["x"],
-                    "y":      base["y"],
-                    "width":  _lw,
+                    "id": base["id"],
+                    "type": "link",
+                    "url": solo_url,
+                    "x": base["x"],
+                    "y": base["y"],
+                    "width": _lw,
                     "height": _lh,
                 }
                 return link_node
 
         return node
 
-
-
     # ---------- CARD / PREVIEW / APP_CARD → TEXT ----------
-    if item_type in ("card", "preview", "app_card"):
+    if item_type in ("preview", "app_card"):
         data = item.get("data") or {}
         parts = []
         if data.get("title"):
@@ -3931,8 +4833,9 @@ def convert_item_to_canvas_node(
             parts.append(f"<p>{_html_escape(str(data.get('description')), False)}</p>")
         if item_type == "app_card":
             parts.extend(_format_app_card_fields(data.get("fields")))
-        if data.get("url"):
-            parts.append(f"<p>{_html_escape(str(data.get('url')), False)}</p>")
+        item_url = _recover_attachment_url(item, "url")
+        if item_url:
+            parts.append(f"<p>{_html_escape(item_url, False)}</p>")
         html = "".join(parts) if parts else ""
         if not html:
             return None
@@ -3951,7 +4854,9 @@ def convert_item_to_canvas_node(
 
         # Obsidian adds paragraph margins/padding inside text nodes; use a conservative
         # estimate so app_card fields do not end up behind an internal scrollbar.
-        need_h = _estimate_render_height(html or "", width_px=base_w, font_px=font_px, line_height=lh, padding=72)
+        need_h = _estimate_render_height(
+            html or "", width_px=base_w, font_px=font_px, line_height=lh, padding=72
+        )
         if need_h > node["height"]:
             node["height"] = need_h
         return node
@@ -4012,8 +4917,8 @@ def convert_item_to_canvas_node(
             )
         else:
             local_name = resolve_local_file_name(item, base["id"])
-        abs_path = os.path.join(new_files_folder, local_name)
-        if os.path.isfile(abs_path) or item_type == "image":
+        abs_path = _attachment_file_path(new_files_folder, local_name)
+        if os.path.isfile(abs_path):
             rel = relpath_from_vault(abs_path, vault_root)
             node = {**base, "type": "file", "file": rel}
 
@@ -4048,17 +4953,18 @@ def convert_item_to_canvas_node(
         data = item.get("data") or {}
         style = item.get("style") or {}
 
-        title_html   = (data.get("title")       or "").strip()
-        desc_html    = (data.get("description") or "").strip()
-        due_raw      = (data.get("dueDate")     or "").strip()
-        assignee_id  = (data.get("assigneeId")  or "").strip()
-        card_color   = (style.get("cardTheme")  or "").strip()
+        title_html = (data.get("title") or "").strip()
+        desc_html = (data.get("description") or "").strip()
+        due_raw = (data.get("dueDate") or "").strip()
+        assignee_id = (data.get("assigneeId") or "").strip()
+        card_color = (style.get("cardTheme") or "").strip()
 
         # Форматируем дату из ISO → читаемый вид
         due_str = ""
         if due_raw:
             try:
                 import datetime
+
                 dt = datetime.datetime.fromisoformat(due_raw.replace("Z", "+00:00"))
                 due_str = dt.strftime("%d.%m.%Y")
             except Exception:
@@ -4069,11 +4975,21 @@ def convert_item_to_canvas_node(
         if title_html:
             # заголовок — оборачиваем в <strong> если не содержит своих тегов
             if not _is_html(title_html):
-                parts.append(f"<p><strong>{_html_escape(title_html, False)}</strong></p>")
+                parts.append(
+                    f"<p><strong>{_html_escape(title_html, False)}</strong></p>"
+                )
             else:
                 parts.append(f"<div><strong>{title_html}</strong></div>")
         if desc_html:
-            parts.append(desc_html if _is_html(desc_html) else f"<p>{_html_escape(desc_html, False)}</p>")
+            parts.append(
+                desc_html
+                if _is_html(desc_html)
+                else f"<p>{_html_escape(desc_html, False)}</p>"
+            )
+        parts.extend(_format_app_card_fields(data.get("fields")))
+        card_url = _recover_attachment_url(item, "url")
+        if card_url:
+            parts.append(f"<p>{_html_escape(card_url, False)}</p>")
         meta: list[str] = []
         if due_str:
             meta.append(f"📅 {due_str}")
@@ -4089,10 +5005,12 @@ def convert_item_to_canvas_node(
         font_px = compute_font_px(scale, int(base_font_px), min_font_px)
 
         node = {**base, "type": "text", "text": ""}
-        node.setdefault("styleAttributes", {}).update({
-            "shape": "round-rectangle",
-            "fontSize": font_px,
-        })
+        node.setdefault("styleAttributes", {}).update(
+            {
+                "shape": "round-rectangle",
+                "fontSize": font_px,
+            }
+        )
         if card_color:
             node["styleAttributes"]["backgroundColor"] = card_color
 
@@ -4104,7 +5022,9 @@ def convert_item_to_canvas_node(
         )
 
         # подгоняем высоту под контент
-        need_h = _estimate_render_height(content_html, width_px=base_w, font_px=font_px, line_height=lh)
+        need_h = _estimate_render_height(
+            content_html, width_px=base_w, font_px=font_px, line_height=lh
+        )
         if need_h > base_h:
             node["height"] = need_h
 
@@ -4114,9 +5034,9 @@ def convert_item_to_canvas_node(
     if item_type == "embed":
         data = item.get("data") or {}
         local_name = item.get("local_name") or ""
-        url        = _recover_embed_url(data) or ""
-        title      = (data.get("title")        or "").strip()
-        provider   = (data.get("providerName") or "").strip()
+        url = _recover_embed_url(data) or ""
+        title = (data.get("title") or "").strip()
+        provider = (data.get("providerName") or "").strip()
 
         # Ширина = miro_width × scale (уже в base["width"]), высота = 16:9.
         # Tiny embed geometry from Miro still needs a visible Canvas link card.
@@ -4125,11 +5045,12 @@ def convert_item_to_canvas_node(
         # Допустимые расширения изображений для embed-превью
         _EMBED_IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".svg"}
         local_name_is_image = (
-            local_name and
-            Path(local_name).suffix.lower() in _EMBED_IMAGE_EXTS
+            local_name and Path(local_name).suffix.lower() in _EMBED_IMAGE_EXTS
         )
 
-        if local_name_is_image and _attachment_file_exists(new_files_folder, local_name):
+        if local_name_is_image and _attachment_file_exists(
+            new_files_folder, local_name
+        ):
             # Скачанное превью — реальное изображение → нода-файл
             local_name = prepare_compact_attachment_reference(
                 new_files_folder,
@@ -4139,17 +5060,17 @@ def convert_item_to_canvas_node(
             )
             if not _attachment_file_exists(new_files_folder, local_name):
                 return None
-            abs_path = os.path.join(new_files_folder, local_name)
+            abs_path = _attachment_file_path(new_files_folder, local_name)
             rel = relpath_from_vault(abs_path, vault_root)
             node = {**base, "type": "file", "file": rel}
-            node["width"]  = content_w
+            node["width"] = content_w
             node["height"] = content_h
             return node
         elif url:
             # Превью нет → нативная ссылка-нода Obsidian Canvas (type: "link")
             node = {**base, "type": "link", "url": url}
             node.pop("text", None)
-            node["width"]  = content_w
+            node["width"] = content_w
             node["height"] = content_h
             return node
         elif title or provider or data.get("html") or data.get("previewUrl"):
@@ -4169,7 +5090,10 @@ def convert_item_to_canvas_node(
                 text_style_mode=text_style_mode,
             )
             node["width"] = content_w
-            node["height"] = max(content_h, _estimate_render_height(html, width_px=content_w, font_px=min_font_px))
+            node["height"] = max(
+                content_h,
+                _estimate_render_height(html, width_px=content_w, font_px=min_font_px),
+            )
             return node
         else:
             return None
@@ -4208,7 +5132,6 @@ def convert_item_to_canvas_node(
 
     # ----------  TAG → TEXT-МЕТКА ----------
 
-
     if item_type == "tag":
         if (
             not isinstance(item.get("position"), dict)
@@ -4233,7 +5156,9 @@ def convert_item_to_canvas_node(
             line_height=lh,
             text_style_mode=text_style_mode,
         )
-        need_h = _estimate_render_height(html, width_px=base_w, font_px=font_px, line_height=lh)
+        need_h = _estimate_render_height(
+            html, width_px=base_w, font_px=font_px, line_height=lh
+        )
         if need_h > node["height"]:
             node["height"] = need_h
         return node
@@ -4244,7 +5169,9 @@ def convert_item_to_canvas_node(
     if item_type in _META_TYPES:
         return None
 
-    if item_type in SOURCE_LIMITED_DROP_TYPES:
+    if item_type in SOURCE_LIMITED_DROP_TYPES and not has_recoverable_item_content(
+        item
+    ):
         return None
 
     # Если нет geometry, но есть позиция, сохраняем диагностический placeholder:
@@ -4260,10 +5187,16 @@ def convert_item_to_canvas_node(
             label = item_type.replace("_", " ")
             title = (item.get("data") or {}).get("title", "") or item.get("title", "")
             title_part = f": {_html_escape(str(title), False)}" if title else ""
+            details_html = _recoverable_item_details_html(item)
+            limitation = (
+                "Exact geometry/rendering is not exposed by Miro"
+                if details_html
+                else "Position only; size/content not exposed by Miro API"
+            )
             placeholder_html = (
-                f'<p><em>[{label}{title_part}]</em></p>'
-                f'<p style="font-size:0.8em; opacity:0.6;">'
-                f'Position only; size/content not exposed by Miro API</p>'
+                f"<p><em>[{label}{title_part}]</em></p>"
+                f"{details_html}"
+                f'<p style="font-size:0.8em; opacity:0.6;">{limitation}</p>'
             )
             node = {
                 "id": str(item.get("id", "")),
@@ -4279,6 +5212,15 @@ def convert_item_to_canvas_node(
                     text_style_mode=text_style_mode,
                 ),
             }
+            needed_height = _estimate_render_height(
+                placeholder_html,
+                width_px=node_w,
+                font_px=min_font_px,
+                line_height=1.4,
+                padding=32,
+            )
+            node["height"] = max(node_h, needed_height)
+            node["y"] = center_y - node["height"] / 2.0
             node.setdefault("styleAttributes", {})["fontSize"] = min_font_px
             return node
 
@@ -4286,11 +5228,18 @@ def convert_item_to_canvas_node(
 
     # Есть geometry → создаём текстовую заглушку с указанием типа
     label = item_type.replace("_", " ")
-    title = (item.get("data") or {}).get("title", "")
+    title = (item.get("data") or {}).get("title", "") or item.get("title", "")
     title_part = f": {_html_escape(title, False)}" if title else ""
+    details_html = _recoverable_item_details_html(item)
+    limitation = (
+        "Exact rendering is not exposed by Miro"
+        if details_html
+        else "Type is not supported by the Miro API"
+    )
     placeholder_html = (
-        f'<p><em>[{label}{title_part}]</em></p>'
-        f'<p style="font-size:0.8em; opacity:0.6;">Тип не поддерживается API Miro</p>'
+        f"<p><em>[{label}{title_part}]</em></p>"
+        f"{details_html}"
+        f'<p style="font-size:0.8em; opacity:0.6;">{limitation}</p>'
     )
     node = {**base, "type": "text", "text": ""}
     node.setdefault("styleAttributes", {})["fontSize"] = min_font_px
@@ -4300,9 +5249,136 @@ def convert_item_to_canvas_node(
         line_height=1.4,
         text_style_mode=text_style_mode,
     )
+    center_y = float(node["y"]) + float(node["height"]) / 2.0
+    needed_height = _estimate_render_height(
+        placeholder_html,
+        width_px=float(node["width"]),
+        font_px=min_font_px,
+        line_height=1.4,
+        padding=32,
+    )
+    node["height"] = max(float(node["height"]), needed_height)
+    node["y"] = center_y - float(node["height"]) / 2.0
     return node
 
-def convert_item_to_edge(item: Dict[str, Any], theme: str = "light") -> Optional[Dict[str, Any]]:
+
+def _recoverable_placeholder_node(
+    item: Dict[str, Any],
+    *,
+    scale: float,
+    min_font_px: int,
+    text_style_mode: str,
+) -> Dict[str, Any]:
+    position = item.get("position") if isinstance(item.get("position"), dict) else {}
+    geometry = item.get("geometry") if isinstance(item.get("geometry"), dict) else {}
+
+    def number(value: Any, default: float) -> float:
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return default
+
+    source_width = max(number(geometry.get("width"), 250.0), 1.0)
+    source_height = max(number(geometry.get("height"), 80.0), 1.0)
+    width = max(source_width * scale, 120.0)
+    height = max(source_height * scale, 80.0)
+    center_x = number(position.get("x"), 0.0) * scale
+    center_y = number(position.get("y"), 0.0) * scale
+    item_type = str(item.get("type") or "unsupported").lower()
+    title = (item.get("data") or {}).get("title", "") or item.get("title", "")
+    title_part = f": {_html_escape(str(title), False)}" if title else ""
+    details_html = _recoverable_item_details_html(item)
+    html = (
+        f"<p><em>[{item_type.replace('_', ' ')}{title_part}]</em></p>"
+        f"{details_html}"
+        '<p style="font-size:0.8em; opacity:0.6;">'
+        "Specialized rendering was unavailable; recoverable source data is preserved."
+        "</p>"
+    )
+    height = max(
+        height,
+        _estimate_render_height(
+            html, width_px=width, font_px=min_font_px, line_height=1.4, padding=32
+        ),
+    )
+    return {
+        "id": str(item.get("id") or ""),
+        "type": "text",
+        "x": center_x - width / 2.0,
+        "y": center_y - height / 2.0,
+        "width": width,
+        "height": height,
+        "text": _render_canvas_text(
+            html,
+            font_px=min_font_px,
+            line_height=1.4,
+            text_style_mode=normalize_text_style_mode(text_style_mode),
+        ),
+        "styleAttributes": {"fontSize": min_font_px},
+    }
+
+
+def _normalize_item_for_conversion(item: Dict[str, Any]) -> Dict[str, Any]:
+    normalized = dict(item)
+    for key in (
+        "data",
+        "style",
+        "position",
+        "geometry",
+        "parent",
+        "group",
+        "links",
+        "startItem",
+        "endItem",
+        "nodeView",
+    ):
+        if not isinstance(normalized.get(key), dict):
+            normalized[key] = {}
+    parent = dict(normalized["parent"])
+    if not isinstance(parent.get("links"), dict):
+        parent["links"] = {}
+    normalized["parent"] = parent
+    return normalized
+
+
+def convert_item_to_canvas_node(
+    item: Dict[str, Any],
+    new_files_folder: str,
+    vault_root: str,
+    scale: float = 1.0,
+    min_font_px: int = 8,
+    theme: str = "light",
+    grow_text_nodes: bool = False,
+    text_style_mode: str = "miro",
+) -> Optional[Dict[str, Any]]:
+    item = _normalize_item_for_conversion(item)
+    node = _convert_item_to_canvas_node(
+        item,
+        new_files_folder,
+        vault_root,
+        scale,
+        min_font_px,
+        theme,
+        grow_text_nodes,
+        text_style_mode,
+    )
+    item_type = str(item.get("type") or "").lower()
+    if node is not None or item_type in {"board", "board_member", "connector"}:
+        return node
+    if not has_recoverable_item_content(item):
+        return None
+    return _recoverable_placeholder_node(
+        item,
+        scale=scale,
+        min_font_px=min_font_px,
+        text_style_mode=text_style_mode,
+    )
+
+
+def convert_item_to_edge(
+    item: Dict[str, Any], theme: str = "light"
+) -> Optional[Dict[str, Any]]:
+    item = _normalize_item_for_conversion(item)
     if (item.get("type") or "").lower() != "connector":
         return None
 
@@ -4329,7 +5405,7 @@ def convert_item_to_edge(item: Dict[str, Any], theme: str = "light") -> Optional
 
     # если линия невидима — не красим
     try:
-        sw  = float(style.get("strokeWidth") or 0)
+        sw = float(style.get("strokeWidth") or 0)
         sop = float(style.get("strokeOpacity") or 1)
     except Exception:
         sw, sop = 0.0, 1.0
@@ -4337,8 +5413,8 @@ def convert_item_to_edge(item: Dict[str, Any], theme: str = "light") -> Optional
 
     col_raw = (style.get("strokeColor") or "").strip()
     is_default = _is_default_miro_stroke(col_raw)
-    is_black   = _is_black_like(col_raw)
-    is_white   = _is_white_like(col_raw)
+    is_black = _is_black_like(col_raw)
+    is_white = _is_white_like(col_raw)
 
     chosen_color: Optional[str] = None
     if not invisible:
@@ -4378,7 +5454,9 @@ def convert_item_to_edge(item: Dict[str, Any], theme: str = "light") -> Optional
     if path is not None:
         sa["path"] = path
 
-    pf = map_edge_pathfinding(_extract_conn_shape(item))  # direct / square / bezier / None
+    pf = map_edge_pathfinding(
+        _extract_conn_shape(item)
+    )  # direct / square / bezier / None
     if pf is not None:
         sa["pathfindingMethod"] = pf
 
@@ -4393,6 +5471,7 @@ def convert_item_to_edge(item: Dict[str, Any], theme: str = "light") -> Optional
 # =========================
 # Top-level pipeline
 # =========================
+
 
 def _is_deck(it: Dict[str, Any]) -> bool:
     return (it.get("type") or "").lower() in DECK_TYPES
@@ -4420,7 +5499,7 @@ def _slide_frame_deck_id(
     if not fid:
         return None
 
-    for did in (deck_order or list(deck_ids)):
+    for did in deck_order or list(deck_ids):
         if did in deck_ids and fid in (children.get(did) or []):
             return did
 
@@ -4445,6 +5524,7 @@ def _resolve_relative_positions_to_canvas_center(by_id: Dict[str, Any]) -> None:
     Модифицирует item["position"] напрямую — поскольку by_id хранит те же объекты dict,
     что и all_items, изменения видны везде.
     """
+
     def abs_center(
         item_id: str,
         _stack: frozenset = frozenset(),
@@ -4456,14 +5536,14 @@ def _resolve_relative_positions_to_canvas_center(by_id: Dict[str, Any]) -> None:
         if not item:
             return None
 
-        pos    = item.get("position") or {}
-        rel    = str(pos.get("relativeTo") or "canvas_center").lower()
-        x      = float(pos.get("x") or 0.0)
-        y      = float(pos.get("y") or 0.0)
+        pos = item.get("position") or {}
+        rel = str(pos.get("relativeTo") or "canvas_center").lower()
+        x = float(pos.get("x") or 0.0)
+        y = float(pos.get("y") or 0.0)
         origin = str(pos.get("origin") or "center").lower()
-        geom   = item.get("geometry") or {}
-        w      = float(geom.get("width") or 0.0)
-        h      = float(geom.get("height") or 0.0)
+        geom = item.get("geometry") or {}
+        w = float(geom.get("width") or 0.0)
+        h = float(geom.get("height") or 0.0)
 
         if rel == "canvas_center":
             cx = x if origin == "center" else x + w / 2.0
@@ -4479,10 +5559,10 @@ def _resolve_relative_positions_to_canvas_center(by_id: Dict[str, Any]) -> None:
             return x, y  # не удалось разрешить → fallback
 
         par_item = by_id.get(par_id)
-        p_geom   = (par_item.get("geometry") or {}) if par_item else {}
-        p_w      = float(p_geom.get("width") or 0.0)
-        p_h      = float(p_geom.get("height") or 0.0)
-        p_cx, p_cy   = par_pos
+        p_geom = (par_item.get("geometry") or {}) if par_item else {}
+        p_w = float(p_geom.get("width") or 0.0)
+        p_h = float(p_geom.get("height") or 0.0)
+        p_cx, p_cy = par_pos
         p_tl_x = p_cx - p_w / 2.0
         p_tl_y = p_cy - p_h / 2.0
 
@@ -4499,7 +5579,7 @@ def _resolve_relative_positions_to_canvas_center(by_id: Dict[str, Any]) -> None:
         if rel not in ("parent_top_left", "parent_center"):
             continue
 
-        par_id   = str((item.get("parent") or {}).get("id") or "")
+        par_id = str((item.get("parent") or {}).get("id") or "")
         par_item = by_id.get(par_id)
         par_type = str((par_item.get("type") or "") if par_item else "").lower()
 
@@ -4512,12 +5592,14 @@ def _resolve_relative_positions_to_canvas_center(by_id: Dict[str, Any]) -> None:
             continue
 
         item["position"] = dict(pos)
-        item["position"].update({
-            "x": result[0],
-            "y": result[1],
-            "relativeTo": "canvas_center",
-            "origin": "center",
-        })
+        item["position"].update(
+            {
+                "x": result[0],
+                "y": result[1],
+                "relativeTo": "canvas_center",
+                "origin": "center",
+            }
+        )
 
 
 def _add_mindmap_hierarchy_edges(
@@ -4537,7 +5619,12 @@ def _add_mindmap_hierarchy_edges(
         parent_id = str(parent.get("id") or "") if isinstance(parent, dict) else ""
         parent_item = by_id.get(parent_id)
 
-        if not child_id or not parent_id or child_id not in node_map or parent_id not in node_map:
+        if (
+            not child_id
+            or not parent_id
+            or child_id not in node_map
+            or parent_id not in node_map
+        ):
             continue
         if (parent_item.get("type") or "").lower() != "mindmap_node":
             continue
@@ -4546,11 +5633,13 @@ def _add_mindmap_hierarchy_edges(
         if edge_id in existing_ids:
             continue
 
-        edges.append({
-            "id": edge_id,
-            "fromNode": parent_id,
-            "toNode": child_id,
-        })
+        edges.append(
+            {
+                "id": edge_id,
+                "fromNode": parent_id,
+                "toNode": child_id,
+            }
+        )
         existing_ids.add(edge_id)
 
 
@@ -4582,19 +5671,21 @@ def _add_slide_sequence_edges(
         if edge_id in existing_ids:
             continue
 
-        edges.append({
-            "id": edge_id,
-            "fromNode": from_id,
-            "toNode": to_id,
-            "fromEnd": "none",
-            "toEnd": "none",
-            "color": "#00000000",
-        })
+        edges.append(
+            {
+                "id": edge_id,
+                "fromNode": from_id,
+                "toNode": to_id,
+                "fromEnd": "none",
+                "toEnd": "none",
+                "color": "#00000000",
+            }
+        )
         existing_ids.add(edge_id)
         existing_pairs.add((from_id, to_id))
 
 
-def convert_miro_to_canvas(
+def _convert_miro_to_canvas_impl(
     json_path: str,
     target_dir: str,
     vault_root: str,
@@ -4606,6 +5697,7 @@ def convert_miro_to_canvas(
     grow_text_nodes: bool = False,
     text_style_mode: str = "miro",
     attachment_dir: str | None = None,
+    _created_attachment_paths: List[Path] | None = None,
 ) -> str:
     """
     Основной конвейер конвертации Miro JSON → Obsidian Canvas.
@@ -4616,27 +5708,44 @@ def convert_miro_to_canvas(
     canvas_path = os.path.join(target_dir, base_name + ".canvas")
 
     src_files_folder = os.path.join(os.path.dirname(json_path), base_name + "_files")
+    with open(json_path, "r", encoding="utf-8") as f:
+        miro_root = json.load(f, parse_constant=_reject_nonfinite_json_constant)
+    source_issues = source_completeness_issues(miro_root)
+    source_metadata = _source_canvas_metadata(miro_root)
+    if _source_declares_complete_assets(miro_root):
+        asset_issues = _required_source_asset_issues(miro_root, src_files_folder)
+        if asset_issues:
+            raise RuntimeError(
+                "Declared-complete source assets are invalid: "
+                + "; ".join(asset_issues[:5])
+            )
+
     new_files_folder = ensure_move_attachments(
         json_file=json_path,
         target_dir=target_dir,
         attachment_dir=attachment_dir,
+        _created_paths=_created_attachment_paths,
     )
-
-    with open(json_path, "r", encoding="utf-8") as f:
-        miro_root = json.load(f)
+    if delete_src_files and Path(src_files_folder).resolve(strict=False) == Path(
+        new_files_folder
+    ).resolve(strict=False):
+        raise ValueError(
+            "Cannot delete the attachment sidecar used by the output Canvas."
+        )
 
     nodes: List[Dict[str, Any]] = []
     edges: List[Dict[str, Any]] = []
 
     # --- первый проход: собираем все элементы и отношения родитель → дети
-    
-    all_items: List[Dict[str, Any]] = list(iter_objects(miro_root))
+
+    all_items: List[Dict[str, Any]] = [
+        _normalize_item_for_conversion(item) for item in iter_objects(miro_root)
+    ]
 
     by_id: Dict[str, Dict[str, Any]] = {}
     children: Dict[str, List[str]] = {}
     containers: List[Dict[str, Any]] = []
     container_rects_unscaled: Dict[str, Dict[str, float]] = {}  # frame + diagram
-    diagram_rects_unscaled: Dict[str, Dict[str, float]] = {}    # только diagram
 
     for it in all_items:
         iid = str(it.get("id", "") or "")
@@ -4650,8 +5759,6 @@ def convert_miro_to_canvas(
                 fr0 = _frame_rect_unscaled(it)
                 if fr0:
                     container_rects_unscaled[iid] = fr0
-                    if t == "diagram":
-                        diagram_rects_unscaled[iid] = fr0
 
         # 1) привязка к группе (если есть)
         g = it.get("group")
@@ -4664,7 +5771,6 @@ def convert_miro_to_canvas(
         if isinstance(par, dict) and par.get("id") is not None:
             pid = str(par.get("id"))
             children.setdefault(pid, []).append(iid)
-
 
     # --- разрешение parent_top_left/parent_center для не-контейнерных родителей
     # (mindmap_node, table_text и пр.) — до всех дальнейших вычислений позиций
@@ -4707,12 +5813,17 @@ def convert_miro_to_canvas(
         try:
             cx = float(npos.get("x") or 0.0)
             cy = float(npos.get("y") or 0.0)
-            w  = float(geom.get("width") or 0.0)
-            h  = float(geom.get("height") or 0.0)
+            w = float(geom.get("width") or 0.0)
+            h = float(geom.get("height") or 0.0)
         except Exception:
             continue
         if w > 0 and h > 0:
-            container_rects_unscaled[iid] = {"x": cx - w/2.0, "y": cy - h/2.0, "width": w, "height": h}
+            container_rects_unscaled[iid] = {
+                "x": cx - w / 2.0,
+                "y": cy - h / 2.0,
+                "width": w,
+                "height": h,
+            }
 
     # учесть явные списки детей в самих группах (data.items)
     for cont in containers:
@@ -4728,7 +5839,7 @@ def convert_miro_to_canvas(
                     lst.append(ch)
                     seen.add(ch)
 
-     # --- Slides: deck и принадлежность фреймов к деке ---
+    # --- Slides: deck и принадлежность фреймов к деке ---
 
     # Найдём все slide_container'ы в стабильном порядке исходного JSON.
     deck_order: List[str] = []
@@ -4767,7 +5878,9 @@ def convert_miro_to_canvas(
 
     slide_content_scales_by_frame: Dict[str, float] = {}
     slide_content_size_boosts_by_frame: Dict[str, float] = {}
-    slide_target_max_side_unscaled = SYNTHETIC_SLIDE_MANUAL_DEFAULT_MAX_SIDE / max(float(scale), 1e-9)
+    slide_target_max_side_unscaled = SYNTHETIC_SLIDE_MANUAL_DEFAULT_MAX_SIDE / max(
+        float(scale), 1e-9
+    )
     synthetic_slide_frame_ids = _layout_slide_frames_unscaled(
         by_id,
         deck_order,
@@ -4780,6 +5893,7 @@ def convert_miro_to_canvas(
 
     # --- второй проход: сначала обычные узлы/рёбра (кроме контейнеров)
     node_map: Dict[str, Dict[str, Any]] = {}
+    deferred_comment_nodes: List[tuple[Dict[str, Any], Dict[str, Any]]] = []
     for item in all_items:
         t = (item.get("type") or "").lower()
         if t in CONTAINER_TYPES:  # {"group", "frame", "diagram"}
@@ -4794,54 +5908,12 @@ def convert_miro_to_canvas(
                 parent_pid = cand
 
         if parent_pid:
-            pos = (item.get("position") or {})
+            pos = item.get("position") or {}
             rel_to = str(pos.get("relativeTo") or "").lower()
             if rel_to in ("parent_top_left", "parent_center"):
-                item = _normalize_child_pos_to_canvas(item, container_rects_unscaled[parent_pid])
-        else:
-            # 2) Эвристика для диаграмм: координаты детей, по факту, локальные от TL диаграммы.
-            # Пересчитываем в глобальные, подбирая диаграмму с минимальным «переливом» за рамки.
-            pos = (item.get("position") or {})
-            rel_to = str(pos.get("relativeTo") or "").lower()
-            if rel_to == "canvas_center" and diagram_rects_unscaled:
-                rebased = None
-                best_overflow = None
-                for did, drect in diagram_rects_unscaled.items():
-                    cand_item = _rebase_from_diagram_local(item, drect)
-                    if not cand_item:
-                        continue
-
-                    # Оценим, насколько бокс ребёнка вылезает за диаграмму (0 — идеально внутри)
-                    g = (cand_item.get("geometry") or {})
-                    try:
-                        w  = float(g.get("width") or 0.0)
-                        h  = float(g.get("height") or 0.0)
-                        cx = float((cand_item.get("position") or {}).get("x") or 0.0)
-                        cy = float((cand_item.get("position") or {}).get("y") or 0.0)
-                    except Exception:
-                        continue
-                    bx = cx - w / 2.0
-                    by = cy - h / 2.0
-
-                    ox = 0.0
-                    if bx < drect["x"]:
-                        ox += drect["x"] - bx
-                    if bx + w > drect["x"] + drect["width"]:
-                        ox += (bx + w) - (drect["x"] + drect["width"])
-
-                    oy = 0.0
-                    if by < drect["y"]:
-                        oy += drect["y"] - by
-                    if by + h > drect["y"] + drect["height"]:
-                        oy += (by + h) - (drect["y"] + drect["height"])
-
-                    overflow = ox + oy
-                    if (best_overflow is None) or (overflow < best_overflow):
-                        best_overflow = overflow
-                        rebased = cand_item
-
-                if rebased is not None:
-                    item = rebased
+                item = _normalize_child_pos_to_canvas(
+                    item, container_rects_unscaled[parent_pid]
+                )
 
         # 3) Конвертация коннекторов в рёбра
         edge = convert_item_to_edge(item, theme=theme)
@@ -4851,7 +5923,9 @@ def convert_miro_to_canvas(
 
         # 4) Конвертация остальных элементов в ноды
         node = convert_item_to_canvas_node(
-            item, new_files_folder, vault_root,
+            item,
+            new_files_folder,
+            vault_root,
             scale=scale,
             min_font_px=min_font_px,
             theme=theme,
@@ -4863,8 +5937,10 @@ def convert_miro_to_canvas(
             nid = str(node.get("id", "") or "")
             if nid:
                 node_map[nid] = node
+            if t == "comment" and not _has_canvas_position(item):
+                deferred_comment_nodes.append((node, item))
 
-
+    _place_deferred_comment_nodes(deferred_comment_nodes, nodes, node_map)
     _add_mindmap_hierarchy_edges(all_items, by_id, node_map, edges)
 
     slide_child_node_ids = _fit_slide_child_nodes_to_frame_rects(
@@ -4881,8 +5957,7 @@ def convert_miro_to_canvas(
         expandable_frame_ids=synthetic_slide_frame_ids,
     )
     slide_child_layout_nodes = [
-        node_map[cid] for cid in slide_child_node_ids
-        if cid in node_map
+        node_map[cid] for cid in slide_child_node_ids if cid in node_map
     ]
     _compact_tiny_slide_text_heights(slide_child_layout_nodes)
     _resolve_tiny_slide_marker_text_overlaps(slide_child_layout_nodes)
@@ -4905,7 +5980,8 @@ def convert_miro_to_canvas(
             scale,
         )
     layout_nodes = [
-        node for node in nodes
+        node
+        for node in nodes
         if str(node.get("id", "") or "") not in slide_child_node_ids
     ]
 
@@ -4930,7 +6006,6 @@ def convert_miro_to_canvas(
         _resolve_text_text_vertical_overlaps(layout_nodes)
         _resolve_text_text_horizontal_edge_overlaps(layout_nodes)
 
-
     # --- третий проход: строим контейнеры (Miro group / frame / diagram) как Canvas group
 
     def _container_depth(it: Dict[str, Any]) -> int:
@@ -4941,7 +6016,11 @@ def convert_miro_to_canvas(
         d, cur, seen = 0, it, set()
         while isinstance(cur, dict):
             par = cur.get("parent")
-            pid = str(par.get("id")) if isinstance(par, dict) and par.get("id") is not None else None
+            pid = (
+                str(par.get("id"))
+                if isinstance(par, dict) and par.get("id") is not None
+                else None
+            )
             if not pid or pid in seen:
                 break
             seen.add(pid)
@@ -4958,7 +6037,7 @@ def convert_miro_to_canvas(
     # Первый слайд каждой деки (для metadata.startNode)
     first_slide_per_deck: Dict[str, str] = {}
     for did in deck_order:
-        for fid in (children.get(did) or []):
+        for fid in children.get(did) or []:
             if fid in slide_frame_id_set:
                 first_slide_per_deck[did] = fid
                 break
@@ -4969,7 +6048,7 @@ def convert_miro_to_canvas(
             continue
 
         ctype = str(cont.get("type") or "").lower()
-        is_frame_like = (ctype in FRAME_LIKE_TYPES)  # frame и diagram
+        is_frame_like = ctype in FRAME_LIKE_TYPES  # frame и diagram
         is_slide_frame = cid in slide_frame_id_set
 
         # кандидаты-дети по id (берём только те, что реально сконвертированы в node_map)
@@ -4981,9 +6060,14 @@ def convert_miro_to_canvas(
         if is_frame_like:
             _r0 = container_rects_unscaled.get(cid)
             frect = (
-                {"x": _r0["x"] * scale, "y": _r0["y"] * scale,
-                 "width": _r0["width"] * scale, "height": _r0["height"] * scale}
-                if _r0 else _frame_rect(cont, scale=scale)
+                {
+                    "x": _r0["x"] * scale,
+                    "y": _r0["y"] * scale,
+                    "width": _r0["width"] * scale,
+                    "height": _r0["height"] * scale,
+                }
+                if _r0
+                else _frame_rect(cont, scale=scale)
             )
         else:
             frect = None
@@ -4992,14 +6076,20 @@ def convert_miro_to_canvas(
         # parent.id авторитетнее: иначе часть содержимого слайда выпадает
         # из Advanced Canvas slide group.
         if is_frame_like and frect and not is_slide_frame:
-            child_ids = [ch for ch in raw_child_ids if _node_center_inside_rect(node_map[ch], frect, tol=1.0)]
+            child_ids = [
+                ch
+                for ch in raw_child_ids
+                if _node_center_inside_rect(node_map[ch], frect, tol=1.0)
+            ]
         else:
             child_ids = raw_child_ids
 
         # bbox детей: 0 padding для frame/diagram, 12 px для обычной группы
         bbox = (
-            _bbox_of_nodes(node_map, child_ids, padding=0) if (child_ids and is_frame_like)
-            else _bbox_of_nodes(node_map, child_ids, padding=12) if child_ids
+            _bbox_of_nodes(node_map, child_ids, padding=0)
+            if (child_ids and is_frame_like)
+            else _bbox_of_nodes(node_map, child_ids, padding=12)
+            if child_ids
             else None
         )
 
@@ -5008,7 +6098,11 @@ def convert_miro_to_canvas(
             if is_slide_frame:
                 rect = frect or bbox
             elif frect and bbox:
-                rect = frect if _rect_contains(frect, bbox, eps=0.5) else _rect_union(frect, bbox)
+                rect = (
+                    frect
+                    if _rect_contains(frect, bbox, eps=0.5)
+                    else _rect_union(frect, bbox)
+                )
             else:
                 rect = frect or bbox  # пустая рамка тоже допустима
         else:
@@ -5088,12 +6182,11 @@ def convert_miro_to_canvas(
             "width": rect["width"],
             "height": rect["height"],
             "label": label,
-            "nodes": child_ids,   # ВАЖНО: deck содержит frame-группы
+            "nodes": child_ids,  # ВАЖНО: deck содержит frame-группы
             "color": color,
         }
         nodes.append(group_node)
         node_map[cid] = group_node
-
 
     _resolve_synthetic_slide_deck_canvas_overlaps(
         nodes,
@@ -5108,6 +6201,54 @@ def convert_miro_to_canvas(
             if fid in slide_frame_id_set:
                 slide_sequence_ids.append(fid)
         _add_slide_sequence_edges(slide_sequence_ids, node_map, edges)
+    if source_issues:
+        width = 560.0
+        details = json.dumps(
+            {
+                "issues": source_issues,
+                "completeness": source_metadata.get("completeness"),
+            },
+            ensure_ascii=False,
+            indent=2,
+            sort_keys=True,
+        )
+        html = (
+            "<p><strong>[Miro source incomplete]</strong></p>"
+            f"<pre>{_html_escape(details, quote=False)}</pre>"
+            "<p>Some source layers were not fully exported; this Canvas is degraded.</p>"
+        )
+        height = max(
+            160.0,
+            float(
+                _estimate_render_height(
+                    html, width_px=width, font_px=12, line_height=1.4, padding=40
+                )
+            ),
+        )
+        occupied = _bbox_of_real_nodes(nodes, include_groups=False)
+        x = occupied["x"] if occupied else -width / 2.0
+        y = occupied["y"] - height - 64.0 if occupied else -height / 2.0
+        existing_ids = {str(node.get("id") or "") for node in nodes}
+        diagnostic_id = "miro-source-incomplete"
+        suffix = 2
+        while diagnostic_id in existing_ids:
+            diagnostic_id = f"miro-source-incomplete-{suffix}"
+            suffix += 1
+        nodes.append(
+            {
+                "id": diagnostic_id,
+                "type": "text",
+                "x": x,
+                "y": y,
+                "width": width,
+                "height": height,
+                "text": _render_canvas_text(
+                    html, font_px=12, line_height=1.4, text_style_mode=text_style_mode
+                ),
+                "styleAttributes": {"fontSize": 12, "shape": "round-rectangle"},
+                "miroDiagnostic": "source_incomplete",
+            }
+        )
 
     # --- НОРМАЛИЗАЦИЯ: центрируем «вещественные» элементы в (0, 0)
     bb = _bbox_of_real_nodes(nodes, include_groups=False)  # считаем только по non-group
@@ -5124,10 +6265,15 @@ def convert_miro_to_canvas(
                     # пропускаем элементы без координат (на всякий случай)
                     pass
 
-
-
-
+    node_ids = {str(node.get("id") or "") for node in nodes}
+    edges = [
+        edge
+        for edge in edges
+        if edge.get("fromNode") in node_ids and edge.get("toNode") in node_ids
+    ]
     canvas_obj: Dict[str, Any] = {"nodes": nodes, "edges": edges}
+    if source_metadata:
+        canvas_obj["miroSource"] = source_metadata
 
     # Advanced Canvas metadata: startNode = первый слайд первой деки (если есть)
     all_first_slides = list(first_slide_per_deck.values())
@@ -5138,9 +6284,25 @@ def convert_miro_to_canvas(
             "startNode": all_first_slides[0],
         }
 
-    os.makedirs(target_dir, exist_ok=True)
-    with open(canvas_path, "w", encoding="utf-8") as f:
-        json.dump(canvas_obj, f, ensure_ascii=False, indent=2)
+    _mkdir_with_tracking(Path(target_dir), _created_attachment_paths)
+    descriptor, temp_canvas_name = tempfile.mkstemp(
+        prefix=f".{Path(canvas_path).name}.",
+        suffix=".tmp",
+        dir=target_dir,
+    )
+    temp_canvas_path = Path(temp_canvas_name)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as f:
+            json.dump(
+                canvas_obj,
+                f,
+                ensure_ascii=False,
+                indent=2,
+                allow_nan=False,
+            )
+        os.replace(temp_canvas_path, canvas_path)
+    finally:
+        temp_canvas_path.unlink(missing_ok=True)
 
     cleanup_sources(
         json_file=json_path,
@@ -5149,6 +6311,128 @@ def convert_miro_to_canvas(
         delete_src_files=delete_src_files,
     )
 
-
-
     return canvas_path
+
+
+def _directory_inside_vault(path: Path, vault_root: Path, *, label: str) -> Path:
+    resolved_vault = vault_root.resolve()
+    resolved = path.resolve(strict=False)
+    try:
+        relative = resolved.relative_to(resolved_vault)
+    except ValueError as exc:
+        raise ValueError(
+            f"{label} must stay inside the Obsidian vault: {path}"
+        ) from exc
+
+    current = resolved_vault
+    for part in relative.parts:
+        current /= part
+        if _is_link_or_reparse(current):
+            raise ValueError(f"{label} contains a link or reparse point: {current}")
+        if current.exists() and not current.is_dir():
+            raise ValueError(f"{label} must be a directory: {current}")
+    return resolved
+
+
+def _rollback_created_paths(created_paths: List[Path]) -> None:
+    for path in reversed(created_paths):
+        try:
+            if path.is_dir() and not _is_link_or_reparse(path):
+                path.rmdir()
+            else:
+                path.unlink(missing_ok=True)
+        except OSError:
+            continue
+
+
+def convert_miro_to_canvas(
+    json_path: str,
+    target_dir: str,
+    vault_root: str,
+    delete_json: bool = False,
+    delete_src_files: bool = False,
+    scale: float = 1.0,
+    min_font_px: int = 8,
+    theme: str = "light",
+    grow_text_nodes: bool = False,
+    text_style_mode: str = "miro",
+    attachment_dir: str | None = None,
+) -> str:
+    """Validate boundaries, then run one transactional Miro JSON to Canvas conversion."""
+    source = Path(json_path)
+    _require_regular_file(source, label="Miro JSON source")
+    source = source.resolve()
+
+    vault = Path(vault_root)
+    _require_regular_directory(vault, label="Obsidian vault root")
+    _require_no_reparse_components(vault, label="Obsidian vault root")
+    vault = vault.resolve()
+    target = _directory_inside_vault(
+        Path(target_dir), vault, label="Canvas target directory"
+    )
+    attachment_root = (
+        _directory_inside_vault(
+            Path(attachment_dir),
+            vault,
+            label="Attachment directory",
+        )
+        if attachment_dir
+        else None
+    )
+
+    scale_value = _positive_finite_number(scale, label="scale")
+    if (
+        isinstance(min_font_px, bool)
+        or not isinstance(min_font_px, int)
+        or min_font_px <= 0
+    ):
+        raise ValueError("min_font_px must be a positive integer")
+    theme_value = str(theme or "").strip().lower()
+    if theme_value not in {"light", "dark"}:
+        raise ValueError("theme must be 'light' or 'dark'")
+    text_style_value = normalize_text_style_mode(text_style_mode)
+
+    source_sidecar = source.with_name(f"{source.stem}_files")
+    final_attachments = _attachment_destination(
+        str(source),
+        str(target),
+        str(attachment_root) if attachment_root else None,
+    )
+    if delete_src_files and source_sidecar.resolve(
+        strict=False
+    ) == final_attachments.resolve(strict=False):
+        raise ValueError(
+            "Cannot delete the attachment sidecar used by the output Canvas."
+        )
+
+    canvas_path = target / f"{source.stem}.canvas"
+    if canvas_path.exists() or _is_link_or_reparse(canvas_path):
+        _require_regular_file(canvas_path, label="Existing Canvas output")
+
+    created_paths: List[Path] = []
+    try:
+        result = _convert_miro_to_canvas_impl(
+            str(source),
+            str(target),
+            str(vault),
+            delete_json=False,
+            delete_src_files=False,
+            scale=scale_value,
+            min_font_px=min_font_px,
+            theme=theme_value,
+            grow_text_nodes=grow_text_nodes,
+            text_style_mode=text_style_value,
+            attachment_dir=str(attachment_root) if attachment_root else None,
+            _created_attachment_paths=created_paths,
+        )
+    except Exception:
+        _rollback_created_paths(created_paths)
+        raise
+
+    cleanup_sources(
+        json_file=str(source),
+        src_files_folder=str(source_sidecar),
+        delete_json=delete_json,
+        delete_src_files=delete_src_files,
+    )
+    return result

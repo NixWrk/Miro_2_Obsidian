@@ -2,8 +2,11 @@ from __future__ import annotations
 
 import os
 import sys
+import threading
 import unittest
 from pathlib import Path
+from urllib.error import HTTPError
+from urllib.request import urlopen
 from unittest.mock import patch
 
 
@@ -12,9 +15,11 @@ SCRIPTS_DIR = REPO_ROOT / "scripts"
 
 sys.path.insert(0, str(SCRIPTS_DIR))
 
+import miro_oauth_token as oauth  # noqa: E402
 from miro_oauth_token import (  # noqa: E402
     ALTERNATE_LOOPBACK_REDIRECT_URI,
     DEFAULT_REDIRECT_URI,
+    DEFAULT_SCOPES,
     LOCAL_CONFIG_ENV,
     OAuthConfig,
     OAuthTokenExchangeError,
@@ -35,7 +40,9 @@ from miro_oauth_token import (  # noqa: E402
 
 
 class FakeResponse:
-    def __init__(self, payload: dict[str, str], *, ok: bool = True, status_code: int = 200) -> None:
+    def __init__(
+        self, payload: dict[str, str], *, ok: bool = True, status_code: int = 200
+    ) -> None:
         self.payload = payload
         self.ok = ok
         self.status_code = status_code
@@ -52,12 +59,15 @@ class FakeSession:
         self.calls: list[dict[str, object]] = []
         self.response = response or FakeResponse({"access_token": "token-1"})
 
-    def post(self, url: str, *, params: dict[str, str], timeout: int) -> FakeResponse:
-        self.calls.append({"url": url, "params": params, "timeout": timeout})
+    def post(self, url: str, *, data: dict[str, str], timeout: int) -> FakeResponse:
+        self.calls.append({"url": url, "data": data, "timeout": timeout})
         return self.response
 
 
 class MiroOAuthTokenTests(unittest.TestCase):
+    def test_default_scopes_are_read_only(self) -> None:
+        self.assertEqual(DEFAULT_SCOPES, "boards:read team:read")
+
     def test_build_authorize_url_encodes_required_fields(self) -> None:
         config = OAuthConfig(
             client_id="client-1",
@@ -79,6 +89,12 @@ class MiroOAuthTokenTests(unittest.TestCase):
         self.assertEqual(callback_bind_hosts("localhost"), ("127.0.0.1", "::1"))
         self.assertEqual(callback_bind_hosts("127.0.0.1"), ("127.0.0.1",))
 
+    def test_callback_bind_hosts_rejects_non_loopback_hosts(self) -> None:
+        for hostname in ("0.0.0.0", "192.0.2.1", "example.invalid"):
+            with self.subTest(hostname=hostname):
+                with self.assertRaisesRegex(ValueError, "loopback"):
+                    callback_bind_hosts(hostname)
+
     def test_timeout_message_contains_retry_diagnostics_without_secret(self) -> None:
         config = OAuthConfig(
             client_id="client-1",
@@ -86,7 +102,9 @@ class MiroOAuthTokenTests(unittest.TestCase):
             redirect_uri=DEFAULT_REDIRECT_URI,
         )
 
-        message = format_callback_timeout_message(config, "https://miro.com/oauth/authorize?client_id=client-1")
+        message = format_callback_timeout_message(
+            config, "https://miro.com/oauth/authorize?client_id=client-1"
+        )
 
         self.assertIn("http://localhost:8765/callback", message)
         self.assertIn("http://127.0.0.1:8765/callback", message)
@@ -96,7 +114,9 @@ class MiroOAuthTokenTests(unittest.TestCase):
         self.assertNotIn("secret-1", message)
 
     def test_callback_recovery_hint_only_for_localhost_redirect(self) -> None:
-        hint = callback_recovery_hint(OAuthConfig(client_id="client-1", client_secret="secret-1"))
+        hint = callback_recovery_hint(
+            OAuthConfig(client_id="client-1", client_secret="secret-1")
+        )
 
         self.assertIsNotNone(hint)
         self.assertIn("127.0.0.1:8765", hint or "")
@@ -127,19 +147,27 @@ class MiroOAuthTokenTests(unittest.TestCase):
     def test_config_from_env_requires_client_credentials(self) -> None:
         with patch.dict(os.environ, {}, clear=True):
             with patch("miro_oauth_token.load_local_oauth_config", return_value={}):
-                with self.assertRaisesRegex(ValueError, "MIRO_CLIENT_ID, MIRO_CLIENT_SECRET"):
+                with self.assertRaisesRegex(
+                    ValueError, "MIRO_CLIENT_ID, MIRO_CLIENT_SECRET"
+                ):
                     config_from_env()
 
     def test_config_from_env_reads_credentials_without_printing_them(self) -> None:
-        with patch.dict(os.environ, {"MIRO_CLIENT_ID": "client-1", "MIRO_CLIENT_SECRET": "secret-1"}):
+        with patch.dict(
+            os.environ, {"MIRO_CLIENT_ID": "client-1", "MIRO_CLIENT_SECRET": "secret-1"}
+        ):
             with patch("miro_oauth_token.load_local_oauth_config", return_value={}):
-                config = config_from_env(authorize_url="https://example.invalid/authorize")
+                config = config_from_env(
+                    authorize_url="https://example.invalid/authorize"
+                )
 
         self.assertEqual(config.client_id, "client-1")
         self.assertEqual(config.client_secret, "secret-1")
         self.assertEqual(config.redirect_uri, "http://localhost:8765/callback")
         self.assertEqual(config.authorize_url, "https://example.invalid/authorize")
-        self.assertEqual(ALTERNATE_LOOPBACK_REDIRECT_URI, "http://127.0.0.1:8765/callback")
+        self.assertEqual(
+            ALTERNATE_LOOPBACK_REDIRECT_URI, "http://127.0.0.1:8765/callback"
+        )
 
     def test_config_from_env_reads_optional_oauth_settings_from_env(self) -> None:
         env = {
@@ -175,7 +203,9 @@ class MiroOAuthTokenTests(unittest.TestCase):
                 ),
                 encoding="utf-8",
             )
-            with patch.dict(os.environ, {LOCAL_CONFIG_ENV: str(config_path)}, clear=True):
+            with patch.dict(
+                os.environ, {LOCAL_CONFIG_ENV: str(config_path)}, clear=True
+            ):
                 config = config_from_env()
 
         self.assertEqual(config.client_id, "local-client")
@@ -184,26 +214,53 @@ class MiroOAuthTokenTests(unittest.TestCase):
         self.assertEqual(config.scopes, "boards:read")
 
     def test_resolves_yandex_browser_from_local_app_data(self) -> None:
-        expected = str(Path("C:/Users/me/AppData/Local/Yandex/YandexBrowser/Application/browser.exe"))
-        with patch.dict(os.environ, {"LOCALAPPDATA": str(Path("C:/Users/me/AppData/Local"))}, clear=True):
-            with patch("miro_oauth_token.os.path.isfile", side_effect=lambda path: path == expected):
+        expected = str(
+            Path(
+                "C:/Users/me/AppData/Local/Yandex/YandexBrowser/Application/browser.exe"
+            )
+        )
+        with patch.dict(
+            os.environ,
+            {"LOCALAPPDATA": str(Path("C:/Users/me/AppData/Local"))},
+            clear=True,
+        ):
+            with patch(
+                "miro_oauth_token.os.path.isfile",
+                side_effect=lambda path: path == expected,
+            ):
                 self.assertEqual(resolve_browser_executable("yandex"), expected)
 
-    def test_open_authorize_url_uses_resolved_browser_without_system_fallback(self) -> None:
+    def test_open_authorize_url_uses_resolved_browser(self) -> None:
         browser = str(Path("C:/Yandex/browser.exe"))
         with patch("miro_oauth_token.resolve_browser_executable", return_value=browser):
             with patch("miro_oauth_token.subprocess.Popen") as popen:
-                self.assertTrue(open_authorize_url("https://example.invalid/oauth", browser="yandex"))
+                with patch("miro_oauth_token.webbrowser.open") as system_browser:
+                    self.assertTrue(
+                        open_authorize_url(
+                            "https://example.invalid/oauth", browser="yandex"
+                        )
+                    )
 
         popen.assert_called_once()
-        self.assertEqual(popen.call_args.args[0], [browser, "https://example.invalid/oauth"])
+        self.assertEqual(
+            popen.call_args.args[0], [browser, "https://example.invalid/oauth"]
+        )
+        system_browser.assert_not_called()
 
-    def test_open_authorize_url_skips_when_yandex_is_missing(self) -> None:
+    def test_open_authorize_url_falls_back_to_system_browser(self) -> None:
         with patch("miro_oauth_token.resolve_browser_executable", return_value=None):
             with patch("miro_oauth_token.subprocess.Popen") as popen:
-                self.assertFalse(open_authorize_url("https://example.invalid/oauth", browser="yandex"))
+                with patch(
+                    "miro_oauth_token.webbrowser.open", return_value=True
+                ) as system_browser:
+                    self.assertTrue(
+                        open_authorize_url(
+                            "https://example.invalid/oauth", browser="yandex"
+                        )
+                    )
 
         popen.assert_not_called()
+        system_browser.assert_called_once_with("https://example.invalid/oauth")
 
     def test_parse_callback_path_extracts_code_error_and_state(self) -> None:
         result = parse_callback_path("/callback?code=code-1&state=state-1")
@@ -212,10 +269,127 @@ class MiroOAuthTokenTests(unittest.TestCase):
         self.assertIsNone(result.error)
         self.assertEqual(result.state, "state-1")
 
+    def test_callback_rejects_wrong_state_without_finishing_flow(self) -> None:
+        result = oauth.CallbackResult()
+        event = threading.Event()
+        handler = oauth._make_callback_handler(
+            callback_path="/callback",
+            expected_state="expected-state",
+            result=result,
+            event=event,
+        )
+        server = oauth._make_callback_server("127.0.0.1", 0, handler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        port = server.server_address[1]
+        try:
+            with self.assertRaises(HTTPError) as error:
+                urlopen(
+                    f"http://127.0.0.1:{port}/callback?code=bad&state=wrong", timeout=2
+                )
+            self.assertEqual(error.exception.code, 400)
+            self.assertFalse(event.is_set())
+            self.assertIsNone(result.code)
+
+            with urlopen(
+                f"http://127.0.0.1:{port}/callback?code=good&state=expected-state",
+                timeout=2,
+            ) as response:
+                self.assertEqual(response.status, 200)
+            self.assertTrue(event.wait(1))
+            self.assertEqual(result.code, "good")
+        finally:
+            server.shutdown()
+            server.server_close()
+
+    def test_authorize_generates_state_and_uses_it_for_url_and_callback(self) -> None:
+        class FakeServer:
+            def serve_forever(self) -> None:
+                return None
+
+            def shutdown(self) -> None:
+                return None
+
+            def server_close(self) -> None:
+                return None
+
+        def make_handler(**kwargs):
+            kwargs["result"].code = "code-1"
+            kwargs["event"].set()
+            return object
+
+        config = OAuthConfig(client_id="client-1", client_secret="secret-1")
+        with patch(
+            "miro_oauth_token.secrets.token_urlsafe", return_value="generated-state"
+        ) as token_urlsafe:
+            with patch(
+                "miro_oauth_token._make_callback_handler", side_effect=make_handler
+            ) as make_callback:
+                with patch(
+                    "miro_oauth_token.callback_bind_hosts", return_value=("127.0.0.1",)
+                ):
+                    with patch(
+                        "miro_oauth_token._make_callback_server",
+                        return_value=FakeServer(),
+                    ):
+                        with patch(
+                            "miro_oauth_token.open_authorize_url", return_value=True
+                        ) as open_url:
+                            with patch(
+                                "miro_oauth_token.exchange_access_token",
+                                return_value="token-1",
+                            ):
+                                token = oauth.authorize_and_get_token(
+                                    config, timeout_seconds=1
+                                )
+
+        self.assertEqual(token, "token-1")
+        token_urlsafe.assert_called_once_with(32)
+        self.assertEqual(
+            make_callback.call_args.kwargs["expected_state"], "generated-state"
+        )
+        self.assertIn("state=generated-state", open_url.call_args.args[0])
+
+    def test_authorize_rejects_unsafe_redirect_before_side_effects(self) -> None:
+        for redirect_uri in (
+            "https://localhost:8765/callback",
+            "http://0.0.0.0:8765/callback",
+            "http://example.invalid:8765/callback",
+        ):
+            config = OAuthConfig(
+                client_id="client-1",
+                client_secret="secret-1",
+                redirect_uri=redirect_uri,
+            )
+            with self.subTest(redirect_uri=redirect_uri):
+                with patch("miro_oauth_token._make_callback_handler") as make_handler:
+                    with patch("miro_oauth_token._make_callback_server") as make_server:
+                        with patch("miro_oauth_token.open_authorize_url") as open_url:
+                            with self.assertRaisesRegex(ValueError, "loopback"):
+                                oauth.authorize_and_get_token(config)
+                make_handler.assert_not_called()
+                make_server.assert_not_called()
+                open_url.assert_not_called()
+
+    def test_authorize_rejects_invalid_timeout_before_side_effects(self) -> None:
+        config = OAuthConfig(client_id="client-1", client_secret="secret-1")
+        for timeout in (0, -1, float("nan"), float("inf"), True):
+            with self.subTest(timeout=timeout):
+                with patch("miro_oauth_token._make_callback_handler") as make_handler:
+                    with patch("miro_oauth_token._make_callback_server") as make_server:
+                        with self.assertRaisesRegex(ValueError, "positive finite"):
+                            oauth.authorize_and_get_token(
+                                config, timeout_seconds=timeout
+                            )
+                make_handler.assert_not_called()
+                make_server.assert_not_called()
+
     def test_extract_authorization_code_accepts_raw_code_or_callback_url(self) -> None:
         self.assertEqual(extract_authorization_code("code-1"), "code-1")
         self.assertEqual(
-            extract_authorization_code("http://localhost:8765/callback?code=code-2&state=state-1"),
+            extract_authorization_code(
+                "http://localhost:8765/callback?code=code-2&state=state-1"
+            ),
             "code-2",
         )
 
@@ -242,7 +416,7 @@ class MiroOAuthTokenTests(unittest.TestCase):
         )
 
         self.assertEqual(token, "token-1")
-        self.assertEqual(session.calls[0]["params"]["code"], "code-1")
+        self.assertEqual(session.calls[0]["data"]["code"], "code-1")
 
     def test_token_exchange_error_sanitizes_secret_and_code(self) -> None:
         config = OAuthConfig(client_id="client-1", client_secret="secret-1")
@@ -262,12 +436,14 @@ class MiroOAuthTokenTests(unittest.TestCase):
 
     def test_exchange_access_token_reports_sanitized_oauth_error(self) -> None:
         config = OAuthConfig(client_id="client-1", client_secret="secret-1")
-        session = FakeSession(FakeResponse({"error": "invalid_client"}, ok=False, status_code=401))
+        session = FakeSession(
+            FakeResponse({"error": "invalid_client"}, ok=False, status_code=401)
+        )
 
         with self.assertRaisesRegex(OAuthTokenExchangeError, "invalid_client"):
             exchange_access_token(config, "code-1", session=session)
 
-    def test_exchange_access_token_posts_oauth_query_params(self) -> None:
+    def test_exchange_access_token_posts_oauth_form_body(self) -> None:
         config = OAuthConfig(
             client_id="client-1",
             client_secret="secret-1",
@@ -280,7 +456,7 @@ class MiroOAuthTokenTests(unittest.TestCase):
         self.assertEqual(token, "token-1")
         self.assertEqual(session.calls[0]["url"], "https://api.miro.com/v1/oauth/token")
         self.assertEqual(
-            session.calls[0]["params"],
+            session.calls[0]["data"],
             {
                 "grant_type": "authorization_code",
                 "code": "code-1",

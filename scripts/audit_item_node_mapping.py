@@ -12,11 +12,14 @@ from pathlib import Path
 from statistics import median
 from typing import Any
 
+from audit_missing_miro_items import classify_missing_item
+
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 CONVERTER_DIR = REPO_ROOT / "Json_2_Canvas"
 DEFAULT_LIMIT = 50
 GENERATED_EDGE_PREFIXES = ("mindmap-", "slide-sequence-")
+GENERATED_NODE_PREFIXES = ("miro-source-incomplete",)
 SOURCE_LIMITED_DROP_TYPES = {
     "dynamic_poll",
     "flip_card",
@@ -86,10 +89,16 @@ def _connector_endpoints(item: dict[str, Any]) -> tuple[str, str]:
 
 def expected_node_types(item: dict[str, Any]) -> set[str]:
     item_type = str(item.get("type") or "").lower()
+    sys.path.insert(0, str(CONVERTER_DIR))
+    from Converter import has_recoverable_item_content  # noqa: PLC0415
+
+    recoverable = has_recoverable_item_content(item)
+    if item_type in {"image", "document", "doc_format", "embed"} and str(item.get("local_name") or "").strip():
+        return {"file"}
     if item_type in CONTAINER_TYPES:
         return {"group"}
     if item_type in {"image", "document", "doc_format"}:
-        return {"file", "link"}
+        return {"file", "link", "text"} if recoverable else {"file", "link"}
     if item_type == "embed":
         return {"file", "link", "text"}
     if item_type == "text":
@@ -107,8 +116,12 @@ def expected_node_types(item: dict[str, Any]) -> set[str]:
         "comment",
     }:
         return {"text"}
-    if item_type in META_TYPES or item_type in SOURCE_LIMITED_DROP_TYPES:
+    if item_type in META_TYPES:
         return set()
+    if item_type in SOURCE_LIMITED_DROP_TYPES:
+        return {"text"} if recoverable else set()
+    if recoverable:
+        return {"text"}
     if _has_geometry(item) or _has_position(item):
         return {"text"}
     return set()
@@ -117,7 +130,7 @@ def expected_node_types(item: dict[str, Any]) -> set[str]:
 def _is_generated_canvas_id(value: str, *, canvas_kind: str) -> bool:
     if canvas_kind == "edge":
         return value.startswith(GENERATED_EDGE_PREFIXES)
-    return False
+    return value.startswith(GENERATED_NODE_PREFIXES)
 
 
 def _canvas_node_rect(node: dict[str, Any]) -> tuple[float, float, float, float] | None:
@@ -375,6 +388,18 @@ def audit_mapping_issues(miro_root: Any, canvas_root: dict[str, Any], *, scale: 
                         canvas_type=str(source_nodes[0].get("type") or ""),
                     )
                 )
+            if not source_edges:
+                missing = classify_missing_item(item)
+                if missing.actionable:
+                    issues.append(
+                        MappingIssue(
+                            source_id,
+                            item_type,
+                            "missing_expected_canvas_edge",
+                            f"{missing.reason}: {missing.detail}",
+                            canvas_kind="edge",
+                        )
+                    )
             for edge in source_edges:
                 from_node = str(edge.get("fromNode") or "")
                 to_node = str(edge.get("toNode") or "")
@@ -416,6 +441,18 @@ def audit_mapping_issues(miro_root: Any, canvas_root: dict[str, Any], *, scale: 
             )
 
         expected_types = expected_node_types(item)
+        if not source_nodes:
+            missing = classify_missing_item(item)
+            if missing.actionable:
+                issues.append(
+                    MappingIssue(
+                        source_id,
+                        item_type,
+                        "missing_expected_canvas_node",
+                        f"{missing.reason}: {missing.detail}",
+                        canvas_kind="node",
+                    )
+                )
         for node in source_nodes:
             node_type = str(node.get("type") or "")
             if expected_types and node_type not in expected_types:
@@ -442,7 +479,7 @@ def audit_mapping_issues(miro_root: Any, canvas_root: dict[str, Any], *, scale: 
                 )
 
     for canvas_id, values in sorted(nodes_by_id.items()):
-        if canvas_id in source_by_id:
+        if canvas_id in source_by_id or _is_generated_canvas_id(canvas_id, canvas_kind="node"):
             continue
         issues.append(
             MappingIssue(

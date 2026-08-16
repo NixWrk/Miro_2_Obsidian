@@ -48,6 +48,51 @@ class ItemNodeMappingAuditTests(unittest.TestCase):
         self.assertIn("node_type_mismatch", reasons)
         self.assertIn("item_represented_as_edge", reasons)
 
+    def test_reports_missing_expected_node_and_edge(self) -> None:
+        miro = [
+            {"id": "a", "type": "text", "geometry": {"width": 100, "height": 50}, "position": {"x": 0, "y": 0}},
+            {"id": "b", "type": "text", "geometry": {"width": 100, "height": 50}, "position": {"x": 200, "y": 0}},
+            {"id": "shape-1", "type": "shape", "geometry": {"width": 100, "height": 50}, "position": {"x": 400, "y": 0}},
+            {"id": "edge-1", "type": "connector", "startItem": {"id": "a"}, "endItem": {"id": "b"}},
+        ]
+        canvas = {
+            "nodes": [
+                {"id": "a", "type": "text", "x": 0, "y": 0, "width": 100, "height": 50},
+                {"id": "b", "type": "text", "x": 200, "y": 0, "width": 100, "height": 50},
+            ],
+            "edges": [],
+        }
+
+        reasons = {issue.reason for issue in audit_mapping_issues(miro, canvas)}
+
+        self.assertIn("missing_expected_canvas_node", reasons)
+        self.assertIn("missing_expected_canvas_edge", reasons)
+
+    def test_accepts_recoverable_source_limited_placeholder(self) -> None:
+        miro = [{
+            "id": "table-1",
+            "type": "table",
+            "geometry": {"width": 320, "height": 180},
+            "position": {"x": 0, "y": 0},
+            "links": {"web": "https://miro.test/table-1"},
+        }]
+        canvas = {
+            "nodes": [{"id": "table-1", "type": "text", "x": -160, "y": -90, "width": 320, "height": 180}],
+            "edges": [],
+        }
+
+        self.assertEqual(summarize_mapping(miro, canvas)["total"], 0)
+
+    def test_reports_bare_comment_missing_from_canvas(self) -> None:
+        issues = audit_mapping_issues(
+            [{"id": "comment-1", "type": "comment"}],
+            {"nodes": [], "edges": []},
+        )
+
+        self.assertEqual(len(issues), 1)
+        self.assertEqual(issues[0].reason, "missing_expected_canvas_node")
+        self.assertTrue(issues[0].actionable)
+
     def test_ignores_known_generated_edge_ids(self) -> None:
         miro = [
             {"id": "a", "type": "mindmap_node", "geometry": {"width": 100, "height": 50}, "position": {"x": 0, "y": 0}},
@@ -64,6 +109,58 @@ class ItemNodeMappingAuditTests(unittest.TestCase):
         summary = summarize_mapping(miro, canvas)
 
         self.assertEqual(summary["total"], 0)
+
+    def test_ignores_generated_source_incomplete_diagnostic(self) -> None:
+        miro = {
+            "items": [],
+            "comments": [],
+            "completeness": {"complete": False},
+        }
+        canvas = {
+            "nodes": [{
+                "id": "miro-source-incomplete",
+                "type": "text",
+                "x": 0,
+                "y": 0,
+                "width": 400,
+                "height": 200,
+            }],
+            "edges": [],
+        }
+
+        self.assertEqual(summarize_mapping(miro, canvas)["total"], 0)
+
+    def test_required_local_asset_cannot_be_counted_as_text_placeholder(self) -> None:
+        miro = [{
+            "id": "image-1",
+            "type": "image",
+            "local_name": "asset.png",
+            "data": {"imageUrl": "https://example.test/asset.png"},
+            "geometry": {"width": 100, "height": 50},
+        }]
+        canvas = {
+            "nodes": [{"id": "image-1", "type": "text", "x": 0, "y": 0, "width": 100, "height": 50}],
+            "edges": [],
+        }
+
+        summary = summarize_mapping(miro, canvas)
+
+        self.assertEqual(summary["actionable"], 1)
+        self.assertEqual(summary["by_reason"], {"node_type_mismatch": 1})
+
+    def test_accepts_recoverable_document_text_placeholder(self) -> None:
+        miro = [{
+            "id": "doc-1",
+            "type": "document",
+            "data": {"title": "Unavailable document"},
+            "geometry": {"width": 200, "height": 100},
+        }]
+        canvas = {
+            "nodes": [{"id": "doc-1", "type": "text", "x": 0, "y": 0, "width": 200, "height": 100}],
+            "edges": [],
+        }
+
+        self.assertEqual(summarize_mapping(miro, canvas)["total"], 0)
 
     def test_reports_node_position_drift_when_canvas_center_moves_from_source(self) -> None:
         miro = [

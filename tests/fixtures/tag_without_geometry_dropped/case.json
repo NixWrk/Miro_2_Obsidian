@@ -1,15 +1,19 @@
 {
-  "description": "Tags without source geometry are dropped instead of becoming phantom nodes at canvas origin.",
+  "description": "A positionless tag keeps its recoverable title in a diagnostic text node.",
   "converter": {
     "scale": 1.0,
     "min_font_px": 8,
     "theme": "dark"
   },
   "assertions": {
-    "node_count": 0,
+    "node_count": 1,
     "edge_count": 0,
-    "absent_node_ids": [
-      "floating-tag"
+    "nodes": [
+      {
+        "id": "floating-tag",
+        "type": "text",
+        "text_contains": "No geometry"
+      }
     ]
   }
 }

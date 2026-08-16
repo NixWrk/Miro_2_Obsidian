@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -10,10 +11,23 @@ SCRIPTS_DIR = REPO_ROOT / "scripts"
 
 sys.path.insert(0, str(SCRIPTS_DIR))
 
-from miro_capability_probe import build_coverage_rows, render_markdown_report, summarize_items  # noqa: E402
+from miro_capability_probe import (  # noqa: E402
+    build_coverage_rows,
+    load_json,
+    render_markdown_report,
+    summarize_items,
+)
 
 
 class MiroCapabilityProbeTests(unittest.TestCase):
+    def test_shared_loader_rejects_nonfinite_json(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "source.json"
+            path.write_text('{"x": NaN}', encoding="utf-8")
+
+            with self.assertRaisesRegex(ValueError, "Non-finite JSON"):
+                load_json(path)
+
     def test_summarizes_geometry_and_content(self) -> None:
         root = [
             {
@@ -23,7 +37,11 @@ class MiroCapabilityProbeTests(unittest.TestCase):
                 "geometry": {"width": 100, "height": 40},
                 "data": {"content": "<p>Hello</p>"},
             },
-            {"id": "format-1", "type": "data_table_format", "position": {"x": 1, "y": 2}},
+            {
+                "id": "format-1",
+                "type": "data_table_format",
+                "position": {"x": 1, "y": 2},
+            },
         ]
 
         summary = summarize_items(root)
@@ -35,14 +53,28 @@ class MiroCapabilityProbeTests(unittest.TestCase):
 
     def test_marks_websdk_only_items_as_export_candidates(self) -> None:
         rest_root = [{"id": "text-1", "type": "text"}]
-        websdk_root = [{"id": "tag-1", "type": "tag", "x": 0, "y": 0, "width": 80, "height": 24, "title": "urgent"}]
+        websdk_root = [
+            {
+                "id": "tag-1",
+                "type": "tag",
+                "x": 0,
+                "y": 0,
+                "width": 80,
+                "height": 24,
+                "title": "urgent",
+            }
+        ]
 
-        rows = {row.item_type: row for row in build_coverage_rows(rest_root, websdk_root)}
+        rows = {
+            row.item_type: row for row in build_coverage_rows(rest_root, websdk_root)
+        }
 
         self.assertEqual(rows["tag"].coverage, "websdk_only")
         self.assertEqual(rows["tag"].action, "websdk_export_candidate")
 
-    def test_text_with_position_and_width_is_placeable_when_height_is_missing(self) -> None:
+    def test_text_with_position_and_width_is_placeable_when_height_is_missing(
+        self,
+    ) -> None:
         root = [
             {
                 "id": "text-1",
@@ -76,13 +108,23 @@ class MiroCapabilityProbeTests(unittest.TestCase):
         self.assertEqual(summary["text"].with_geometry, 1)
         self.assertEqual(summary["text"].with_content, 1)
 
-    def test_marks_observed_dropped_rest_items_as_source_limited_when_no_geometry_or_content(self) -> None:
-        rest_root = [{"id": "format-1", "type": "data_table_format", "position": {"x": 1, "y": 2}}]
+    def test_marks_observed_dropped_rest_items_as_source_limited_when_no_geometry_or_content(
+        self,
+    ) -> None:
+        rest_root = [
+            {
+                "id": "format-1",
+                "type": "data_table_format",
+                "position": {"x": 1, "y": 2},
+            }
+        ]
 
         rows = {row.item_type: row for row in build_coverage_rows(rest_root, [])}
 
         self.assertEqual(rows["data_table_format"].coverage, "rest_only")
-        self.assertEqual(rows["data_table_format"].action, "intentional_or_source_limited")
+        self.assertEqual(
+            rows["data_table_format"].action, "intentional_or_source_limited"
+        )
 
     def test_marks_geometry_only_table_text_as_source_limited(self) -> None:
         rest_root = [
@@ -205,7 +247,10 @@ class MiroCapabilityProbeTests(unittest.TestCase):
         self.assertEqual(rows["slide_container"].action, "covered_or_audit_needed")
 
     def test_report_contains_actionable_candidate_rows(self) -> None:
-        rows = build_coverage_rows([], [{"id": "tag-1", "type": "tag", "x": 0, "y": 0, "width": 80, "height": 24}])
+        rows = build_coverage_rows(
+            [],
+            [{"id": "tag-1", "type": "tag", "x": 0, "y": 0, "width": 80, "height": 24}],
+        )
 
         report = render_markdown_report(rows)
 

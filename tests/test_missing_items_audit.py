@@ -94,9 +94,76 @@ class MissingItemsAuditTests(unittest.TestCase):
 
         result = classify_missing_item(item)
 
-        self.assertEqual(result.reason, "embed_without_resolvable_url")
+        self.assertEqual(result.reason, "recoverable_content_missing")
         self.assertTrue(result.actionable)
         self.assertEqual(result.title, "Playlist")
+
+    def test_classifies_table_link_as_recoverable(self) -> None:
+        result = classify_missing_item({
+            "id": "cell-1",
+            "type": "table_text",
+            "links": {"web": "https://miro.test/?moveToWidget=cell-1"},
+            "geometry": {"width": 120, "height": 30},
+        })
+
+        self.assertEqual(result.reason, "recoverable_content_missing")
+        self.assertTrue(result.actionable)
+
+    def test_reports_incomplete_source_envelope(self) -> None:
+        miro = {
+            "items": [],
+            "comments": [],
+            "completeness": {
+                "complete": False,
+                "items": {"complete": True},
+                "comments": {"complete": False},
+                "assets": {"complete": False, "checked": False},
+            },
+        }
+
+        missing = audit_missing_items(miro, {"nodes": [], "edges": []})
+
+        self.assertEqual(len(missing), 1)
+        self.assertEqual(missing[0].item_id, "__source__")
+        self.assertEqual(missing[0].reason, "source_incomplete")
+        self.assertTrue(missing[0].actionable)
+        self.assertIn("comments.complete", missing[0].detail)
+
+    def test_required_local_asset_needs_a_canvas_file_node(self) -> None:
+        item = {
+            "id": "doc-1",
+            "type": "document",
+            "local_name": "doc.pdf",
+            "data": {"title": "Document"},
+        }
+        missing = audit_missing_items(
+            [item],
+            {"nodes": [{"id": "doc-1", "type": "text"}], "edges": []},
+        )
+
+        self.assertEqual(len(missing), 1)
+        self.assertEqual(missing[0].reason, "required_asset_not_represented")
+        self.assertTrue(missing[0].actionable)
+
+    def test_known_board_coverage_limit_is_visible_but_not_actionable(self) -> None:
+        miro = {
+            "items": [],
+            "comments": [],
+            "completeness": {
+                "complete": True,
+                "capture_complete": True,
+                "board_complete": False,
+                "items": {"complete": True},
+                "comments": {"complete": True},
+                "assets": {"complete": True, "checked": True},
+            },
+        }
+
+        missing = audit_missing_items(miro, {"nodes": [], "edges": []})
+
+        self.assertEqual(len(missing), 1)
+        self.assertEqual(missing[0].reason, "source_coverage_limited")
+        self.assertFalse(missing[0].actionable)
 
     def test_classifies_board_metadata(self) -> None:
         result = classify_missing_item({"id": "board-1", "type": "board"})

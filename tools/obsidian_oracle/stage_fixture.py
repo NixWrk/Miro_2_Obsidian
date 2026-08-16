@@ -5,7 +5,6 @@ import shutil
 import sys
 import tempfile
 from pathlib import Path
-from typing import Any
 
 
 TOOL_DIR = Path(__file__).resolve().parent
@@ -16,7 +15,7 @@ CONVERTER_DIR = REPO_ROOT / "Json_2_Canvas"
 sys.path.insert(0, str(CONVERTER_DIR))
 
 from Converter import convert_miro_to_canvas  # noqa: E402
-from common import load_config, load_json, vault_path
+from common import load_config, load_json, vault_path  # noqa: E402
 
 
 def fixture_dir(name: str) -> Path:

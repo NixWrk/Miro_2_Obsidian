@@ -12,8 +12,8 @@
       {
         "id": "<redacted-long-id>",
         "type": "file",
-        "file_contains": "img_1100752501.png",
-        "file_not_contains": "Публичная_uXjVLargeFixture"
+        "file_contains": "<redacted-long-id>.png",
+        "file_not_contains": "img_1100752501.png"
       }
     ]
   }

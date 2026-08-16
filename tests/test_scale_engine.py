@@ -42,8 +42,21 @@ def _text_node(node_id: str, x: float, y: float, width: float, height: float) ->
 
 
 class ScaleEngineTests(unittest.TestCase):
+    def test_profile_numbers_must_be_positive_and_finite(self) -> None:
+        invalid_profiles = (
+            ViewProfile(min_zoom=0),
+            ViewProfile(min_zoom=float("nan")),
+            ViewProfile(width=float("inf")),
+        )
+        for profile in invalid_profiles:
+            with self.subTest(profile=profile):
+                with self.assertRaisesRegex(ValueError, "positive finite"):
+                    pick_recommended_scale([], profile, OBSIDIAN_FONT_SIZE)
+
     def test_balanced_scale_is_capped_by_fullhd_fit_for_huge_boards(self) -> None:
-        profile = ViewProfile(width=1920, height=1080, min_zoom=0.12, scale_mode="balanced")
+        profile = ViewProfile(
+            width=1920, height=1080, min_zoom=0.12, scale_mode="balanced"
+        )
         miro_root = [
             _text_node("left", 0, 0, 200, 100),
             _text_node("right", 1_100_000, 548_000, 200, 100),
@@ -61,7 +74,9 @@ class ScaleEngineTests(unittest.TestCase):
         self.assertEqual(ctx["scale_exceeds_fit"], 0.0)
 
     def test_readable_scale_reports_fit_conflict_for_huge_boards(self) -> None:
-        profile = ViewProfile(width=1920, height=1080, min_zoom=0.12, scale_mode="readable")
+        profile = ViewProfile(
+            width=1920, height=1080, min_zoom=0.12, scale_mode="readable"
+        )
         miro_root = [
             _text_node("left", 0, 0, 200, 100),
             _text_node("right", 1_100_000, 548_000, 200, 100),
@@ -77,7 +92,9 @@ class ScaleEngineTests(unittest.TestCase):
         self.assertEqual(ctx["scale_exceeds_fit"], 1.0)
 
     def test_zoom_unlocked_profile_makes_readable_scale_fit_huge_boards(self) -> None:
-        profile = ViewProfile(width=1920, height=1080, min_zoom=2 ** -12, scale_mode="readable")
+        profile = ViewProfile(
+            width=1920, height=1080, min_zoom=2**-12, scale_mode="readable"
+        )
         miro_root = [
             _text_node("left", 0, 0, 200, 100),
             _text_node("right", 1_100_000, 548_000, 200, 100),
@@ -94,7 +111,9 @@ class ScaleEngineTests(unittest.TestCase):
         self.assertEqual(ctx["scale_exceeds_fit"], 0.0)
 
     def test_overview_scale_uses_fit_cap_even_when_board_already_fits(self) -> None:
-        profile = ViewProfile(width=1920, height=1080, min_zoom=0.12, scale_mode="overview")
+        profile = ViewProfile(
+            width=1920, height=1080, min_zoom=0.12, scale_mode="overview"
+        )
         miro_root = [
             _text_node("a", 0, 0, 200, 100),
             _text_node("b", 900, 400, 200, 100),
@@ -106,7 +125,9 @@ class ScaleEngineTests(unittest.TestCase):
         self.assertEqual(ctx["scale_mode"], "overview")
 
     def test_recommended_scale_keeps_readability_when_board_already_fits(self) -> None:
-        profile = ViewProfile(width=1920, height=1080, min_zoom=0.12, scale_mode="balanced")
+        profile = ViewProfile(
+            width=1920, height=1080, min_zoom=0.12, scale_mode="balanced"
+        )
         miro_root = [
             _text_node("a", 0, 0, 200, 100),
             _text_node("b", 900, 400, 200, 100),

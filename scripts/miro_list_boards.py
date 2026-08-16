@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import argparse
-import json
 import sys
 from collections import Counter
 from pathlib import Path
@@ -14,12 +13,19 @@ sys.path.insert(0, str(MIRO_JSON_DIR))
 sys.path.insert(0, str(REPO_ROOT / "scripts"))
 
 from miro_downloader import get_boards  # noqa: E402
-from miro_oauth_token import DEFAULT_AUTHORIZE_URL, DEFAULT_BROWSER, DEFAULT_REDIRECT_URI  # noqa: E402
+from miro_oauth_token import (  # noqa: E402
+    DEFAULT_AUTHORIZE_URL,
+    DEFAULT_BROWSER,
+    DEFAULT_REDIRECT_URI,
+    DEFAULT_SCOPES,
+)
 from miro_rest_export_board import resolve_token_from_args, write_json  # noqa: E402
 
 
 def summarize_boards(boards: list[dict[str, Any]]) -> dict[str, Any]:
-    teams = Counter(str((board.get("team") or {}).get("name") or "<unknown>") for board in boards)
+    teams = Counter(
+        str((board.get("team") or {}).get("name") or "<unknown>") for board in boards
+    )
     return {
         "total": len(boards),
         "by_team": dict(sorted(teams.items())),
@@ -27,16 +33,20 @@ def summarize_boards(boards: list[dict[str, Any]]) -> dict[str, Any]:
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="List boards available to the current Miro token.")
+    parser = argparse.ArgumentParser(
+        description="List boards available to the current Miro token."
+    )
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--token-env", default="MIRO_ACCESS_TOKEN")
     parser.add_argument("--oauth", action="store_true")
     parser.add_argument("--oauth-client-id-env", default="MIRO_CLIENT_ID")
     parser.add_argument("--oauth-client-secret-env", default="MIRO_CLIENT_SECRET")
     parser.add_argument("--oauth-redirect-uri", default=DEFAULT_REDIRECT_URI)
-    parser.add_argument("--oauth-scopes", default="boards:read boards:write team:read")
+    parser.add_argument("--oauth-scopes", default=DEFAULT_SCOPES)
     parser.add_argument("--oauth-authorize-url", default=DEFAULT_AUTHORIZE_URL)
-    parser.add_argument("--oauth-token-url", default="https://api.miro.com/v1/oauth/token")
+    parser.add_argument(
+        "--oauth-token-url", default="https://api.miro.com/v1/oauth/token"
+    )
     parser.add_argument("--oauth-timeout-seconds", type=int, default=300)
     parser.add_argument("--oauth-browser", default=DEFAULT_BROWSER)
     parser.add_argument("--oauth-no-open-browser", action="store_true")

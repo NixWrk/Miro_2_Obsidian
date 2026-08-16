@@ -31,7 +31,8 @@
       },
       {
         "id": "small-slide-image",
-        "type": "file",
+        "type": "link",
+        "url": "https://example.com/small-slide-image.png",
         "width": 120,
         "height": 67.5
       },

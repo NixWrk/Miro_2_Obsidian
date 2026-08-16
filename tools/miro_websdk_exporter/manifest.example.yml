@@ -1,5 +1,5 @@
 appName: Miro2Obsidian Web SDK Exporter
-sdkUri: http://localhost:8766/index-20260611-deep-table.html
+sdkUri: http://localhost:8766/index-20260727-complete-json.html
 redirectUris:
   - http://localhost:8765/callback
   - http://127.0.0.1:8765/callback

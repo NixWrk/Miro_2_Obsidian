@@ -10,13 +10,18 @@
 """
 
 import re
+import sys
 from glob import escape as glob_escape
 from pathlib import Path
-from threading import Event
 from typing import Callable, Optional
 from urllib.parse import urlsplit
 
-from miro_downloader import (
+SCRIPTS_DIR = Path(__file__).resolve().parents[1] / "scripts"
+if str(SCRIPTS_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPTS_DIR))
+
+from miro_rest_export_board import export_complete_board_source  # noqa: E402
+from miro_downloader import (  # noqa: E402
     get_items_on_board,
     download_all,
     download_resource_with_redirect,
@@ -25,8 +30,7 @@ from miro_downloader import (
     write_json,
     _dedupe_miro_items,
 )
-from utils import (
-    safe_filename,
+from utils import (  # noqa: E402
     compute_target_filename,
     make_unique_in_batch,
     allocate_unique_batch_names,
@@ -36,6 +40,7 @@ from utils import (
 # =============================================================================
 # Вспомогательная функция: проверка конфликтов имён на диске
 # =============================================================================
+
 
 def collect_conflicts(future_files: list[Path]) -> list[Path]:
     """
@@ -65,7 +70,9 @@ def collect_conflicts(future_files: list[Path]) -> list[Path]:
                 pattern = f"{glob_escape(p.stem)}*{p.suffix}"
                 for hit in parent.glob(pattern):
                     name = hit.name
-                    if name.startswith(p.stem) and name.lower().endswith(p.suffix.lower()):
+                    if name.startswith(p.stem) and name.lower().endswith(
+                        p.suffix.lower()
+                    ):
                         _add(hit)
             else:
                 pattern = f"{glob_escape(p.stem)}.*"
@@ -79,6 +86,7 @@ def collect_conflicts(future_files: list[Path]) -> list[Path]:
 # =============================================================================
 # Вспомогательная функция: карты локальных путей для встраивания картинок
 # =============================================================================
+
 
 def _norm_url(u: str) -> str | None:
     if not u:
@@ -132,6 +140,7 @@ def build_image_maps(
 # Точка входа: run_download
 # =============================================================================
 
+
 def run_download(
     *,
     board_id: str,
@@ -141,6 +150,7 @@ def run_download(
     safe_board: str,
     rename_files: bool,
     prefer_experimental: bool,
+    canonical: bool = True,
     # колбэки GUI
     log: Callable[[str], None],
     ask_strategy: Callable[[list[Path]], Optional[str]],
@@ -152,7 +162,7 @@ def run_download(
     on_file_fail: Callable[[str, str], None],
     on_overall_progress: Callable[[int, int], None],
     gui_root=None,
-) -> None:
+) -> Path | None:
     """
     Полный цикл скачивания одной доски Miro.
     Все обращения к UI — только через переданные колбэки.
@@ -160,6 +170,46 @@ def run_download(
 
     json_path = save_base / f"{safe_team}_{safe_board}.json"
     attachments_dir = save_base / f"{safe_team}_{safe_board}_files"
+    if canonical:
+        conflicts = collect_conflicts([json_path, attachments_dir])
+        strategy = ask_strategy(conflicts) if conflicts else "overwrite"
+        if strategy in (None, "skip"):
+            return None
+        real_json_path = apply_strategy(json_path, strategy)
+        if real_json_path is None:
+            return None
+        if strategy == "rename":
+            index = 1
+            candidate = real_json_path
+            while (
+                candidate.exists()
+                or candidate.with_name(f"{candidate.stem}_files").exists()
+            ):
+                candidate = json_path.with_name(
+                    f"{json_path.stem} ({index}){json_path.suffix}"
+                )
+                index += 1
+            real_json_path = candidate
+
+        log("Экспортирую canonical JSON: items, comments, provenance и assets...")
+        payload, export_info = export_complete_board_source(
+            board_id=board_id,
+            token=token,
+            output_path=real_json_path,
+            prefer_experimental=prefer_experimental,
+            download_assets=True,
+            allow_missing_assets=False,
+            logger=log,
+        )
+        on_prepare_rows({}, [])
+        on_overall_progress(1, 1)
+        log(
+            f"Canonical export complete: items={len(payload['items'])}, "
+            f"comments={len(payload['comments'])}, "
+            f"assets_failed={export_info['asset_stats']['failed']}"
+        )
+        return real_json_path
+
     attachments_dir.mkdir(parents=True, exist_ok=True)
 
     # ------------------------------------------------------------------
@@ -167,7 +217,8 @@ def run_download(
     # ------------------------------------------------------------------
     log("Подключаюсь к доске, считаю элементы...")
     items = get_items_on_board(
-        board_id, token,
+        board_id,
+        token,
         logger=log,
         prefer_experimental_items=prefer_experimental,
         confirm_skip_source=ask_continue_forbidden,
@@ -179,29 +230,42 @@ def run_download(
     # ------------------------------------------------------------------
     # 2. Разбиваем по типам
     # ------------------------------------------------------------------
-    images     = [x for x in items if x["type"] == "image"]
-    documents  = [x for x in items if x["type"] == "document"]
+    images = [x for x in items if x["type"] == "image"]
+    documents = [x for x in items if x["type"] == "document"]
     doc_formats = [x for x in items if x["type"] == "doc_format"]
     # embed: скачиваем previewUrl, если есть
     embeds_with_preview = [
-        x for x in items
+        x
+        for x in items
         if x["type"] == "embed" and (x.get("data") or {}).get("previewUrl")
     ]
-    all_items  = images + documents + doc_formats + embeds_with_preview
+    all_items = images + documents + doc_formats + embeds_with_preview
 
     # ------------------------------------------------------------------
     # 3. Желаемые пути → проверка конфликтов → стратегия
     # ------------------------------------------------------------------
     wanted_paths: list[Path] = []
     for it in images:
-        wanted_paths.append(attachments_dir / compute_target_filename(
-            it, safe_team, safe_board, rename_files, is_image=True))
+        wanted_paths.append(
+            attachments_dir
+            / compute_target_filename(
+                it, safe_team, safe_board, rename_files, is_image=True
+            )
+        )
     for it in documents + doc_formats:
-        wanted_paths.append(attachments_dir / compute_target_filename(
-            it, safe_team, safe_board, rename_files, is_image=False))
+        wanted_paths.append(
+            attachments_dir
+            / compute_target_filename(
+                it, safe_team, safe_board, rename_files, is_image=False
+            )
+        )
     for it in embeds_with_preview:
-        wanted_paths.append(attachments_dir / compute_target_filename(
-            it, safe_team, safe_board, rename_files, is_image=True))
+        wanted_paths.append(
+            attachments_dir
+            / compute_target_filename(
+                it, safe_team, safe_board, rename_files, is_image=True
+            )
+        )
 
     future_files = [json_path] + wanted_paths
     conflicts = collect_conflicts(future_files)
@@ -249,28 +313,45 @@ def run_download(
 
     def _phase_callbacks(offset: int):
         """Возвращает колбэки для одной фазы с зафиксированным offset."""
+
         def _start(item_id, name):
             return on_file_start(item_id, name)
+
         def _done(item_id):
             on_file_done(item_id)
+
         def _progress(done, total, _off=offset):
             on_overall_progress(_off + done, len(all_items))
+
         return _start, _done, _progress
 
     offset = 0
+    asset_failures: list[tuple[str, str]] = []
+
+    def report_asset_failure(item_id: str, reason: str) -> None:
+        asset_failures.append((str(item_id), str(reason)))
+        on_file_fail(item_id, reason)
 
     # Phase 1: IMAGES
     if images:
         log(f"Группа: картинки, файлов: {len(images)}")
         _start, _done, _progress = _phase_callbacks(offset)
-        download_all(
-            images, attachments_dir, token,
-            safe_team, safe_board,
-            is_image=True, strategy=strategy,
-            on_file_start=_start, on_file_done=_done,
-            on_overall_progress=_progress,
-            gui_root=gui_root, id_to_final_path=id_to_final,
-            on_file_fail=on_file_fail,
+        asset_failures.extend(
+            download_all(
+                images,
+                attachments_dir,
+                token,
+                safe_team,
+                safe_board,
+                is_image=True,
+                strategy=strategy,
+                on_file_start=_start,
+                on_file_done=_done,
+                on_overall_progress=_progress,
+                gui_root=gui_root,
+                id_to_final_path=id_to_final,
+                on_file_fail=on_file_fail,
+            )
         )
         offset += len(images)
 
@@ -281,14 +362,22 @@ def run_download(
     if documents:
         log(f"Группа: документы, файлов: {len(documents)}")
         _start, _done, _progress = _phase_callbacks(offset)
-        download_all(
-            documents, attachments_dir, token,
-            safe_team, safe_board,
-            is_image=False, strategy=strategy,
-            on_file_start=_start, on_file_done=_done,
-            on_overall_progress=_progress,
-            gui_root=gui_root, id_to_final_path=id_to_final,
-            on_file_fail=on_file_fail,
+        asset_failures.extend(
+            download_all(
+                documents,
+                attachments_dir,
+                token,
+                safe_team,
+                safe_board,
+                is_image=False,
+                strategy=strategy,
+                on_file_start=_start,
+                on_file_done=_done,
+                on_overall_progress=_progress,
+                gui_root=gui_root,
+                id_to_final_path=id_to_final,
+                on_file_fail=on_file_fail,
+            )
         )
         offset += len(documents)
 
@@ -296,17 +385,25 @@ def run_download(
     if doc_formats:
         log(f"Группа: встроенные (doc_format), файлов: {len(doc_formats)}")
         _start, _done, _progress = _phase_callbacks(offset)
-        download_all(
-            doc_formats, attachments_dir, token,
-            safe_team, safe_board,
-            is_image=False, strategy=strategy,
-            on_file_start=_start, on_file_done=_done,
-            on_overall_progress=_progress,
-            gui_root=gui_root, id_to_final_path=id_to_final,
-            inline_slot_map=slot_map,
-            inline_image_url_map=image_src_map,
-            inline_image_id_map=image_id_map,
-            on_file_fail=on_file_fail,
+        asset_failures.extend(
+            download_all(
+                doc_formats,
+                attachments_dir,
+                token,
+                safe_team,
+                safe_board,
+                is_image=False,
+                strategy=strategy,
+                on_file_start=_start,
+                on_file_done=_done,
+                on_overall_progress=_progress,
+                gui_root=gui_root,
+                id_to_final_path=id_to_final,
+                inline_slot_map=slot_map,
+                inline_image_url_map=image_src_map,
+                inline_image_id_map=image_id_map,
+                on_file_fail=on_file_fail,
+            )
         )
 
     # ------------------------------------------------------------------
@@ -320,10 +417,12 @@ def run_download(
             item_id = it["id"]
             preview_url = (it.get("data") or {}).get("previewUrl", "")
             final_path = id_to_final[item_id]
-            fp = _start(item_id, final_path.name)
+            _start(item_id, final_path.name)
 
             got_path = download_resource_with_redirect(
-                preview_url, final_path, token,
+                preview_url,
+                final_path,
+                token,
                 overwrite_when_guessing_ext=(strategy == "overwrite"),
             )
             if got_path:
@@ -339,9 +438,12 @@ def run_download(
                         got_path.unlink(missing_ok=True)
                     except Exception:
                         pass
-                    on_file_fail(item_id, f"embed preview: получен не-image файл ({got_path.suffix}), игнорируем")
+                    report_asset_failure(
+                        item_id,
+                        f"embed preview: получен не-image файл ({got_path.suffix}), игнорируем",
+                    )
             else:
-                on_file_fail(item_id, "embed preview: скачивание не удалось")
+                report_asset_failure(item_id, "embed preview: скачивание не удалось")
             _progress(idx + 1, len(embeds_with_preview))
 
     # ------------------------------------------------------------------
@@ -349,3 +451,12 @@ def run_download(
     # ------------------------------------------------------------------
     items_with_links = add_browser_links(board_id, items)
     write_json(real_json_path, items_with_links)
+    if asset_failures:
+        details = "; ".join(
+            f"{item_id}: {reason}" for item_id, reason in asset_failures
+        )
+        raise RuntimeError(
+            f"{len(asset_failures)} asset download(s) failed; "
+            f"JSON was preserved at {real_json_path}: {details}"
+        )
+    return real_json_path

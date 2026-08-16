@@ -10,11 +10,14 @@ from pathlib import Path
 from unittest.mock import patch
 
 from Miro_2_Obsidian_GUI import (
+    ConversionOptions,
     MiroPipelineApp,
     authorize_gui_token,
     board_id_from_text,
     board_label,
+    board_output_name,
     board_refs_from_file,
+    default_source_json_path,
     show_error_later,
 )
 from miro_oauth_token import OAuthConfig
@@ -65,6 +68,22 @@ class MiroObsidianGuiHelperTests(unittest.TestCase):
             refs = board_refs_from_file(path)
 
         self.assertEqual(refs, [("uXjAlpha=", "Alpha")])
+
+    def test_board_output_name_uses_id_to_avoid_label_collisions(self) -> None:
+        first = board_output_name("Промдизайн", "uXjAlpha=")
+        second = board_output_name("Промдизайн", "uXjBeta=")
+
+        self.assertNotEqual(first, second)
+        self.assertTrue(first.endswith("uXjAlpha="))
+        self.assertTrue(second.endswith("uXjBeta="))
+
+    def test_default_source_json_path_uses_captured_target_value(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "vault" / "boards"
+            result = default_source_json_path(str(target), "Board / Alpha", "uXjAlpha=")
+
+        self.assertEqual(result.parent, target / "_miro_sources")
+        self.assertEqual(result.name, "Board_Alpha_uXjAlpha=.json")
 
     def test_board_label_includes_team_and_collection_when_present(self) -> None:
         self.assertEqual(
@@ -162,6 +181,11 @@ class MiroObsidianGuiHelperTests(unittest.TestCase):
         self.assertEqual(sorted(results), ["token-1", "token-1"])
         authorize.assert_called_once()
 
+    def test_gui_wires_explicit_existing_json_degraded_opt_in(self) -> None:
+        source = (Path(__file__).resolve().parents[1] / "Miro_2_Obsidian_GUI.py").read_text(encoding="utf-8")
+        self.assertIn("Allow incomplete/unverified JSON", source)
+        self.assertIn("allow_incomplete_source=options.allow_missing_assets", source)
+
     def test_miro_export_modes_use_canonical_pipeline(self) -> None:
         app = object.__new__(MiroPipelineApp)
         app._token = lambda: "token-1"
@@ -172,6 +196,14 @@ class MiroObsidianGuiHelperTests(unittest.TestCase):
         app.allow_missing_assets = _Value(False)
         app.stable_items = _Value(True)
         app.install_obsidian_plugins = _Value(False)
+        options = ConversionOptions(
+            scale=None,
+            theme="dark",
+            text_style_mode="miro",
+            allow_missing_assets=False,
+            prefer_experimental=False,
+            install_obsidian_plugins=False,
+        )
 
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -192,6 +224,7 @@ class MiroObsidianGuiHelperTests(unittest.TestCase):
                     attachment_dir=attachment_dir,
                     profile=profile,
                     min_font_px=8,
+                    options=options,
                 )
 
         self.assertEqual(result, "ok")

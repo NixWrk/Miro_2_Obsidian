@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import argparse
-import json
+import shutil
 import sys
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -11,7 +12,22 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS_DIR = REPO_ROOT / "scripts"
 sys.path.insert(0, str(SCRIPTS_DIR))
 
-from merge_miro_sources import merge_sources  # noqa: E402
+from merge_miro_sources import (  # noqa: E402
+    DEFAULT_MAX_SOURCE_AGE_HOURS,
+    finalize_merged_export,
+    merge_sources,
+    validate_rest_export,
+)
+from miro_export_bundle import (  # noqa: E402
+    copy_referenced_sidecar,
+    is_link_or_reparse,
+    publish_staged_bundle,
+    publish_staged_directory,
+    require_regular_directory,
+    require_regular_file,
+    staged_export_path,
+)
+from miro_rest_export_board import stable_enrichment_items, validate_export_assets, write_json  # noqa: E402
 from miro_capability_probe import (  # noqa: E402
     build_coverage_rows,
     load_json,
@@ -21,14 +37,18 @@ from miro_capability_probe import (  # noqa: E402
 
 
 DEFAULT_WORK_DIR = Path("work") / "MIRO2OBSIDIAN" / "source_expansion"
-WEBSDK_APP_ENTRYPOINT = "index-20260611-deep-table.html"
+WEBSDK_APP_ENTRYPOINT = "index-20260727-complete-json.html"
+OUTPUT_SENTINEL_NAME = ".miro-source-expansion"
+OUTPUT_SENTINEL_CONTENT = "miro-source-expansion-v1\n"
 
 
 def _path_for_markdown(path: Path) -> str:
     return str(path).replace("\\", "\\\\")
 
 
-def build_workflow_plan(output_dir: Path, *, board_id: str | None = None, websdk_port: int = 8766) -> str:
+def build_workflow_plan(
+    output_dir: Path, *, board_id: str | None = None, websdk_port: int = 8766
+) -> str:
     rest_manifest = output_dir / "rest_probe_manifest.json"
     rest_result = output_dir / "rest_probe_result.json"
     rest_export = output_dir / "rest_export.json"
@@ -69,11 +89,15 @@ def build_workflow_plan(output_dir: Path, *, board_id: str | None = None, websdk
             f"python scripts\\miro_rest_generate_probe_board.py --execute --oauth{board_arg} --output {_path_for_markdown(rest_result)}",
             "```",
             "",
-            "## 3. Export the board through the existing REST downloader",
+            "## 3. Finalize probe items before either export",
+            "",
+            "If Web SDK-only generated probes are needed, create them now. Do not mutate the board between the REST and Web SDK exports.",
+            "",
+            "## 4. Export the board through the existing REST downloader",
             "",
             f"Save the resulting REST JSON as `{_path_for_markdown(rest_export)}`.",
             "",
-            "## 4. Export the same board through the Web SDK app",
+            "## 5. Export the same unchanged board through the Web SDK app",
             "",
             "```powershell",
             f"python tools\\miro_websdk_exporter\\serve_no_cache.py --port {websdk_port}",
@@ -94,11 +118,11 @@ def build_workflow_plan(output_dir: Path, *, board_id: str | None = None, websdk
             "",
             "Open the app from the board toolbar, export the board, and save the JSON as:",
             "",
-            "For maximum generated coverage, click `Create probe items` in the app before exporting the board.",
+            "If `Create probe items` was used after the REST snapshot, repeat the REST export before continuing.",
             "",
             f"`{_path_for_markdown(websdk_export)}`",
             "",
-            "## 5. Run targeted source probes when candidates require them",
+            "## 6. Run targeted source probes when candidates require them",
             "",
             "Slide/deck probe for real Miro slide decks:",
             "",
@@ -114,13 +138,14 @@ def build_workflow_plan(output_dir: Path, *, board_id: str | None = None, websdk
             "",
             "Run this only when the board contains a real Miro slide deck or when `next_actions.md` keeps `slide_container` as a candidate.",
             "",
-            "## 6. Analyze and merge",
+            "## 7. Analyze and merge",
             "",
             "```powershell",
             (
                 "python scripts\\miro_source_expansion_workflow.py analyze "
                 f"--rest-json {_path_for_markdown(rest_export)} "
                 f"--websdk-json {_path_for_markdown(websdk_export)} "
+                f"--board-id {board_id or '<board_id>'} "
                 f"--output-dir {_path_for_markdown(output_dir)}"
             ),
             "```",
@@ -181,54 +206,181 @@ def render_next_actions(rows: list[Any]) -> str:
     return "\n".join(lines)
 
 
-def write_workflow_plan(output_dir: Path, *, board_id: str | None = None, websdk_port: int = 8765) -> Path:
-    output_dir.mkdir(parents=True, exist_ok=True)
-    path = output_dir / "workflow_plan.md"
-    path.write_text(build_workflow_plan(output_dir, board_id=board_id, websdk_port=websdk_port) + "\n", encoding="utf-8")
-    return path
+def validate_output_target(output_dir: Path) -> None:
+    resolved = output_dir.resolve()
+    if resolved in {Path(resolved.anchor), REPO_ROOT.resolve()}:
+        raise RuntimeError(f"Refusing to use unsafe output directory: {resolved}")
+    if not output_dir.exists() and not is_link_or_reparse(output_dir):
+        return
+    if is_link_or_reparse(output_dir) or not output_dir.is_dir():
+        raise RuntimeError(f"Output path is not a regular directory: {output_dir}")
+
+    sentinel = output_dir / OUTPUT_SENTINEL_NAME
+    has_content = any(output_dir.iterdir())
+    if sentinel.exists() or is_link_or_reparse(sentinel):
+        require_regular_file(sentinel, label="Source expansion output sentinel")
+        if sentinel.read_text(encoding="utf-8") != OUTPUT_SENTINEL_CONTENT:
+            raise RuntimeError(f"Output sentinel is invalid: {sentinel}")
+    elif has_content:
+        raise RuntimeError(
+            f"Refusing to replace unowned analysis directory without {sentinel.name}: {output_dir}"
+        )
 
 
-def run_analysis(rest_json: Path, websdk_json: Path | None, output_dir: Path) -> dict[str, Path]:
-    output_dir.mkdir(parents=True, exist_ok=True)
+def _prepare_staged_output(
+    staged_dir: Path,
+    output_dir: Path,
+    *,
+    preserve_existing: bool,
+) -> None:
+    if preserve_existing and output_dir.exists():
+        require_regular_directory(output_dir, label="Existing source expansion output")
+        shutil.copytree(output_dir, staged_dir)
+    else:
+        staged_dir.mkdir()
+    (staged_dir / OUTPUT_SENTINEL_NAME).write_text(
+        OUTPUT_SENTINEL_CONTENT,
+        encoding="utf-8",
+    )
+
+
+def write_workflow_plan(
+    output_dir: Path,
+    *,
+    board_id: str | None = None,
+    websdk_port: int = 8766,
+) -> Path:
+    validate_output_target(output_dir)
+    output_dir.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(
+        prefix=f".{output_dir.name}-stage-",
+        dir=output_dir.parent,
+    ) as temporary:
+        staged_dir = Path(temporary) / output_dir.name
+        _prepare_staged_output(staged_dir, output_dir, preserve_existing=True)
+        (staged_dir / "workflow_plan.md").write_text(
+            build_workflow_plan(
+                output_dir,
+                board_id=board_id,
+                websdk_port=websdk_port,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        publish_staged_directory(staged_dir, output_dir)
+    return output_dir / "workflow_plan.md"
+
+
+def run_analysis(
+    rest_json: Path,
+    websdk_json: Path | None,
+    output_dir: Path,
+    *,
+    board_id: str | None = None,
+    max_age_hours: float = DEFAULT_MAX_SOURCE_AGE_HOURS,
+) -> dict[str, Path]:
+    require_regular_file(rest_json, label="REST source JSON")
+    if websdk_json is not None:
+        require_regular_file(websdk_json, label="Web SDK source JSON")
+    validate_output_target(output_dir)
+
     rest_root = load_json(rest_json)
     websdk_root = load_json(websdk_json) if websdk_json else []
     rows = build_coverage_rows(rest_root, websdk_root)
 
-    report_md = output_dir / "capability_report.md"
-    report_json = output_dir / "capability_report.json"
-    next_actions = output_dir / "next_actions.md"
-    merged_json = output_dir / "merged.miro.json"
+    output_dir.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(
+        prefix=f".{output_dir.name}-stage-",
+        dir=output_dir.parent,
+    ) as temporary:
+        staged_dir = Path(temporary) / output_dir.name
+        _prepare_staged_output(staged_dir, output_dir, preserve_existing=False)
+        report_md = staged_dir / "capability_report.md"
+        report_json = staged_dir / "capability_report.json"
+        next_actions = staged_dir / "next_actions.md"
+        merged_json = staged_dir / "merged.miro.json"
 
-    report_md.write_text(render_markdown_report(rows) + "\n", encoding="utf-8")
-    report_json.write_text(rows_to_json(rows) + "\n", encoding="utf-8")
-    next_actions.write_text(render_next_actions(rows) + "\n", encoding="utf-8")
+        report_md.write_text(render_markdown_report(rows) + "\n", encoding="utf-8")
+        report_json.write_text(rows_to_json(rows) + "\n", encoding="utf-8")
+        next_actions.write_text(render_next_actions(rows) + "\n", encoding="utf-8")
 
-    if websdk_json:
-        merged = merge_sources(rest_root, websdk_root)
-    else:
-        merged = rest_root
-    merged_json.write_text(json.dumps(merged, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        if websdk_json:
+            merged = merge_sources(
+                rest_root,
+                websdk_root,
+                board_id=board_id,
+                max_age_hours=max_age_hours,
+            )
+            finalize_merged_export(
+                merged,
+                source_json=rest_json,
+                output_json=merged_json,
+                max_age_hours=max_age_hours,
+            )
+        else:
+            validate_rest_export(
+                rest_root,
+                expected_board_id=board_id,
+                max_age_hours=max_age_hours,
+            )
+            source_missing = validate_export_assets(
+                rest_root["items"], output_path=rest_json
+            )
+            if source_missing:
+                raise RuntimeError(
+                    "REST source sidecar is incomplete: "
+                    + "; ".join(source_missing[:5])
+                )
+            with staged_export_path(merged_json) as staged_json:
+                copy_referenced_sidecar(
+                    [*rest_root["items"], *stable_enrichment_items(rest_root)],
+                    source_json=rest_json,
+                    staged_json=staged_json,
+                )
+                staged_missing = validate_export_assets(
+                    rest_root["items"], output_path=staged_json
+                )
+                if staged_missing:
+                    raise RuntimeError(
+                        "Staged REST sidecar is incomplete: "
+                        + "; ".join(staged_missing[:5])
+                    )
+                write_json(staged_json, rest_root)
+                publish_staged_bundle(staged_json, merged_json)
+
+        publish_staged_directory(staged_dir, output_dir)
 
     return {
-        "capability_report_md": report_md,
-        "capability_report_json": report_json,
-        "next_actions": next_actions,
-        "merged_json": merged_json,
+        "capability_report_md": output_dir / "capability_report.md",
+        "capability_report_json": output_dir / "capability_report.json",
+        "next_actions": output_dir / "next_actions.md",
+        "merged_json": output_dir / "merged.miro.json",
     }
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Orchestrate the Miro source expansion probe workflow.")
+    parser = argparse.ArgumentParser(
+        description="Orchestrate the Miro source expansion probe workflow."
+    )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    plan_parser = subparsers.add_parser("plan", help="Create a local workflow checklist.")
+    plan_parser = subparsers.add_parser(
+        "plan", help="Create a local workflow checklist."
+    )
     plan_parser.add_argument("--output-dir", type=Path, default=DEFAULT_WORK_DIR)
     plan_parser.add_argument("--board-id")
     plan_parser.add_argument("--websdk-port", type=int, default=8766)
 
-    analyze_parser = subparsers.add_parser("analyze", help="Analyze REST/Web SDK exports and write merged source artifacts.")
+    analyze_parser = subparsers.add_parser(
+        "analyze",
+        help="Analyze REST/Web SDK exports and write merged source artifacts.",
+    )
     analyze_parser.add_argument("--rest-json", type=Path, required=True)
     analyze_parser.add_argument("--websdk-json", type=Path)
+    analyze_parser.add_argument("--board-id")
+    analyze_parser.add_argument(
+        "--max-age-hours", type=float, default=DEFAULT_MAX_SOURCE_AGE_HOURS
+    )
     analyze_parser.add_argument("--output-dir", type=Path, default=DEFAULT_WORK_DIR)
 
     return parser.parse_args()
@@ -237,12 +389,20 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     args = parse_args()
     if args.command == "plan":
-        path = write_workflow_plan(args.output_dir, board_id=args.board_id, websdk_port=args.websdk_port)
+        path = write_workflow_plan(
+            args.output_dir, board_id=args.board_id, websdk_port=args.websdk_port
+        )
         print(f"workflow_plan={path}")
         return 0
 
     if args.command == "analyze":
-        artifacts = run_analysis(args.rest_json, args.websdk_json, args.output_dir)
+        artifacts = run_analysis(
+            args.rest_json,
+            args.websdk_json,
+            args.output_dir,
+            board_id=args.board_id,
+            max_age_hours=args.max_age_hours,
+        )
         for key, path in artifacts.items():
             print(f"{key}={path}")
         return 0

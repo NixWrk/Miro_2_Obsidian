@@ -30,6 +30,14 @@ def resolve_gui_token() -> str:
     return authorize_and_get_token()
 
 
+def board_choice_label(board: dict) -> str:
+    board_id = str(board.get("id") or "board")
+    name = str(board.get("name") or board_id)
+    team = str((board.get("team") or {}).get("name") or "").strip()
+    prefix = f"{team} / " if team else ""
+    return f"{prefix}{name} ({board_id})"
+
+
 # =============================================================================
 # Главное окно приложения
 # =============================================================================
@@ -139,9 +147,11 @@ class MiroDownloaderApp(ctk.CTk):
         self.after(0, _append)
 
     def update_overall_progress(self, done: int, total: int):
-        if total > 0:
-            self.overall_pb.set(done / total)
-            self.progress_label.configure(text=f"{done} / {total}")
+        def _update():
+            if total > 0:
+                self.overall_pb.set(done / total)
+                self.progress_label.configure(text=f"{done} / {total}")
+        self.after(0, _update)
 
     def _reset_overall_progress(self, total: int):
         self.total_files = total
@@ -180,7 +190,7 @@ class MiroDownloaderApp(ctk.CTk):
             self.token = resolve_gui_token()
             if self.token:
                 boards = get_boards(self.token)
-                self.boards_by_name = {b["name"]: b for b in boards}
+                self.boards_by_name = {board_choice_label(board): board for board in boards}
                 if self.boards_by_name:
                     names = ["Публичная доска"] + list(self.boards_by_name.keys())
                     self.board_menu.configure(values=names)
@@ -202,16 +212,24 @@ class MiroDownloaderApp(ctk.CTk):
     # ------------------------------------------------------------------
 
     def _ask_in_main_thread(self, fn, timeout: int):
-        """Запускает fn() в главном потоке, ждёт результата (с таймаутом)."""
+        """Run fn in Tk's thread and propagate timeout or callback failures."""
         done = Event()
         result = {"val": None}
+        error: dict[str, BaseException] = {}
 
         def _run():
-            result["val"] = fn()
-            done.set()
+            try:
+                result["val"] = fn()
+            except BaseException as exc:
+                error["exception"] = exc
+            finally:
+                done.set()
 
         self.after(0, _run)
-        done.wait(timeout=timeout)
+        if not done.wait(timeout=timeout):
+            raise TimeoutError("Timed out waiting for the Tk main thread.")
+        if error:
+            raise error["exception"]
         return result["val"]
 
     def ask_strategy(self, conflicts: list[Path]) -> str | None:
@@ -259,24 +277,28 @@ class MiroDownloaderApp(ctk.CTk):
                 row = FileProgress(self.log_frame, id_to_final[it["id"]].name)
                 row.pack(fill="x", pady=2)
                 self.file_rows[it["id"]] = row
-        self.after(0, _build)
+        self._ask_in_main_thread(_build, timeout=30)
 
     def _on_file_start(self, item_id: str, name: str) -> FileProgress:
         return self.file_rows[item_id]
 
     def _on_file_done(self, item_id: str):
-        row = self.file_rows.get(item_id)
-        if row:
-            row.set_done()
+        def _done():
+            row = self.file_rows.get(item_id)
+            if row:
+                row.set_done()
+        self.after(0, _done)
 
     def _on_file_fail(self, item_id: str, msg: str):
-        row = self.file_rows.get(item_id)
-        if not row:
-            return
-        if "пустой url" in msg.lower():
-            row.set_skipped("пустой URL")
-        else:
-            row.set_error(msg)
+        def _fail():
+            row = self.file_rows.get(item_id)
+            if not row:
+                return
+            if "пустой url" in msg.lower():
+                row.set_skipped("пустой URL")
+            else:
+                row.set_error(msg)
+        self.after(0, _fail)
 
     # ------------------------------------------------------------------
     # Запуск скачивания
@@ -307,9 +329,10 @@ class MiroDownloaderApp(ctk.CTk):
             board_id = board["id"]
             team_name = (board.get("team") or {}).get("name", "Без команды")
             safe_team = safe_filename(team_name)
-            safe_board = safe_filename(board["name"])
+            safe_board = safe_filename(f"{board.get('name') or 'board'}_{board_id}")
 
         save_base = Path(self.dir_entry.get())
+        rename_files = bool(self.rename_files.get())
 
         # Блокируем кнопку, чистим лог
         self.start_btn.configure(state="disabled")
@@ -317,13 +340,13 @@ class MiroDownloaderApp(ctk.CTk):
 
         def worker():
             try:
-                run_download(
+                result = run_download(
                     board_id=board_id,
                     token=self.token,
                     save_base=save_base,
                     safe_team=safe_team,
                     safe_board=safe_board,
-                    rename_files=self.rename_files.get(),
+                    rename_files=rename_files,
                     prefer_experimental=self.prefer_experimental,
                     log=self.log,
                     ask_strategy=self.ask_strategy,
@@ -336,7 +359,13 @@ class MiroDownloaderApp(ctk.CTk):
                     on_overall_progress=self.update_overall_progress,
                     gui_root=self,
                 )
-                self.after(0, lambda: messagebox.showinfo("Готово", "Скачивание завершено."))
+                if result is None:
+                    self.log("Скачивание отменено.")
+                    return
+                self.after(
+                    0,
+                    lambda: messagebox.showinfo("Готово", f"JSON сохранён:\n{result}"),
+                )
             except Exception as e:
                 self.after(0, partial(messagebox.showerror, "Ошибка", f"Ошибка при загрузке: {e}"))
             finally:
@@ -349,12 +378,7 @@ class MiroDownloaderApp(ctk.CTk):
     # ------------------------------------------------------------------
 
     def on_close(self):
-        try:
-            self.destroy()
-        except Exception:
-            pass
-        finally:
-            os._exit(0)
+        self.destroy()
 
 
 # =============================================================================
@@ -362,9 +386,6 @@ class MiroDownloaderApp(ctk.CTk):
 # =============================================================================
 
 if __name__ == "__main__":
-    import atexit
-    atexit.register(lambda: os._exit(0))
-
     ctk.set_appearance_mode("System")
     ctk.set_default_color_theme("blue")
     app = MiroDownloaderApp()

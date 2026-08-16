@@ -4,6 +4,7 @@ import os
 import re
 import sys
 import threading
+from dataclasses import dataclass
 from pathlib import Path
 from tkinter import filedialog, messagebox
 from typing import Callable
@@ -23,7 +24,11 @@ sys.path.insert(0, str(CONVERTER_DIR))
 from Scale_engine import ViewProfile  # noqa: E402
 from miro_downloader import get_boards  # noqa: E402
 from miro_oauth_token import authorize_and_get_token, callback_recovery_hint, config_from_env  # noqa: E402
-from miro_pipeline import run_existing_json_pipeline, run_rest_experimental_pipeline  # noqa: E402
+from miro_pipeline import (  # noqa: E402
+    pipeline_result_is_degraded,
+    run_existing_json_pipeline,
+    run_rest_experimental_pipeline,
+)
 from obsidian_vault_settings import resolve_vault_paths  # noqa: E402
 
 
@@ -86,6 +91,25 @@ def safe_name(value: str) -> str:
     cleaned = re.sub(r"[^0-9A-Za-z._=-]+", "_", value.strip())
     cleaned = re.sub(r"_+", "_", cleaned).strip("._ ")
     return cleaned or "board"
+
+
+def board_output_name(label: str, board_id: str) -> str:
+    return f"{safe_name(label)}_{safe_name(board_id)}"
+
+
+def default_source_json_path(target_text: str, label: str, board_id: str) -> Path:
+    base = Path(target_text.strip()) if target_text.strip() else REPO_ROOT / "work" / "MIRO2OBSIDIAN" / "Miro_2_JSON"
+    return base / "_miro_sources" / f"{board_output_name(label, board_id)}.json"
+
+
+@dataclass(frozen=True)
+class ConversionOptions:
+    scale: float | None
+    theme: str
+    text_style_mode: str
+    allow_missing_assets: bool
+    prefer_experimental: bool
+    install_obsidian_plugins: bool
 
 
 def _name_from_payload(value: object) -> str:
@@ -259,7 +283,7 @@ class MiroPipelineApp(ctk.CTk):
         self.allow_missing_assets = ctk.BooleanVar(value=False)
         self.allow_missing_assets_checkbox = ctk.CTkCheckBox(
             options,
-            text="Allow missing assets",
+            text="Allow degraded export/source",
             variable=self.allow_missing_assets,
         )
         self.allow_missing_assets_checkbox.grid(
@@ -328,11 +352,6 @@ class MiroPipelineApp(ctk.CTk):
         entry.insert(0, value)
         if disabled:
             entry.configure(state="disabled")
-
-    def _default_source_json(self, label: str) -> Path:
-        canvas_text = self.target_dir.get().strip()
-        base = Path(canvas_text) if canvas_text else REPO_ROOT / "work" / "MIRO2OBSIDIAN" / "Miro_2_JSON"
-        return base / "_miro_sources" / f"{safe_name(label)}.json"
 
     def _selected_board_label(self) -> str:
         if self.source_mode.get() == ACCOUNT_SOURCE_MODE:
@@ -473,17 +492,21 @@ class MiroPipelineApp(ctk.CTk):
 
     def on_source_mode_changed(self, mode: str) -> None:
         self.allow_missing_assets.set(False)
-        if mode in MIRO_EXPORT_MODES:
-            self.allow_missing_assets_checkbox.grid(
-                row=1,
-                column=4,
-                columnspan=2,
-                sticky="w",
-                padx=8,
-                pady=(0, 8),
+        self.allow_missing_assets_checkbox.configure(
+            text=(
+                "Allow missing assets (degraded)"
+                if mode in MIRO_EXPORT_MODES
+                else "Allow incomplete/unverified JSON"
             )
-        else:
-            self.allow_missing_assets_checkbox.grid_remove()
+        )
+        self.allow_missing_assets_checkbox.grid(
+            row=1,
+            column=4,
+            columnspan=2,
+            sticky="w",
+            padx=8,
+            pady=(0, 8),
+        )
 
         if mode == ACCOUNT_SOURCE_MODE:
             self._show_path_frame(self.account_frame)
@@ -507,6 +530,7 @@ class MiroPipelineApp(ctk.CTk):
         attachment_dir: Path | None,
         profile: ViewProfile,
         min_font_px: int,
+        options: ConversionOptions,
     ):
         return run_rest_experimental_pipeline(
             board_id=board_id,
@@ -514,57 +538,80 @@ class MiroPipelineApp(ctk.CTk):
             source_json=source_json,
             target_dir=target_dir,
             vault_root=vault_root,
-            scale=self._parse_float_or_none(self.scale.get()),
+            scale=options.scale,
             view_profile=profile,
             min_font_px=min_font_px,
-            theme=self.theme.get(),
-            text_style_mode=self.text_style_mode.get(),
-            allow_missing_assets=self.allow_missing_assets.get(),
-            prefer_experimental=not self.stable_items.get(),
-            install_obsidian_plugins=self.install_obsidian_plugins.get(),
+            theme=options.theme,
+            text_style_mode=options.text_style_mode,
+            allow_missing_assets=options.allow_missing_assets,
+            prefer_experimental=options.prefer_experimental,
+            install_obsidian_plugins=options.install_obsidian_plugins,
             attachment_dir=attachment_dir,
             logger=lambda message: self._log(f"{label}: {message}"),
         )
 
     def run_pipeline(self) -> None:
+        try:
+            source_mode = self.source_mode.get()
+            target_text = self.target_dir.get().strip()
+            if not target_text:
+                raise ValueError("Canvas folder is required.")
+            json_path_text = self.json_path.get().strip()
+            url_list_text = self.url_list_path.get().strip()
+            board_text = self.board_id.get()
+            account_board_id = self.selected_account_board_id
+            account_label = self._selected_board_label() if source_mode == ACCOUNT_SOURCE_MODE else ""
+            min_font_px = int(self.min_font_px.get().strip() or "8")
+            profile = ViewProfile(
+                min_zoom=float(self.min_zoom.get().strip() or "0.12"),
+                min_font_px=min_font_px,
+                scale_mode=self.scale_mode.get(),
+            )
+            options = ConversionOptions(
+                scale=self._parse_float_or_none(self.scale.get()),
+                theme=self.theme.get(),
+                text_style_mode=self.text_style_mode.get(),
+                allow_missing_assets=self.allow_missing_assets.get(),
+                prefer_experimental=not self.stable_items.get(),
+                install_obsidian_plugins=self.install_obsidian_plugins.get(),
+            )
+        except Exception as exc:  # noqa: BLE001
+            self._log(f"Pipeline failed: {exc}")
+            show_error_later(self.after, "Pipeline failed", exc)
+            return
+
+        self.run_button.configure(state="disabled")
+
         def worker() -> None:
-            self._set_busy(True)
             try:
-                source_mode = self.source_mode.get()
-                target_text = self.target_dir.get().strip()
-                if not target_text:
-                    raise ValueError("Canvas folder is required.")
+                run_results = []
                 target_dir = Path(target_text)
                 vault_paths = resolve_vault_paths(target_dir)
                 vault_root = vault_paths.vault_root
                 attachment_dir = vault_paths.attachment_dir
                 self.after(0, lambda: self._set_entry(self.vault_root, str(vault_root), disabled=True))
 
-                min_font_px = int(self.min_font_px.get().strip() or "8")
-                profile = ViewProfile(
-                    min_zoom=float(self.min_zoom.get().strip() or "0.12"),
-                    min_font_px=min_font_px,
-                    scale_mode=self.scale_mode.get(),
-                )
                 if source_mode == JSON_SOURCE_MODE:
-                    source_text = self.json_path.get().strip()
+                    source_text = json_path_text
                     if not source_text:
                         raise ValueError("Choose a JSON file.")
                     result = run_existing_json_pipeline(
                         source_json=Path(source_text),
                         target_dir=target_dir,
                         vault_root=vault_root,
-                        scale=self._parse_float_or_none(self.scale.get()),
+                        scale=options.scale,
                         view_profile=profile,
                         min_font_px=min_font_px,
-                        theme=self.theme.get(),
-                        text_style_mode=self.text_style_mode.get(),
-                        install_obsidian_plugins=self.install_obsidian_plugins.get(),
+                        theme=options.theme,
+                        text_style_mode=options.text_style_mode,
+                        allow_incomplete_source=options.allow_missing_assets,
+                        install_obsidian_plugins=options.install_obsidian_plugins,
                         attachment_dir=attachment_dir,
                         logger=self._log,
                     )
+                    run_results.append(result)
                 elif source_mode == URL_LIST_SOURCE_MODE:
-                    list_text = self.url_list_path.get().strip()
+                    list_text = url_list_text
                     if not list_text:
                         raise ValueError("Choose a URL list file.")
                     list_path = Path(list_text)
@@ -574,8 +621,9 @@ class MiroPipelineApp(ctk.CTk):
                     source_root = target_dir / "_miro_sources"
                     last_result = None
                     for index, (ref_id, label) in enumerate(refs, start=1):
-                        board_dir = target_dir / safe_name(label)
-                        board_json = source_root / f"{safe_name(label)}.json"
+                        output_name = board_output_name(label, ref_id)
+                        board_dir = target_dir / output_name
+                        board_json = source_root / f"{output_name}.json"
                         self._log(f"[{index}/{len(refs)}] Processing {label}")
                         last_result = self._run_one_board(
                             board_id=ref_id,
@@ -586,32 +634,48 @@ class MiroPipelineApp(ctk.CTk):
                             attachment_dir=attachment_dir,
                             profile=profile,
                             min_font_px=min_font_px,
+                            options=options,
                         )
+                        run_results.append(last_result)
                     result = last_result
                 else:
                     if source_mode == ACCOUNT_SOURCE_MODE:
-                        board_id = self.selected_account_board_id
+                        board_id = account_board_id
                         if not board_id:
                             raise ValueError("Authenticate and choose a board.")
-                        label = self._selected_board_label()
+                        label = account_label
                     else:
-                        board_id = board_id_from_text(self.board_id.get())
+                        board_id = board_id_from_text(board_text)
                         if not board_id:
                             raise ValueError("Paste a Miro board link.")
                         label = board_id
                     result = self._run_one_board(
                         board_id=board_id,
                         label=label,
-                        source_json=self._default_source_json(label),
+                        source_json=default_source_json_path(target_text, label, board_id),
                         target_dir=target_dir,
                         vault_root=vault_root,
                         attachment_dir=attachment_dir,
                         profile=profile,
                         min_font_px=min_font_px,
+                        options=options,
                     )
+                    run_results.append(result)
                 done_path = str(result.canvas_path) if result else str(target_dir)
-                self._log(f"Done: {done_path}")
-                self.after(0, lambda: messagebox.showinfo("Pipeline complete", done_path))
+                degraded = [item for item in run_results if pipeline_result_is_degraded(item)]
+                if degraded:
+                    details = "\n".join(str(item.source_json) for item in degraded)
+                    self._log(f"Completed with incomplete source data: {len(degraded)} board(s).")
+                    self.after(
+                        0,
+                        lambda details=details: messagebox.showwarning(
+                            "Pipeline incomplete",
+                            f"Missing source data or assets:\n{details}",
+                        ),
+                    )
+                else:
+                    self._log(f"Done: {done_path}")
+                    self.after(0, lambda: messagebox.showinfo("Pipeline complete", done_path))
             except Exception as exc:  # noqa: BLE001
                 self._log(f"Pipeline failed: {exc}")
                 show_error_later(self.after, "Pipeline failed", exc)

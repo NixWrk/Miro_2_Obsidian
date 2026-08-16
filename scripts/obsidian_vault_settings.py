@@ -37,13 +37,20 @@ def load_obsidian_app_settings(vault_root: Path) -> dict[str, Any]:
 
 
 def _vault_relative_path(vault_root: Path, value: str) -> Path:
-    value = value.strip().strip("/\\")
-    if not value:
-        return vault_root
-    candidate = Path(value)
-    if candidate.is_absolute():
-        return candidate
-    return vault_root / candidate
+    raw_value = value.strip()
+    if not raw_value:
+        return Path(vault_root).resolve()
+    candidate = Path(raw_value)
+    if candidate.is_absolute() or candidate.drive:
+        raise ValueError("Obsidian attachmentFolderPath must be vault-relative")
+
+    resolved_vault = Path(vault_root).resolve()
+    resolved = (resolved_vault / candidate).resolve(strict=False)
+    try:
+        resolved.relative_to(resolved_vault)
+    except ValueError as exc:
+        raise ValueError("Obsidian attachmentFolderPath escapes the vault") from exc
+    return resolved
 
 
 def resolve_attachment_dir(vault_root: Path, canvas_folder: Path) -> Path | None:
@@ -64,7 +71,9 @@ def resolve_vault_paths(canvas_folder: Path) -> VaultPaths:
     canvas_folder = Path(canvas_folder).resolve()
     vault_root = find_vault_root(canvas_folder)
     if not vault_root:
-        raise ValueError(f"Canvas folder is not inside an Obsidian vault: {canvas_folder}")
+        raise ValueError(
+            f"Canvas folder is not inside an Obsidian vault: {canvas_folder}"
+        )
     return VaultPaths(
         vault_root=vault_root,
         canvas_folder=canvas_folder,

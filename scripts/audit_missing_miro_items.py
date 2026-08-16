@@ -68,7 +68,7 @@ def represented_canvas_ids(canvas_root: dict[str, Any]) -> set[str]:
 
 def _card_like_has_content(item: dict[str, Any]) -> bool:
     data = item.get("data") if isinstance(item.get("data"), dict) else {}
-    if any(data.get(key) for key in ("title", "description", "url")):
+    if any(data.get(key) for key in ("title", "description", "url", "dueDate", "assigneeId")):
         return True
     fields = data.get("fields")
     return isinstance(fields, list) and any(fields)
@@ -101,14 +101,41 @@ def _has_canvas_position(item: dict[str, Any]) -> bool:
     return position.get("x") is not None and position.get("y") is not None
 
 
+def _has_recoverable_content(item: dict[str, Any]) -> bool:
+    sys.path.insert(0, str(CONVERTER_DIR))
+    from Converter import has_recoverable_item_content  # noqa: WPS433
+
+    return has_recoverable_item_content(item)
+
+
 def classify_missing_item(item: dict[str, Any]) -> MissingMiroItem:
     item_id = str(item.get("id") or "")
     item_type = str(item.get("type") or "").lower()
     title = text_snippet(item)
     data = item.get("data") if isinstance(item.get("data"), dict) else {}
 
-    if item_type == "board":
+    if item_type in {"board", "board_member"}:
         return MissingMiroItem(item_id, item_type, "board_metadata", "Board root metadata is not a Canvas element.", title)
+
+    if item_type == "comment":
+        return MissingMiroItem(
+            item_id,
+            item_type,
+            "comment_missing_from_canvas",
+            "Comment identity, content, or metadata should be preserved as a Canvas annotation.",
+            title,
+            actionable=True,
+        )
+
+    if _has_recoverable_content(item):
+        return MissingMiroItem(
+            item_id,
+            item_type,
+            "recoverable_content_missing",
+            "Source exposes recoverable content; converter should preserve it in a generic placeholder.",
+            title,
+            actionable=True,
+        )
 
     if item_type in {"card", "preview", "app_card"} and not _card_like_has_content(item):
         return MissingMiroItem(
@@ -173,6 +200,14 @@ def classify_missing_item(item: dict[str, Any]) -> MissingMiroItem:
                 "Connector has no complete startItem/endItem ids.",
                 title,
             )
+        return MissingMiroItem(
+            item_id,
+            item_type,
+            "connector_missing_from_canvas",
+            f"Connector {start}->{end} has endpoints but no Canvas edge.",
+            title,
+            actionable=True,
+        )
 
     if not item.get("geometry"):
         if item_type not in {"tag", "data_table_format", "table_text"} and _has_canvas_position(item):
@@ -195,16 +230,49 @@ def classify_missing_item(item: dict[str, Any]) -> MissingMiroItem:
     return MissingMiroItem(item_id, item_type, "unclassified_missing_item", "Not represented and not covered by a known skip rule.", title, actionable=True)
 
 
+def _requires_file_node(item: dict[str, Any]) -> bool:
+    return (
+        str(item.get("type") or "").lower() in {"image", "document", "doc_format", "embed"}
+        and bool(str(item.get("local_name") or "").strip())
+    )
+
+
 def audit_missing_items(miro_root: Any, canvas_root: dict[str, Any]) -> list[MissingMiroItem]:
     sys.path.insert(0, str(CONVERTER_DIR))
-    from Converter import iter_objects  # noqa: WPS433
+    from Converter import iter_objects, source_completeness_issues  # noqa: WPS433
 
     represented = represented_canvas_ids(canvas_root)
+    nodes_by_id: dict[str, list[dict[str, Any]]] = {}
+    for node in canvas_root.get("nodes", []):
+        if isinstance(node, dict) and node.get("id") is not None:
+            nodes_by_id.setdefault(str(node["id"]), []).append(node)
     missing: list[MissingMiroItem] = []
+    completeness_issues = source_completeness_issues(miro_root)
+    if completeness_issues:
+        coverage_only = completeness_issues == ["completeness.board_complete is false"]
+        missing.append(MissingMiroItem(
+            "__source__",
+            "source",
+            "source_coverage_limited" if coverage_only else "source_incomplete",
+            "; ".join(completeness_issues),
+            actionable=not coverage_only,
+        ))
     for item in iter_objects(miro_root):
         if not isinstance(item, dict) or item.get("id") is None:
             continue
-        if str(item["id"]) in represented:
+        item_id = str(item["id"])
+        if item_id in represented:
+            if _requires_file_node(item) and not any(
+                str(node.get("type") or "") == "file" for node in nodes_by_id.get(item_id, [])
+            ):
+                missing.append(MissingMiroItem(
+                    item_id,
+                    str(item.get("type") or "").lower(),
+                    "required_asset_not_represented",
+                    f"Source declares local asset {item.get('local_name')!r}, but Canvas has no file node.",
+                    text_snippet(item),
+                    actionable=True,
+                ))
             continue
         missing.append(classify_missing_item(item))
     return missing

@@ -1,0 +1,90 @@
+const fs = require("fs");
+const vm = require("vm");
+
+const exporterPath = process.argv[2];
+if (!exporterPath) {
+  throw new Error("exporter path is required");
+}
+
+const listeners = {};
+const elements = new Map();
+function element(id) {
+  if (!elements.has(id)) {
+    elements.set(id, {
+      disabled: false,
+      textContent: "",
+      addEventListener(event, callback) {
+        listeners[`${id}:${event}`] = callback;
+      },
+    });
+  }
+  return elements.get(id);
+}
+
+global.document = {
+  getElementById: element,
+  createElement() {
+    return { click() {} };
+  },
+};
+global.navigator = { clipboard: { writeText: async () => {} } };
+
+const item = {
+  id: "item-1",
+  type: "shape",
+  nan: Number.NaN,
+  infinity: Number.POSITIVE_INFINITY,
+  bigint: 42n,
+  missing: undefined,
+};
+item.self = item;
+Object.defineProperty(item, "__proto__", {
+  enumerable: true,
+  value: { preserved: true },
+});
+
+global.miro = {
+  board: {
+    get: async () => [item],
+    getSelection: async () => [],
+    getInfo: async () => ({ id: "board-1" }),
+    notifications: { showInfo: async () => {} },
+  },
+};
+global.window = { miro: global.miro };
+
+vm.runInThisContext(fs.readFileSync(exporterPath, "utf8"), { filename: exporterPath });
+
+(async () => {
+  const exportBoard = listeners["export-board:click"];
+  if (typeof exportBoard !== "function") {
+    throw new Error("export-board click handler was not registered");
+  }
+  await exportBoard();
+  const payload = JSON.parse(element("output").textContent);
+  if (payload.completeness.capture_complete !== false) {
+    throw new Error("lossy serialization was incorrectly declared complete");
+  }
+  const issues = payload.completeness.serialization.issues;
+  const kinds = new Set(issues.map((issue) => issue.kind));
+  for (const expected of ["non_finite_number", "bigint", "undefined", "circular_reference"]) {
+    if (!kinds.has(expected)) {
+      throw new Error(`missing serialization issue: ${expected}`);
+    }
+  }
+  if (!payload.items[0].nan.__miro_export_serialization__) {
+    throw new Error("non-finite value was not preserved as an explicit marker");
+  }
+  if (!payload.items[0].self.__miro_export_serialization__) {
+    throw new Error("circular reference was not preserved as an explicit marker");
+  }
+  if (
+    !Object.prototype.hasOwnProperty.call(payload.items[0], "__proto__") ||
+    payload.items[0].__proto__.preserved !== true
+  ) {
+    throw new Error("enumerable __proto__ field was lost during serialization");
+  }
+})().catch((error) => {
+  console.error(error && error.stack ? error.stack : error);
+  process.exitCode = 1;
+});

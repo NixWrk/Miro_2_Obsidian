@@ -13,6 +13,7 @@ SCRIPTS_DIR = REPO_ROOT / "scripts"
 sys.path.insert(0, str(SCRIPTS_DIR))
 
 from miro_comment_probe import (  # noqa: E402
+    CommentProbeError,
     build_comment_probe_requests,
     classify_status,
     decide_probe_result,
@@ -88,6 +89,62 @@ class MiroCommentProbeTests(unittest.TestCase):
         self.assertEqual(comments[0]["type"], "comment")
         self.assertEqual(comments[0]["source"], "experimental_comments_collection")
 
+    def test_public_items_probe_does_not_relabel_regular_items_as_comments(self) -> None:
+        comments = extract_comment_items(
+            [
+                {
+                    "key": "public_items_type_comment",
+                    "classification": "available",
+                    "body": {"data": [{"id": "shape-1", "type": "shape"}]},
+                }
+            ]
+        )
+
+        self.assertEqual(comments, [])
+
+    def test_empty_public_items_filter_does_not_prove_comment_availability(self) -> None:
+        session = FakeSession([
+            FakeResponse({"data": []}, status_code=200),
+            FakeResponse({"error": "Not found."}, status_code=404),
+            FakeResponse({"error": "Not found."}, status_code=404),
+        ])
+
+        payload = run_comment_probe(
+            board_id="board-1",
+            token="secret-token",
+            session=session,
+            retry_delay_seconds=0,
+        )
+
+        self.assertEqual(payload["summary"]["available"], 0)
+        self.assertEqual(
+            payload["summary"]["by_classification"]["unverified_empty_comment_filter"],
+            1,
+        )
+        self.assertFalse(payload["completeness"]["complete"])
+
+    def test_probe_rejects_cross_origin_pagination_link(self) -> None:
+        session = FakeSession([
+            FakeResponse({"message": "invalid type"}, status_code=400),
+            FakeResponse(
+                {
+                    "data": [{"id": "comment-1", "text": "First"}],
+                    "links": {"next": "https://attacker.invalid/steal"},
+                },
+                status_code=200,
+            ),
+            FakeResponse({"error": "Not found."}, status_code=404),
+        ])
+
+        with self.assertRaisesRegex(CommentProbeError, "changed origin"):
+            run_comment_probe(
+                board_id="board-1",
+                token="secret-token",
+                session=session,
+                retry_delay_seconds=0,
+            )
+        self.assertEqual(len(session.calls), 3)
+
     def test_probe_records_unavailable_comment_paths(self) -> None:
         session = FakeSession([
             FakeResponse({"message": "invalid type"}, status_code=400),
@@ -124,7 +181,7 @@ class MiroCommentProbeTests(unittest.TestCase):
             FakeResponse(
                 {
                     "data": [{"id": "comment-1", "text": "First"}],
-                    "links": {"next": "https://api.miro.test/v2/boards/board-1/comments?cursor=2"},
+                    "links": {"next": "https://api.miro.com/v2/boards/board-1/comments?cursor=2"},
                 },
                 status_code=200,
             ),
@@ -140,6 +197,48 @@ class MiroCommentProbeTests(unittest.TestCase):
         self.assertIn("cursor=2", session.calls[-1]["url"])
         self.assertIn("pages", payload["requests"][1])
 
+    def test_probe_rejects_page_size_that_disagrees_with_data(self) -> None:
+        session = FakeSession([
+            FakeResponse({"data": []}, status_code=400),
+            FakeResponse({"data": [{"id": "comment-1"}], "size": 2, "total": 2}, status_code=200),
+            FakeResponse({"error": "Not found."}, status_code=404),
+        ])
+
+        with self.assertRaisesRegex(CommentProbeError, "size does not match"):
+            run_comment_probe(board_id="board-1", token="secret-token", session=session)
+
+    def test_probe_rejects_boolean_pagination_metadata(self) -> None:
+        session = FakeSession([
+            FakeResponse({"data": []}, status_code=400),
+            FakeResponse({"data": [{"id": "comment-1"}], "total": True}, status_code=200),
+            FakeResponse({"error": "Not found."}, status_code=404),
+        ])
+
+        with self.assertRaisesRegex(CommentProbeError, "malformed total"):
+            run_comment_probe(board_id="board-1", token="secret-token", session=session)
+
+    def test_probe_rejects_total_that_changes_between_pages(self) -> None:
+        session = FakeSession([
+            FakeResponse({"data": []}, status_code=400),
+            FakeResponse(
+                {
+                    "data": [{"id": "comment-1"}],
+                    "size": 1,
+                    "offset": 0,
+                    "total": 2,
+                    "links": {"next": "https://api.miro.com/v2/boards/board-1/comments?cursor=2"},
+                },
+                status_code=200,
+            ),
+            FakeResponse({"error": "Not found."}, status_code=404),
+            FakeResponse(
+                {"data": [{"id": "comment-2"}], "size": 1, "offset": 1, "total": 3},
+                status_code=200,
+            ),
+        ])
+
+        with self.assertRaisesRegex(CommentProbeError, "total changed"):
+            run_comment_probe(board_id="board-1", token="secret-token", session=session)
     def test_probe_marks_empty_available_source(self) -> None:
         session = FakeSession([
             FakeResponse({"data": []}, status_code=400),

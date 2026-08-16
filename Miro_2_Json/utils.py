@@ -1,9 +1,10 @@
-﻿#utils.py
+# utils.py
 from pathlib import Path
 import re
 import os
-from collections import Counter
+
 MAX_FILENAME_LENGTH = 200
+
 
 def extract_doc_format_title(html: str) -> str:
     if not html:
@@ -11,6 +12,7 @@ def extract_doc_format_title(html: str) -> str:
     text = re.sub(r"<[^>]+>", "", html)
     text = text.strip()
     return text[:100] if text else "doc"
+
 
 def add_extension_unique(base_path: Path, ext: str) -> Path:
     parent, stem = base_path.parent, base_path.stem
@@ -23,6 +25,7 @@ def add_extension_unique(base_path: Path, ext: str) -> Path:
         i += 1
     return cand
 
+
 def allocate_unique_batch_names(base_paths: list[Path]) -> list[Path]:
     """
     На вход — список желаемых путей (могут дублироваться).
@@ -30,8 +33,7 @@ def allocate_unique_batch_names(base_paths: list[Path]) -> list[Path]:
     - сначала проверяем существование на диске;
     - затем учитываем дубликаты внутри этого же запуска.
     """
-    used = set()               # уже выданные в этой партии
-    counts = Counter(p.name for p in base_paths)
+    used = set()  # уже выданные в этой партии
     result = []
 
     for p in base_paths:
@@ -49,7 +51,6 @@ def allocate_unique_batch_names(base_paths: list[Path]) -> list[Path]:
         result.append(cand)
 
     return result
-
 
 
 def make_unique_in_batch(base_paths: list[Path]) -> list[Path]:
@@ -81,14 +82,27 @@ def make_unique_in_batch(base_paths: list[Path]) -> list[Path]:
     return result
 
 
+_WINDOWS_RESERVED_NAMES = {
+    "CON",
+    "PRN",
+    "AUX",
+    "NUL",
+    *(f"COM{index}" for index in range(1, 10)),
+    *(f"LPT{index}" for index in range(1, 10)),
+}
+
+
 def safe_filename(name: str) -> str:
-    """Делает имя файла безопасным."""
-    name = re.sub(r'[\\/*?:"<>|]', "_", name)
+    """Return a filename that is portable to Windows and safe for local output."""
+    name = re.sub(r'[\\/*?:"<>|]', "_", str(name or "file")).rstrip(" .")
+    if not name:
+        name = "file"
+    if name.split(".", 1)[0].upper() in _WINDOWS_RESERVED_NAMES:
+        name = f"_{name}"
     if len(name) > MAX_FILENAME_LENGTH:
         root, ext = os.path.splitext(name)
-        name = root[:MAX_FILENAME_LENGTH - len(ext)] + ext
+        name = root[: MAX_FILENAME_LENGTH - len(ext)] + ext
     return name
-
 
 def ensure_unique_filename(path: Path) -> Path:
     """
@@ -119,22 +133,24 @@ def ensure_unique_filename(path: Path) -> Path:
         counter += 1
 
 
-
-def compute_target_filename(item: dict, safe_team: str, safe_board: str,
-                            rename_files: bool, is_image: bool) -> str:
+def compute_target_filename(
+    item: dict, safe_team: str, safe_board: str, rename_files: bool, is_image: bool
+) -> str:
     """
     Вычисляет целевое имя файла для элемента доски.
     Обрабатывает image, document и doc_format (→ .pdf).
     """
     t = item.get("type")
-    data = item.get("data") or {}
+    data = item.get("data") if isinstance(item.get("data"), dict) else {}
 
     if t == "doc_format":
         base = extract_doc_format_title(data.get("html", "")) or item.get("id", "doc")
         ext = ".pdf"
     elif t == "embed":
         # Для embed: base — из title (без расширения), ext — из previewUrl
-        raw_title = data.get("title") or data.get("providerName") or item.get("id", "embed")
+        raw_title = (
+            data.get("title") or data.get("providerName") or item.get("id", "embed")
+        )
         base = Path(raw_title).stem  # убираем возможное расширение из title
         preview_url = data.get("previewUrl", "")
         ext = Path(preview_url.split("?")[0]).suffix if preview_url else ""
@@ -154,5 +170,3 @@ def compute_target_filename(item: dict, safe_team: str, safe_board: str,
 
     base = safe_filename(base)
     return f"{safe_team}_{safe_board}_{base}{ext}" if rename_files else f"{base}{ext}"
-
-

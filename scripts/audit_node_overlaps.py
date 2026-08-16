@@ -218,7 +218,6 @@ def build_miro_source_rects(miro_root: Any, *, scale: float) -> tuple[dict[str, 
         FRAME_LIKE_TYPES,
         _frame_rect_unscaled,
         _normalize_child_pos_to_canvas,
-        _rebase_from_diagram_local,
         _resolve_relative_positions_to_canvas_center,
         iter_objects,
     )
@@ -227,7 +226,6 @@ def build_miro_source_rects(miro_root: Any, *, scale: float) -> tuple[dict[str, 
     by_id: dict[str, dict[str, Any]] = {}
     containers: list[dict[str, Any]] = []
     container_rects_unscaled: dict[str, dict[str, float]] = {}
-    diagram_rects_unscaled: dict[str, dict[str, float]] = {}
 
     for item in all_items:
         item_id = str(item.get("id") or "")
@@ -241,8 +239,6 @@ def build_miro_source_rects(miro_root: Any, *, scale: float) -> tuple[dict[str, 
                 frame_rect = _frame_rect_unscaled(item)
                 if frame_rect:
                     container_rects_unscaled[item_id] = frame_rect
-                    if item_type == "diagram":
-                        diagram_rects_unscaled[item_id] = frame_rect
 
     _resolve_relative_positions_to_canvas_center(by_id)
 
@@ -306,40 +302,6 @@ def build_miro_source_rects(miro_root: Any, *, scale: float) -> tuple[dict[str, 
             rel = str(pos.get("relativeTo") or "").lower()
             if rel in ("parent_top_left", "parent_center"):
                 item = _normalize_child_pos_to_canvas(item, container_rects_unscaled[parent_id])
-        else:
-            pos = item.get("position") or {}
-            rel = str(pos.get("relativeTo") or "").lower()
-            if rel == "canvas_center" and diagram_rects_unscaled:
-                rebased = None
-                best_overflow = None
-                for diagram_rect in diagram_rects_unscaled.values():
-                    candidate = _rebase_from_diagram_local(item, diagram_rect)
-                    if not candidate:
-                        continue
-                    geom = candidate.get("geometry") or {}
-                    try:
-                        width = float(geom.get("width") or 0.0)
-                        height = float(geom.get("height") or 0.0)
-                        center_x = float((candidate.get("position") or {}).get("x") or 0.0)
-                        center_y = float((candidate.get("position") or {}).get("y") or 0.0)
-                    except Exception:
-                        continue
-                    left = center_x - width / 2.0
-                    top = center_y - height / 2.0
-                    overflow = 0.0
-                    if left < diagram_rect["x"]:
-                        overflow += diagram_rect["x"] - left
-                    if left + width > diagram_rect["x"] + diagram_rect["width"]:
-                        overflow += (left + width) - (diagram_rect["x"] + diagram_rect["width"])
-                    if top < diagram_rect["y"]:
-                        overflow += diagram_rect["y"] - top
-                    if top + height > diagram_rect["y"] + diagram_rect["height"]:
-                        overflow += (top + height) - (diagram_rect["y"] + diagram_rect["height"])
-                    if best_overflow is None or overflow < best_overflow:
-                        best_overflow = overflow
-                        rebased = candidate
-                if rebased is not None:
-                    item = rebased
 
         rect, reason = miro_source_rect_for_item(item, scale=scale)
         if rect:

@@ -1,17 +1,27 @@
 {
-  "description": "Unsupported table source with no recoverable cell text is dropped from Canvas and classified as source-limited.",
+  "description": "Unsupported table records preserve recoverable links while truly empty format metadata stays source-limited.",
   "converter": {
     "scale": 1.0,
     "min_font_px": 8,
     "theme": "dark"
   },
   "assertions": {
-    "node_count": 0,
+    "node_count": 2,
     "edge_count": 0,
     "absent_node_ids": [
-      "table-1",
-      "cell-1",
       "format-1"
+    ],
+    "nodes": [
+      {
+        "id": "table-1",
+        "type": "text",
+        "text_contains": "moveToWidget=table-1"
+      },
+      {
+        "id": "cell-1",
+        "type": "text",
+        "text_contains": "moveToWidget=cell-1"
+      }
     ]
   }
 }

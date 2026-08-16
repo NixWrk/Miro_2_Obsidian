@@ -11,8 +11,8 @@
     "nodes": [
       {
         "id": "image-without-local-file",
-        "type": "file",
-        "file_contains": "img_local-file.png",
+        "type": "link",
+        "url": "https://example.invalid/missing-preview.png",
         "width": 320,
         "height": 180
       }

@@ -1,11 +1,15 @@
 from __future__ import annotations
 
 import argparse
+import ipaddress
 import json
+import math
 import os
+import secrets
 import socket
 import subprocess
 import threading
+import webbrowser
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -17,7 +21,7 @@ DEFAULT_AUTHORIZE_URL = "https://miro.com/oauth/authorize"
 DEFAULT_TOKEN_URL = "https://api.miro.com/v1/oauth/token"
 DEFAULT_REDIRECT_URI = "http://localhost:8765/callback"
 ALTERNATE_LOOPBACK_REDIRECT_URI = "http://127.0.0.1:8765/callback"
-DEFAULT_SCOPES = "boards:read boards:write team:read"
+DEFAULT_SCOPES = "boards:read team:read"
 DEFAULT_TIMEOUT_SECONDS = 300
 DEFAULT_BROWSER = "yandex"
 LOCAL_CONFIG_ENV = "MIRO_OAUTH_CONFIG"
@@ -49,7 +53,12 @@ def load_local_oauth_config() -> dict[str, str]:
     candidates: list[Path] = []
     if os.environ.get(LOCAL_CONFIG_ENV):
         candidates.append(Path(str(os.environ[LOCAL_CONFIG_ENV])).expanduser())
-    candidates.extend([Path.cwd() / LOCAL_CONFIG_NAME, Path(__file__).resolve().parents[1] / LOCAL_CONFIG_NAME])
+    candidates.extend(
+        [
+            Path.cwd() / LOCAL_CONFIG_NAME,
+            Path(__file__).resolve().parents[1] / LOCAL_CONFIG_NAME,
+        ]
+    )
 
     for path in candidates:
         if not path.is_file():
@@ -57,7 +66,9 @@ def load_local_oauth_config() -> dict[str, str]:
         payload = json.loads(path.read_text(encoding="utf-8-sig"))
         if not isinstance(payload, dict):
             raise ValueError(f"OAuth config must be a JSON object: {path}")
-        return {str(key): str(value) for key, value in payload.items() if value is not None}
+        return {
+            str(key): str(value) for key, value in payload.items() if value is not None
+        }
     return {}
 
 
@@ -72,8 +83,17 @@ def config_from_env(
 ) -> OAuthConfig:
     local_config = load_local_oauth_config()
     client_id = os.environ.get(client_id_env) or local_config.get("client_id")
-    client_secret = os.environ.get(client_secret_env) or local_config.get("client_secret")
-    missing = [name for name, value in ((client_id_env, client_id), (client_secret_env, client_secret)) if not value]
+    client_secret = os.environ.get(client_secret_env) or local_config.get(
+        "client_secret"
+    )
+    missing = [
+        name
+        for name, value in (
+            (client_id_env, client_id),
+            (client_secret_env, client_secret),
+        )
+        if not value
+    ]
     if missing:
         raise ValueError(
             f"Missing OAuth environment variable(s): {', '.join(missing)}. "
@@ -82,22 +102,33 @@ def config_from_env(
     return OAuthConfig(
         client_id=str(client_id),
         client_secret=str(client_secret),
-        redirect_uri=redirect_uri or os.environ.get("MIRO_REDIRECT_URI") or local_config.get("redirect_uri") or DEFAULT_REDIRECT_URI,
-        scopes=scopes or os.environ.get("MIRO_SCOPES") or local_config.get("scopes") or DEFAULT_SCOPES,
-        authorize_url=authorize_url or os.environ.get("MIRO_AUTHORIZE_URL") or local_config.get("authorize_url") or DEFAULT_AUTHORIZE_URL,
-        token_url=token_url or os.environ.get("MIRO_TOKEN_URL") or local_config.get("token_url") or DEFAULT_TOKEN_URL,
+        redirect_uri=redirect_uri
+        or os.environ.get("MIRO_REDIRECT_URI")
+        or local_config.get("redirect_uri")
+        or DEFAULT_REDIRECT_URI,
+        scopes=scopes
+        or os.environ.get("MIRO_SCOPES")
+        or local_config.get("scopes")
+        or DEFAULT_SCOPES,
+        authorize_url=authorize_url
+        or os.environ.get("MIRO_AUTHORIZE_URL")
+        or local_config.get("authorize_url")
+        or DEFAULT_AUTHORIZE_URL,
+        token_url=token_url
+        or os.environ.get("MIRO_TOKEN_URL")
+        or local_config.get("token_url")
+        or DEFAULT_TOKEN_URL,
     )
 
 
-def build_authorize_url(config: OAuthConfig, *, state: str | None = None) -> str:
+def build_authorize_url(config: OAuthConfig, *, state: str) -> str:
     query: dict[str, str] = {
         "response_type": "code",
         "client_id": config.client_id,
         "redirect_uri": config.redirect_uri,
         "scope": config.scopes,
     }
-    if state:
-        query["state"] = state
+    query["state"] = state
     return f"{config.authorize_url}?{urlencode(query)}"
 
 
@@ -136,7 +167,9 @@ def callback_recovery_hint(config: OAuthConfig) -> str | None:
     )
 
 
-def format_callback_bind_error(config: OAuthConfig, port: int, bind_failures: list[tuple[str, str]]) -> str:
+def format_callback_bind_error(
+    config: OAuthConfig, port: int, bind_failures: list[tuple[str, str]]
+) -> str:
     lines = [
         f"Could not start local OAuth callback server on port {port}.",
         "Another local service already owns the callback address, so Miro's browser redirect cannot reach this helper.",
@@ -193,7 +226,9 @@ def _safe_response_payload(response: Any, *, config: OAuthConfig, code: str) -> 
     return text
 
 
-def format_token_exchange_error(response: Any, *, config: OAuthConfig, code: str) -> str:
+def format_token_exchange_error(
+    response: Any, *, config: OAuthConfig, code: str
+) -> str:
     status_code = getattr(response, "status_code", "unknown")
     payload = _safe_response_payload(response, config=config, code=code)
     hints = [
@@ -216,7 +251,7 @@ def _callback_page(result: CallbackResult) -> bytes:
         title = "Miro authorization complete"
         body = "Authorization complete. You can close this window."
     return (
-        "<!doctype html><html><head><meta charset=\"utf-8\">"
+        '<!doctype html><html><head><meta charset="utf-8">'
         f"<title>{title}</title></head><body><p>{body}</p>"
         "<script>window.close();</script></body></html>"
     ).encode("utf-8")
@@ -225,9 +260,12 @@ def _callback_page(result: CallbackResult) -> bytes:
 def _make_callback_handler(
     *,
     callback_path: str,
+    expected_state: str,
     result: CallbackResult,
     event: threading.Event,
 ) -> type[BaseHTTPRequestHandler]:
+    result_lock = threading.Lock()
+
     class OAuthCallbackHandler(BaseHTTPRequestHandler):
         def do_GET(self) -> None:  # noqa: N802 - BaseHTTPRequestHandler API
             parsed = urlparse(self.path)
@@ -238,10 +276,38 @@ def _make_callback_handler(
                 return
 
             callback_result = parse_callback_path(self.path)
-            result.code = callback_result.code
-            result.error = callback_result.error
-            result.state = callback_result.state
-            event.set()
+            if not callback_result.state or not secrets.compare_digest(
+                callback_result.state, expected_state
+            ):
+                page = b"Invalid OAuth state. You can close this window and retry."
+                self.send_response(400)
+                self.send_header("Content-Type", "text/plain; charset=utf-8")
+                self.send_header("Content-Length", str(len(page)))
+                self.end_headers()
+                self.wfile.write(page)
+                return
+            if bool(callback_result.code) == bool(callback_result.error):
+                page = b"OAuth callback must contain exactly one of code or error."
+                self.send_response(400)
+                self.send_header("Content-Type", "text/plain; charset=utf-8")
+                self.send_header("Content-Length", str(len(page)))
+                self.end_headers()
+                self.wfile.write(page)
+                return
+
+            with result_lock:
+                if event.is_set():
+                    page = b"OAuth callback was already processed."
+                    self.send_response(409)
+                    self.send_header("Content-Type", "text/plain; charset=utf-8")
+                    self.send_header("Content-Length", str(len(page)))
+                    self.end_headers()
+                    self.wfile.write(page)
+                    return
+                result.code = callback_result.code
+                result.error = callback_result.error
+                result.state = callback_result.state
+                event.set()
 
             page = _callback_page(result)
             self.send_response(200)
@@ -260,15 +326,25 @@ def callback_bind_hosts(redirect_hostname: str) -> tuple[str, ...]:
     normalized = redirect_hostname.strip("[]").lower()
     if normalized == "localhost":
         return ("127.0.0.1", "::1")
-    return (redirect_hostname,)
+    try:
+        address = ipaddress.ip_address(normalized)
+    except ValueError as exc:
+        raise ValueError("OAuth callback host must be a loopback address.") from exc
+    if not address.is_loopback:
+        raise ValueError("OAuth callback host must be a loopback address.")
+    return (str(address),)
 
 
 class IPv6ThreadingHTTPServer(ThreadingHTTPServer):
     address_family = socket.AF_INET6
 
 
-def _make_callback_server(host: str, port: int, handler: type[BaseHTTPRequestHandler]) -> ThreadingHTTPServer:
-    server_type: type[ThreadingHTTPServer] = IPv6ThreadingHTTPServer if ":" in host else ThreadingHTTPServer
+def _make_callback_server(
+    host: str, port: int, handler: type[BaseHTTPRequestHandler]
+) -> ThreadingHTTPServer:
+    server_type: type[ThreadingHTTPServer] = (
+        IPv6ThreadingHTTPServer if ":" in host else ThreadingHTTPServer
+    )
     return server_type((host, port), handler)
 
 
@@ -280,9 +356,19 @@ def yandex_browser_candidates() -> tuple[str, ...]:
         path
         for path in (
             os.environ.get("YANDEX_BROWSER_PATH", ""),
-            os.path.join(local_app_data, "Yandex", "YandexBrowser", "Application", "browser.exe"),
-            os.path.join(program_files, "Yandex", "YandexBrowser", "Application", "browser.exe"),
-            os.path.join(program_files_x86, "Yandex", "YandexBrowser", "Application", "browser.exe"),
+            os.path.join(
+                local_app_data, "Yandex", "YandexBrowser", "Application", "browser.exe"
+            ),
+            os.path.join(
+                program_files, "Yandex", "YandexBrowser", "Application", "browser.exe"
+            ),
+            os.path.join(
+                program_files_x86,
+                "Yandex",
+                "YandexBrowser",
+                "Application",
+                "browser.exe",
+            ),
         )
         if path
     )
@@ -303,16 +389,26 @@ def resolve_browser_executable(browser: str) -> str | None:
 
 
 def open_authorize_url(authorize_url: str, *, browser: str = DEFAULT_BROWSER) -> bool:
-    executable = resolve_browser_executable(browser)
-    if not executable:
-        print(f"browser_open_skipped={browser}: executable not found")
+    if browser.strip().lower() in {"", "manual", "none"}:
+        print(f"browser_open_skipped={browser}: manual mode")
         return False
-    subprocess.Popen([executable, authorize_url], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    print(f"browser_opened={browser}")
-    return True
+    executable = resolve_browser_executable(browser)
+    if executable:
+        subprocess.Popen(
+            [executable, authorize_url],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        print(f"browser_opened={browser}")
+        return True
+    opened = bool(webbrowser.open(authorize_url))
+    print("browser_opened=system" if opened else "browser_open_failed=system")
+    return opened
 
 
-def exchange_access_token(config: OAuthConfig, code: str, *, session: Any | None = None) -> str:
+def exchange_access_token(
+    config: OAuthConfig, code: str, *, session: Any | None = None
+) -> str:
     if session is None:
         import requests
 
@@ -320,7 +416,7 @@ def exchange_access_token(config: OAuthConfig, code: str, *, session: Any | None
 
     response = session.post(
         config.token_url,
-        params={
+        data={
             "grant_type": "authorization_code",
             "code": code,
             "redirect_uri": config.redirect_uri,
@@ -330,7 +426,9 @@ def exchange_access_token(config: OAuthConfig, code: str, *, session: Any | None
         timeout=30,
     )
     if not getattr(response, "ok", False):
-        raise OAuthTokenExchangeError(format_token_exchange_error(response, config=config, code=code))
+        raise OAuthTokenExchangeError(
+            format_token_exchange_error(response, config=config, code=code)
+        )
     payload = response.json()
     token = payload.get("access_token")
     if not token:
@@ -348,18 +446,34 @@ def authorize_and_get_token(
 ) -> str:
     redirect = urlparse(config.redirect_uri)
     if redirect.scheme != "http" or not redirect.hostname:
-        raise ValueError("Only local http redirect URIs are supported by this helper.")
+        raise ValueError(
+            "Only loopback http redirect URIs are supported by this helper."
+        )
     if not redirect.path:
         raise ValueError("Redirect URI must include a callback path.")
+    bind_hosts = callback_bind_hosts(redirect.hostname)
+    if (
+        isinstance(timeout_seconds, bool)
+        or not isinstance(timeout_seconds, (int, float))
+        or not math.isfinite(timeout_seconds)
+        or timeout_seconds <= 0
+    ):
+        raise ValueError("OAuth callback timeout must be a positive finite number.")
 
     result = CallbackResult()
     event = threading.Event()
-    handler = _make_callback_handler(callback_path=redirect.path, result=result, event=event)
+    state = secrets.token_urlsafe(32)
+    handler = _make_callback_handler(
+        callback_path=redirect.path,
+        expected_state=state,
+        result=result,
+        event=event,
+    )
     port = redirect.port or 80
 
     servers: list[tuple[str, ThreadingHTTPServer]] = []
     bind_failures: list[tuple[str, str]] = []
-    for bind_host in callback_bind_hosts(redirect.hostname):
+    for bind_host in bind_hosts:
         try:
             servers.append((bind_host, _make_callback_server(bind_host, port, handler)))
         except OSError as exc:
@@ -378,7 +492,7 @@ def authorize_and_get_token(
         for host, error in bind_failures:
             print(f"callback_bind_skipped={host}:{port} ({error})")
 
-        authorize_url = build_authorize_url(config)
+        authorize_url = build_authorize_url(config, state=state)
         print(f"authorization_url={authorize_url}")
         print(f"waiting_for_callback={config.redirect_uri}")
         hint = callback_recovery_hint(config)
@@ -415,7 +529,9 @@ def exchange_manual_authorization(
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Run a local Miro OAuth flow and obtain an access token.")
+    parser = argparse.ArgumentParser(
+        description="Run a local Miro OAuth flow and obtain an access token."
+    )
     parser.add_argument("--client-id-env", default="MIRO_CLIENT_ID")
     parser.add_argument("--client-secret-env", default="MIRO_CLIENT_SECRET")
     parser.add_argument("--redirect-uri", default=DEFAULT_REDIRECT_URI)
@@ -423,11 +539,24 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--authorize-url", default=DEFAULT_AUTHORIZE_URL)
     parser.add_argument("--token-url", default=DEFAULT_TOKEN_URL)
     parser.add_argument("--timeout-seconds", type=int, default=DEFAULT_TIMEOUT_SECONDS)
-    parser.add_argument("--browser", default=DEFAULT_BROWSER, help="Browser to open for OAuth. Default: yandex.")
+    parser.add_argument(
+        "--browser",
+        default=DEFAULT_BROWSER,
+        help="Browser to open for OAuth. Default: yandex.",
+    )
     parser.add_argument("--no-open-browser", action="store_true")
-    parser.add_argument("--code", help="Exchange an already obtained authorization code.")
-    parser.add_argument("--callback-url", help="Exchange a copied localhost callback URL containing ?code=...")
-    parser.add_argument("--print-token", action="store_true", help="Print the token to stdout. Avoid in shared logs.")
+    parser.add_argument(
+        "--code", help="Exchange an already obtained authorization code."
+    )
+    parser.add_argument(
+        "--callback-url",
+        help="Exchange a copied localhost callback URL containing ?code=...",
+    )
+    parser.add_argument(
+        "--print-token",
+        action="store_true",
+        help="Print the token to stdout. Avoid in shared logs.",
+    )
     return parser.parse_args()
 
 
@@ -442,7 +571,9 @@ def main() -> int:
         token_url=args.token_url,
     )
     if args.code or args.callback_url:
-        token = exchange_manual_authorization(config, code=args.code, callback_url=args.callback_url)
+        token = exchange_manual_authorization(
+            config, code=args.code, callback_url=args.callback_url
+        )
     else:
         token = authorize_and_get_token(
             config,

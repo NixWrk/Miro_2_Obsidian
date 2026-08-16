@@ -49,40 +49,194 @@ class CoverageRow:
 
 CAPABILITIES: tuple[Capability, ...] = (
     Capability("text", YES, YES, "POST /texts", "createText", "text node", "supported"),
-    Capability("shape", YES, YES, "POST /shapes", "createShape", "text node with shape", "supported"),
-    Capability("sticky_note", YES, YES, "POST /sticky_notes", "createStickyNote", "text node", "supported"),
-    Capability("image", YES, YES, "POST /images", "createImage", "file node", "supported"),
-    Capability("document", OBSERVED, LIMITED, "POST /documents", NO, "file node", "supported", "REST enum/export can expose documents."),
-    Capability("doc_format", OBSERVED, UNKNOWN, UNKNOWN, UNKNOWN, "file node", "supported", "Observed rich document export."),
-    Capability("card", YES, YES, "POST /cards", "createCard", "text node or empty drop", "supported"),
-    Capability("app_card", YES, YES, "POST /app_cards", "createAppCard", "text node or empty drop", "supported"),
-    Capability("preview", OBSERVED, YES, UNKNOWN, "createPreview", "text node or empty drop", "supported"),
-    Capability("embed", YES, YES, "POST /embeds", "createEmbed", "file/link/diagnostic node", "supported"),
-    Capability("frame", YES, YES, "POST /frames", "createFrame", "group node", "supported"),
-    Capability("diagram", OBSERVED, UNKNOWN, UNKNOWN, UNKNOWN, "group node", "observed"),
-    Capability("group", OBSERVED, YES, UNKNOWN, "createGroup", "structural", "observed"),
-    Capability("connector", YES, YES, "POST /connectors", "createConnector", "edge", "supported"),
-    Capability("tag", OBSERVED, YES, "POST /tags", "createTag", "drop metadata unless placeable", "observed"),
-    Capability("mindmap_node", NO, YES, NO, "experimental.createMindmapNode", "text node + hierarchy edge", "supported"),
+    Capability(
+        "shape",
+        YES,
+        YES,
+        "POST /shapes",
+        "createShape",
+        "text node with shape",
+        "supported",
+    ),
+    Capability(
+        "sticky_note",
+        YES,
+        YES,
+        "POST /sticky_notes",
+        "createStickyNote",
+        "text node",
+        "supported",
+    ),
+    Capability(
+        "image", YES, YES, "POST /images", "createImage", "file node", "supported"
+    ),
+    Capability(
+        "document",
+        OBSERVED,
+        LIMITED,
+        "POST /documents",
+        NO,
+        "file node",
+        "supported",
+        "REST enum/export can expose documents.",
+    ),
+    Capability(
+        "doc_format",
+        OBSERVED,
+        UNKNOWN,
+        UNKNOWN,
+        UNKNOWN,
+        "file node",
+        "supported",
+        "Observed rich document export.",
+    ),
+    Capability(
+        "card",
+        YES,
+        YES,
+        "POST /cards",
+        "createCard",
+        "text node or empty drop",
+        "supported",
+    ),
+    Capability(
+        "app_card",
+        YES,
+        YES,
+        "POST /app_cards",
+        "createAppCard",
+        "text node or empty drop",
+        "supported",
+    ),
+    Capability(
+        "preview",
+        OBSERVED,
+        YES,
+        UNKNOWN,
+        "createPreview",
+        "text node or empty drop",
+        "supported",
+    ),
+    Capability(
+        "embed",
+        YES,
+        YES,
+        "POST /embeds",
+        "createEmbed",
+        "file/link/diagnostic node",
+        "supported",
+    ),
+    Capability(
+        "frame", YES, YES, "POST /frames", "createFrame", "group node", "supported"
+    ),
+    Capability(
+        "diagram", OBSERVED, UNKNOWN, UNKNOWN, UNKNOWN, "group node", "observed"
+    ),
+    Capability(
+        "group", OBSERVED, YES, UNKNOWN, "createGroup", "structural", "observed"
+    ),
+    Capability(
+        "connector",
+        YES,
+        YES,
+        "POST /connectors",
+        "createConnector",
+        "edge",
+        "supported",
+    ),
+    Capability(
+        "tag",
+        OBSERVED,
+        YES,
+        "POST /tags",
+        "createTag",
+        "drop metadata unless placeable",
+        "observed",
+    ),
+    Capability(
+        "mindmap_node",
+        NO,
+        YES,
+        NO,
+        "experimental.createMindmapNode",
+        "text node + hierarchy edge",
+        "supported",
+    ),
     Capability("board", META, META, "POST /boards", NO, "drop", "metadata"),
     Capability("board_member", META, META, NO, NO, "drop", "metadata"),
     Capability("member", META, META, NO, NO, "drop", "metadata"),
-    Capability("data_table_format", OBSERVED, LIMITED, NO, NO, "drop", "source_limited"),
-    Capability("table_text", OBSERVED, LIMITED, NO, NO, "drop empty cells", "source_limited", "Observed legacy table cell exports can have geometry without cell text."),
-    Capability("slide_container", OBSERVED, UNKNOWN, UNKNOWN, UNKNOWN, "group deck", "supported"),
+    Capability(
+        "data_table_format", OBSERVED, LIMITED, NO, NO, "drop", "source_limited"
+    ),
+    Capability(
+        "table_text",
+        OBSERVED,
+        LIMITED,
+        NO,
+        NO,
+        "drop empty cells",
+        "source_limited",
+        "Observed legacy table cell exports can have geometry without cell text.",
+    ),
+    Capability(
+        "slide_container",
+        OBSERVED,
+        UNKNOWN,
+        UNKNOWN,
+        UNKNOWN,
+        "group deck",
+        "supported",
+    ),
     Capability("emoji", NO, LIMITED, NO, NO, "drop/placeholder", "source_limited"),
     Capability("kanban", NO, LIMITED, NO, NO, "drop/placeholder", "source_limited"),
-    Capability("mindmap", NO, LIMITED, NO, NO, "drop/placeholder", "source_limited", "Legacy/unsupported family; Web SDK experimental emits mindmap_node."),
+    Capability(
+        "mindmap",
+        NO,
+        LIMITED,
+        NO,
+        NO,
+        "drop/placeholder",
+        "source_limited",
+        "Legacy/unsupported family; Web SDK experimental emits mindmap_node.",
+    ),
     Capability("mockup", NO, LIMITED, NO, NO, "drop/placeholder", "source_limited"),
     Capability("stroke", NO, LIMITED, NO, NO, "drop/placeholder", "source_limited"),
     Capability("table", NO, LIMITED, NO, NO, "drop/placeholder", "source_limited"),
     Capability("usm", NO, LIMITED, NO, NO, "drop/placeholder", "source_limited"),
     Capability("code", OBSERVED, UNKNOWN, UNKNOWN, UNKNOWN, "text node", "supported"),
-    Capability("wireframe", UNKNOWN, UNKNOWN, UNKNOWN, UNKNOWN, "drop/placeholder", "needs_probe"),
-    Capability("webscreen", UNKNOWN, UNKNOWN, UNKNOWN, UNKNOWN, "drop/placeholder", "needs_probe"),
-    Capability("svg", UNKNOWN, UNKNOWN, UNKNOWN, UNKNOWN, "drop/placeholder", "needs_probe"),
-    Capability("grid", UNKNOWN, UNKNOWN, UNKNOWN, UNKNOWN, "drop/placeholder", "needs_probe"),
-    Capability("comment", LIMITED, LIMITED, UNKNOWN, UNKNOWN, "text annotation sidecar", "separate_source"),
+    Capability(
+        "wireframe",
+        UNKNOWN,
+        UNKNOWN,
+        UNKNOWN,
+        UNKNOWN,
+        "drop/placeholder",
+        "needs_probe",
+    ),
+    Capability(
+        "webscreen",
+        UNKNOWN,
+        UNKNOWN,
+        UNKNOWN,
+        UNKNOWN,
+        "drop/placeholder",
+        "needs_probe",
+    ),
+    Capability(
+        "svg", UNKNOWN, UNKNOWN, UNKNOWN, UNKNOWN, "drop/placeholder", "needs_probe"
+    ),
+    Capability(
+        "grid", UNKNOWN, UNKNOWN, UNKNOWN, UNKNOWN, "drop/placeholder", "needs_probe"
+    ),
+    Capability(
+        "comment",
+        LIMITED,
+        LIMITED,
+        UNKNOWN,
+        UNKNOWN,
+        "text annotation sidecar",
+        "separate_source",
+    ),
 )
 
 CONTENT_KEYS = {
@@ -105,42 +259,47 @@ def capability_by_type() -> dict[str, Capability]:
 
 
 def unknown_capability(item_type: str) -> Capability:
-    return Capability(item_type, UNKNOWN, UNKNOWN, UNKNOWN, UNKNOWN, "unknown", "unknown")
+    return Capability(
+        item_type, UNKNOWN, UNKNOWN, UNKNOWN, UNKNOWN, "unknown", "unknown"
+    )
+
+
+def _reject_nonfinite_json_constant(value: str) -> None:
+    raise ValueError(f"Non-finite JSON value is not supported: {value}")
 
 
 def load_json(path: Path) -> Any:
-    with path.open("r", encoding="utf-8-sig") as f:
-        return json.load(f)
+    with path.open("r", encoding="utf-8-sig") as file:
+        return json.load(file, parse_constant=_reject_nonfinite_json_constant)
 
 
 def iter_items(value: Any) -> Iterable[dict[str, Any]]:
-    if isinstance(value, list):
-        for item in value:
-            yield from iter_items(item)
-        return
+    seen_ids: set[str] = set()
 
-    if not isinstance(value, dict):
-        return
+    def walk(candidate: Any) -> Iterable[dict[str, Any]]:
+        if isinstance(candidate, list):
+            for nested in candidate:
+                yield from walk(nested)
+            return
+        if not isinstance(candidate, dict):
+            return
+        if candidate.get("id") is not None and candidate.get("type") is not None:
+            item_id = str(candidate["id"])
+            if item_id not in seen_ids:
+                seen_ids.add(item_id)
+                yield candidate
+            return
 
-    if value.get("id") is not None and value.get("type") is not None:
-        yield value
-        return
+        root_keys = [key for key in ("items", "comments") if key in candidate]
+        if root_keys:
+            for key in root_keys:
+                yield from walk(candidate[key])
+            return
+        for nested in candidate.values():
+            if isinstance(nested, (dict, list)):
+                yield from walk(nested)
 
-    traversed_keys: set[str] = set()
-    for key in ("items", "data", "children"):
-        nested = value.get(key)
-        if isinstance(nested, list):
-            yield from iter_items(nested)
-            traversed_keys.add(key)
-        elif isinstance(nested, dict):
-            yield from iter_items(nested)
-            traversed_keys.add(key)
-
-    for key, nested in value.items():
-        if key in traversed_keys:
-            continue
-        if isinstance(nested, (dict, list)):
-            yield from iter_items(nested)
+    yield from walk(value)
 
 
 def normalize_item_type(item: dict[str, Any]) -> str:
@@ -164,11 +323,15 @@ def has_geometry(item: dict[str, Any]) -> bool:
     item_type = normalize_item_type(item)
     geometry = item.get("geometry") if isinstance(item.get("geometry"), dict) else {}
     position = item.get("position") if isinstance(item.get("position"), dict) else {}
-    has_size = _positive_number(geometry.get("width")) and _positive_number(geometry.get("height"))
+    has_size = _positive_number(geometry.get("width")) and _positive_number(
+        geometry.get("height")
+    )
     has_position = position.get("x") is not None and position.get("y") is not None
 
     if not has_size:
-        has_size = _positive_number(item.get("width")) and _positive_number(item.get("height"))
+        has_size = _positive_number(item.get("width")) and _positive_number(
+            item.get("height")
+        )
     if not has_position:
         has_position = item.get("x") is not None and item.get("y") is not None
 
@@ -249,7 +412,9 @@ def empty_stats() -> TypeStats:
     return TypeStats()
 
 
-def classify_row(capability: Capability, rest: TypeStats, websdk: TypeStats) -> tuple[str, str]:
+def classify_row(
+    capability: Capability, rest: TypeStats, websdk: TypeStats
+) -> tuple[str, str]:
     observed_rest = rest.count > 0
     observed_websdk = websdk.count > 0
 
@@ -266,8 +431,14 @@ def classify_row(capability: Capability, rest: TypeStats, websdk: TypeStats) -> 
         return coverage, "metadata"
     if observed_websdk and not observed_rest:
         return coverage, "websdk_export_candidate"
-    if observed_rest and capability.converter_output.startswith(("drop", "not exported")):
-        if capability.source_class == "source_limited" and rest.with_content == 0 and websdk.with_content == 0:
+    if observed_rest and capability.converter_output.startswith(
+        ("drop", "not exported")
+    ):
+        if (
+            capability.source_class == "source_limited"
+            and rest.with_content == 0
+            and websdk.with_content == 0
+        ):
             return coverage, "intentional_or_source_limited"
         if rest.with_geometry or rest.with_content:
             return coverage, "converter_candidate"
@@ -276,12 +447,17 @@ def classify_row(capability: Capability, rest: TypeStats, websdk: TypeStats) -> 
         return coverage, "covered_or_audit_needed"
     if capability.source_class in {"source_limited", "needs_probe", "separate_source"}:
         return coverage, capability.source_class
-    if any(value not in {NO, UNKNOWN, LIMITED} for value in (capability.rest_create, capability.websdk_create)):
+    if any(
+        value not in {NO, UNKNOWN, LIMITED}
+        for value in (capability.rest_create, capability.websdk_create)
+    ):
         return coverage, "generated_probe_candidate"
     return coverage, "not_prioritized"
 
 
-def build_coverage_rows(rest_root: Any | None = None, websdk_root: Any | None = None) -> list[CoverageRow]:
+def build_coverage_rows(
+    rest_root: Any | None = None, websdk_root: Any | None = None
+) -> list[CoverageRow]:
     rest_summary = summarize_items(rest_root or [])
     websdk_summary = summarize_items(websdk_root or [])
     capabilities = capability_by_type()
@@ -319,7 +495,11 @@ def render_markdown_report(rows: list[CoverageRow]) -> str:
     ]
 
     for row in rows:
-        if row.rest.count == 0 and row.websdk.count == 0 and row.action in {"not_prioritized"}:
+        if (
+            row.rest.count == 0
+            and row.websdk.count == 0
+            and row.action in {"not_prioritized"}
+        ):
             continue
         lines.append(
             "| "
@@ -351,7 +531,9 @@ def rows_to_json(rows: list[CoverageRow]) -> str:
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Compare Miro REST/Web SDK exports against the project capability matrix.")
+    parser = argparse.ArgumentParser(
+        description="Compare Miro REST/Web SDK exports against the project capability matrix."
+    )
     parser.add_argument("--rest-json", type=Path, help="Miro REST export JSON.")
     parser.add_argument("--websdk-json", type=Path, help="Miro Web SDK export JSON.")
     parser.add_argument("--format", choices=("markdown", "json"), default="markdown")
@@ -364,7 +546,9 @@ def main() -> int:
     rest_root = load_json(args.rest_json) if args.rest_json else []
     websdk_root = load_json(args.websdk_json) if args.websdk_json else []
     rows = build_coverage_rows(rest_root, websdk_root)
-    report = rows_to_json(rows) if args.format == "json" else render_markdown_report(rows)
+    report = (
+        rows_to_json(rows) if args.format == "json" else render_markdown_report(rows)
+    )
 
     if args.output:
         args.output.parent.mkdir(parents=True, exist_ok=True)

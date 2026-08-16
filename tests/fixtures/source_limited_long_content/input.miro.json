@@ -1,0 +1,14 @@
+{
+  "items": [
+    {
+      "id": "table-rich",
+      "type": "table",
+      "position": {"x": 0, "y": 0, "origin": "center", "relativeTo": "canvas_center"},
+      "geometry": {"width": 180, "height": 40},
+      "data": {
+        "title": "Planning matrix",
+        "description": "A deliberately long source payload that must remain readable instead of being clipped inside the original short geometry. It carries decisions, owners, dates, and implementation notes."
+      }
+    }
+  ]
+}

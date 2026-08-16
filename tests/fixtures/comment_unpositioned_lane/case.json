@@ -1,0 +1,15 @@
+{
+  "description": "Comments without coordinates use a deterministic lane; item comments stay beside their target.",
+  "converter": {"scale": 1.0, "min_font_px": 8, "theme": "dark"},
+  "assertions": {
+    "node_count": 4,
+    "edge_count": 0,
+    "nodes": [
+      {"id": "anchor", "type": "text", "text_contains": "Board item"},
+      {"id": "comment-lane-1", "type": "text", "text_contains": "First unpositioned comment"},
+      {"id": "comment-lane-2", "type": "text", "text_contains": "Reply body"},
+      {"id": "comment-target", "type": "text", "text_contains": "target: anchor"}
+    ],
+    "no_overlapping_nodes": [{"types": ["text"]}]
+  }
+}

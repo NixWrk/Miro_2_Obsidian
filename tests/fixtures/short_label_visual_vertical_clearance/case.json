@@ -24,12 +24,12 @@
       {
         "id": "<redacted-long-id>",
         "type": "file",
-        "file_contains": "img_1100871516.png"
+        "file_contains": "<redacted-long-id>.png"
       },
       {
         "id": "<redacted-long-id>",
         "type": "file",
-        "file_contains": "img_1100871519.png"
+        "file_contains": "<redacted-long-id>.png"
       }
     ],
     "non_overlapping_pairs": [

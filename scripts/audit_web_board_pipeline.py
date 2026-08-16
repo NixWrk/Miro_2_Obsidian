@@ -4,41 +4,58 @@ import argparse
 import json
 import os
 import re
-import shutil
+
 import sys
 import tempfile
 from collections import Counter
 from dataclasses import asdict, dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 CONVERTER_DIR = REPO_ROOT / "Json_2_Canvas"
-DEFAULT_BOARD_LIST = REPO_ROOT / "work" / "MIRO2OBSIDIAN" / "Obs_Miro" / "Концепт" / "Web_boards.md"
+DEFAULT_BOARD_LIST = (
+    REPO_ROOT / "work" / "MIRO2OBSIDIAN" / "Obs_Miro" / "Концепт" / "Web_boards.md"
+)
 DEFAULT_JSON_ROOT = REPO_ROOT / "work" / "MIRO2OBSIDIAN" / "web_test"
 DEFAULT_OUT_DIR = REPO_ROOT / "tools" / "canvas_render" / ".out" / "web_board_audit"
 RENDER_DIR = REPO_ROOT / "tools" / "canvas_render"
-OBSIDIAN_UNLOCKED_MIN_ZOOM = 2 ** -12
+OBSIDIAN_UNLOCKED_MIN_ZOOM = 2**-12
+AUDIT_SENTINEL_NAME = ".miro-web-board-audit"
+AUDIT_SENTINEL_CONTENT = "miro-web-board-audit-v1\n"
 
 sys.path.insert(0, str(CONVERTER_DIR))
 sys.path.insert(0, str(REPO_ROOT / "scripts"))
 
-from Converter import OBSIDIAN_FONT_SIZE, convert_miro_to_canvas, iter_objects  # noqa: E402
+from Converter import OBSIDIAN_FONT_SIZE, convert_miro_to_canvas  # noqa: E402
 from Scale_engine import ViewProfile, pick_recommended_scale  # noqa: E402
 from audit_item_node_mapping import summarize_mapping  # noqa: E402
 from audit_missing_miro_items import audit_missing_items  # noqa: E402
 from audit_node_overlaps import audit_nodes, build_miro_source_rects, overlap_to_dict  # noqa: E402
-from miro_rest_export_board import (  # noqa: E402
-    build_board_source_payload,
-    download_export_assets,
-    export_board_comments,
-    export_board_items,
-    write_json,
+from merge_miro_sources import (  # noqa: E402
+    DEFAULT_MAX_SOURCE_AGE_HOURS,
+    validate_canonical_export,
+    validate_rest_export,
+    validate_websdk_export,
 )
+from miro_export_bundle import (  # noqa: E402
+    copy_referenced_sidecar,
+    is_link_or_reparse,
+    publish_staged_directory,
+    referenced_local_names,
+    require_regular_directory,
+    require_regular_file,
+    sidecar_path,
+)
+from miro_capability_probe import load_json as load_strict_json  # noqa: E402
+from miro_rest_export_board import export_complete_board_source, write_json  # noqa: E402
 
 
-BOARD_LINK_RE = re.compile(r"\[(?P<label>[^\]]+)\]\((?P<url>https://miro\.com/app/board/(?P<id>[^/?#]+)[^)]*)\)")
+BOARD_LINK_RE = re.compile(
+    r"\[(?P<label>[^\]]+)\]\((?P<url>https://miro\.com/app/board/(?P<id>[^/?#]+)[^)]*)\)"
+)
 SAFE_NAME_RE = re.compile(r"[^0-9A-Za-zА-Яа-я._=-]+")
 
 
@@ -50,8 +67,7 @@ class BoardRef:
 
 
 def load_json(path: Path) -> Any:
-    with path.open("r", encoding="utf-8-sig") as f:
-        return json.load(f)
+    return load_strict_json(path)
 
 
 def safe_name(value: str) -> str:
@@ -70,21 +86,31 @@ def expand_text_style_modes(mode: str) -> list[str]:
     return [mode]
 
 
-def reset_generated_outputs(out_dir: Path, *, export_rest: bool) -> None:
-    out_dir.mkdir(parents=True, exist_ok=True)
-    for child in ("converted", "renders"):
-        shutil.rmtree(out_dir / child, ignore_errors=True)
-    if export_rest:
-        shutil.rmtree(out_dir / "rest_exports", ignore_errors=True)
-    for filename in (
-        "web_board_pipeline_audit.json",
-        "web_board_pipeline_audit.md",
-        "web_board_review_queue.md",
-    ):
-        try:
-            (out_dir / filename).unlink()
-        except FileNotFoundError:
-            pass
+def validate_output_target(out_dir: Path) -> None:
+    if not out_dir.exists() and not out_dir.is_symlink():
+        return
+    require_regular_directory(out_dir, label="Audit output directory")
+    entries = list(out_dir.iterdir())
+    if not entries:
+        return
+
+    sentinel = out_dir / AUDIT_SENTINEL_NAME
+    if sentinel.exists() or sentinel.is_symlink():
+        require_regular_file(sentinel, label="Audit output sentinel")
+        if sentinel.read_text(encoding="utf-8") == AUDIT_SENTINEL_CONTENT:
+            return
+        raise RuntimeError(f"Audit output sentinel has unexpected content: {sentinel}")
+
+    if out_dir.resolve() == DEFAULT_OUT_DIR.resolve(strict=False):
+        return
+    raise RuntimeError(
+        f"Refusing to replace non-empty unowned audit output directory: {out_dir}. "
+        f"Use an empty directory or one containing {AUDIT_SENTINEL_NAME}."
+    )
+
+
+def write_output_sentinel(out_dir: Path) -> None:
+    (out_dir / AUDIT_SENTINEL_NAME).write_text(AUDIT_SENTINEL_CONTENT, encoding="utf-8")
 
 
 def parse_board_markdown(path: Path) -> list[BoardRef]:
@@ -112,7 +138,13 @@ def parse_board_json(path: Path) -> list[BoardRef]:
             continue
         board_id = str(board["id"])
         label = str(board.get("name") or board_id)
-        refs.append(BoardRef(board_id=board_id, label=label, url=f"https://miro.com/app/board/{board_id}/"))
+        refs.append(
+            BoardRef(
+                board_id=board_id,
+                label=label,
+                url=f"https://miro.com/app/board/{board_id}/",
+            )
+        )
     return refs
 
 
@@ -122,28 +154,106 @@ def load_board_refs(path: Path) -> list[BoardRef]:
     return parse_board_markdown(path)
 
 
-def find_local_export(board_id: str, json_root: Path) -> Path | None:
-    candidates = sorted(json_root.glob("*.json"))
+def validate_source_for_board(
+    payload: Any,
+    board_id: str,
+    *,
+    max_age_hours: float = DEFAULT_MAX_SOURCE_AGE_HOURS,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    surface = payload.get("source_surface") if isinstance(payload, dict) else None
+    validators = {
+        "rest": validate_rest_export,
+        "web_sdk": validate_websdk_export,
+        "canonical": validate_canonical_export,
+    }
+    if surface is None:
+        raise ValueError("strict source envelope missing")
+    validator = validators.get(str(surface))
+    if validator is None:
+        raise ValueError(f"Unsupported source_surface: {surface!r}")
+    info = validator(
+        payload,
+        expected_board_id=board_id,
+        max_age_hours=max_age_hours,
+        now=now,
+    )
+    return {
+        "verified": True,
+        "source_surface": str(surface),
+        "board_id": info["board_id"],
+        "exported_at": info["exported_at"].isoformat(),
+    }
+
+
+def find_local_export(
+    board_id: str,
+    json_root: Path,
+    *,
+    max_age_hours: float = DEFAULT_MAX_SOURCE_AGE_HOURS,
+    now: datetime | None = None,
+    rejected: list[dict[str, str]] | None = None,
+) -> Path | None:
+    if not json_root.exists() and not json_root.is_symlink():
+        return None
+    if is_link_or_reparse(json_root) or not json_root.is_dir():
+        raise RuntimeError(f"JSON root is not a regular directory: {json_root}")
+
+    candidates = [
+        candidate
+        for candidate in sorted(json_root.glob("*.json"))
+        if board_id in candidate.name
+    ]
+    valid: list[tuple[datetime, str, Path]] = []
     for candidate in candidates:
-        if board_id in candidate.name:
-            return candidate
-    return None
+        try:
+            require_regular_file(candidate, label="Miro source JSON")
+            validation = validate_source_for_board(
+                load_json(candidate),
+                board_id,
+                max_age_hours=max_age_hours,
+                now=now,
+            )
+            exported_at = datetime.fromisoformat(str(validation["exported_at"]))
+        except (
+            OSError,
+            RuntimeError,
+            UnicodeError,
+            ValueError,
+            json.JSONDecodeError,
+        ) as exc:
+            if rejected is not None:
+                rejected.append({"path": str(candidate), "reason": str(exc)})
+            continue
+        valid.append((exported_at, candidate.name, candidate))
+    return max(valid)[2] if valid else None
 
 
-def copy_export_to_workdir(source_json: Path, work_dir: Path) -> Path:
+def stage_export_for_conversion(
+    payload: dict[str, Any], source_json: Path, work_dir: Path
+) -> Path:
     work_json = work_dir / source_json.name
-    shutil.copy2(source_json, work_json)
-    source_files = source_json.with_name(f"{source_json.stem}_files")
-    if source_files.exists():
-        shutil.copytree(source_files, work_json.with_name(f"{work_json.stem}_files"))
+    items = payload.get("items")
+    if not isinstance(items, list):
+        raise ValueError("strict source items must be a list")
+    write_json(work_json, payload)
+    copy_referenced_sidecar(items, source_json=source_json, staged_json=work_json)
     return work_json
 
 
 def summarize_source(miro_root: Any) -> dict[str, Any]:
-    items = [item for item in iter_objects(miro_root) if isinstance(item, dict)]
+    if not isinstance(miro_root, dict):
+        return {"items": 0, "comments": 0, "by_type": {}}
+    items = [item for item in miro_root.get("items", []) if isinstance(item, dict)]
+    comments = [
+        comment
+        for comment in miro_root.get("comments", [])
+        if isinstance(comment, dict)
+    ]
     by_type = Counter(str(item.get("type") or "<missing>") for item in items)
     return {
         "items": len(items),
+        "comments": len(comments),
         "by_type": dict(sorted(by_type.items())),
     }
 
@@ -152,29 +262,42 @@ def _source_item_requires_asset(item: dict[str, Any]) -> bool:
     item_type = str(item.get("type") or "").lower()
     data = item.get("data") if isinstance(item.get("data"), dict) else {}
     if item_type == "image":
-        return any(str(data.get(key) or "").strip() for key in ("imageUrl", "url", "downloadUrl"))
+        return any(
+            str(data.get(key) or "").strip()
+            for key in ("imageUrl", "url", "downloadUrl")
+        )
     if item_type == "document":
-        return any(str(data.get(key) or "").strip() for key in ("documentUrl", "url", "downloadUrl"))
+        return any(
+            str(data.get(key) or "").strip()
+            for key in ("documentUrl", "url", "downloadUrl")
+        )
     if item_type == "doc_format":
         return bool(str(data.get("html") or "").strip())
     return False
 
 
 def summarize_source_assets(miro_root: Any, source_json: Path) -> dict[str, Any]:
-    attachments_dir = source_json.with_name(f"{source_json.stem}_files")
+    if not isinstance(miro_root, dict) or not isinstance(miro_root.get("items"), list):
+        raise ValueError("strict source items must be a list")
+
+    attachments_dir = sidecar_path(source_json)
+    sidecar_exists = attachments_dir.exists() or attachments_dir.is_symlink()
+    if sidecar_exists:
+        require_regular_directory(attachments_dir, label="Source asset sidecar")
+    sidecar_root = attachments_dir.resolve(strict=False)
     examples: list[dict[str, str]] = []
     total = 0
 
-    for item in iter_objects(miro_root):
+    for item in miro_root["items"]:
         if not isinstance(item, dict):
             continue
-        local_name = str(item.get("local_name") or "").strip()
+        raw_name = str(item.get("local_name") or "").strip()
         requires_asset = _source_item_requires_asset(item)
-        if not local_name and not requires_asset:
+        if not raw_name and not requires_asset:
             continue
 
         total += 1
-        if not local_name:
+        if not raw_name:
             examples.append(
                 {
                     "id": str(item.get("id") or ""),
@@ -186,16 +309,23 @@ def summarize_source_assets(miro_root: Any, source_json: Path) -> dict[str, Any]
             )
             continue
 
-        expected = attachments_dir / local_name
-        if expected.is_file():
+        relative = referenced_local_names([item])[0]
+        expected = attachments_dir / relative
+        try:
+            expected.resolve(strict=False).relative_to(sidecar_root)
+        except (OSError, ValueError) as exc:
+            raise RuntimeError(f"Asset escapes source sidecar: {raw_name}") from exc
+
+        if expected.exists() or expected.is_symlink():
+            require_regular_file(expected, label="Referenced source asset")
             continue
 
-        reason = "missing source file" if attachments_dir.exists() else "missing source sidecar"
+        reason = "missing source file" if sidecar_exists else "missing source sidecar"
         examples.append(
             {
                 "id": str(item.get("id") or ""),
                 "type": str(item.get("type") or ""),
-                "local_name": local_name,
+                "local_name": raw_name,
                 "expected_path": str(expected),
                 "reason": reason,
             }
@@ -204,7 +334,7 @@ def summarize_source_assets(miro_root: Any, source_json: Path) -> dict[str, Any]
     return {
         "local_refs": total,
         "missing": len(examples),
-        "sidecar_exists": attachments_dir.exists(),
+        "sidecar_exists": sidecar_exists,
         "missing_examples": examples[:20],
     }
 
@@ -213,17 +343,47 @@ def summarize_canvas(canvas: dict[str, Any], vault_root: Path) -> dict[str, Any]
     nodes = [node for node in canvas.get("nodes", []) if isinstance(node, dict)]
     edges = [edge for edge in canvas.get("edges", []) if isinstance(edge, dict)]
     node_types = Counter(str(node.get("type") or "<missing>") for node in nodes)
+    vault_resolved = vault_root.resolve()
 
     missing_files: list[dict[str, str]] = []
     for node in nodes:
         if node.get("type") != "file":
             continue
-        rel = str(node.get("file") or "")
+        rel = str(node.get("file") or "").strip()
         if not rel:
-            missing_files.append({"id": str(node.get("id") or ""), "file": "", "reason": "empty file ref"})
+            missing_files.append(
+                {
+                    "id": str(node.get("id") or ""),
+                    "file": "",
+                    "reason": "empty file ref",
+                }
+            )
             continue
-        if not (vault_root / rel).is_file():
-            missing_files.append({"id": str(node.get("id") or ""), "file": rel, "reason": "missing local file"})
+        relative = Path(rel.replace("\\", "/"))
+        candidate = vault_root / relative
+        try:
+            if relative.is_absolute():
+                raise ValueError("absolute path")
+            candidate.resolve(strict=False).relative_to(vault_resolved)
+        except (OSError, ValueError):
+            missing_files.append(
+                {
+                    "id": str(node.get("id") or ""),
+                    "file": rel,
+                    "reason": "file ref escapes vault",
+                }
+            )
+            continue
+        try:
+            require_regular_file(candidate, label="Canvas file reference")
+        except RuntimeError:
+            missing_files.append(
+                {
+                    "id": str(node.get("id") or ""),
+                    "file": rel,
+                    "reason": "missing or unsafe local file",
+                }
+            )
 
     return {
         "nodes": len(nodes),
@@ -248,15 +408,21 @@ def summarize_missing(miro_root: Any, canvas: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def summarize_overlaps(miro_root: Any, canvas: dict[str, Any], *, scale: float) -> dict[str, Any]:
+def summarize_overlaps(
+    miro_root: Any, canvas: dict[str, Any], *, scale: float
+) -> dict[str, Any]:
     source_rects, source_missing = build_miro_source_rects(miro_root, scale=scale)
     overlaps = audit_nodes(
         canvas,
         source_rects=source_rects,
         source_missing=source_missing,
     )
-    by_status = Counter(str(overlap.source_status or "<unknown>") for overlap in overlaps)
-    generated = [overlap for overlap in overlaps if overlap.source_status == "generated_overlap"]
+    by_status = Counter(
+        str(overlap.source_status or "<unknown>") for overlap in overlaps
+    )
+    generated = [
+        overlap for overlap in overlaps if overlap.source_status == "generated_overlap"
+    ]
     return {
         "total": len(overlaps),
         "generated": len(generated),
@@ -265,29 +431,27 @@ def summarize_overlaps(miro_root: Any, canvas: dict[str, Any], *, scale: float) 
     }
 
 
-def compute_scale(miro_root: Any, *, scale_mode: str, min_zoom: float) -> tuple[float, dict[str, Any]]:
+def compute_scale(
+    miro_root: Any, *, scale_mode: str, min_zoom: float
+) -> tuple[float, dict[str, Any]]:
     profile = ViewProfile(min_zoom=min_zoom, scale_mode=scale_mode)
     return pick_recommended_scale(miro_root, profile, OBSIDIAN_FONT_SIZE)
 
 
-def export_rest_board(board: BoardRef, output_json: Path, *, token: str, allow_missing_assets: bool) -> dict[str, Any]:
-    messages: list[str] = []
-    items = export_board_items(board_id=board.board_id, token=token, logger=messages.append)
-    comments = export_board_comments(board_id=board.board_id, token=token, logger=messages.append)
-    download_stats = download_export_assets(
-        items,
-        output_path=output_json,
+def export_rest_board(
+    board: BoardRef, output_json: Path, *, token: str, allow_missing_assets: bool
+) -> dict[str, Any]:
+    _payload, info = export_complete_board_source(
+        board_id=board.board_id,
         token=token,
-        logger=messages.append,
-        strict=not allow_missing_assets,
+        output_path=output_json,
+        allow_missing_assets=allow_missing_assets,
+        board_name=board.label,
+        board_url=board.url,
     )
-    write_json(output_json, build_board_source_payload(items, comments))
     return {
-        "path": str(output_json),
-        "items": len(items),
-        "comments": len(comments),
-        "download_stats": download_stats,
-        "log_tail": messages[-10:],
+        **info,
+        "download_stats": info["asset_stats"],
     }
 
 
@@ -329,6 +493,7 @@ def audit_one_board(
     min_font_px: int,
     render: bool = False,
     render_dir: Path | None = None,
+    max_source_age_hours: float = DEFAULT_MAX_SOURCE_AGE_HOURS,
 ) -> dict[str, Any]:
     record: dict[str, Any] = {
         "board": asdict(board),
@@ -339,18 +504,66 @@ def audit_one_board(
     if source_json is None:
         return record
 
-    board_key = board_artifact_key(board, text_style_mode)
-    board_dir = out_dir / "converted" / board_key
-    vault_root = board_dir / "vault"
-    target_dir = vault_root / "MIRO2OBSIDIAN" / board_key
-    target_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        require_regular_file(source_json, label="Miro source JSON")
+        miro_root = load_json(source_json)
+        source_validation = validate_source_for_board(
+            miro_root,
+            board.board_id,
+            max_age_hours=max_source_age_hours,
+        )
+        source_assets = summarize_source_assets(miro_root, source_json)
+    except (
+        OSError,
+        RuntimeError,
+        UnicodeError,
+        ValueError,
+        json.JSONDecodeError,
+    ) as exc:
+        record.update(
+            {
+                "status": "source_invalid",
+                "source_validation": {"verified": False, "reason": str(exc)},
+                "error": str(exc),
+            }
+        )
+        return record
 
-    with tempfile.TemporaryDirectory(prefix=f"miro2obs_web_audit_{safe_name(board.board_id)}_") as tmp:
-        work_json = copy_export_to_workdir(source_json, Path(tmp))
-        miro_root = load_json(work_json)
-        source_assets = summarize_source_assets(miro_root, work_json)
-        scale, scale_ctx = compute_scale(miro_root, scale_mode=scale_mode, min_zoom=min_zoom)
-        canvas_path = Path(
+    record.update(
+        {
+            "source_validation": source_validation,
+            "source": summarize_source(miro_root),
+            "source_assets": source_assets,
+        }
+    )
+    if source_assets["missing"]:
+        record["status"] = "source_missing_assets"
+        return record
+
+    board_key = board_artifact_key(board, text_style_mode)
+    converted_root = out_dir / "converted"
+    converted_root.mkdir(parents=True, exist_ok=True)
+    final_board_dir = converted_root / board_key
+
+    with (
+        tempfile.TemporaryDirectory(
+            prefix=f"miro2obs_web_source_{safe_name(board.board_id)}_"
+        ) as source_tmp,
+        tempfile.TemporaryDirectory(
+            prefix=f".{board_key}-", dir=converted_root
+        ) as board_tmp,
+    ):
+        staged_board_dir = Path(board_tmp) / board_key
+        vault_root = staged_board_dir / "vault"
+        target_dir = vault_root / "MIRO2OBSIDIAN" / board_key
+        target_dir.mkdir(parents=True, exist_ok=True)
+        work_json = stage_export_for_conversion(
+            miro_root, source_json, Path(source_tmp)
+        )
+        scale, scale_ctx = compute_scale(
+            miro_root, scale_mode=scale_mode, min_zoom=min_zoom
+        )
+        staged_canvas_path = Path(
             convert_miro_to_canvas(
                 str(work_json),
                 str(target_dir),
@@ -361,27 +574,37 @@ def audit_one_board(
                 text_style_mode=text_style_mode,
             )
         )
+        require_regular_file(staged_canvas_path, label="Generated Canvas")
+        canvas_relative = staged_canvas_path.resolve().relative_to(
+            staged_board_dir.resolve()
+        )
+        canvas = load_json(staged_canvas_path)
+        canvas_summary = summarize_canvas(canvas, vault_root)
+        missing_summary = summarize_missing(miro_root, canvas)
+        mapping_summary = summarize_mapping(miro_root, canvas, scale=scale)
+        overlap_summary = summarize_overlaps(miro_root, canvas, scale=scale)
+        publish_staged_directory(staged_board_dir, final_board_dir)
 
-    canvas = load_json(canvas_path)
+    canvas_path = final_board_dir / canvas_relative
     record.update(
         {
             "status": "ok",
             "canvas_path": str(canvas_path),
             "scale": scale,
             "scale_context": scale_ctx,
-            "source": summarize_source(miro_root),
-            "source_assets": source_assets,
-            "canvas": summarize_canvas(canvas, vault_root),
-            "missing_miro_items": summarize_missing(miro_root, canvas),
-            "mapping": summarize_mapping(miro_root, canvas, scale=scale),
-            "overlaps": summarize_overlaps(miro_root, canvas, scale=scale),
+            "canvas": canvas_summary,
+            "missing_miro_items": missing_summary,
+            "mapping": mapping_summary,
+            "overlaps": overlap_summary,
         }
     )
-    if record["source_assets"]["missing"]:
-        record["status"] = "source_missing_assets"
-    elif record["canvas"]["missing_files"]:
+    if record["canvas"]["missing_files"]:
         record["status"] = "canvas_missing_files"
-    if record["missing_miro_items"]["actionable"] or record["mapping"]["actionable"] or record["overlaps"]["generated"]:
+    elif (
+        record["missing_miro_items"]["actionable"]
+        or record["mapping"]["actionable"]
+        or record["overlaps"]["generated"]
+    ):
         record["status"] = "needs_review"
     if render:
         actual_render_dir = render_dir or (out_dir / "renders")
@@ -411,11 +634,14 @@ def render_markdown_report(payload: dict[str, Any]) -> str:
         f"needs_review: {payload['summary']['needs_review']}",
         f"missing_json: {payload['summary']['missing_json']}",
         "",
-        "| Board | Mode | Status | Miro items | Canvas nodes/edges | Missing/actionable | Mapping issues | Generated overlaps | Missing files | Render |",
+        "| Board | Mode | Status | Miro items/comments | Canvas nodes/edges | Missing/actionable | Mapping issues | Generated overlaps | Missing files | Render |",
         "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
     ]
     for board in payload["boards"]:
-        source_items = (board.get("source") or {}).get("items", "")
+        source = board.get("source") or {}
+        source_items = source.get("items", "")
+        source_comments = source.get("comments", "")
+        source_count = f"{source_items}/{source_comments}" if source else ""
         canvas = board.get("canvas") or {}
         canvas_count = ""
         if canvas:
@@ -434,7 +660,7 @@ def render_markdown_report(payload: dict[str, Any]) -> str:
         label = board["board"]["label"].replace("|", "\\|")
         mode = board.get("text_style_mode") or ""
         lines.append(
-            f"| [{label}]({board['board']['url']}) | {mode} | {board['status']} | {source_items} | "
+            f"| [{label}]({board['board']['url']}) | {mode} | {board['status']} | {source_count} | "
             f"{canvas_count} | {missing_count} | {mapping_count} | {generated} | {missing_files} | {render_status(board)} |"
         )
 
@@ -449,6 +675,7 @@ def render_markdown_report(payload: dict[str, Any]) -> str:
             "export_failed",
             "convert_failed",
             "render_failed",
+            "source_invalid",
         }:
             continue
         lines.append("")
@@ -475,7 +702,9 @@ def render_markdown_report(payload: dict[str, Any]) -> str:
         if missing.get("actionable"):
             lines.append(f"- actionable missing: `{missing['actionable']}`")
             for item in missing.get("actionable_examples", [])[:5]:
-                lines.append(f"  - `{item['item_id']}` `{item['item_type']}`: {item['reason']}")
+                lines.append(
+                    f"  - `{item['item_id']}` `{item['item_type']}`: {item['reason']}"
+                )
         mapping = board.get("mapping") or {}
         if mapping.get("actionable"):
             lines.append(f"- mapping issues: `{mapping['actionable']}`")
@@ -500,7 +729,9 @@ def render_markdown_report(payload: dict[str, Any]) -> str:
             for item in overlaps.get("generated_examples", [])[:5]:
                 left = item["left"]["id"]
                 right = item["right"]["id"]
-                lines.append(f"  - `{left}` ↔ `{right}` area `{item['overlap_area']:.2f}`")
+                lines.append(
+                    f"  - `{left}` ↔ `{right}` area `{item['overlap_area']:.2f}`"
+                )
         canvas = board.get("canvas") or {}
         if canvas.get("missing_files"):
             lines.append(f"- missing files: `{canvas['missing_files']}`")
@@ -525,6 +756,9 @@ def issue_tags(record: dict[str, Any]) -> list[str]:
         tags.append("conversion failed")
     if record["status"] == "render_failed":
         tags.append("render failed")
+    if record["status"] == "source_invalid":
+        tags.append("invalid source envelope")
+
     source_assets = record.get("source_assets") or {}
     if source_assets.get("missing"):
         tags.append("source attachments missing")
@@ -558,7 +792,9 @@ def render_queue_report(payload: dict[str, Any]) -> str:
         queued += 1
         mode = record.get("text_style_mode") or "source"
         board = record["board"]
-        lines.append(f"- [ ] [{board['label']}]({board['url']}) `{mode}` — {', '.join(tags)}")
+        lines.append(
+            f"- [ ] [{board['label']}]({board['url']}) `{mode}` — {', '.join(tags)}"
+        )
         if record.get("canvas_path"):
             lines.append(f"  - canvas: `{record['canvas_path']}`")
         if record.get("source_json"):
@@ -578,8 +814,11 @@ def build_summary(records: list[dict[str, Any]]) -> dict[str, Any]:
         "render_failed",
         "convert_failed",
         "export_failed",
+        "source_invalid",
     }
-    board_ids = {record["board"]["board_id"] for record in records if record.get("board")}
+    board_ids = {
+        record["board"]["board_id"] for record in records if record.get("board")
+    }
     return {
         "boards": len(board_ids),
         "records": len(records),
@@ -590,45 +829,94 @@ def build_summary(records: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+def audit_succeeded(summary: dict[str, Any]) -> bool:
+    return bool(summary.get("records")) and summary.get("ok") == summary.get("records")
+
+
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Audit web-listed Miro boards through JSON export and Canvas conversion.")
+    parser = argparse.ArgumentParser(
+        description="Audit web-listed Miro boards through JSON export and Canvas conversion."
+    )
     parser.add_argument("--board-list", type=Path, default=DEFAULT_BOARD_LIST)
     parser.add_argument("--json-root", type=Path, default=DEFAULT_JSON_ROOT)
     parser.add_argument("--out-dir", type=Path, default=DEFAULT_OUT_DIR)
-    parser.add_argument("--scale-mode", choices=["balanced", "overview", "readable"], default="readable")
+    parser.add_argument(
+        "--scale-mode", choices=["balanced", "overview", "readable"], default="readable"
+    )
     parser.add_argument("--min-zoom", type=float, default=OBSIDIAN_UNLOCKED_MIN_ZOOM)
-    parser.add_argument("--text-style-mode", choices=["miro", "obsidian", "both"], default="obsidian")
+    parser.add_argument(
+        "--text-style-mode", choices=["miro", "obsidian", "both"], default="obsidian"
+    )
     parser.add_argument("--min-font-px", type=int, default=8)
-    parser.add_argument("--limit", type=int, help="Only audit the first N boards from the list.")
-    parser.add_argument("--export-rest", action="store_true", help="Refresh each board JSON through REST before conversion.")
+    parser.add_argument(
+        "--limit", type=int, help="Only audit the first N boards from the list."
+    )
+    parser.add_argument(
+        "--export-rest",
+        action="store_true",
+        help="Refresh each board JSON through REST before conversion.",
+    )
     parser.add_argument("--token-env", default="MIRO_ACCESS_TOKEN")
     parser.add_argument("--allow-missing-assets", action="store_true")
-    parser.add_argument("--render", action="store_true", help="Capture a smoke screenshot for each converted Canvas.")
+    parser.add_argument(
+        "--max-source-age-hours", type=float, default=DEFAULT_MAX_SOURCE_AGE_HOURS
+    )
+    parser.add_argument(
+        "--render",
+        action="store_true",
+        help="Capture a smoke screenshot for each converted Canvas.",
+    )
     return parser.parse_args()
 
 
-def main() -> int:
-    args = parse_args()
+def remap_output_paths(value: Any, staged_root: Path, published_root: Path) -> Any:
+    staged_prefix = str(staged_root.resolve())
+    published_prefix = str(published_root.resolve(strict=False))
+    if isinstance(value, dict):
+        return {
+            key: remap_output_paths(item, staged_root, published_root)
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [remap_output_paths(item, staged_root, published_root) for item in value]
+    if isinstance(value, str) and (
+        value == staged_prefix or value.startswith(staged_prefix + os.sep)
+    ):
+        return published_prefix + value[len(staged_prefix) :]
+    return value
+
+
+def run_audit(args: argparse.Namespace, out_dir: Path) -> dict[str, Any]:
     boards = load_board_refs(args.board_list)
     if args.limit:
         boards = boards[: args.limit]
     if not boards:
-        raise SystemExit(f"No boards found in {args.board_list}")
+        raise RuntimeError(f"No boards found in {args.board_list}")
 
-    reset_generated_outputs(args.out_dir, export_rest=args.export_rest)
-    export_dir = args.out_dir / "rest_exports"
+    export_dir = out_dir / "rest_exports"
     if args.export_rest:
         export_dir.mkdir(parents=True, exist_ok=True)
         token = os.environ.get(args.token_env)
         if not token:
-            raise SystemExit(f"{args.token_env} is not set. Set it or omit --export-rest.")
+            raise RuntimeError(
+                f"{args.token_env} is not set. Set it or omit --export-rest."
+            )
     else:
         token = ""
 
     text_modes = expand_text_style_modes(args.text_style_mode)
     records: list[dict[str, Any]] = []
     for board in boards:
-        source_json = find_local_export(board.board_id, args.json_root)
+        rejected_sources: list[dict[str, str]] = []
+        source_json = None
+        if not args.export_rest:
+            source_json = find_local_export(
+                board.board_id,
+                args.json_root,
+                max_age_hours=args.max_source_age_hours,
+                rejected=rejected_sources,
+            )
+
         export_info: dict[str, Any] | None = None
         if args.export_rest:
             output_json = export_dir / f"{safe_name(board.board_id)}.json"
@@ -645,40 +933,45 @@ def main() -> int:
                     {
                         "board": asdict(board),
                         "status": "export_failed",
-                        "source_json": str(source_json) if source_json else None,
+                        "source_json": None,
                         "text_style_mode": None,
                         "error": str(exc),
                     }
                 )
                 continue
-            else:
-                source_json = output_json
 
         if source_json is None:
+            status = "source_invalid" if rejected_sources else "no_json_export"
             record = {
                 "board": asdict(board),
-                "status": "no_json_export",
+                "status": status,
                 "source_json": None,
                 "text_style_mode": None,
+                "source_candidates_rejected": rejected_sources,
             }
+            if rejected_sources:
+                record["error"] = (
+                    f"Rejected {len(rejected_sources)} matching local export candidate(s)."
+                )
             records.append(record)
             print(f"{record['status']} {board.board_id} {board.label}")
             continue
 
         for text_mode in text_modes:
-            record: dict[str, Any] = {"export": export_info} if export_info else {}
+            record = {"export": export_info} if export_info else {}
             try:
                 record.update(
                     audit_one_board(
                         board,
                         source_json=source_json,
-                        out_dir=args.out_dir,
+                        out_dir=out_dir,
                         scale_mode=args.scale_mode,
                         min_zoom=args.min_zoom,
                         text_style_mode=text_mode,
                         min_font_px=args.min_font_px,
                         render=args.render,
-                        render_dir=args.out_dir / "renders",
+                        render_dir=out_dir / "renders",
+                        max_source_age_hours=args.max_source_age_hours,
                     )
                 )
             except Exception as exc:  # noqa: BLE001
@@ -691,11 +984,13 @@ def main() -> int:
                         "error": str(exc),
                     }
                 )
+            if rejected_sources:
+                record["source_candidates_rejected"] = rejected_sources
             records.append(record)
             print(f"{record['status']} {board.board_id} {board.label} [{text_mode}]")
 
-    payload = {
-        "schema_version": 1,
+    return {
+        "schema_version": 2,
         "board_list": str(args.board_list),
         "json_root": str(args.json_root),
         "settings": {
@@ -706,21 +1001,49 @@ def main() -> int:
             "min_font_px": args.min_font_px,
             "export_rest": bool(args.export_rest),
             "render": bool(args.render),
+            "max_source_age_hours": args.max_source_age_hours,
         },
         "summary": build_summary(records),
         "boards": records,
     }
+
+
+def main() -> int:
+    args = parse_args()
+    validate_output_target(args.out_dir)
+    args.out_dir.parent.mkdir(parents=True, exist_ok=True)
+
+    with tempfile.TemporaryDirectory(
+        prefix=f".{args.out_dir.name}-stage-",
+        dir=args.out_dir.parent,
+    ) as temporary:
+        staged_out_dir = Path(temporary) / args.out_dir.name
+        staged_out_dir.mkdir()
+        write_output_sentinel(staged_out_dir)
+        payload = run_audit(args, staged_out_dir)
+        payload = remap_output_paths(payload, staged_out_dir, args.out_dir)
+
+        write_json(staged_out_dir / "web_board_pipeline_audit.json", payload)
+        (staged_out_dir / "web_board_pipeline_audit.md").write_text(
+            render_markdown_report(payload),
+            encoding="utf-8",
+        )
+        (staged_out_dir / "web_board_review_queue.md").write_text(
+            render_queue_report(payload),
+            encoding="utf-8",
+        )
+        publish_staged_directory(staged_out_dir, args.out_dir)
+
     report_json = args.out_dir / "web_board_pipeline_audit.json"
     report_md = args.out_dir / "web_board_pipeline_audit.md"
     queue_md = args.out_dir / "web_board_review_queue.md"
-    write_json(report_json, payload)
-    report_md.write_text(render_markdown_report(payload), encoding="utf-8")
-    queue_md.write_text(render_queue_report(payload), encoding="utf-8")
     print(f"report_json={report_json}")
     print(f"report_md={report_md}")
     print(f"queue_md={queue_md}")
-    print("summary=" + json.dumps(payload["summary"], ensure_ascii=False, sort_keys=True))
-    return 0
+    print(
+        "summary=" + json.dumps(payload["summary"], ensure_ascii=False, sort_keys=True)
+    )
+    return 0 if audit_succeeded(payload["summary"]) else 1
 
 
 if __name__ == "__main__":

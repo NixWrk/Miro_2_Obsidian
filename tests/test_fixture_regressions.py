@@ -368,6 +368,22 @@ class FixtureRegressionTests(unittest.TestCase):
                 for rule in assertions.get("text_fits", []):
                     _assert_text_fits(self, canvas, rule)
 
+    def test_unpositioned_comments_use_lane_and_item_anchor(self) -> None:
+        canvas = _run_converter(FIXTURES_DIR / "comment_unpositioned_lane")
+        anchor = _node_by_id(canvas, "anchor")
+        target = _node_by_id(canvas, "comment-target")
+        first = _node_by_id(canvas, "comment-lane-1")
+        second = _node_by_id(canvas, "comment-lane-2")
+
+        self.assertGreaterEqual(float(target["x"]), float(anchor["x"]) + float(anchor["width"]))
+        self.assertGreaterEqual(float(first["x"]), float(target["x"]) + float(target["width"]))
+        self.assertGreaterEqual(float(second["y"]), float(first["y"]) + float(first["height"]))
+        self.assertIn("Alice (user-1)", first["text"])
+        self.assertIn("Second unpositioned comment", second["text"])
+        self.assertIn("Reply body", second["text"])
+        self.assertIn("reply-1", second["text"])
+        self.assertIn("comment-target", target["text"])
+
     def test_fixture_conversion_is_deterministic(self) -> None:
         for fixture_dir in _fixture_dirs():
             with self.subTest(fixture=fixture_dir.name):

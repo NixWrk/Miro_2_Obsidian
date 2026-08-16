@@ -36,9 +36,28 @@ class MiroWebsdkExporterAssetTests(unittest.TestCase):
         self.assertIn("image_data_url", js)
         self.assertIn("embed_inline", js)
         self.assertIn('source_surface: "web_sdk"', js)
-        self.assertIn('const EXPORTER_VERSION = "20260611-deep-table"', js)
+        self.assertIn('const EXPORTER_VERSION = "20260727-complete-json"', js)
+        self.assertIn('const CAPTURE_PROFILE = "maximum_board_v1"', js)
         self.assertIn("exporter_version: EXPORTER_VERSION", js)
+        self.assertIn("capture_profile: CAPTURE_PROFILE", js)
+        self.assertIn('method: "miro.board.get"', js)
+        self.assertIn('scope: "api_exposed_board_items"', js)
+        self.assertIn("capture_complete: captureComplete", js)
+        self.assertIn("board_complete: false", js)
+        self.assertIn('coverage_basis: "miro.board.get_api_surface"', js)
+        self.assertIn('"unsupported_item_details_unavailable"', js)
+        self.assertIn('"unsupported_parent_children_not_enumerated"', js)
+        self.assertIn('"comment_content_unavailable"', js)
+        self.assertIn("serialization_errors: serializationErrors", js)
+        self.assertIn("complete: itemsComplete", js)
         self.assertIn("function toPlain", js)
+        self.assertIn(
+            'const SERIALIZATION_MARKER = "__miro_export_serialization__"', js
+        )
+        self.assertIn('"non_finite_number"', js)
+        self.assertIn('"bigint"', js)
+        self.assertIn('"circular_reference"', js)
+        self.assertIn("allSerializationIssues.length === 0", js)
         self.assertIn("TABLE_DIAGNOSTIC_TYPES", js)
         self.assertIn("function deepInspectTableLikeItem", js)
         self.assertIn("Object.getOwnPropertyNames", js)
@@ -46,6 +65,9 @@ class MiroWebsdkExporterAssetTests(unittest.TestCase):
         self.assertIn("prototype_chain", js)
         self.assertIn("diagnostics: buildDiagnostics(items)", js)
         self.assertIn("diagnostics: buildDiagnostics(selection)", js)
+        self.assertIn("const itemSerializationIssues = [];", js)
+        self.assertIn("selection: plainSelection", js)
+        self.assertNotIn("uniquePlainItems", js)
 
     def test_index_registers_miro_toolbar_icon(self) -> None:
         html = (EXPORTER_DIR / "index.html").read_text(encoding="utf-8")
@@ -53,17 +75,19 @@ class MiroWebsdkExporterAssetTests(unittest.TestCase):
         self.assertIn("https://miro.com/app/static/sdk/v2/miro.js", html)
         self.assertIn('miro.board.ui.on("icon:click"', html)
         self.assertIn("miro.board.ui.openPanel", html)
-        self.assertIn("panel-20260611-deep-table.html", html)
-        self.assertIn("Exporter version: 20260611-deep-table", html)
+        self.assertIn("panel-20260727-complete-json.html", html)
+        self.assertIn("Exporter version: 20260727-complete-json", html)
 
     def test_versioned_entrypoint_registers_miro_toolbar_icon(self) -> None:
-        html = (EXPORTER_DIR / "index-20260611-deep-table.html").read_text(encoding="utf-8")
+        html = (EXPORTER_DIR / "index-20260727-complete-json.html").read_text(
+            encoding="utf-8"
+        )
 
         self.assertIn("https://miro.com/app/static/sdk/v2/miro.js", html)
         self.assertIn('miro.board.ui.on("icon:click"', html)
         self.assertIn("miro.board.ui.openPanel", html)
-        self.assertIn("panel-20260611-deep-table.html", html)
-        self.assertIn("Exporter version: 20260611-deep-table", html)
+        self.assertIn("panel-20260727-complete-json.html", html)
+        self.assertIn("Exporter version: 20260727-complete-json", html)
 
     def test_panel_loads_miro_sdk_and_local_exporter(self) -> None:
         html = (EXPORTER_DIR / "panel.html").read_text(encoding="utf-8")
@@ -73,18 +97,20 @@ class MiroWebsdkExporterAssetTests(unittest.TestCase):
         self.assertIn("create-generated-probe", html)
         self.assertIn("export-board", html)
         self.assertIn("export-selection", html)
-        self.assertIn("./exporter.js?v=20260611-deep-table", html)
-        self.assertIn("Exporter version: 20260611-deep-table", html)
+        self.assertIn("./exporter.js?v=20260727-complete-json", html)
+        self.assertIn("Exporter version: 20260727-complete-json", html)
 
     def test_versioned_panel_loads_miro_sdk_and_local_exporter(self) -> None:
-        html = (EXPORTER_DIR / "panel-20260611-deep-table.html").read_text(encoding="utf-8")
+        html = (EXPORTER_DIR / "panel-20260727-complete-json.html").read_text(
+            encoding="utf-8"
+        )
 
         self.assertIn("https://miro.com/app/static/sdk/v2/miro.js", html)
         self.assertIn("create-generated-probe", html)
         self.assertIn("export-board", html)
         self.assertIn("export-selection", html)
-        self.assertIn("./exporter.js?v=20260611-deep-table", html)
-        self.assertIn("Exporter version: 20260611-deep-table", html)
+        self.assertIn("./exporter.js?v=20260727-complete-json", html)
+        self.assertIn("Exporter version: 20260727-complete-json", html)
 
     def test_toolbar_icons_and_manifest_are_present(self) -> None:
         outline = (EXPORTER_DIR / "icon-outline.svg").read_text(encoding="utf-8")
@@ -97,7 +123,9 @@ class MiroWebsdkExporterAssetTests(unittest.TestCase):
         self.assertNotIn(" aria-", outline)
         self.assertNotIn(" role=", color)
         self.assertNotIn(" aria-", color)
-        self.assertIn("sdkUri: http://localhost:8766/index-20260611-deep-table.html", manifest)
+        self.assertIn(
+            "sdkUri: http://localhost:8766/index-20260727-complete-json.html", manifest
+        )
         self.assertIn("Use this URI for SDK authorization", manifest)
         self.assertIn("boards:read", manifest)
         self.assertIn("boards:write", manifest)
@@ -108,7 +136,7 @@ class MiroWebsdkExporterAssetTests(unittest.TestCase):
         self.assertIn("same team as the target board", readme)
         self.assertIn("If several", readme)
         self.assertIn("Profile settings", readme)
-        self.assertIn("http://localhost:8766/index-20260611-deep-table.html", readme)
+        self.assertIn("http://localhost:8766/index-20260727-complete-json.html", readme)
         self.assertIn("serve_no_cache.py --port 8766", readme)
         self.assertIn("exporter_version", readme)
         self.assertIn("+ More apps", readme)

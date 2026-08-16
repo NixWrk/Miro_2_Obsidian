@@ -18,7 +18,7 @@
       {
         "id": "<redacted-long-id>",
         "type": "file",
-        "file_contains": "img_1100752497.png"
+        "file_contains": "<redacted-long-id>.png"
       }
     ],
     "non_overlapping_pairs": [
