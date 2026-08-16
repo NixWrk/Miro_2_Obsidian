@@ -12,17 +12,25 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.13"
           cache: pip
-          cache-dependency-path: requirements-dev.txt
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
       - name: Install dependencies
         run: python -m pip install -r requirements-dev.txt
+      - name: Install browser
+        run: python -m playwright install chromium
       - name: Compile Python
         run: python -m compileall -q Json_2_Canvas Miro_2_Json scripts tools tests Miro_2_Obsidian_GUI.py
       - name: Lint Python
-        run: python -m ruff check Json_2_Canvas Miro_2_Json scripts tests Miro_2_Obsidian_GUI.py
-      - name: Run tests
-        run: python -m pytest -q
+        run: python -m ruff check Json_2_Canvas Miro_2_Json scripts tools tests Miro_2_Obsidian_GUI.py
+      - name: Run structural and visual regression
+        run: python scripts/run_regression.py
+      - name: Run Web SDK smoke tests
+        run: |
+          node tests/websdk_serialization_smoke.js tools/miro_websdk_exporter/exporter.js
+          node tests/websdk_capture_completeness_smoke.js tools/miro_websdk_exporter/exporter.js

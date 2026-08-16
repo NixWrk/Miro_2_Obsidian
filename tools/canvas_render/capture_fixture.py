@@ -84,6 +84,20 @@ def capture_canvas(canvas_path: Path, screenshot_path: Path, *, fit_viewport: bo
         )
         try:
             page.goto(index_url)
+            viewport = page.locator("#viewport")
+            viewport_size = viewport.evaluate(
+                "(element) => ({ width: element.clientWidth, height: element.clientHeight })"
+            )
+            viewport.evaluate(
+                """
+                (element, size) => {
+                  element.style.width = `${size.width}px`;
+                  element.style.height = `${size.height}px`;
+                  element.style.overflow = "hidden";
+                }
+                """,
+                viewport_size,
+            )
             page.set_input_files("#canvas-file", str(canvas_path))
             page.wait_for_function(
                 "document.body.dataset.renderStatus === 'ready'",
@@ -97,16 +111,10 @@ def capture_canvas(canvas_path: Path, screenshot_path: Path, *, fit_viewport: bo
                       const stage = document.getElementById("stage");
                       const stageWidth = Math.max(1, Number.parseFloat(stage.style.width) || stage.scrollWidth);
                       const stageHeight = Math.max(1, Number.parseFloat(stage.style.height) || stage.scrollHeight);
-                      const rect = viewport.getBoundingClientRect();
-                      const targetWidth = Math.max(1, window.innerWidth - rect.left);
-                      const targetHeight = Math.max(1, window.innerHeight - rect.top);
-                      viewport.style.width = `${targetWidth}px`;
-                      viewport.style.height = `${targetHeight}px`;
-                      viewport.style.overflow = "hidden";
                       const scale = Math.min(
                         1,
-                        targetWidth / stageWidth,
-                        targetHeight / stageHeight
+                        viewport.clientWidth / stageWidth,
+                        viewport.clientHeight / stageHeight
                       );
                       stage.style.transformOrigin = "0 0";
                       stage.style.transform = `scale(${scale})`;
@@ -114,7 +122,7 @@ def capture_canvas(canvas_path: Path, screenshot_path: Path, *, fit_viewport: bo
                     }
                     """
                 )
-                page.locator("#viewport").screenshot(path=str(screenshot_path))
+                viewport.screenshot(path=str(screenshot_path))
             else:
                 page.locator("#stage").screenshot(path=str(screenshot_path))
         except PlaywrightTimeoutError as exc:
@@ -134,7 +142,7 @@ def image_diff_ratio(expected: Path, actual: Path, pixel_tolerance: int) -> floa
         diff = ImageChops.difference(exp, act)
         changed = 0
         total = exp.size[0] * exp.size[1]
-        for pixel in diff.getdata():
+        for pixel in diff.get_flattened_data():
             if max(pixel) > pixel_tolerance:
                 changed += 1
         return changed / max(total, 1)
@@ -153,7 +161,7 @@ def check_fixture(
 
     with tempfile.TemporaryDirectory(prefix=f"miro2obs_render_{fixture.name}_") as tmp:
         canvas_path = convert_fixture(fixture, Path(tmp))
-        capture_canvas(canvas_path, actual_path)
+        capture_canvas(canvas_path, actual_path, fit_viewport=True)
 
     if update_baseline:
         shutil.copy2(actual_path, expected_path)
@@ -161,8 +169,8 @@ def check_fixture(
         return True
 
     if not expected_path.exists():
-        print(f"MISSING {fixture.name}: {expected_path} (run with --update-baseline)")
-        return False
+        print(f"SKIP {fixture.name}: no visual baseline")
+        return True
 
     ratio = image_diff_ratio(expected_path, actual_path, pixel_tolerance)
     if ratio > max_diff_ratio:

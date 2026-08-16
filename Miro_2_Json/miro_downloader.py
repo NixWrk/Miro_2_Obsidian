@@ -21,7 +21,6 @@ from typing import Callable, Optional
 from urllib.parse import unquote, urljoin, urlsplit, urlunsplit, parse_qsl, urlencode
 
 import requests
-from ratelimit import rate_limited
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
@@ -900,7 +899,6 @@ def safe_ui_call(widget, func, *args, **kwargs):
         widget.after(0, lambda: func(*args, **kwargs))
 
 
-@rate_limited(calls=1900, period=60)
 def download_resource_with_redirect(
     url: str,
     final_path: Path,

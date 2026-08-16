@@ -9,7 +9,13 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlsplit, urlunsplit
 
 
-CURRENT_ENTRYPOINT = "/index-20260727-complete-json.html"
+CURRENT_ENTRYPOINT = "/index.html"
+LEGACY_PATHS = {
+    "/index-20260611-deep-table.html": "/index.html",
+    "/index-20260727-complete-json.html": "/index.html",
+    "/panel-20260611-deep-table.html": "/panel.html",
+    "/panel-20260727-complete-json.html": "/panel.html",
+}
 
 
 def resolve_request_path(path: str) -> str:
@@ -18,6 +24,8 @@ def resolve_request_path(path: str) -> str:
     query = parse_qs(parsed.query, keep_blank_values=True)
     if parsed.path.rstrip("/") == "/callback" and "code" not in query:
         return urlunsplit(("", "", CURRENT_ENTRYPOINT, parsed.query, ""))
+    if parsed.path in LEGACY_PATHS:
+        return urlunsplit(("", "", LEGACY_PATHS[parsed.path], parsed.query, ""))
     return path
 
 

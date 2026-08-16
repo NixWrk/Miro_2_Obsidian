@@ -1,62 +1,66 @@
-# Отличия отображения Miro и Obsidian Canvas
+# Miro versus Obsidian Canvas display gaps
 
-Этот документ фиксирует не общие догадки, а результат production-прогона
-`TEST_BOARD` от 2026-08-16. Источник собран как строгий union REST + Web SDK:
+[English] | [Russian](MIRO_VS_CANVAS_DISPLAY_GAPS.ru.md)
 
-- canonical JSON: 479 элементов и 1 комментарий;
-- Web SDK: 477 элементов;
-- обязательные ассеты: 78 изображений, 1 документ и 2 `doc_format`;
-- Canvas: 445 узлов и 30 рёбер;
-- отсутствующие файлы, дубли ID и оборванные рёбра: 0.
+This report records measured results from the `TEST_BOARD` production run on
+2026-08-16, not general assumptions. The source was built as a strict REST and
+Web SDK union:
 
-`completeness.complete` и `capture_complete` равны `true`. При этом
-`board_complete` намеренно равен `false`: публичные Miro API не обещают доступ
-к скрытым внутренним данным неподдерживаемых виджетов. Это ограничение источника,
-а не ошибка pipeline.
+- canonical JSON: 479 items and 1 comment;
+- Web SDK: 477 items;
+- required assets: 78 images, 1 document, and 2 `doc_format` files;
+- Canvas: 445 nodes and 30 edges;
+- missing files, duplicate IDs, and broken edges: 0.
 
-## Фактическое преобразование TEST_BOARD
+Both `completeness.complete` and `capture_complete` are `true`.
+`board_complete` deliberately remains `false`: Miro's public APIs do not promise
+access to hidden internal data for unsupported widgets. This is a source
+limitation, not a pipeline failure.
 
-| Miro | Количество | Canvas | Результат |
+## Measured TEST_BOARD conversion
+
+| Miro | Count | Canvas | Result |
 |---|---:|---|---|
-| `shape` | 233 | 233 text nodes | Текст, цвет и базовая форма сохранены через Advanced Canvas attributes |
-| `sticky_note` | 29 | 29 text nodes | Содержимое и основные цвета сохранены |
-| `text` | 75 | 75 text nodes | Rich text передан как HTML внутри Canvas text node |
-| `image` | 78 | 73 file nodes | 5 внутренних слотов документа скрыты, потому что их отображает родительский `doc_format` |
-| `document` + `doc_format` | 3 | 3 file nodes | Локальные файлы сохранены и проверены |
-| `frame` + `group` + `diagram` + `slide_container` | 10 | 10 group nodes | Геометрия, подписи и membership сохранены в доступной модели Canvas |
-| `connector` | 29 | 29 edges | Концы и 2 подписи сохранены; добавлено 1 невидимое ребро порядка слайдов |
-| `preview` | 1 | 1 link node | Целевой URL стал нативной Canvas link card |
-| `table` + `table_text` | 19 | 19 text nodes | API не отдали содержимое ячеек, поэтому сохранены диагностические данные и ссылки |
-| REST comment | 1 | 1 text node | Текст и метаданные видимы, но это не интерактивный Miro thread |
-| `board` + `board_member` | 2 | 0 visible nodes | Служебные записи остаются в `miroSource`, но не рисуются на поле |
-| completeness diagnostic | 0 source items | 1 text node | Явно показывает известные ограничения публичного API |
+| `shape` | 233 | 233 text nodes | Text, color, and the supported base shape are retained through Advanced Canvas attributes |
+| `sticky_note` | 29 | 29 text nodes | Content and primary colors are retained |
+| `text` | 75 | 75 text nodes | Rich text is stored as HTML inside Canvas text nodes |
+| `image` | 78 | 73 file nodes | Five internal document slots are hidden because their parent `doc_format` renders them |
+| `document` + `doc_format` | 3 | 3 file nodes | Local files are retained and validated |
+| `frame` + `group` + `diagram` + `slide_container` | 10 | 10 group nodes | Geometry, labels, and membership are retained within the Canvas model |
+| `connector` | 29 | 29 edges | Endpoints and two labels are retained; one invisible slide-order edge is added |
+| `preview` | 1 | 1 link node | The target URL becomes a native Canvas link card |
+| `table` + `table_text` | 19 | 19 text nodes | The APIs did not expose cell content, so diagnostics and links are retained |
+| REST comment | 1 | 1 text node | Text and metadata are visible, but this is not an interactive Miro thread |
+| `board` + `board_member` | 2 | 0 visible nodes | Service records remain in `miroSource` but are not drawn |
+| completeness diagnostic | 0 source items | 1 text node | Known public-API limitations are made explicit |
 
-## Оставшиеся различия
+## Remaining differences
 
-Приоритеты ниже одновременно учитывают заметность на доске и возможность
-исправления.
+The priorities below consider both visibility and whether the gap can be fixed
+with the data currently available.
 
-| Приоритет | Область | Miro | Canvas сейчас | Причина | Где исправлять |
+| Priority | Area | Miro | Current Canvas | Root cause | Correct layer |
 |---|---|---|---|---|---|
-| P0 | Таблицы | Полноценная сетка и содержимое ячеек | Технические placeholders для 3 таблиц и 16 ячеек | REST и Web SDK не вернули содержимое | Сначала нужен новый источник данных; Canvas plugin сам данные не восстановит |
-| P0 | Фигуры | 45 фактических подтипов | 8 форм Advanced Canvas | Целевая модель беднее Miro | Плагин с собственным renderer фигур или расширение Advanced Canvas |
-| P0 | Rotation | 3 повёрнутых элемента | В output нет поля rotation | JSON Canvas не имеет универсальной нативной модели поворота | Canvas plugin и отдельное metadata-поле |
-| P0 | Коннекторы | Точная трасса, изгибы, caps, width, dash, orientation | Узлы соединены, 2 подписи сохранены, но точная трасса не гарантируется | Canvas edge model хранит меньше геометрии | Плагин renderer рёбер плюс сохранение Miro control points |
-| P1 | Текст | Точные шрифты, метрики, line wrap и vertical alignment | HTML сохраняет контент, но Obsidian пересчитывает строки и размеры | Другой HTML/CSS renderer и набор шрифтов | Плагин typography layer и font fallback map |
-| P1 | Цвета и границы | Отдельные fill/border opacity, border width/style | Сохраняется поддерживаемая часть; визуальная альфа и толщина могут отличаться | Ограничения Advanced Canvas attributes | Расширить style metadata и renderer |
-| P1 | Frames | Frame chrome, background, title placement и порядок | 5 frames стали group nodes | Canvas group семантически проще Miro frame | Расширение group renderer |
-| P1 | Slides | Deck, порядок, presentation UI | `startNode` и невидимое sequence edge | В Canvas нет Miro presentation mode | Плагин slide navigator/presentation mode |
-| P1 | Sticky notes | Нативный sticky layout, autosize, padding и эффекты | Text nodes с формой и цветом | Нет отдельного sticky node type | Специализированный note renderer |
-| P1 | Documents | Редактируемый Miro doc с inline slots | Локальный PDF/HTML file preview | Canvas показывает файл, а не Miro document model | Плагин document viewer; редактирование потребует отдельной модели |
-| P1 | Comments | Thread, anchor, replies, reactions и статус | Отдельный текстовый узел | Canvas не имеет comment thread API | Плагин comments panel и anchor metadata |
-| P2 | Images | Crop, mask, exact rotation and image chrome | Локальные file nodes | Obsidian отвечает за file preview | Image renderer без filename chrome, с crop metadata |
-| P2 | Link previews | Miro preview card | Нативная Obsidian link card | Вид зависит от сети и metadata cache Obsidian | Кэшировать title/thumbnail или добавить собственную карточку |
-| P2 | Z-order | Явный порядок слоёв Miro | Явного `zIndex` в output нет | Canvas использует порядок nodes и собственные правила | Сохранять Miro order в metadata и применять в plugin |
-| P2 | Viewport | Miro start viewport и zoom | Доска центрируется и масштабируется до `1.133212` | Canvas и Miro используют разные камеры | Сохранять viewport metadata и восстанавливать через plugin |
+| P0 | Tables | Full grid and cell content | Technical placeholders for 3 tables and 16 cells | REST and Web SDK did not return the content | A new data source is required before a renderer can help |
+| P0 | Shapes | 45 observed subtypes | 8 Advanced Canvas shapes | The target shape model is smaller | Custom shape renderer or Advanced Canvas extension |
+| P0 | Rotation | 3 rotated items | No output rotation field | JSON Canvas has no portable rotation model | Plugin renderer plus namespaced metadata |
+| P0 | Connectors | Exact paths, bends, caps, width, dash, and orientation | Nodes are connected and two labels survive, but the exact route is not guaranteed | Canvas edges retain less geometry | Edge renderer plus preserved Miro control points |
+| P1 | Text | Exact fonts, metrics, wrapping, and vertical alignment | HTML content survives, but Obsidian recalculates lines and sizes | Different renderer and font set | Typography layer and font fallback map |
+| P1 | Color and borders | Independent fill/border opacity, width, and style | Only the supported subset is visible | Advanced Canvas attribute limits | Extended style metadata and renderer |
+| P1 | Frames | Frame chrome, background, title placement, and order | Five frames become group nodes | Canvas groups are semantically simpler | Extended group renderer |
+| P1 | Slides | Deck order and presentation UI | `startNode` and an invisible sequence edge | Canvas has no Miro presentation mode | Slide navigator and presentation layer |
+| P1 | Sticky notes | Native layout, autosize, padding, and effects | Colored text nodes | No dedicated sticky node type | Specialized note renderer |
+| P1 | Documents | Editable Miro doc with inline slots | Local PDF/HTML file preview | Canvas displays a file, not the Miro document model | Document viewer; editing needs a local model |
+| P1 | Comments | Threads, anchors, replies, reactions, and state | Separate text node | Canvas has no comment thread API | Comment panel and anchor metadata |
+| P2 | Images | Crop, mask, exact rotation, and image chrome | Local file nodes | Obsidian owns file preview rendering | Image renderer with crop metadata and optional title chrome |
+| P2 | Link previews | Miro preview card | Native Obsidian link card | Rendering depends on network and Obsidian metadata cache | Cached title/thumbnail or custom card |
+| P2 | Z-order | Explicit Miro layer order | No explicit output `zIndex` | Canvas uses node order and internal rules | Preserve Miro order in metadata and apply it in a plugin |
+| P2 | Viewport | Miro start viewport and zoom | Board is centered and fitted to `1.133212` | The products use different camera models | Preserve and restore viewport metadata |
 
-## Схлопывание фигур на TEST_BOARD
+## Shape collapse on TEST_BOARD
 
-На доске встретились 45 Miro subtype, но целевой renderer использует только:
+The board contained 45 Miro shape subtypes, while the target renderer currently
+uses only:
 
 - `round-rectangle`;
 - `pill`;
@@ -67,47 +71,46 @@
 - `database`;
 - `document`.
 
-Поэтому `star`, `cloud`, `cross`, `pentagon`, `hexagon`, `octagon`, callout,
-braces и часть flowchart symbols выглядят приблизительно. Их текст и положение
-сохраняются, но силуэт не совпадает с Miro.
+As a result, stars, clouds, crosses, pentagons, hexagons, octagons, callouts,
+braces, and several flowchart symbols are approximate. Their text and position
+survive, but their silhouette does not match Miro.
 
-## Что уже исправлено этим прогоном
+## Fixes confirmed by this run
 
-1. Полный Web SDK JSON больше не считается неполным из-за корректно
-   сериализованных маркеров `undefined` и non-finite values.
-2. Строковая форма `data.shape` больше не ломает конвертацию.
-3. Повторный production run безопасно обновляет изменившиеся вложения и
-   восстанавливает предыдущую папку при сбое.
-4. Внутренние image slots `doc_format` больше не появляются повторно как
-   технические текстовые узлы.
-5. `preview` с целевым URL отображается как нативная link card, а не как
-   крупная строка URL.
+1. Correctly serialized `undefined` and non-finite markers no longer make a
+   complete Web SDK payload appear incomplete.
+2. A string-valued `data.shape` no longer breaks conversion.
+3. Repeated production runs safely replace changed attachments and restore the
+   previous directory if conversion fails.
+4. Internal `doc_format` image slots no longer reappear as technical text nodes.
+5. A `preview` with a target URL becomes a native link card instead of a large
+   URL string.
 
-## Рекомендуемый backlog плагина
+## Recommended plugin backlog
 
-1. Добавить metadata-поля `miroSubtype`, `miroRotation`, `miroZIndex` и точную
-   геометрию connector path без изменения стандартных Canvas-полей.
-2. Реализовать renderer для 45 Miro shapes и rotation.
-3. Реализовать connector renderer с Miro caps, dash, width и control points.
-4. Добавить frame/slide presentation layer.
-5. Добавить typography layer для font family, vertical alignment и line wrap.
-6. Добавить comments panel и скрываемый provenance/diagnostic inspector.
-7. Исследовать отдельный источник table data. До этого table renderer не решит
-   главную проблему, потому что рисовать ему нечего.
+1. Add namespaced `miroSubtype`, `miroRotation`, `miroZIndex`, and connector-path
+   metadata without changing standard Canvas fields.
+2. Render all observed Miro shapes and rotation.
+3. Render connector caps, dash, width, and control points.
+4. Add frame and slide presentation layers.
+5. Add typography controls for font family, vertical alignment, and wrapping.
+6. Add a comments panel and a hideable provenance/diagnostic inspector.
+7. Investigate a separate table-data source. A table renderer cannot recover
+   content that no source exposes.
 
-## Проверка будущего плагина
+## Future plugin verification
 
-Для каждой категории нужен один маленький fixture и один снимок из настоящего
-Obsidian. Критерии сравнения:
+Each category needs one minimized fixture and one screenshot from real Obsidian.
+Acceptance criteria:
 
-1. одинаковое число пользовательских элементов;
-2. совпадающие bounding boxes с заданным допуском;
-3. совпадающие subtype, rotation, fill, border и text metrics;
-4. совпадающие connector endpoints и path;
-5. отсутствие технических placeholders там, где данные можно отрисовать;
-6. явный diagnostic node там, где данные не отдал Miro.
+1. the same number of user-visible elements;
+2. matching bounding boxes within a documented tolerance;
+3. matching subtype, rotation, fill, border, and text metrics;
+4. matching connector endpoints and paths;
+5. no technical placeholder where recoverable data can be rendered;
+6. an explicit diagnostic where Miro did not expose the data.
 
-Главное архитектурное правило: canonical JSON остаётся максимально полным и
-не подстраивается под ограничения Canvas. Потери отображения исправляются на
-слое конвертации или плагина, а исходные REST/Web SDK объекты и provenance
-сохраняются без удаления.
+The architectural rule is unchanged: canonical JSON stays as complete as
+possible and is never reduced to fit Canvas. Display loss belongs in the
+converter or plugin layer, while original REST/Web SDK objects and provenance
+remain intact.

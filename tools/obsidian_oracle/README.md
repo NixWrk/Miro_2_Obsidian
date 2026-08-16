@@ -1,126 +1,102 @@
-# Obsidian Oracle Harness
+# Obsidian oracle harness
 
-Этот harness нужен для финальной визуальной проверки результата в настоящем Obsidian.
+This harness stages converted files for final visual verification in real
+Obsidian.
 
-Собственный renderer полезен для быстрой диагностики, но он не может гарантировать полное совпадение с Obsidian. Финальный oracle должен использовать сам Obsidian как renderer.
+The browser renderer is useful for fast diagnostics, but it cannot guarantee
+that Obsidian will render the same result. Real Obsidian is therefore the final
+visual oracle.
 
-## Целевой подход
+## Controlled profile
 
-1. Создать отдельный тестовый vault.
-2. Зафиксировать версию Obsidian, тему, CSS snippets, zoom, шрифт и размер окна.
-3. Отключить сторонние плагины.
-4. Скопировать сгенерированный `.canvas` и связанные файлы в vault.
-5. Открыть canvas в Obsidian.
-6. Сделать screenshot.
-7. Сравнить screenshot с baseline fixture.
-
-## Локальный oracle-профиль
-
-Текущий тестовый vault:
+The local test vault is:
 
 ```text
 _obsidian_oracle_vault
 ```
 
-Рабочая папка внутри vault:
+Its working folder is:
 
 ```text
 _obsidian_oracle_vault\MIRO2OBSIDIAN
 ```
 
-Обязательный community plugin:
+The controlled profile uses Advanced Canvas. Project-local checks can validate
+the manifest and settings, while final screenshots require the real plugin
+runtime files (`main.js` and `styles.css`).
 
-```text
-advanced-canvas
-```
+## Setup and checks
 
-Проверенное состояние:
-- plugin folder: `_obsidian_oracle_vault\.obsidian\plugins\advanced-canvas`;
-- manifest id: `advanced-canvas`;
-- manifest name: `Advanced Canvas`;
-- manifest version: `6.0.1`;
-- plugin включён в `_obsidian_oracle_vault\.obsidian\community-plugins.json`.
-
-Для быстрых local checks достаточно project-local vault. Для финальных Obsidian screenshots Advanced Canvas должен быть установлен настоящими plugin-файлами (`main.js`, `styles.css`), а не только включён в manifest/community plugins.
-
-## Команды
-
-Проверить локальную oracle-среду:
+Initialize the local vault and validate its configuration:
 
 ```powershell
 python tools\obsidian_oracle\init_local_vault.py
 python tools\obsidian_oracle\check_environment.py
 ```
 
-Проверить, что установлен настоящий runtime плагина:
+Require a complete plugin runtime:
 
 ```powershell
 python tools\obsidian_oracle\check_environment.py --strict-runtime
 ```
 
-Если есть существующий vault с установленным Advanced Canvas, можно скопировать runtime:
+Copy plugin runtime files from an existing vault:
 
 ```powershell
-python tools\obsidian_oracle\init_local_vault.py --plugin-source "<local-test-data>\.obsidian\plugins"
+python tools\obsidian_oracle\init_local_vault.py --plugin-source "path\to\ObsidianVault\.obsidian\plugins"
 ```
 
-Если существующего vault нет, runtime можно скачать из GitHub release:
+Or install the Advanced Canvas runtime from its GitHub release:
 
 ```powershell
 python tools\obsidian_oracle\install_plugin_runtime.py advanced-canvas
 python tools\obsidian_oracle\check_environment.py --strict-runtime
 ```
 
-Сконвертировать fixture и положить `.canvas` в oracle-папку vault:
+## Fixture workflow
+
+Convert and stage one fixture:
 
 ```powershell
 python tools\obsidian_oracle\stage_fixture.py basic_text
 ```
 
-Результат будет создан в:
+The staged Canvas is written below:
 
 ```text
 _obsidian_oracle_vault\MIRO2OBSIDIAN\_oracle\<fixture>\
 ```
 
-После staging нужно открыть полученный `.canvas` в Obsidian и сделать/сравнить screenshot с `expected.obsidian.png`.
+Open it in Obsidian and capture a screenshot for comparison with
+`expected.obsidian.png`.
 
-Принять уже снятый скриншот как baseline:
+Accept an existing screenshot as the baseline:
 
 ```powershell
 python tools\obsidian_oracle\snapshot_fixture.py app_card_fields --actual path\to\screenshot.png --update-baseline
 ```
 
-Сравнить уже снятый скриншот с baseline:
+Compare an existing screenshot:
 
 ```powershell
 python tools\obsidian_oracle\snapshot_fixture.py app_card_fields --actual path\to\screenshot.png
 ```
 
-В интерактивной desktop-сессии можно staged fixture и снять весь экран:
+In an interactive desktop session, capture the full screen:
 
 ```powershell
 python tools\obsidian_oracle\snapshot_fixture.py app_card_fields --capture-screen --update-baseline
 ```
 
-Actual screenshots пишутся в `tools/obsidian_oracle/.out/`.
+Actual screenshots are written to `tools/obsidian_oracle/.out/` and ignored by
+Git.
 
-## Правило при расхождении
+## Source-of-truth rule
 
-Если диагностический web-render и Obsidian показывают разное поведение, источником истины считается Obsidian.
+When the browser harness and Obsidian disagree, Obsidian wins. Then either fix
+the browser harness, document its limitation, or add a structural assertion
+that detects the issue without relying on the custom renderer.
 
-После этого нужно:
-- либо исправить web-render harness;
-- либо записать его ограничение в документацию;
-- либо добавить отдельную проверку, которая ловит проблему без зависимости от собственного renderer.
-
-## Требования к стабильности
-
-- один viewport для всех baseline;
-- один масштаб canvas;
-- одна тема;
-- один набор шрифтов;
-- отсутствие пользовательских плагинов;
-- исключение: `advanced-canvas` должен быть включён для этого проекта;
-- отсутствие ручного перемещения nodes перед screenshot;
-- baseline обновляется только через выбранную проблему из `tasks/problem_library.md`.
+Stable baselines require one viewport, Canvas zoom, theme, font set, and window
+size; no manual node movement; and no unrelated community plugins. Advanced
+Canvas is the controlled exception for this repository.

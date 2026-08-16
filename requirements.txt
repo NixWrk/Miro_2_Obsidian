@@ -1,3 +1,2 @@
-customtkinter==5.2.2
-ratelimit==2.2.1
-requests==2.32.5
+customtkinter==6.0.0
+requests==2.34.2

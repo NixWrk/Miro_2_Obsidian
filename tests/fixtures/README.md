@@ -1,8 +1,9 @@
-# Fixtures
+# Regression fixtures
 
-Каждая папка внутри `tests/fixtures/` описывает один воспроизводимый кейс конвертации Miro JSON в Obsidian Canvas.
+Each directory under `tests/fixtures/` describes one reproducible Miro JSON to
+Obsidian Canvas conversion case.
 
-Рекомендуемая структура:
+Recommended layout:
 
 ```text
 tests/fixtures/<case_name>/
@@ -14,22 +15,21 @@ tests/fixtures/<case_name>/
   notes.md
 ```
 
-Минимально обязательны:
-- `input.miro.json` — входной пример;
-- `case.json` — параметры конвертации и автоматизированные assertions;
-- `notes.md` — какое правило или проблему проверяет кейс.
+Required files:
 
-`expected.canvas.json` используется для строгих structural/semantic/geometry проверок.
+- `input.miro.json`: minimized input that reproduces the rule;
+- `case.json`: converter options and executable assertions;
+- `notes.md`: the behavior or regression covered by the case.
 
-`expected.render.png` используется для быстрого visual baseline через `tools/canvas_render/`.
+`expected.canvas.json` is available for strict structural, semantic, or geometry
+checks. `expected.render.png` is a fast browser-renderer baseline.
+`expected.obsidian.png` is the final baseline from real Obsidian. Fixtures without
+an image baseline remain structural tests and are skipped by the visual runner. When
+the two images disagree, real Obsidian is authoritative.
 
-`expected.obsidian.png` используется как финальный visual baseline через настоящий Obsidian oracle.
+## Geometry assertions
 
-Если `expected.render.png` и `expected.obsidian.png` расходятся, источником истины считается `expected.obsidian.png`.
-
-## Geometry Assertions
-
-`case.json` can assert that specific nodes do not overlap:
+Assert that named nodes do not overlap:
 
 ```json
 "non_overlapping_pairs": [
@@ -37,7 +37,7 @@ tests/fixtures/<case_name>/
 ]
 ```
 
-It can also ask the regression test to scan every pair of selected node types:
+Scan every pair of selected node types:
 
 ```json
 "no_overlapping_nodes": [
@@ -50,10 +50,9 @@ It can also ask the regression test to scan every pair of selected node types:
 ]
 ```
 
-Use `types` to avoid checking Canvas `group` containers against their children.
+Use `types` to avoid treating a Canvas group and its children as an overlap.
 
-`case.json` can also assert that a text node's rendered height estimate fits
-inside the generated Canvas node:
+Assert that estimated rendered text fits inside its generated node:
 
 ```json
 "text_fits": [
@@ -65,11 +64,10 @@ inside the generated Canvas node:
 ]
 ```
 
-Use this for rules where geometry can be numerically correct but Obsidian would
-still show an internal text scrollbar because `fontSize` is clamped to the
-readable minimum.
+This catches cases where geometry is numerically valid but Obsidian would show
+an internal scrollbar after applying its font-size floor.
 
-Node assertions support both lower and upper geometry bounds:
+Node assertions support lower and upper geometry bounds:
 
 ```json
 {
@@ -81,5 +79,9 @@ Node assertions support both lower and upper geometry bounds:
 }
 ```
 
-Use upper bounds for overview-preservation rules where a fix must not silently
-expand a Miro item into a much larger Canvas footprint.
+Upper bounds are useful for overview-preservation rules where a fix must not
+silently expand a small Miro item into a much larger Canvas footprint.
+
+Do not commit complete private boards. Remove unrelated content, personal data,
+tokens, private URLs, and unnecessary assets before turning a real failure into
+a fixture.

@@ -37,7 +37,7 @@ from miro_capability_probe import (  # noqa: E402
 
 
 DEFAULT_WORK_DIR = Path("work") / "MIRO2OBSIDIAN" / "source_expansion"
-WEBSDK_APP_ENTRYPOINT = "index-20260727-complete-json.html"
+WEBSDK_APP_ENTRYPOINT = "index.html"
 OUTPUT_SENTINEL_NAME = ".miro-source-expansion"
 OUTPUT_SENTINEL_CONTENT = "miro-source-expansion-v1\n"
 

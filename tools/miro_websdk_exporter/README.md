@@ -15,7 +15,7 @@ python tools\miro_websdk_exporter\serve_no_cache.py --port 8766
 2. Register this App URL in Miro:
 
 ```text
-http://localhost:8766/index-20260727-complete-json.html
+http://localhost:8766/index.html
 ```
 
 3. Upload `icon-outline.svg` and `icon-color.svg`, install the app into the
@@ -38,8 +38,8 @@ python tools\miro_websdk_exporter\serve_no_cache.py --port 8765
 ```
 
 `serve_no_cache.py` routes a callback without OAuth `code` to the current
-versioned exporter and listens on IPv4 plus IPv6 loopback. Stop this server
-before a REST OAuth run that also needs port `8765`.
+`index.html` entrypoint and listens on IPv4 plus IPv6 loopback. Stop this
+server before a REST OAuth run that also needs port `8765`.
 
 Troubleshooting:
 
@@ -47,9 +47,9 @@ Troubleshooting:
 - `404 File not found`: another static server does not know the configured path;
 - app missing from the board: install it in the team that owns that board.
 
-`index.html` and the older `20260611-deep-table` entrypoints are compatibility
-aliases that open the current `20260727-complete-json` panel. The versioned URL
-above is preferred because it makes stale Miro/browser caches visible.
+`index.html` is the only maintained entrypoint. `serve_no_cache.py` still maps
+the former dated index and panel URLs to the current files, so existing Miro app
+configurations keep working without duplicate HTML copies.
 
 Install the app into the same team as the target board. If several similarly
 named exporter apps exist, verify the App URL in `Profile settings` ->

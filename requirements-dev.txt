@@ -1,5 +1,5 @@
 -r requirements.txt
-Pillow==10.4.0
-playwright==1.55.0
-pytest==9.0.2
-ruff==0.15.6
+Pillow==12.3.0
+playwright==1.62.0
+pytest==9.1.1
+ruff==0.16.3

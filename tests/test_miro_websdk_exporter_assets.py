@@ -2,8 +2,12 @@ from __future__ import annotations
 
 import importlib.util
 import socket
+import threading
 import unittest
+from functools import partial
+from http.server import ThreadingHTTPServer
 from pathlib import Path
+from urllib.request import urlopen
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -25,12 +29,45 @@ class MiroWebsdkExporterAssetTests(unittest.TestCase):
 
         self.assertEqual(
             server.resolve_request_path("/callback?_miro=1.2.3&_sdk=stable"),
-            "/index-20260727-complete-json.html?_miro=1.2.3&_sdk=stable",
+            "/index.html?_miro=1.2.3&_sdk=stable",
         )
         self.assertEqual(
             server.resolve_request_path("/callback?code=one-time-code"),
             "/callback?code=one-time-code",
         )
+        for legacy_path, current_path in server.LEGACY_PATHS.items():
+            self.assertEqual(
+                server.resolve_request_path(f"{legacy_path}?cache=1"),
+                f"{current_path}?cache=1",
+            )
+
+    def test_legacy_entrypoints_are_served_over_http(self) -> None:
+        module = load_server_module()
+        handler = partial(module.NoCacheHandler, directory=str(EXPORTER_DIR))
+        httpd = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+        thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+        thread.start()
+        try:
+            port = httpd.server_address[1]
+            paths = [*module.LEGACY_PATHS, "/callback?_miro=1&_sdk=stable"]
+            for path in paths:
+                with self.subTest(path=path):
+                    with urlopen(
+                        f"http://127.0.0.1:{port}{path}", timeout=2
+                    ) as response:
+                        body = response.read()
+                        self.assertEqual(response.status, 200)
+                        self.assertIn(
+                            b"Exporter version: 20260727-complete-json", body
+                        )
+                        self.assertEqual(
+                            response.headers["Cache-Control"],
+                            "no-store, no-cache, must-revalidate, max-age=0",
+                        )
+        finally:
+            httpd.shutdown()
+            httpd.server_close()
+            thread.join(timeout=2)
 
     def test_server_listens_on_both_localhost_families(self) -> None:
         server = load_server_module()
@@ -109,18 +146,7 @@ class MiroWebsdkExporterAssetTests(unittest.TestCase):
         self.assertIn("https://miro.com/app/static/sdk/v2/miro.js", html)
         self.assertIn('miro.board.ui.on("icon:click"', html)
         self.assertIn("miro.board.ui.openPanel", html)
-        self.assertIn("panel-20260727-complete-json.html", html)
-        self.assertIn("Exporter version: 20260727-complete-json", html)
-
-    def test_versioned_entrypoint_registers_miro_toolbar_icon(self) -> None:
-        html = (EXPORTER_DIR / "index-20260727-complete-json.html").read_text(
-            encoding="utf-8"
-        )
-
-        self.assertIn("https://miro.com/app/static/sdk/v2/miro.js", html)
-        self.assertIn('miro.board.ui.on("icon:click"', html)
-        self.assertIn("miro.board.ui.openPanel", html)
-        self.assertIn("panel-20260727-complete-json.html", html)
+        self.assertIn("panel.html", html)
         self.assertIn("Exporter version: 20260727-complete-json", html)
 
     def test_panel_loads_miro_sdk_and_local_exporter(self) -> None:
@@ -128,18 +154,6 @@ class MiroWebsdkExporterAssetTests(unittest.TestCase):
 
         self.assertIn("https://miro.com/app/static/sdk/v2/miro.js", html)
         self.assertIn("./exporter.js", html)
-        self.assertIn("create-generated-probe", html)
-        self.assertIn("export-board", html)
-        self.assertIn("export-selection", html)
-        self.assertIn("./exporter.js?v=20260727-complete-json", html)
-        self.assertIn("Exporter version: 20260727-complete-json", html)
-
-    def test_versioned_panel_loads_miro_sdk_and_local_exporter(self) -> None:
-        html = (EXPORTER_DIR / "panel-20260727-complete-json.html").read_text(
-            encoding="utf-8"
-        )
-
-        self.assertIn("https://miro.com/app/static/sdk/v2/miro.js", html)
         self.assertIn("create-generated-probe", html)
         self.assertIn("export-board", html)
         self.assertIn("export-selection", html)
@@ -158,7 +172,7 @@ class MiroWebsdkExporterAssetTests(unittest.TestCase):
         self.assertNotIn(" role=", color)
         self.assertNotIn(" aria-", color)
         self.assertIn(
-            "sdkUri: http://localhost:8766/index-20260727-complete-json.html", manifest
+            "sdkUri: http://localhost:8766/index.html", manifest
         )
         self.assertIn("Use this URI for SDK authorization", manifest)
         self.assertIn("boards:read", manifest)
@@ -170,7 +184,7 @@ class MiroWebsdkExporterAssetTests(unittest.TestCase):
         self.assertIn("same team as the target board", readme)
         self.assertIn("If several", readme)
         self.assertIn("Profile settings", readme)
-        self.assertIn("http://localhost:8766/index-20260727-complete-json.html", readme)
+        self.assertIn("http://localhost:8766/index.html", readme)
         self.assertIn("serve_no_cache.py --port 8766", readme)
         self.assertIn("exporter_version", readme)
         self.assertIn("+ More apps", readme)
