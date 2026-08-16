@@ -17,6 +17,7 @@ Miro, OAuth или интернетом.
 | Шрифты и текст | Выбор font family и размера, форматирование и alignment через UI, без ручного HTML |
 | Комментарии | Отображение, создание, редактирование, ответы, resolve и anchors к элементу или точке |
 | Zoom | Большой диапазон zoom, быстрый fit и сохранение привычного pan/pinch/wheel |
+| Миникарта | Весь холст в углу, точная рамка текущего viewport, click/drag navigation без смены zoom |
 | Тема отображения | Мгновенное переключение system/light/dark командой, кнопкой и hotkey |
 | Цвета | Расширенная палитра, recent colors и простой picker для text/fill/border/edge |
 | Nodes и формы | Создание и редактирование расширенных node types и всех поддерживаемых Miro shapes |
@@ -47,6 +48,41 @@ Miro, OAuth или интернетом.
   пользовательского действия.
 - `canvas-zoom-unlock` поглощается `miro-canvas` после достижения полной
   функциональной эквивалентности; два постоянных плагина для одной доски не нужны.
+
+## Архитектурное решение
+
+Пишем `miro-canvas` с нуля как отдельный Obsidian plugin, но не создаём новый
+Canvas engine. Базой всегда остаётся нативный Obsidian Canvas. Поэтому
+`самостоятельно` здесь означает: все обязательные функции работают без Advanced
+Canvas и других community plugins; сам core Canvas Obsidian остаётся необходим.
+
+Advanced Canvas поддерживается как необязательный сосед. Если он установлен,
+`miro-canvas` использует совместимые metadata/events и не дублирует уже активные
+controls. Если его нет или его API изменился, отключается только integration
+layer, а доска и собственные функции `miro-canvas` продолжают работать.
+
+- [ ] `ARCH-001` `P0 P` Использовать нативный Canvas view как единственный
+  обязательный runtime и не заменять его отдельным редактором.
+- [ ] `ARCH-002` `P0 P` Не зависеть при загрузке или сохранении от Advanced
+  Canvas, Canvas Minimap, Excalidraw или другого community plugin.
+- [ ] `ARCH-003` `P0 P` Подключать Advanced Canvas только через optional adapter
+  с runtime detection, проверкой capabilities и graceful disable.
+- [ ] `ARCH-004` `P0 P` Не форкать и не копировать код Advanced Canvas;
+  совместимость строить на данных, событиях и минимальном feature detection.
+- [ ] `ARCH-005` `P0 P` Один и тот же `.canvas` без потери данных открывается в
+  режимах: native only, `miro-canvas`, Advanced Canvas и оба plugins вместе.
+- [ ] `ARCH-006` `P0 P` При совместной работе убирать дублирующиеся кнопки и
+  patches, сохраняя один понятный control для каждой функции.
+- [ ] `ARCH-007` `P0 P` Изолировать private Canvas internals в одном тонком
+  `CanvasAdapter`; Advanced Canvas integration не должна растекаться по features.
+- [ ] `ARCH-008` `P1 P` Читать Advanced JSON Canvas metadata, когда она есть, но
+  реализовать необходимое отображение этого metadata и без Advanced Canvas.
+- [ ] `ARCH-009` `P0 P` Размещать исходники в `plugins/miro-canvas/` этого repo,
+  собирать TypeScript через esbuild и не добавлять UI framework/runtime dependency.
+- [ ] `ARCH-010` `P1 P` Выносить plugin в отдельный repository только перед
+  независимыми releases/community publication, когда граница кода стабилизируется.
+- [ ] `ARCH-011` `P0 P` Несовместимость optional integration не должна блокировать
+  startup, чтение, редактирование или сохранение обычной Canvas-доски.
 
 ## Офлайн-граница
 
@@ -205,10 +241,45 @@ node с тем же ID, что и Miro item, связывается без за�
   Obsidian и не выдавать синтетический viewport за исходный.
 - [ ] `VIEW-005` `P1 P` Добавить команды fit board, fit selection и jump to
   source item ID.
-- [ ] `VIEW-006` `P2 P` Добавить minimap для больших досок без отдельного layout
-  engine.
+- [ ] `VIEW-006` `P0 P` Встроить minimap для больших досок без отдельного layout
+  engine и без обязательного стороннего plugin.
 - [ ] `VIEW-007` `P2 P` Сохранять текущую selection и camera при временном
   переключении Miro renderer.
+
+## Миникарта
+
+Миникарта - собственный лёгкий navigation layer на нативном HTML Canvas 2D. Она
+не является вторым renderer: рисует упрощённую геометрию, цвета, groups и edges,
+поэтому не дублирует DOM всей доски и не пытается сделать мелкий текст читаемым.
+
+- [ ] `MAP-001` `P0 P` Показывать полные content bounds, включая отрицательные
+  coordinates, удалённые nodes, groups, frames и edges.
+- [ ] `MAP-002` `P0 P` Показывать контрастную точную рамку текущего viewport:
+  положение экрана и долю всей доски, которую он занимает.
+- [ ] `MAP-003` `P0 P` Обновлять viewport frame при pan, zoom, resize окна,
+  открытии sidebar и переключении renderer без заметной задержки.
+- [ ] `MAP-004` `P0 P` Клик по точке миникарты центрирует там текущий viewport,
+  не меняя zoom.
+- [ ] `MAP-005` `P0 P` Drag рамки viewport плавно перемещает камеру; pointer не
+  должен проскальзывать в редактирование элементов под миникартой.
+- [ ] `MAP-006` `P0 P` Обновлять overview после create, move, resize, restyle,
+  reconnect и delete, не перечитывая весь DOM на каждый pointer event.
+- [ ] `MAP-007` `P0 P` Одинаково работать на обычной Canvas и рядом с Advanced
+  Canvas, используя общий `CanvasAdapter` и не требуя Canvas Minimap plugins.
+- [ ] `MAP-008` `P1 P` Дать выбор угла, размера и opacity, а также компактные
+  show/hide и collapse controls; default - правый нижний угол.
+- [ ] `MAP-009` `P0 P` Уважать system/light/dark theme, сохранять видимость
+  viewport frame и не закрывать штатные Canvas controls.
+- [ ] `MAP-010` `P1 P` Поддержать mouse, touch и keyboard focus с доступным
+  названием control; drag имеет click fallback.
+- [ ] `MAP-011` `P0 P` Рисовать через один `<canvas>` и `requestAnimationFrame`,
+  кешировать scene geometry и не подключать D3 или отдельный layout engine.
+- [ ] `MAP-012` `P0 P` При изменении private Canvas API отключать только minimap
+  с понятной диагностикой, не ломая сам Canvas.
+
+Существующие [Canvas minimap](https://github.com/ifree/Obsidian-canvas-minimap)
+и [HY Canvas Minimap](https://github.com/lugglory/hy-canvas-minimap) используются
+как UX/reference и источник compatibility fixtures, но не как runtime dependency.
 
 ## Темы и цвета
 
@@ -639,8 +710,9 @@ node с тем же ID, что и Miro item, связывается без за�
   custom decoration не должна скрывать их реальные links.
 - [ ] `NATIVE-008` `P1 P` Уважать Obsidian themes и CSS snippets для UI chrome,
   сохраняя явные board colors.
-- [ ] `NATIVE-009` `P1 P` Совместимость с Advanced Canvas и Excalidraw проверять
-  как обязательную, с остальными plugins - через graceful fallback.
+- [ ] `NATIVE-009` `P0 P` Совместимость с Advanced Canvas и Excalidraw проверять
+  как обязательную; Advanced Canvas остаётся optional, с остальными plugins -
+  через graceful fallback.
 - [ ] `NATIVE-010` `P2 P` Проверить desktop и mobile/touch отдельно; отсутствие
   mobile patch не должно ломать стандартный mobile Canvas.
 
@@ -654,8 +726,8 @@ node с тем же ID, что и Miro item, связывается без за�
   при редактировании, preview, comments или diagnostics.
 - [ ] `QUAL-004` `P0 P` Namespace CSS и DOM markers, чтобы не менять обычные
   Canvas files.
-- [ ] `QUAL-005` `P0 P` Изолировать обращения к private Obsidian/Advanced Canvas
-  APIs в одном adapter с feature detection.
+- [ ] `QUAL-005` `P0 P` Изолировать обращения к private Obsidian Canvas API в
+  одном adapter; Advanced Canvas получает отдельный optional integration layer.
 - [ ] `QUAL-006` `P0 P` При несовместимой версии отключать patch и показывать
   понятную ошибку, не ломая Canvas.
 - [ ] `QUAL-007` `P1 P` Строить source indexes за `O(n)` и не сканировать весь DOM
@@ -719,13 +791,21 @@ node с тем же ID, что и Miro item, связывается без за�
   geometry, links или selection.
 - [ ] `TEST-022` Hotkeys, Markdown, wikilinks, embeds, file actions и undo/redo
   проходят real-Obsidian smoke test.
+- [ ] `TEST-023` Прогнать compatibility matrix: native only, `miro-canvas` only,
+  Advanced Canvas only и оба plugins; сравнить данные, UI controls и console errors.
+- [ ] `TEST-024` Minimap показывает все content bounds и точный viewport на
+  отрицательных coordinates, большой доске и после resize sidebar/window.
+- [ ] `TEST-025` Click и drag minimap перемещают камеру в ожидаемую coordinate,
+  сохраняют zoom и не изменяют selection или content.
+- [ ] `TEST-026` При simulated adapter incompatibility Canvas открывается и
+  сохраняется, а отключаются только minimap/Advanced integration capabilities.
 
 ## Порядок реализации
 
 | Этап | Содержание | Результат |
 |---|---|---|
-| M0 | Schema, Canvas adapter, native compatibility, safe fallback, tests | Плагин ничего не ломает и готов хранить local extensions |
-| M1 | Font/size UI без HTML, zoom, theme switch, colors, locks, attachment-title toggle | Ежедневная работа с обычным Canvas уже заметно удобнее |
+| M0 | Plugin shell в `plugins/miro-canvas`, schema, Canvas adapter, optional Advanced adapter, compatibility matrix | Плагин самостоятельно работает поверх native Canvas и ничего не ломает |
+| M1 | Minimap, font/size UI без HTML, zoom, theme switch, colors, locks, attachment-title toggle | Ежедневная работа с обычным Canvas уже заметно удобнее |
 | M2 | Local comments, advanced arrows/anchors, node/shape authoring, documents | Закрыто пользовательское ядро первой версии |
 | M3 | Rotation, z-order, Miro shapes/text/connectors, sticky, frames, slides, media/cards | Импортированные доски отображаются существенно ближе к Miro |
 | M4 | Tables и unsupported widgets | Только после появления доказанного source payload |
@@ -743,21 +823,25 @@ Miro sync не входит в проект; собственный drawing engi
 1. Обычный Canvas без `miroSource` сохраняет hotkeys, Markdown, wikilinks,
    embeds, links, file actions, drag/drop, context menu и undo/redo.
 2. Без плагина любой созданный `.canvas` по-прежнему открывается штатно.
-3. Font family, font size, colors, theme, zoom, lock и attachment names меняются
+3. Плагин полностью загружается и работает без Advanced Canvas; при совместной
+   работе нет двойных controls, конфликтующих patches или потери metadata.
+4. Миникарта показывает весь холст и точный viewport; click/drag перемещают
+   камеру без изменения zoom, selection или content.
+5. Font family, font size, colors, theme, zoom, lock и attachment names меняются
    через понятный UI без ручного HTML или JSON.
-4. Local comments можно создавать, редактировать, удалять, обсуждать и привязывать
+6. Local comments можно создавать, редактировать, удалять, обсуждать и привязывать
    к node, edge, изображению или свободной coordinate.
-5. Edges поддерживают все caps, любой element endpoint, interior/image anchors и
+7. Edges поддерживают все caps, любой element endpoint, interior/image anchors и
    свободные coordinates с валидным plugin-off fallback.
-6. Расширенные nodes и 45 shapes можно не только импортировать, но и создавать и
+8. Расширенные nodes и 45 shapes можно не только импортировать, но и создавать и
    редактировать в Obsidian.
-7. Документы отображаются аккуратно, открываются нативно, а filename можно
+9. Документы отображаются аккуратно, открываются нативно, а filename можно
    показать или скрыть глобально и для отдельной node.
-8. Каждый доступный Miro source object либо отображён, либо имеет явную и
-   проверяемую причину ограничения; canonical JSON и provenance не теряются.
-9. `TEST_BOARD`, все доступные web boards и обычная Canvas fixture проходят
-   structural и real-Obsidian visual/interaction проверки.
-10. Tables, exact connector bends и закрытые Miro internals честно остаются
+10. Каждый доступный Miro source object либо отображён, либо имеет явную и
+    проверяемую причину ограничения; canonical JSON и provenance не теряются.
+11. `TEST_BOARD`, все доступные web boards и обычная Canvas fixture проходят
+    structural и real-Obsidian visual/interaction проверки.
+12. Tables, exact connector bends и закрытые Miro internals честно остаются
     source-limited до появления нового локального export source.
-11. Все основные workflows проходят с отключённой сетью; bundle не содержит
+13. Все основные workflows проходят с отключённой сетью; bundle не содержит
     Miro auth/sync, telemetry или обязательных remote dependencies.
