@@ -1,5 +1,14 @@
 # Miro -> Obsidian Canvas
 
+Проверяемый pipeline для переноса максимально полного публичного JSON доски
+Miro в Obsidian Canvas. Поддерживаемый production-путь объединяет строгий REST
+export, свежий maximum-profile Web SDK export, комментарии и обязательные
+ассеты, а затем вызывает единственный конвертер `Json_2_Canvas/Converter.py`.
+
+Главный принцип: canonical JSON хранит максимум доступной информации и
+provenance. Ограничения Canvas исправляются на уровне конвертера или плагина,
+а не удалением данных из источника.
+
 ## Установка
 
 Проверенная версия среды: Python 3.13. Производственные и тестовые зависимости закреплены отдельно:
@@ -16,9 +25,6 @@ Development, tests and visual regression:
 python -m pip install -r requirements-dev.txt
 python -m playwright install chromium
 ```
-
-Инструментальный набор для переноса досок Miro в Obsidian Advanced Canvas.
-
 Проект сейчас развивается как проверяемый pipeline, а не как один монолитный GUI:
 
 1. Получить данные из Miro через REST, REST comments sidecar, Web SDK exporter или локальный JSON.
@@ -30,6 +36,7 @@ python -m playwright install chromium
 Текущий снимок состояния проекта: [`tasks/current_state.md`](tasks/current_state.md).
 Матрица доступности Miro items: [`tasks/miro_capabilities.md`](tasks/miro_capabilities.md).
 Инвентаризация репозитория: [`tasks/repo_inventory.md`](tasks/repo_inventory.md).
+Фактические различия Miro и Canvas: [`docs/MIRO_VS_CANVAS_DISPLAY_GAPS.md`](docs/MIRO_VS_CANVAS_DISPLAY_GAPS.md).
 
 ## Что уже есть
 
@@ -63,6 +70,7 @@ python -m playwright install chromium
 | `tools/obsidian_oracle/` | Staging/check helpers для реального Obsidian vault | validation tool |
 | `tools/obsidian_plugins/canvas-zoom-unlock/` | Маленький локальный Obsidian plugin для снятия zoom limit | project tool |
 | `tools/miro_websdk_exporter/` | Локальное Miro app/Web SDK приложение для maximum board export/probe | supported complementary source |
+| `docs/` | Проверенные эксплуатационные заметки и backlog расхождений Miro/Canvas | project docs |
 | `tasks/` | LLM-loop правила, problem library, roadmap, capability matrix | project memory |
 | `work/` | Локальный vault, реальные exports и временные canvas outputs | ignored local data |
 | `_obsidian_oracle_vault/` | Локальный oracle vault | ignored local data |
@@ -87,10 +95,18 @@ python scripts\run_regression.py
 python scripts\run_regression.py --skip-render
 ```
 
-Запустить только unit tests:
+Запустить полный Python test suite:
 
 ```powershell
-python -m unittest discover -s tests -v
+python -m pytest -q
+```
+
+Проверить lint и Web SDK serialization contracts:
+
+```powershell
+python -m ruff check .
+node tests\websdk_serialization_smoke.js tools\miro_websdk_exporter\exporter.js
+node tests\websdk_capture_completeness_smoke.js tools\miro_websdk_exporter\exporter.js
 ```
 
 ## Получение данных из Miro через REST
@@ -127,21 +143,26 @@ python scripts\miro_rest_export_board.py `
 
 ## Production pipeline
 
-The supported unattended path is strict REST export:
+Поддерживаемый production-путь строгий и транзакционный:
 
 ```text
 Miro board
-  -> all REST board-item pages + complete comments sidecar
+  -> all REST item pages + complete REST comments
+  +  fresh maximum_board_v1 Web SDK export
+  -> canonical REST + Web SDK union with field-level provenance
   -> required image/document/doc_format assets
-  -> validated REST JSON with provenance and completeness metadata
   -> Json_2_Canvas/Converter.py
-  -> Obsidian .canvas
+  -> validated Obsidian .canvas
 ```
+
+REST-only остаётся рабочим режимом, но maximum production JSON требует свежий
+Web SDK export той же доски.
 
 Run it from CLI:
 
 ```powershell
 python scripts\miro_pipeline.py `
+  --oauth `
   --board-id uXj... `
   --source-json work\MIRO2OBSIDIAN\Miro_2_JSON\board.json `
   --vault-root path\to\ObsidianVault `
@@ -161,6 +182,7 @@ with the Web SDK app's `Export board` action and pass that JSON to the pipeline:
 
 ```powershell
 python scripts\miro_pipeline.py `
+  --oauth `
   --board-id uXj... `
   --websdk-json path\to\websdk-board.json `
   --source-json work\MIRO2OBSIDIAN\Miro_2_JSON\board.json `
@@ -174,7 +196,20 @@ than 60 minutes apart. REST remains authoritative for shared ids, Web SDK fills
 empty fields and contributes Web SDK-only items, and every original source item
 is retained in `source_provenance.original_items`. Required assets introduced by
 the union are downloaded before the canonical bundle is published
-transactionally.
+transactionally. A repeated run replaces only its own previous attachment
+directory, removes stale files and restores the old directory if conversion
+fails.
+
+A successful maximum run requires all of these conditions:
+
+- `completeness.complete: true` and `capture_complete: true`;
+- complete REST items and comments;
+- complete `maximum_board_v1` Web SDK capture for the same board;
+- zero missing required assets;
+- a parseable Canvas with unique node IDs and valid file/edge references.
+
+Display losses that remain after a complete export are tracked separately in
+[`docs/MIRO_VS_CANVAS_DISPLAY_GAPS.md`](docs/MIRO_VS_CANVAS_DISPLAY_GAPS.md).
 
 This is the maximum public-API JSON, not a pixel-perfect Miro backup. Web SDK
 does not expose full details for unsupported items, does not enumerate hidden
@@ -287,6 +322,10 @@ whole URL, replace only `localhost` with `127.0.0.1`, and press Enter while the
 GUI/CLI is still waiting for OAuth. The Miro app can still use the registered
 `http://localhost:8765/callback` redirect URI; this replacement is only for
 delivering the already-issued callback to the local helper.
+
+Do not run the Web SDK static server on port `8765` while CLI/GUI OAuth is
+waiting there. The recommended split is OAuth callback on `8765` and Web SDK
+App URL on `8766`.
 
 Do not commit tokens, client secrets, callback URLs containing `code=...`, or
 local `.env` files.
@@ -470,6 +509,22 @@ Register this versioned App URL in Miro:
 ```text
 http://localhost:8766/index-20260727-complete-json.html
 ```
+
+Recommended port split:
+
+- REST OAuth callback: `http://localhost:8765/callback`;
+- Web SDK App URL: `http://localhost:8766/index-20260727-complete-json.html`.
+
+An existing Miro app whose App URL is already
+`http://localhost:8765/callback` is also supported: start the same server on
+port `8765`. A callback without OAuth `code` is routed to the current exporter,
+and the server listens on both IPv4 and IPv6 loopback. Stop that server before
+running REST OAuth on the same port.
+
+`ERR_CONNECTION_REFUSED` means the configured local server/port is not
+running. A plain Python `404 File not found` means the app opened a route that
+the wrong static server does not handle; use `serve_no_cache.py` and verify the
+exact App URL in Miro Developer settings.
 
 Use `Export board`, not `Export selection`, for a production union. A valid
 board payload declares `capture_profile: "maximum_board_v1"`, records

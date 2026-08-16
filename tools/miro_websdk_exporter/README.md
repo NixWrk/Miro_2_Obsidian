@@ -22,6 +22,31 @@ http://localhost:8766/index-20260727-complete-json.html
    target board's team, and open it from `+ More apps` / `+ More tools`.
 4. Press `Export board` and download the JSON.
 
+The recommended split keeps the Web SDK app on `8766` and the REST OAuth
+callback on `8765`, so both roles cannot intercept each other.
+
+For an existing app already configured with this App URL:
+
+```text
+http://localhost:8765/callback
+```
+
+start the exporter with:
+
+```powershell
+python tools\miro_websdk_exporter\serve_no_cache.py --port 8765
+```
+
+`serve_no_cache.py` routes a callback without OAuth `code` to the current
+versioned exporter and listens on IPv4 plus IPv6 loopback. Stop this server
+before a REST OAuth run that also needs port `8765`.
+
+Troubleshooting:
+
+- `ERR_CONNECTION_REFUSED`: the local server is not running on the App URL port;
+- `404 File not found`: another static server does not know the configured path;
+- app missing from the board: install it in the team that owns that board.
+
 `index.html` and the older `20260611-deep-table` entrypoints are compatibility
 aliases that open the current `20260727-complete-json` panel. The versioned URL
 above is preferred because it makes stale Miro/browser caches visible.
@@ -98,5 +123,6 @@ python scripts\miro_capability_probe.py `
   --websdk-json path\to\websdk-board.json
 ```
 
-The local manifest sketch is `manifest.example.yml`. Keep OAuth callback port
-`8765` separate from the static app server on `8766`.
+The local manifest sketch is `manifest.example.yml`. Prefer OAuth callback
+port `8765` and static App URL port `8766`; callback-mode App URLs on `8765`
+are compatibility-only and must not run concurrently with REST OAuth.
