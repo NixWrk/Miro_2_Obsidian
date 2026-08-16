@@ -68,6 +68,12 @@ python -m playwright install chromium
 
 ## Быстрый старт
 
+Если вы никогда не создавали Miro Developer App, начните с инструкции
+[Подключение собственных досок Miro](docs/MIRO_APP_SETUP.ru.md). Текущая
+одноразовая настройка обычно занимает 10-20 минут и не требует программирования,
+но пока содержит несколько ручных действий в Miro и с локальным сервером. Там
+же записан план мастера, который уберёт terminal setup.
+
 ### Конвертация готового JSON
 
 Этот режим не требует Miro credentials или доступа к сети:
@@ -94,6 +100,10 @@ GUI разделяет четыре сценария:
 - **Existing JSON**: локальная конвертация без обращения к Miro.
 
 ### Максимально полный экспорт
+
+[Инструкция для начинающих](docs/MIRO_APP_SETUP.ru.md) объясняет каждый экран
+Miro, сложность и выигрыш, установку в team, частые ошибки и будущую
+автоматизацию первого запуска.
 
 1. Создайте собственное Miro Developer App в team целевой доски.
 2. Добавьте OAuth redirect URI `http://localhost:8765/callback`.
@@ -186,6 +196,7 @@ Web-renderer служит быстрой диагностикой. Источн�
 ## Документация
 
 - [English documentation index](docs/README.md)
+- [Подключение собственного Miro app](docs/MIRO_APP_SETUP.ru.md)
 - [Web SDK exporter](tools/miro_websdk_exporter/README.md)
 - [Отличия Miro и Canvas](docs/MIRO_VS_CANVAS_DISPLAY_GAPS.ru.md)
 - [Полный план `miro-canvas`](docs/miro-canvas.ru.md)

@@ -4,6 +4,11 @@ Buildless Miro app for capturing the maximum board JSON exposed by the Web SDK.
 It is a complementary source for the canonical REST+Web SDK production union
 and a probe tool for source-limited item families.
 
+If this is your first Miro Developer App, follow the
+[beginner setup guide](../../docs/MIRO_APP_SETUP.md) before using the steps
+below. Normal export needs only `boards:read` and `team:read`; add
+`boards:write` only for an intentional generated-item probe.
+
 ## Install and open
 
 1. Start the no-cache server:

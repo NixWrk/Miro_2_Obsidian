@@ -84,6 +84,11 @@ python -m playwright install chromium
 
 ## Quick start
 
+New to Miro Developer Apps? Start with [Connect your own Miro boards](docs/MIRO_APP_SETUP.md).
+The current one-time setup normally takes 10-20 minutes and requires no coding,
+but it still includes a few manual Miro and local-server steps. The guide also
+defines the planned download-and-run wizard that will remove terminal setup.
+
 ### Convert an existing JSON export
 
 ```powershell
@@ -108,6 +113,10 @@ The GUI supports four explicit workflows:
 - **Existing JSON**: convert a local canonical JSON without contacting Miro.
 
 ### Export maximum public-API data
+
+The [beginner setup guide](docs/MIRO_APP_SETUP.md) explains every Miro screen,
+the difficulty and benefit, team installation, troubleshooting, and which steps
+the future first-run wizard will automate.
 
 1. Create a Miro Developer App in the team that owns the board.
 2. Register `http://localhost:8765/callback` as an OAuth redirect URI.
@@ -219,6 +228,7 @@ excluded by `.gitignore`.
 ## Documentation
 
 - [Documentation index](docs/README.md)
+- [Beginner Miro app setup](docs/MIRO_APP_SETUP.md)
 - [Web SDK exporter](tools/miro_websdk_exporter/README.md)
 - [Miro versus Canvas display gaps](docs/MIRO_VS_CANVAS_DISPLAY_GAPS.md)
 - [`miro-canvas` offline plugin plan](docs/miro-canvas.md)

@@ -8,6 +8,8 @@ translation is not yet available.
 
 - [Project overview and quick start](../README.md)
 - [Russian project overview](../README.ru.md)
+- [Beginner Miro app setup](MIRO_APP_SETUP.md)
+- [Russian beginner setup](MIRO_APP_SETUP.ru.md)
 - [Miro Web SDK exporter](../tools/miro_websdk_exporter/README.md)
 - [Canvas render harness](../tools/canvas_render/README.md)
 - [Real-Obsidian oracle](../tools/obsidian_oracle/README.md)

@@ -176,7 +176,9 @@ class MiroWebsdkExporterAssetTests(unittest.TestCase):
         )
         self.assertIn("Use this URI for SDK authorization", manifest)
         self.assertIn("boards:read", manifest)
-        self.assertIn("boards:write", manifest)
+        self.assertIn("team:read", manifest)
+        self.assertIn("Add boards:write only", manifest)
+        self.assertNotIn("  - boards:write", manifest)
 
     def test_readme_warns_about_team_and_duplicate_apps(self) -> None:
         readme = (EXPORTER_DIR / "README.md").read_text(encoding="utf-8")
@@ -185,6 +187,7 @@ class MiroWebsdkExporterAssetTests(unittest.TestCase):
         self.assertIn("If several", readme)
         self.assertIn("Profile settings", readme)
         self.assertIn("http://localhost:8766/index.html", readme)
+        self.assertIn("../../docs/MIRO_APP_SETUP.md", readme)
         self.assertIn("serve_no_cache.py --port 8766", readme)
         self.assertIn("exporter_version", readme)
         self.assertIn("+ More apps", readme)

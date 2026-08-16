@@ -2,5 +2,5 @@
   "client_id": "<your Miro app client id>",
   "client_secret": "<your Miro app client secret>",
   "redirect_uri": "http://localhost:8765/callback",
-  "scopes": "boards:read boards:write team:read"
+  "scopes": "boards:read team:read"
 }

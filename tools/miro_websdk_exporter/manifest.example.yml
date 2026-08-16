@@ -7,8 +7,8 @@ redirectUris:
 # "Use this URI for SDK authorization" when the app uses both Web SDK and REST.
 scopes:
   - boards:read
-  - boards:write
   - team:read
+# Add boards:write only while intentionally running generated-item probes.
 icons:
   outline: ./icon-outline.svg
   color: ./icon-color.svg
