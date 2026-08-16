@@ -37,6 +37,7 @@ python -m playwright install chromium
 Матрица доступности Miro items: [`tasks/miro_capabilities.md`](tasks/miro_capabilities.md).
 Инвентаризация репозитория: [`tasks/repo_inventory.md`](tasks/repo_inventory.md).
 Фактические различия Miro и Canvas: [`docs/MIRO_VS_CANVAS_DISPLAY_GAPS.md`](docs/MIRO_VS_CANVAS_DISPLAY_GAPS.md).
+Полная спецификация будущего Canvas-плагина: [`docs/miro-canvas.md`](docs/miro-canvas.md).
 
 ## Что уже есть
 
