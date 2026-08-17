@@ -9,9 +9,7 @@ from unittest.mock import patch
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS_DIR = REPO_ROOT / "scripts"
 
-sys.path.insert(0, str(SCRIPTS_DIR))
-
-from miro_list_boards import summarize_boards  # noqa: E402
+from scripts.miro_list_boards import summarize_boards  # noqa: E402
 
 
 class MiroListBoardsTests(unittest.TestCase):
@@ -31,12 +29,12 @@ class MiroListBoardsTests(unittest.TestCase):
         self.assertEqual(summary["by_team"]["<unknown>"], 1)
 
     def test_cli_uses_existing_downloader(self) -> None:
-        import miro_list_boards
+        from scripts import miro_list_boards
 
-        with patch("miro_list_boards.resolve_token_from_args", return_value="token-1"):
-            with patch("miro_list_boards.get_boards", return_value=[{"id": "board-1", "team": {"name": "foto"}}]):
-                with patch("miro_list_boards.write_json") as write_json:
-                    with patch.object(sys, "argv", ["miro_list_boards.py", "--output", "boards.json"]):
+        with patch("scripts.miro_list_boards.resolve_token_from_args", return_value="token-1"):
+            with patch("scripts.miro_list_boards.get_boards", return_value=[{"id": "board-1", "team": {"name": "foto"}}]):
+                with patch("scripts.miro_list_boards.write_json") as write_json:
+                    with patch.object(sys, "argv", ["scripts.miro_list_boards.py", "--output", "boards.json"]):
                         self.assertEqual(miro_list_boards.main(), 0)
 
         write_json.assert_called_once()

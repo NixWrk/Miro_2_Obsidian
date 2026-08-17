@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import argparse
 import shutil
-import sys
 import tempfile
 from pathlib import Path
 
@@ -12,9 +11,7 @@ REPO_ROOT = TOOL_DIR.parents[1]
 FIXTURES_DIR = REPO_ROOT / "tests" / "fixtures"
 CONVERTER_DIR = REPO_ROOT / "Json_2_Canvas"
 
-sys.path.insert(0, str(CONVERTER_DIR))
-
-from Converter import convert_miro_to_canvas  # noqa: E402
+from Json_2_Canvas.Converter import convert_miro_to_canvas  # noqa: E402
 from common import load_config, load_json, vault_path  # noqa: E402
 
 

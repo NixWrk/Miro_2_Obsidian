@@ -8,7 +8,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
-from miro_oauth_token import DEFAULT_AUTHORIZE_URL, DEFAULT_BROWSER, DEFAULT_REDIRECT_URI
+from scripts.miro_oauth_token import DEFAULT_AUTHORIZE_URL, DEFAULT_BROWSER, DEFAULT_REDIRECT_URI
 
 
 DEFAULT_BOARD_NAME = "Miro2Obsidian REST Capability Probe"
@@ -637,7 +637,7 @@ def parse_args() -> argparse.Namespace:
 
 def resolve_token_from_args(args: argparse.Namespace) -> str:
     if args.oauth:
-        from miro_oauth_token import authorize_and_get_token, config_from_env, exchange_manual_authorization
+        from scripts.miro_oauth_token import authorize_and_get_token, config_from_env, exchange_manual_authorization
 
         config = config_from_env(
             client_id_env=args.oauth_client_id_env,

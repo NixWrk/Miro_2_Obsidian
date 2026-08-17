@@ -6,7 +6,7 @@ items focus on packaging, onboarding, and richer offline Canvas editing.
 
 ## Public release
 
-- [ ] Revoke and rotate the historical Miro OAuth credential before changing
+- [x] Revoke and rotate the historical Miro OAuth credential before changing
   the repository visibility.
 - [ ] After switching to public, enable GitHub private vulnerability reporting,
   secret scanning with push protection, and `main` branch protection requiring

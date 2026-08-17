@@ -3,7 +3,6 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -13,9 +12,7 @@ from unittest.mock import patch
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS_DIR = REPO_ROOT / "scripts"
 
-sys.path.insert(0, str(SCRIPTS_DIR))
-
-from obsidian_plugin_setup import (  # noqa: E402
+from scripts.obsidian_plugin_setup import (  # noqa: E402
     ADVANCED_CANVAS_ID,
     ADVANCED_CANVAS_VERSION,
     ZOOM_UNLOCK_ID,
@@ -50,7 +47,7 @@ class ObsidianPluginSetupTests(unittest.TestCase):
             (advanced / "styles.css").write_text("/* installed */\n", encoding="utf-8")
 
             with patch.dict(
-                "obsidian_plugin_setup.ADVANCED_CANVAS_SHA256",
+                "scripts.obsidian_plugin_setup.ADVANCED_CANVAS_SHA256",
                 {ADVANCED_CANVAS_VERSION: runtime_hashes(advanced)},
                 clear=True,
             ):
@@ -82,7 +79,7 @@ class ObsidianPluginSetupTests(unittest.TestCase):
             (source / "styles.css").write_text("/* incompatible */\n", encoding="utf-8")
             vault = root / "vault"
 
-            with patch("obsidian_plugin_setup.ZOOM_UNLOCK_SOURCE", source):
+            with patch("scripts.obsidian_plugin_setup.ZOOM_UNLOCK_SOURCE", source):
                 with self.assertRaisesRegex(
                     RuntimeError, f"manifest version is not {ZOOM_UNLOCK_VERSION}"
                 ):
@@ -109,7 +106,7 @@ class ObsidianPluginSetupTests(unittest.TestCase):
             (source / "styles.css").write_text("/* tampered */\n", encoding="utf-8")
             vault = root / "vault"
 
-            with patch("obsidian_plugin_setup.ZOOM_UNLOCK_SOURCE", source):
+            with patch("scripts.obsidian_plugin_setup.ZOOM_UNLOCK_SOURCE", source):
                 with self.assertRaisesRegex(RuntimeError, "SHA-256 mismatch"):
                     install_zoom_unlock(vault)
 
@@ -129,7 +126,7 @@ class ObsidianPluginSetupTests(unittest.TestCase):
             (root / "vault" / ".obsidian").mkdir(parents=True)
 
             with patch.dict(
-                "obsidian_plugin_setup.ADVANCED_CANVAS_SHA256",
+                "scripts.obsidian_plugin_setup.ADVANCED_CANVAS_SHA256",
                 {ADVANCED_CANVAS_VERSION: runtime_hashes(source)},
                 clear=True,
             ):
@@ -164,7 +161,7 @@ class ObsidianPluginSetupTests(unittest.TestCase):
             (target / "styles.css").write_bytes((source / "styles.css").read_bytes())
 
             with patch.dict(
-                "obsidian_plugin_setup.ADVANCED_CANVAS_SHA256",
+                "scripts.obsidian_plugin_setup.ADVANCED_CANVAS_SHA256",
                 {ADVANCED_CANVAS_VERSION: runtime_hashes(source)},
                 clear=True,
             ):
@@ -190,7 +187,7 @@ class ObsidianPluginSetupTests(unittest.TestCase):
             (source / "main.js").write_text("// tampered\n", encoding="utf-8")
 
             with patch.dict(
-                "obsidian_plugin_setup.ADVANCED_CANVAS_SHA256",
+                "scripts.obsidian_plugin_setup.ADVANCED_CANVAS_SHA256",
                 {ADVANCED_CANVAS_VERSION: expected_hashes},
                 clear=True,
             ):
@@ -246,7 +243,7 @@ class ObsidianPluginSetupTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmp:
             target = Path(tmp) / "main.js"
-            with patch("obsidian_plugin_setup._download", side_effect=fake_download):
+            with patch("scripts.obsidian_plugin_setup._download", side_effect=fake_download):
                 url = download_release_asset(
                     "owner/repo",
                     "6.0.1",
@@ -273,7 +270,7 @@ class ObsidianPluginSetupTests(unittest.TestCase):
                 self.skipTest(f"Hardlinks are unavailable: {exc}")
 
             with patch(
-                "obsidian_plugin_setup._download",
+                "scripts.obsidian_plugin_setup._download",
                 side_effect=lambda _url, path: path.write_bytes(b"asset"),
             ):
                 download_release_asset(
@@ -292,7 +289,7 @@ class ObsidianPluginSetupTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             target = Path(tmp) / "main.js"
             with patch(
-                "obsidian_plugin_setup._download",
+                "scripts.obsidian_plugin_setup._download",
                 side_effect=lambda _url, path: path.write_bytes(b"bad"),
             ):
                 with self.assertRaisesRegex(RuntimeError, "SHA-256 mismatch"):
@@ -329,8 +326,8 @@ class ObsidianPluginSetupTests(unittest.TestCase):
             settings.parent.mkdir(parents=True)
             settings.write_text('{"unexpected": true}', encoding="utf-8")
 
-            with patch("obsidian_plugin_setup.install_advanced_canvas") as advanced:
-                with patch("obsidian_plugin_setup.install_zoom_unlock") as zoom:
+            with patch("scripts.obsidian_plugin_setup.install_advanced_canvas") as advanced:
+                with patch("scripts.obsidian_plugin_setup.install_zoom_unlock") as zoom:
                     with self.assertRaisesRegex(RuntimeError, "JSON array"):
                         setup_obsidian_plugins(vault)
 

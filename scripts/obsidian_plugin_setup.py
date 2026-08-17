@@ -12,7 +12,7 @@ from pathlib import Path
 from threading import Lock
 from typing import Callable
 
-from miro_export_bundle import is_link_or_reparse
+from scripts.miro_export_bundle import is_link_or_reparse
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]

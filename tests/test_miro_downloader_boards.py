@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import sys
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -9,9 +8,7 @@ from unittest.mock import patch
 REPO_ROOT = Path(__file__).resolve().parents[1]
 MIRO_JSON_DIR = REPO_ROOT / "Miro_2_Json"
 
-sys.path.insert(0, str(MIRO_JSON_DIR))
-
-from miro_downloader import get_boards  # noqa: E402
+from Miro_2_Json.miro_downloader import get_boards  # noqa: E402
 
 
 class _Response:
@@ -54,8 +51,8 @@ class MiroDownloaderBoardsTests(unittest.TestCase):
             _Response({"data": [{"id": "board-2", "name": "Two"}], "links": {}}),
         ]
 
-        with patch("miro_downloader.requests.get", side_effect=responses) as request:
-            with patch("miro_downloader.time.sleep"):
+        with patch("Miro_2_Json.miro_downloader.requests.get", side_effect=responses) as request:
+            with patch("Miro_2_Json.miro_downloader.time.sleep"):
                 boards = get_boards("token-1")
 
         self.assertEqual([board["id"] for board in boards], ["board-1", "board-2"])
@@ -73,8 +70,8 @@ class MiroDownloaderBoardsTests(unittest.TestCase):
             _Response({"data": [{"id": "board-2"}], "total": 2, "offset": 1, "size": 1}),
         ]
 
-        with patch("miro_downloader.requests.get", side_effect=responses) as request:
-            with patch("miro_downloader.time.sleep"):
+        with patch("Miro_2_Json.miro_downloader.requests.get", side_effect=responses) as request:
+            with patch("Miro_2_Json.miro_downloader.time.sleep"):
                 boards = get_boards("token-1")
 
         self.assertEqual([board["id"] for board in boards], ["board-1", "board-2"])
@@ -82,7 +79,7 @@ class MiroDownloaderBoardsTests(unittest.TestCase):
 
     def test_get_boards_fails_when_total_requires_progress_but_page_is_empty(self) -> None:
         response = _Response({"data": [], "total": 1, "offset": 0, "size": 0})
-        with patch("miro_downloader.requests.get", return_value=response):
+        with patch("Miro_2_Json.miro_downloader.requests.get", return_value=response):
             with self.assertRaisesRegex(RuntimeError, "made no progress"):
                 get_boards("token-1")
 
@@ -91,8 +88,8 @@ class MiroDownloaderBoardsTests(unittest.TestCase):
             _Response({}, status_code=429, headers={"Retry-After": "0"}),
             _Response({"data": [{"id": "board-1"}], "total": 1, "offset": 0, "size": 1}),
         ]
-        with patch("miro_downloader.requests.get", side_effect=responses) as request:
-            with patch("miro_downloader.time.sleep"):
+        with patch("Miro_2_Json.miro_downloader.requests.get", side_effect=responses) as request:
+            with patch("Miro_2_Json.miro_downloader.time.sleep"):
                 boards = get_boards("token-1")
 
         self.assertEqual([board["id"] for board in boards], ["board-1"])
@@ -100,13 +97,13 @@ class MiroDownloaderBoardsTests(unittest.TestCase):
 
     def test_get_boards_rejects_offset_that_does_not_match_request(self) -> None:
         response = _Response({"data": [{"id": "board-1"}], "total": 1, "offset": 1, "size": 1})
-        with patch("miro_downloader.requests.get", return_value=response):
+        with patch("Miro_2_Json.miro_downloader.requests.get", return_value=response):
             with self.assertRaisesRegex(RuntimeError, "offset does not match"):
                 get_boards("token-1")
 
     def test_get_boards_rejects_boolean_pagination_metadata(self) -> None:
         response = _Response({"data": [{"id": "board-1"}], "total": True, "offset": 0, "size": 1})
-        with patch("miro_downloader.requests.get", return_value=response):
+        with patch("Miro_2_Json.miro_downloader.requests.get", return_value=response):
             with self.assertRaisesRegex(RuntimeError, "malformed total"):
                 get_boards("token-1")
     def test_get_boards_rejects_cross_origin_next_before_sending_token(self) -> None:
@@ -117,8 +114,8 @@ class MiroDownloaderBoardsTests(unittest.TestCase):
             }
         )
 
-        with patch("miro_downloader.requests.get", return_value=response) as request:
-            with patch("miro_downloader.time.sleep"):
+        with patch("Miro_2_Json.miro_downloader.requests.get", return_value=response) as request:
+            with patch("Miro_2_Json.miro_downloader.time.sleep"):
                 with self.assertRaisesRegex(RuntimeError, "left api.miro.com"):
                     get_boards("secret-token")
 

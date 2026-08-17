@@ -6,7 +6,6 @@ import json
 import os
 import re
 import shutil
-import sys
 import tempfile
 from collections import Counter
 from pathlib import Path
@@ -20,10 +19,8 @@ ORACLE_DIR = REPO_ROOT / "tools" / "obsidian_oracle"
 DEFAULT_SAMPLE_ROOT = REPO_ROOT / "work"
 DEFAULT_OUT_DIR = RENDER_DIR / ".out" / "local_samples"
 
-sys.path.insert(0, str(CONVERTER_DIR))
-
-from Converter import convert_miro_to_canvas  # noqa: E402
-from Scale_engine import (  # noqa: E402
+from Json_2_Canvas.Converter import convert_miro_to_canvas  # noqa: E402
+from Json_2_Canvas.Scale_engine import (  # noqa: E402
     DEFAULT_FIT_MARGIN,
     OBSIDIAN_FONT_SIZE,
     ViewProfile,
@@ -213,7 +210,6 @@ def resolve_scale(sample_json: Path, explicit_scale: float | None, profile: View
 
 
 def oracle_target(sample_key: str) -> tuple[Path, Path]:
-    sys.path.insert(0, str(ORACLE_DIR))
     from common import load_config, vault_path  # noqa: WPS433
 
     config = load_config()
@@ -229,7 +225,6 @@ def oracle_target(sample_key: str) -> tuple[Path, Path]:
 
 
 def render_canvas(canvas_path: Path, screenshot_path: Path, *, fit_viewport: bool) -> None:
-    sys.path.insert(0, str(RENDER_DIR))
     from capture_fixture import capture_canvas  # noqa: WPS433
 
     capture_canvas(canvas_path, screenshot_path, fit_viewport=fit_viewport)

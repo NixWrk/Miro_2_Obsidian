@@ -19,14 +19,14 @@ python -m playwright install chromium
 ## Before submitting a change
 
 ```powershell
-python -m compileall -q Json_2_Canvas Miro_2_Json scripts tools tests Miro_2_Obsidian_GUI.py
-python -m ruff check Json_2_Canvas Miro_2_Json scripts tools tests Miro_2_Obsidian_GUI.py
+python -m compileall -q Json_2_Canvas Miro_2_Json miro2obsidian scripts tools tests Miro_2_Obsidian_GUI.py
+python -m ruff check Json_2_Canvas Miro_2_Json miro2obsidian scripts tools tests Miro_2_Obsidian_GUI.py
 python -m pytest -q
 node tests\websdk_serialization_smoke.js tools\miro_websdk_exporter\exporter.js
 node tests\websdk_capture_completeness_smoke.js tools\miro_websdk_exporter\exporter.js
 ```
 
-Run `python scripts\run_regression.py` when a change affects conversion or
+Run `python -m scripts.run_regression` when a change affects conversion or
 rendering.
 
 ## Converter changes
@@ -36,7 +36,8 @@ fixture in `tests/fixtures/<case_name>/`:
 
 - `input.miro.json` with only the source data needed to reproduce the case;
 - `case.json` with structural, semantic, or geometry assertions;
-- `notes.md` explaining the rule and expected result;
+-
+otes.md` explaining the rule and expected result;
 - a visual baseline only when the behavior cannot be asserted reliably in JSON.
 
 Do not add complete private board exports as fixtures. Remove unrelated content,

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import sys
 import unittest
 from pathlib import Path
 
@@ -8,9 +7,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS_DIR = REPO_ROOT / "scripts"
 
-sys.path.insert(0, str(SCRIPTS_DIR))
-
-from miro_rest_probe_board import (  # noqa: E402
+from scripts.miro_rest_probe_board import (  # noqa: E402
     REST_CONNECTOR_CAPS,
     REST_CONNECTOR_SHAPES,
     REST_SHAPE_TYPES,

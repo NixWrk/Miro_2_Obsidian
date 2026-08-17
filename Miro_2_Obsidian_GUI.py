@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import os
 import re
-import sys
 import threading
 from dataclasses import dataclass
 from pathlib import Path
@@ -19,19 +18,15 @@ CONVERTER_DIR = REPO_ROOT / "Json_2_Canvas"
 DEFAULT_EXPORT_ROOT = Path.home() / "Documents" / "Miro 2 Obsidian"
 BOARD_LIST_ENV = "MIRO_BOARD_LIST"
 
-sys.path.insert(0, str(SCRIPTS_DIR))
-sys.path.insert(0, str(MIRO_JSON_DIR))
-sys.path.insert(0, str(CONVERTER_DIR))
-
-from Scale_engine import ViewProfile  # noqa: E402
-from miro_downloader import get_boards  # noqa: E402
-from miro_oauth_token import authorize_and_get_token, callback_recovery_hint, config_from_env  # noqa: E402
-from miro_pipeline import (  # noqa: E402
+from Json_2_Canvas.Scale_engine import ViewProfile  # noqa: E402
+from Miro_2_Json.miro_downloader import get_boards  # noqa: E402
+from scripts.miro_oauth_token import authorize_and_get_token, callback_recovery_hint, config_from_env  # noqa: E402
+from miro2obsidian.application import (  # noqa: E402
     pipeline_result_is_degraded,
     run_existing_json_pipeline,
     run_rest_experimental_pipeline,
 )
-from obsidian_vault_settings import resolve_vault_paths  # noqa: E402
+from scripts.obsidian_vault_settings import resolve_vault_paths  # noqa: E402
 
 
 ACCOUNT_SOURCE_MODE = "Miro account"
@@ -687,6 +682,10 @@ class MiroPipelineApp(ctk.CTk):
         threading.Thread(target=worker, daemon=True).start()
 
 
-if __name__ == "__main__":
+def main() -> None:
     app = MiroPipelineApp()
     app.mainloop()
+
+
+if __name__ == "__main__":
+    main()

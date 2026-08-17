@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -10,9 +9,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS_DIR = REPO_ROOT / "scripts"
 
-sys.path.insert(0, str(SCRIPTS_DIR))
-
-from obsidian_vault_settings import find_vault_root, resolve_vault_paths  # noqa: E402
+from scripts.obsidian_vault_settings import find_vault_root, resolve_vault_paths  # noqa: E402
 
 
 class ObsidianVaultSettingsTests(unittest.TestCase):

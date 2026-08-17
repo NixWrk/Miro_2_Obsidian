@@ -132,8 +132,8 @@ by Git. Environment variables are preferable for automation.
 Install runtime dependencies and start the desktop application:
 
 ```powershell
-python -m pip install -r requirements.txt
-python Miro_2_Obsidian_GUI.py
+python -m pip install .
+miro2obsidian-gui
 ```
 
 Choose **Miro account** and select **Authenticate / refresh**. The browser opens
@@ -159,7 +159,7 @@ Then:
 4. Select **Export board**, not **Export selection**.
 5. Keep the downloaded JSON. It must be from the same board and close in time to
    the REST export.
-6. Pass it to `scripts/miro_pipeline.py` with `--websdk-json` as shown in the
+6. Pass it to `miro2obsidian` with `--websdk-json` as shown in the
    project [README](../README.md#export-maximum-public-api-data).
 
 The current Web SDK download is a manual bridge. The planned local companion

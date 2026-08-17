@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import os
-import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -10,9 +9,8 @@ from unittest.mock import patch
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(REPO_ROOT / "Json_2_Canvas"))
 
-from Converter import (  # noqa: E402
+from Json_2_Canvas.Converter import (  # noqa: E402
     cleanup_sources,
     convert_miro_to_canvas,
     ensure_move_attachments,
@@ -350,7 +348,7 @@ class ConverterFileSafetyTests(unittest.TestCase):
             (sidecar / "asset.bin").write_bytes(b"new")
 
             with patch(
-                "Converter._convert_miro_to_canvas_impl",
+                "Json_2_Canvas.Converter._convert_miro_to_canvas_impl",
                 side_effect=RuntimeError("simulated conversion failure"),
             ):
                 with self.assertRaisesRegex(RuntimeError, "simulated"):

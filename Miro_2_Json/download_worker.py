@@ -10,18 +10,15 @@
 """
 
 import re
-import sys
 from glob import escape as glob_escape
 from pathlib import Path
 from typing import Callable, Optional
 from urllib.parse import urlsplit
 
 SCRIPTS_DIR = Path(__file__).resolve().parents[1] / "scripts"
-if str(SCRIPTS_DIR) not in sys.path:
-    sys.path.insert(0, str(SCRIPTS_DIR))
 
-from miro_rest_export_board import export_complete_board_source  # noqa: E402
-from miro_downloader import (  # noqa: E402
+from scripts.miro_rest_export_board import export_complete_board_source  # noqa: E402
+from Miro_2_Json.miro_downloader import (  # noqa: E402
     get_items_on_board,
     download_all,
     download_resource_with_redirect,
@@ -30,7 +27,7 @@ from miro_downloader import (  # noqa: E402
     write_json,
     _dedupe_miro_items,
 )
-from utils import (  # noqa: E402
+from Miro_2_Json.utils import (  # noqa: E402
     compute_target_filename,
     make_unique_in_batch,
     allocate_unique_batch_names,

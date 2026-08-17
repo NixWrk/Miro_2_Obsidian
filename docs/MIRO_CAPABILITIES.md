@@ -119,21 +119,22 @@ Deep Web SDK table diagnostics on 2026-06-11 confirmed the same limitation. Expo
 Before adding a new converter rule for a Miro item family, compare available export surfaces:
 
 ```powershell
-python scripts\miro_capability_probe.py --rest-json path\to\rest.json
-python scripts\miro_capability_probe.py --rest-json path\to\rest.json --websdk-json path\to\websdk.json
-python scripts\miro_capability_probe.py --rest-json path\to\rest.json --websdk-json path\to\websdk.json --format json --output capability_report.json
+python -m scripts.miro_capability_probe --rest-json path\to\rest.json
+python -m scripts.miro_capability_probe --rest-json path\to\rest.json --websdk-json path\to\websdk.json
+python -m scripts.miro_capability_probe --rest-json path\to\rest.json --websdk-json path\to\websdk.json --format json --output capability_report.json
 ```
 
 The report marks:
 
 - `websdk_export_candidate` when a type appears in Web SDK export but not REST.
 - `converter_candidate` when REST exposes placeable/contentful items that the converter still drops.
-- `source_limited`, `needs_probe`, or `separate_source` when the missing content should not become a converter bug yet.
+- `source_limited`,
+eeds_probe`, or `separate_source` when the missing content should not become a converter bug yet.
 
 To prepare a generated REST probe board without touching Miro:
 
 ```powershell
-python scripts\miro_rest_generate_probe_board.py --output rest_probe_manifest.json
+python -m scripts.miro_rest_generate_probe_board --output rest_probe_manifest.json
 ```
 
 To execute the manifest later, use your own Miro Developer App. Either set a
@@ -142,8 +143,8 @@ To execute the manifest later, use your own Miro Developer App. Either set a
 `--board-id` points at an existing board:
 
 ```powershell
-python scripts\miro_rest_generate_probe_board.py --execute --output rest_probe_result.json
-python scripts\miro_rest_generate_probe_board.py --execute --board-id <board_id> --output rest_probe_result.json
+python -m scripts.miro_rest_generate_probe_board --execute --output rest_probe_result.json
+python -m scripts.miro_rest_generate_probe_board --execute --board-id <board_id> --output rest_probe_result.json
 ```
 
 With `--oauth`, the local callback defaults to `http://localhost:8765/callback` and the helper opens the system browser. Use `--oauth-browser yandex` or an executable path for an explicit browser. Register the exact redirect URI in the Miro app; `localhost` and `127.0.0.1` are different values for Miro OAuth.
@@ -163,7 +164,7 @@ complete board capture and are rejected by the production merge.
 The normal maximum pipeline is:
 
 ```powershell
-python scripts\miro_pipeline.py `
+miro2obsidian `
   --board-id <board_id> `
   --websdk-json path\to\websdk-board.json `
   --source-json path\to\canonical-board.json `
@@ -182,7 +183,7 @@ The standalone merge CLI remains useful when a strict REST JSON and all needed
 asset files already exist:
 
 ```powershell
-python scripts\merge_miro_sources.py `
+python -m scripts.merge_miro_sources `
   --board-id <board_id> `
   --rest-json path\to\rest.json `
   --websdk-json path\to\websdk-board.json `
@@ -198,8 +199,8 @@ recovered widget content.
 The source-expansion workflow remains available for reports and fixture work:
 
 ```powershell
-python scripts\miro_source_expansion_workflow.py plan --output-dir work\source_expansion
-python scripts\miro_source_expansion_workflow.py analyze --rest-json path\to\rest.json --websdk-json path\to\websdk-board.json --output-dir work\source_expansion
+python -m scripts.miro_source_expansion_workflow plan --output-dir work\source_expansion
+python -m scripts.miro_source_expansion_workflow analyze --rest-json path\to\rest.json --websdk-json path\to\websdk-board.json --output-dir work\source_expansion
 ```
 ## Missing-item audit policy
 

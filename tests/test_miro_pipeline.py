@@ -10,16 +10,10 @@ from pathlib import Path
 from unittest.mock import patch
 
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
-SCRIPTS_DIR = REPO_ROOT / "scripts"
-CONVERTER_DIR = REPO_ROOT / "Json_2_Canvas"
-
-sys.path.insert(0, str(CONVERTER_DIR))
-sys.path.insert(0, str(SCRIPTS_DIR))
-
-import miro_pipeline  # noqa: E402
-from Scale_engine import ViewProfile  # noqa: E402
-from miro_pipeline import (  # noqa: E402
+from miro2obsidian import application
+from scripts import miro_pipeline
+from Json_2_Canvas.Scale_engine import ViewProfile  # noqa: E402
+from miro2obsidian.application import (
     resolve_scale,
     run_existing_json_pipeline,
     run_rest_experimental_pipeline,
@@ -123,7 +117,7 @@ class MiroPipelineTests(unittest.TestCase):
             source.write_text('{"items": [], "x": NaN}', encoding="utf-8")
 
             with self.assertRaisesRegex(ValueError, "Existing JSON cannot be read"):
-                miro_pipeline.inspect_existing_source(source)
+                application.inspect_existing_source(source)
 
     def test_canonical_existing_source_uses_canonical_completeness_sections(self) -> None:
         payload = {
@@ -142,8 +136,8 @@ class MiroPipelineTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             source = Path(tmp) / "canonical.json"
             source.write_text(json.dumps(payload), encoding="utf-8")
-            with patch("miro_pipeline.validate_canonical_export") as validate:
-                loaded, completeness = miro_pipeline.inspect_existing_source(source)
+            with patch("miro2obsidian.application.validate_canonical_export") as validate:
+                loaded, completeness = application.inspect_existing_source(source)
 
         validate.assert_called_once_with(payload, max_age_hours=-1)
         self.assertEqual(loaded, payload)
@@ -163,15 +157,15 @@ class MiroPipelineTests(unittest.TestCase):
             expected_canvas = target_dir / "board.canvas"
             with (
                 patch(
-                    "miro_pipeline.export_complete_board_source",
+                    "miro2obsidian.application.export_complete_board_source",
                     return_value=complete_source_export(items, comments),
                 ) as export,
                 patch(
-                    "miro_pipeline.resolve_scale",
+                    "miro2obsidian.application.resolve_scale",
                     return_value=(0.5, {"scale_source": "auto"}),
                 ) as scale,
                 patch(
-                    "miro_pipeline.convert_miro_to_canvas",
+                    "miro2obsidian.application.convert_miro_to_canvas",
                     return_value=str(expected_canvas),
                 ) as convert,
             ):
@@ -239,24 +233,24 @@ class MiroPipelineTests(unittest.TestCase):
             websdk_json = root / "websdk.json"
             with (
                 patch(
-                    "miro_pipeline.export_complete_board_source",
+                    "miro2obsidian.application.export_complete_board_source",
                     return_value=(rest_payload, rest_info),
                 ) as export,
                 patch(
-                    "miro_pipeline.load_json",
+                    "miro2obsidian.application.load_json",
                     return_value={"source_surface": "web_sdk"},
                 ) as load,
-                patch("miro_pipeline.merge_sources", return_value=merged) as merge,
+                patch("miro2obsidian.application.merge_sources", return_value=merged) as merge,
                 patch(
-                    "miro_pipeline.finalize_merged_export",
+                    "miro2obsidian.application.finalize_merged_export",
                     return_value=canonical,
                 ) as finalize,
                 patch(
-                    "miro_pipeline.resolve_scale",
+                    "miro2obsidian.application.resolve_scale",
                     return_value=(1.0, {"scale_source": "auto"}),
                 ),
                 patch(
-                    "miro_pipeline.convert_miro_to_canvas",
+                    "miro2obsidian.application.convert_miro_to_canvas",
                     return_value=str(root / "board.canvas"),
                 ),
             ):
@@ -300,16 +294,16 @@ class MiroPipelineTests(unittest.TestCase):
             source_json.write_text("previous-canonical", encoding="utf-8")
             with (
                 patch(
-                    "miro_pipeline.export_complete_board_source",
+                    "miro2obsidian.application.export_complete_board_source",
                     side_effect=export_to_stage,
                 ),
-                patch("miro_pipeline.load_json", return_value={}),
+                patch("miro2obsidian.application.load_json", return_value={}),
                 patch(
-                    "miro_pipeline.merge_sources",
+                    "miro2obsidian.application.merge_sources",
                     side_effect=ValueError("Web SDK board mismatch"),
                 ),
-                patch("miro_pipeline.setup_obsidian_plugins") as plugins,
-                patch("miro_pipeline.convert_miro_to_canvas") as convert,
+                patch("miro2obsidian.application.setup_obsidian_plugins") as plugins,
+                patch("miro2obsidian.application.convert_miro_to_canvas") as convert,
             ):
                 with self.assertRaisesRegex(ValueError, "board mismatch"):
                     run_rest_experimental_pipeline(
@@ -331,8 +325,8 @@ class MiroPipelineTests(unittest.TestCase):
 
     def test_websdk_union_rejects_degraded_asset_mode_before_side_effects(self) -> None:
         with (
-            patch("miro_pipeline.export_complete_board_source") as export,
-            patch("miro_pipeline.setup_obsidian_plugins") as plugins,
+            patch("miro2obsidian.application.export_complete_board_source") as export,
+            patch("miro2obsidian.application.setup_obsidian_plugins") as plugins,
         ):
             with self.assertRaisesRegex(ValueError, "diagnostic-only"):
                 run_rest_experimental_pipeline(
@@ -355,15 +349,15 @@ class MiroPipelineTests(unittest.TestCase):
             root = Path(tmp)
             with (
                 patch(
-                    "miro_pipeline.export_complete_board_source",
+                    "miro2obsidian.application.export_complete_board_source",
                     return_value=complete_source_export(items, complete=False),
                 ) as export,
                 patch(
-                    "miro_pipeline.resolve_scale",
+                    "miro2obsidian.application.resolve_scale",
                     return_value=(1.0, {"scale_source": "auto"}),
                 ),
                 patch(
-                    "miro_pipeline.convert_miro_to_canvas",
+                    "miro2obsidian.application.convert_miro_to_canvas",
                     return_value=str(root / "out.canvas"),
                 ),
             ):
@@ -379,22 +373,22 @@ class MiroPipelineTests(unittest.TestCase):
 
         self.assertTrue(export.call_args.kwargs["allow_missing_assets"])
         self.assertFalse(result.completeness["complete"])
-        self.assertTrue(miro_pipeline.pipeline_result_is_degraded(result))
+        self.assertTrue(application.pipeline_result_is_degraded(result))
 
     def test_stable_items_switches_rest_items_mode(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             with (
                 patch(
-                    "miro_pipeline.export_complete_board_source",
+                    "miro2obsidian.application.export_complete_board_source",
                     return_value=complete_source_export([]),
                 ) as export,
                 patch(
-                    "miro_pipeline.resolve_scale",
+                    "miro2obsidian.application.resolve_scale",
                     return_value=(1.0, {"scale_source": "auto"}),
                 ),
                 patch(
-                    "miro_pipeline.convert_miro_to_canvas",
+                    "miro2obsidian.application.convert_miro_to_canvas",
                     return_value=str(root / "out.canvas"),
                 ),
             ):
@@ -414,10 +408,10 @@ class MiroPipelineTests(unittest.TestCase):
             root = Path(tmp)
             with (
                 patch(
-                    "miro_pipeline.export_complete_board_source",
+                    "miro2obsidian.application.export_complete_board_source",
                     side_effect=RuntimeError("Asset validation incomplete"),
                 ),
-                patch("miro_pipeline.convert_miro_to_canvas") as convert,
+                patch("miro2obsidian.application.convert_miro_to_canvas") as convert,
             ):
                 with self.assertRaisesRegex(
                     RuntimeError, "Asset validation incomplete"
@@ -437,17 +431,17 @@ class MiroPipelineTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             with (
-                patch("miro_pipeline.setup_obsidian_plugins") as plugins,
+                patch("miro2obsidian.application.setup_obsidian_plugins") as plugins,
                 patch(
-                    "miro_pipeline.export_complete_board_source",
+                    "miro2obsidian.application.export_complete_board_source",
                     return_value=complete_source_export([]),
                 ),
                 patch(
-                    "miro_pipeline.resolve_scale",
+                    "miro2obsidian.application.resolve_scale",
                     return_value=(1.0, {"scale_source": "auto"}),
                 ),
                 patch(
-                    "miro_pipeline.convert_miro_to_canvas",
+                    "miro2obsidian.application.convert_miro_to_canvas",
                     return_value=str(root / "out.canvas"),
                 ),
             ):
@@ -473,13 +467,13 @@ class MiroPipelineTests(unittest.TestCase):
                 json.dumps(verified_existing_source()), encoding="utf-8"
             )
             with (
-                patch("miro_pipeline.setup_obsidian_plugins") as plugins,
+                patch("miro2obsidian.application.setup_obsidian_plugins") as plugins,
                 patch(
-                    "miro_pipeline.resolve_scale",
+                    "miro2obsidian.application.resolve_scale",
                     return_value=(0.75, {"scale_source": "auto"}),
                 ),
                 patch(
-                    "miro_pipeline.convert_miro_to_canvas",
+                    "miro2obsidian.application.convert_miro_to_canvas",
                     return_value=str(expected_canvas),
                 ) as convert,
             ):
@@ -518,8 +512,8 @@ class MiroPipelineTests(unittest.TestCase):
             canvas.write_bytes(b"existing-canvas")
 
             with (
-                patch("miro_pipeline.setup_obsidian_plugins") as plugins,
-                patch("miro_pipeline.convert_miro_to_canvas") as convert,
+                patch("miro2obsidian.application.setup_obsidian_plugins") as plugins,
+                patch("miro2obsidian.application.convert_miro_to_canvas") as convert,
             ):
                 with self.assertRaisesRegex(ValueError, "incomplete or unverified"):
                     run_existing_json_pipeline(
@@ -538,7 +532,7 @@ class MiroPipelineTests(unittest.TestCase):
             root = Path(tmp)
             source_json = root / "board.json"
             source_json.write_text("[]", encoding="utf-8")
-            with patch("miro_pipeline.convert_miro_to_canvas") as convert:
+            with patch("miro2obsidian.application.convert_miro_to_canvas") as convert:
                 with self.assertRaisesRegex(ValueError, "verified REST or canonical"):
                     run_existing_json_pipeline(
                         source_json=source_json,
@@ -556,9 +550,9 @@ class MiroPipelineTests(unittest.TestCase):
             source_json.write_text("[]", encoding="utf-8")
             expected_canvas = root / "target" / "board.canvas"
             with (
-                patch("miro_pipeline.resolve_scale", return_value=(1.0, {})),
+                patch("miro2obsidian.application.resolve_scale", return_value=(1.0, {})),
                 patch(
-                    "miro_pipeline.convert_miro_to_canvas",
+                    "miro2obsidian.application.convert_miro_to_canvas",
                     return_value=str(expected_canvas),
                 ) as convert,
             ):
@@ -570,7 +564,7 @@ class MiroPipelineTests(unittest.TestCase):
                 )
 
             convert.assert_called_once()
-            self.assertTrue(miro_pipeline.pipeline_result_is_degraded(result))
+            self.assertTrue(application.pipeline_result_is_degraded(result))
             self.assertFalse(result.completeness["verified"])
             self.assertTrue(any("WARNING" in message for message in result.messages))
 
@@ -581,7 +575,7 @@ class MiroPipelineTests(unittest.TestCase):
             target_dir = root / "target"
             vault_root = root / "vault"
             attachment_dir = vault_root / "Files" / "Attachments"
-            expected = miro_pipeline.PipelineResult(
+            expected = application.PipelineResult(
                 source_json=source_json,
                 canvas_path=target_dir / "board.canvas",
                 item_count=0,
@@ -592,7 +586,7 @@ class MiroPipelineTests(unittest.TestCase):
             )
 
             argv = [
-                "miro_pipeline.py",
+                "miro2obsidian.application.py",
                 "--existing-json",
                 "--source-json",
                 str(source_json),
@@ -606,12 +600,12 @@ class MiroPipelineTests(unittest.TestCase):
             with (
                 patch.object(sys, "argv", argv),
                 patch(
-                    "miro_pipeline.resolve_attachment_dir", return_value=attachment_dir
+                    "scripts.miro_pipeline.resolve_attachment_dir", return_value=attachment_dir
                 ),
-                patch("miro_pipeline.resolve_token_from_args") as auth,
-                patch("miro_pipeline.run_rest_experimental_pipeline") as rest,
+                patch("scripts.miro_pipeline.resolve_token_from_args") as auth,
+                patch("miro2obsidian.application.run_rest_experimental_pipeline") as rest,
                 patch(
-                    "miro_pipeline.run_existing_json_pipeline", return_value=expected
+                    "miro2obsidian.application.run_existing_json_pipeline", return_value=expected
                 ) as existing,
             ):
                 result = miro_pipeline.main()
@@ -631,7 +625,7 @@ class MiroPipelineTests(unittest.TestCase):
             target_dir = root / "target"
             vault_root = root / "vault"
             attachment_dir = vault_root / "Files" / "Attachments"
-            expected = miro_pipeline.PipelineResult(
+            expected = application.PipelineResult(
                 source_json=source_json,
                 canvas_path=target_dir / "board.canvas",
                 item_count=1,
@@ -642,7 +636,7 @@ class MiroPipelineTests(unittest.TestCase):
             )
 
             argv = [
-                "miro_pipeline.py",
+                "miro2obsidian.application.py",
                 "--board-id",
                 "board-1",
                 "--source-json",
@@ -656,11 +650,11 @@ class MiroPipelineTests(unittest.TestCase):
             with (
                 patch.object(sys, "argv", argv),
                 patch(
-                    "miro_pipeline.resolve_attachment_dir", return_value=attachment_dir
+                    "scripts.miro_pipeline.resolve_attachment_dir", return_value=attachment_dir
                 ),
-                patch("miro_pipeline.resolve_token_from_args", return_value="token-1"),
+                patch("scripts.miro_pipeline.resolve_token_from_args", return_value="token-1"),
                 patch(
-                    "miro_pipeline.run_rest_experimental_pipeline",
+                    "miro2obsidian.application.run_rest_experimental_pipeline",
                     return_value=expected,
                 ) as rest,
             ):
@@ -674,7 +668,7 @@ class MiroPipelineTests(unittest.TestCase):
             root = Path(tmp)
             source_json = root / "board.json"
             websdk_json = root / "websdk.json"
-            expected = miro_pipeline.PipelineResult(
+            expected = application.PipelineResult(
                 source_json=source_json,
                 canvas_path=root / "board.canvas",
                 item_count=1,
@@ -684,7 +678,7 @@ class MiroPipelineTests(unittest.TestCase):
                 messages=[],
             )
             argv = [
-                "miro_pipeline.py",
+                "miro2obsidian.application.py",
                 "--board-id",
                 "board-1",
                 "--source-json",
@@ -698,10 +692,10 @@ class MiroPipelineTests(unittest.TestCase):
             ]
             with (
                 patch.object(sys, "argv", argv),
-                patch("miro_pipeline.resolve_attachment_dir", return_value=None),
-                patch("miro_pipeline.resolve_token_from_args", return_value="token-1"),
+                patch("scripts.miro_pipeline.resolve_attachment_dir", return_value=None),
+                patch("scripts.miro_pipeline.resolve_token_from_args", return_value="token-1"),
                 patch(
-                    "miro_pipeline.run_rest_experimental_pipeline",
+                    "miro2obsidian.application.run_rest_experimental_pipeline",
                     return_value=expected,
                 ) as rest,
             ):
@@ -733,7 +727,7 @@ class MiroPipelineTests(unittest.TestCase):
                 advanced_canvas_version="6.0.1",
             )
             parser = Namespace(parse_args=lambda: args)
-            degraded = miro_pipeline.PipelineResult(
+            degraded = application.PipelineResult(
                 source_json=args.source_json,
                 canvas_path=args.target_dir / "board.canvas",
                 item_count=1,
@@ -744,13 +738,13 @@ class MiroPipelineTests(unittest.TestCase):
                 completeness={"complete": False, "assets": {"complete": False}},
             )
             with (
-                patch("miro_pipeline.build_parser", return_value=parser),
+                patch("scripts.miro_pipeline.build_parser", return_value=parser),
                 patch(
-                    "miro_pipeline.view_profile_from_args", return_value=ViewProfile()
+                    "scripts.miro_pipeline.view_profile_from_args", return_value=ViewProfile()
                 ),
-                patch("miro_pipeline.resolve_token_from_args", return_value="token-1"),
+                patch("scripts.miro_pipeline.resolve_token_from_args", return_value="token-1"),
                 patch(
-                    "miro_pipeline.run_rest_experimental_pipeline",
+                    "miro2obsidian.application.run_rest_experimental_pipeline",
                     return_value=degraded,
                 ),
             ):
@@ -759,7 +753,7 @@ class MiroPipelineTests(unittest.TestCase):
         self.assertEqual(result, 2)
 
     def test_pipeline_result_without_export_completeness_is_not_degraded(self) -> None:
-        existing = miro_pipeline.PipelineResult(
+        existing = application.PipelineResult(
             source_json=Path("source.json"),
             canvas_path=Path("board.canvas"),
             item_count=0,
@@ -769,7 +763,7 @@ class MiroPipelineTests(unittest.TestCase):
             messages=[],
         )
 
-        self.assertFalse(miro_pipeline.pipeline_result_is_degraded(existing))
+        self.assertFalse(application.pipeline_result_is_degraded(existing))
 
     def test_resolve_scale_uses_scale_engine_for_auto_scale(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -778,7 +772,7 @@ class MiroPipelineTests(unittest.TestCase):
             profile = ViewProfile(scale_mode="readable")
 
             with patch(
-                "miro_pipeline.compute_scale_preview",
+                "miro2obsidian.application.compute_scale_preview",
                 return_value={"scale": 0.25, "context": {"scale_mode": "readable"}},
             ) as preview:
                 scale, context = resolve_scale(
@@ -790,7 +784,7 @@ class MiroPipelineTests(unittest.TestCase):
         preview.assert_called_once_with(str(source_json), profile, 18)
 
     def test_resolve_scale_accepts_explicit_scale_without_reading_json(self) -> None:
-        with patch("miro_pipeline.compute_scale_preview") as preview:
+        with patch("miro2obsidian.application.compute_scale_preview") as preview:
             scale, context = resolve_scale(
                 Path("missing.json"), explicit_scale=2.0, profile=ViewProfile()
             )
@@ -800,7 +794,7 @@ class MiroPipelineTests(unittest.TestCase):
         preview.assert_not_called()
 
     def test_resolve_scale_rejects_nonpositive_and_nonfinite_values(self) -> None:
-        with patch("miro_pipeline.compute_scale_preview") as preview:
+        with patch("miro2obsidian.application.compute_scale_preview") as preview:
             for value in (0, -1, float("nan"), float("inf")):
                 with self.subTest(scale=value):
                     with self.assertRaisesRegex(ValueError, "positive finite"):
@@ -816,8 +810,8 @@ class MiroPipelineTests(unittest.TestCase):
         self,
     ) -> None:
         with (
-            patch("miro_pipeline.export_complete_board_source") as export,
-            patch("miro_pipeline.setup_obsidian_plugins") as plugins,
+            patch("miro2obsidian.application.export_complete_board_source") as export,
+            patch("miro2obsidian.application.setup_obsidian_plugins") as plugins,
         ):
             with self.assertRaisesRegex(ValueError, "positive finite"):
                 run_rest_experimental_pipeline(

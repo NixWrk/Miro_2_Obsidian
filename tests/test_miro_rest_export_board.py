@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -10,9 +9,7 @@ from unittest.mock import patch
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS_DIR = REPO_ROOT / "scripts"
 
-sys.path.insert(0, str(SCRIPTS_DIR))
-
-from miro_rest_export_board import (  # noqa: E402
+from scripts.miro_rest_export_board import (  # noqa: E402
     build_board_source_payload,
     download_export_assets,
     export_board_comments,
@@ -23,7 +20,7 @@ from miro_rest_export_board import (  # noqa: E402
     validate_export_assets,
     write_json,
 )
-from miro_downloader import _dedupe_miro_items  # noqa: E402
+from Miro_2_Json.miro_downloader import _dedupe_miro_items  # noqa: E402
 
 
 PNG_BYTES = b"\x89PNG\r\n\x1a\n"
@@ -57,7 +54,7 @@ class MiroRestExportBoardTests(unittest.TestCase):
             return raw_items
 
         with patch(
-            "miro_rest_export_board.get_items_on_board",
+            "scripts.miro_rest_export_board.get_items_on_board",
             side_effect=complete_experimental_export,
         ) as get_items:
             items = export_board_items(
@@ -93,7 +90,7 @@ class MiroRestExportBoardTests(unittest.TestCase):
             return raw_items
 
         with patch(
-            "miro_rest_export_board.get_items_on_board", side_effect=hidden_replacement
+            "scripts.miro_rest_export_board.get_items_on_board", side_effect=hidden_replacement
         ):
             with self.assertRaisesRegex(RuntimeError, "Stable items were returned"):
                 export_board_items(
@@ -110,7 +107,7 @@ class MiroRestExportBoardTests(unittest.TestCase):
             self.fail("fallback logger must abort before stable items are returned")
 
         with patch(
-            "miro_rest_export_board.get_items_on_board", side_effect=attempted_fallback
+            "scripts.miro_rest_export_board.get_items_on_board", side_effect=attempted_fallback
         ):
             with self.assertRaisesRegex(
                 RuntimeError, "stable item replacement is disabled"
@@ -180,7 +177,7 @@ class MiroRestExportBoardTests(unittest.TestCase):
         messages: list[str] = []
 
         with patch(
-            "miro_comment_probe.run_comment_probe",
+            "scripts.miro_comment_probe.run_comment_probe",
             return_value={
                 "decision": "comments_available_with_items",
                 "comments": comments,
@@ -212,7 +209,7 @@ class MiroRestExportBoardTests(unittest.TestCase):
 
     def test_export_board_comments_rejects_non_object_comment(self) -> None:
         with patch(
-            "miro_comment_probe.run_comment_probe",
+            "scripts.miro_comment_probe.run_comment_probe",
             return_value={
                 "comments": [{"id": "comment-1", "type": "comment"}, None],
                 "summary": {"comment_items": 2},
@@ -224,7 +221,7 @@ class MiroRestExportBoardTests(unittest.TestCase):
 
     def test_export_board_comments_rejects_summary_count_mismatch(self) -> None:
         with patch(
-            "miro_comment_probe.run_comment_probe",
+            "scripts.miro_comment_probe.run_comment_probe",
             return_value={
                 "comments": [{"id": "comment-1", "type": "comment"}],
                 "summary": {"comment_items": 2},
@@ -236,14 +233,14 @@ class MiroRestExportBoardTests(unittest.TestCase):
 
     def test_export_board_comments_propagates_probe_failure(self) -> None:
         with patch(
-            "miro_comment_probe.run_comment_probe", side_effect=RuntimeError("boom")
+            "scripts.miro_comment_probe.run_comment_probe", side_effect=RuntimeError("boom")
         ):
             with self.assertRaisesRegex(RuntimeError, "boom"):
                 export_board_comments(board_id="board-1", token="token-1")
 
     def test_export_board_comments_rejects_incomplete_probe(self) -> None:
         with patch(
-            "miro_comment_probe.run_comment_probe",
+            "scripts.miro_comment_probe.run_comment_probe",
             return_value={
                 "decision": "separate_source_not_found_in_checked_rest_paths",
                 "comments": [],
@@ -343,16 +340,16 @@ class MiroRestExportBoardTests(unittest.TestCase):
             output = Path(tmp) / "board.json"
             with (
                 patch(
-                    "miro_rest_export_board.export_board_items",
+                    "scripts.miro_rest_export_board.export_board_items",
                     side_effect=complete_items,
                 ) as export_items,
                 patch(
-                    "miro_rest_export_board.export_board_comments",
+                    "scripts.miro_rest_export_board.export_board_comments",
                     side_effect=complete_comments,
                 ),
-                patch("miro_rest_export_board.download_export_assets") as assets,
+                patch("scripts.miro_rest_export_board.download_export_assets") as assets,
                 patch(
-                    "miro_rest_export_board.validate_export_assets",
+                    "scripts.miro_rest_export_board.validate_export_assets",
                     side_effect=[["image-1: missing local_name"], []],
                 ),
             ):
@@ -409,16 +406,16 @@ class MiroRestExportBoardTests(unittest.TestCase):
             output = Path(tmp) / "board.json"
             with (
                 patch(
-                    "miro_rest_export_board.export_board_items",
+                    "scripts.miro_rest_export_board.export_board_items",
                     side_effect=complete_items,
                 ),
                 patch(
-                    "miro_rest_export_board.export_board_comments",
+                    "scripts.miro_rest_export_board.export_board_comments",
                     side_effect=complete_comments,
                 ),
-                patch("miro_rest_export_board.download_export_assets"),
+                patch("scripts.miro_rest_export_board.download_export_assets"),
                 patch(
-                    "miro_rest_export_board.validate_export_assets",
+                    "scripts.miro_rest_export_board.validate_export_assets",
                     return_value=["image-1: missing"],
                 ),
             ):
@@ -453,11 +450,11 @@ class MiroRestExportBoardTests(unittest.TestCase):
             output = Path(tmp) / "board.json"
             with (
                 patch(
-                    "miro_rest_export_board.export_board_items",
+                    "scripts.miro_rest_export_board.export_board_items",
                     side_effect=complete_items,
                 ),
                 patch(
-                    "miro_rest_export_board.export_board_comments",
+                    "scripts.miro_rest_export_board.export_board_comments",
                     side_effect=complete_comments,
                 ),
             ):
@@ -486,7 +483,7 @@ class MiroRestExportBoardTests(unittest.TestCase):
                 raise RuntimeError("refresh failed")
 
             with patch(
-                "miro_rest_export_board._build_complete_board_source",
+                "scripts.miro_rest_export_board._build_complete_board_source",
                 side_effect=fail_after_staging,
             ):
                 with self.assertRaisesRegex(RuntimeError, "refresh failed"):
@@ -516,7 +513,7 @@ class MiroRestExportBoardTests(unittest.TestCase):
                 return {"generation": "new"}, {"path": str(output_path)}
 
             with patch(
-                "miro_rest_export_board._build_complete_board_source",
+                "scripts.miro_rest_export_board._build_complete_board_source",
                 side_effect=build_staged,
             ):
                 export_complete_board_source(
@@ -542,7 +539,7 @@ class MiroRestExportBoardTests(unittest.TestCase):
                 return {"generation": "without-assets"}, {"path": str(output_path)}
 
             with patch(
-                "miro_rest_export_board._build_complete_board_source",
+                "scripts.miro_rest_export_board._build_complete_board_source",
                 side_effect=build_staged,
             ):
                 export_complete_board_source(
@@ -600,10 +597,10 @@ class MiroRestExportBoardTests(unittest.TestCase):
 
             with (
                 patch(
-                    "miro_rest_export_board.download_all", side_effect=fake_download_all
+                    "scripts.miro_rest_export_board.download_all", side_effect=fake_download_all
                 ) as dl_all,
                 patch(
-                    "miro_rest_export_board.download_resource_with_redirect",
+                    "scripts.miro_rest_export_board.download_resource_with_redirect",
                     side_effect=fake_embed_download,
                 ) as dl_embed,
             ):
@@ -664,7 +661,7 @@ class MiroRestExportBoardTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             output = Path(tmp) / "exports" / "board.json"
             with patch(
-                "miro_rest_export_board.download_all", side_effect=fake_download_all
+                "scripts.miro_rest_export_board.download_all", side_effect=fake_download_all
             ) as dl_all:
                 stats = download_export_assets(
                     items, output_path=output, token="token-1"
@@ -707,7 +704,7 @@ class MiroRestExportBoardTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             output = Path(tmp) / "exports" / "board.json"
             with patch(
-                "miro_rest_export_board.download_all", side_effect=fake_download_all
+                "scripts.miro_rest_export_board.download_all", side_effect=fake_download_all
             ):
                 with self.assertRaisesRegex(RuntimeError, "img-1"):
                     download_export_assets(items, output_path=output, token="token-1")
@@ -738,7 +735,7 @@ class MiroRestExportBoardTests(unittest.TestCase):
             existing = sidecar / "rest_board_same.png"
             existing.write_bytes(b"existing-neighbor")
             with patch(
-                "miro_rest_export_board.download_all", side_effect=fake_download_all
+                "scripts.miro_rest_export_board.download_all", side_effect=fake_download_all
             ):
                 stats = download_export_assets(
                     items, output_path=output, token="token-1"
@@ -773,7 +770,7 @@ class MiroRestExportBoardTests(unittest.TestCase):
             sidecar = output.with_name("board_files")
             sidecar.mkdir()
             (sidecar / "existing.png").write_bytes(PNG_BYTES)
-            with patch("miro_rest_export_board.download_all") as download_all:
+            with patch("scripts.miro_rest_export_board.download_all") as download_all:
                 stats = download_export_assets(
                     items, output_path=output, token="token-1"
                 )
@@ -859,7 +856,7 @@ class MiroRestExportBoardTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             output = Path(tmp) / "exports" / "board.json"
             with patch(
-                "miro_rest_export_board.download_all", side_effect=flaky_download_all
+                "scripts.miro_rest_export_board.download_all", side_effect=flaky_download_all
             ):
                 stats = download_export_assets(
                     items, output_path=output, token="token-1", logger=messages.append
@@ -891,7 +888,7 @@ class MiroRestExportBoardTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             output = Path(tmp) / "exports" / "board.json"
             with patch(
-                "miro_rest_export_board.download_all", side_effect=fake_download_all
+                "scripts.miro_rest_export_board.download_all", side_effect=fake_download_all
             ):
                 stats = download_export_assets(
                     items, output_path=output, token="token-1", strict=False
@@ -903,10 +900,10 @@ class MiroRestExportBoardTests(unittest.TestCase):
     def test_cli_returns_degraded_status_for_incomplete_export(self) -> None:
         args = type("Args", (), {})()
         with (
-            patch("miro_rest_export_board.parse_args", return_value=args),
-            patch("miro_rest_export_board.resolve_token_from_args", return_value="token"),
+            patch("scripts.miro_rest_export_board.parse_args", return_value=args),
+            patch("scripts.miro_rest_export_board.resolve_token_from_args", return_value="token"),
             patch(
-                "miro_rest_export_board.export_complete_board_source",
+                "scripts.miro_rest_export_board.export_complete_board_source",
                 return_value=({}, {"items": 0, "comments": 0, "complete": False, "log_tail": []}),
             ),
         ):
@@ -935,7 +932,7 @@ class MiroRestExportBoardTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             output = Path(tmp) / "exports" / "board.json"
             with patch(
-                "miro_rest_export_board.download_resource_with_redirect",
+                "scripts.miro_rest_export_board.download_resource_with_redirect",
                 return_value=None,
             ):
                 stats = download_export_assets(

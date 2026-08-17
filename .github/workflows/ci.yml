@@ -21,15 +21,17 @@ jobs:
             requirements.txt
             requirements-dev.txt
       - name: Install dependencies
-        run: python -m pip install -r requirements-dev.txt
+        run: |
+          python -m pip install -r requirements-dev.txt
+          python -m pip install --no-deps -e .
       - name: Install browser
         run: python -m playwright install chromium
       - name: Compile Python
-        run: python -m compileall -q Json_2_Canvas Miro_2_Json scripts tools tests Miro_2_Obsidian_GUI.py
+        run: python -m compileall -q Json_2_Canvas Miro_2_Json miro2obsidian scripts tools tests Miro_2_Obsidian_GUI.py
       - name: Lint Python
-        run: python -m ruff check Json_2_Canvas Miro_2_Json scripts tools tests Miro_2_Obsidian_GUI.py
+        run: python -m ruff check Json_2_Canvas Miro_2_Json miro2obsidian scripts tools tests Miro_2_Obsidian_GUI.py
       - name: Run structural and visual regression
-        run: python scripts/run_regression.py
+        run: python -m scripts.run_regression
       - name: Run Web SDK smoke tests
         run: |
           node tests/websdk_serialization_smoke.js tools/miro_websdk_exporter/exporter.js

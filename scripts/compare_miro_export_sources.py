@@ -5,7 +5,6 @@ import json
 import math
 import os
 import shutil
-import sys
 import tempfile
 from collections import Counter
 from dataclasses import asdict, dataclass
@@ -26,10 +25,8 @@ DEFAULT_OUT_DIR = (
 )
 OBSIDIAN_UNLOCKED_MIN_ZOOM = 2**-12
 
-for path in (MIRO_JSON_DIR, CONVERTER_DIR, SCRIPTS_DIR):
-    sys.path.insert(0, str(path))
 
-from audit_web_board_pipeline import (  # noqa: E402
+from scripts.audit_web_board_pipeline import (  # noqa: E402
     BoardRef,
     audit_one_board,
     expand_text_style_modes,
@@ -38,7 +35,7 @@ from audit_web_board_pipeline import (  # noqa: E402
     remap_output_paths,
     safe_name,
 )
-from miro_export_bundle import (  # noqa: E402
+from scripts.miro_export_bundle import (  # noqa: E402
     copy_referenced_sidecar,
     is_link_or_reparse,
     publish_staged_bundle,
@@ -47,21 +44,21 @@ from miro_export_bundle import (  # noqa: E402
     require_regular_file,
     staged_export_path,
 )
-from merge_miro_sources import (  # noqa: E402
+from scripts.merge_miro_sources import (  # noqa: E402
     DEFAULT_MAX_SOURCE_AGE_HOURS,
     merge_sources,
     validate_canonical_export,
     validate_websdk_export,
 )
-from miro_capability_probe import (  # noqa: E402
+from scripts.miro_capability_probe import (  # noqa: E402
     build_coverage_rows,
     has_content,
     has_geometry,
     iter_items,
     summarize_items,
 )
-from miro_downloader import get_boards  # noqa: E402
-from miro_oauth_token import (  # noqa: E402
+from Miro_2_Json.miro_downloader import get_boards  # noqa: E402
+from scripts.miro_oauth_token import (  # noqa: E402
     DEFAULT_AUTHORIZE_URL,
     DEFAULT_BROWSER,
     DEFAULT_REDIRECT_URI,
@@ -70,7 +67,7 @@ from miro_oauth_token import (  # noqa: E402
     DEFAULT_TOKEN_URL,
     config_from_env,
 )
-from miro_rest_export_board import (  # noqa: E402
+from scripts.miro_rest_export_board import (  # noqa: E402
     download_export_assets,
     export_complete_board_source,
     stable_enrichment_items,
@@ -391,7 +388,7 @@ def export_legacy_source(
     token: str,
     prefer_experimental: bool,
 ) -> SourceResult:
-    from download_worker import run_download  # noqa: PLC0415
+    from Miro_2_Json.download_worker import run_download  # noqa: PLC0415
 
     messages: list[str] = []
     failures: list[dict[str, str]] = []

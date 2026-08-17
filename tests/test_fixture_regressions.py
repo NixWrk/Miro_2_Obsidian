@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import shutil
-import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -13,9 +12,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 CONVERTER_DIR = REPO_ROOT / "Json_2_Canvas"
 FIXTURES_DIR = REPO_ROOT / "tests" / "fixtures"
 
-sys.path.insert(0, str(CONVERTER_DIR))
-
-from Converter import _estimate_render_height, convert_miro_to_canvas  # noqa: E402
+from Json_2_Canvas.Converter import _estimate_render_height, convert_miro_to_canvas  # noqa: E402
 
 
 class CanvasValidationError(AssertionError):

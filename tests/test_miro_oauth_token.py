@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import os
-import sys
 import threading
 import unittest
 from pathlib import Path
@@ -10,13 +9,9 @@ from urllib.request import urlopen
 from unittest.mock import patch
 
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
-SCRIPTS_DIR = REPO_ROOT / "scripts"
 
-sys.path.insert(0, str(SCRIPTS_DIR))
-
-import miro_oauth_token as oauth  # noqa: E402
-from miro_oauth_token import (  # noqa: E402
+from scripts import miro_oauth_token as oauth
+from scripts.miro_oauth_token import (  # noqa: E402
     ALTERNATE_LOOPBACK_REDIRECT_URI,
     DEFAULT_REDIRECT_URI,
     DEFAULT_SCOPES,
@@ -148,7 +143,7 @@ class MiroOAuthTokenTests(unittest.TestCase):
 
     def test_config_from_env_requires_client_credentials(self) -> None:
         with patch.dict(os.environ, {}, clear=True):
-            with patch("miro_oauth_token.load_local_oauth_config", return_value={}):
+            with patch("scripts.miro_oauth_token.load_local_oauth_config", return_value={}):
                 with self.assertRaisesRegex(
                     ValueError, "MIRO_CLIENT_ID, MIRO_CLIENT_SECRET"
                 ):
@@ -158,7 +153,7 @@ class MiroOAuthTokenTests(unittest.TestCase):
         with patch.dict(
             os.environ, {"MIRO_CLIENT_ID": "client-1", "MIRO_CLIENT_SECRET": "secret-1"}
         ):
-            with patch("miro_oauth_token.load_local_oauth_config", return_value={}):
+            with patch("scripts.miro_oauth_token.load_local_oauth_config", return_value={}):
                 config = config_from_env(
                     authorize_url="https://example.invalid/authorize"
                 )
@@ -180,7 +175,7 @@ class MiroOAuthTokenTests(unittest.TestCase):
             "MIRO_TOKEN_URL": "https://example.invalid/token",
         }
         with patch.dict(os.environ, env, clear=True):
-            with patch("miro_oauth_token.load_local_oauth_config", return_value={}):
+            with patch("scripts.miro_oauth_token.load_local_oauth_config", return_value={}):
                 config = config_from_env()
 
         self.assertEqual(config.redirect_uri, "http://127.0.0.1:8765/callback")
@@ -227,16 +222,16 @@ class MiroOAuthTokenTests(unittest.TestCase):
             clear=True,
         ):
             with patch(
-                "miro_oauth_token.os.path.isfile",
+                "scripts.miro_oauth_token.os.path.isfile",
                 side_effect=lambda path: path == expected,
             ):
                 self.assertEqual(resolve_browser_executable("yandex"), expected)
 
     def test_open_authorize_url_uses_resolved_browser(self) -> None:
         browser = str(Path("C:/Yandex/browser.exe"))
-        with patch("miro_oauth_token.resolve_browser_executable", return_value=browser):
-            with patch("miro_oauth_token.subprocess.Popen") as popen:
-                with patch("miro_oauth_token.webbrowser.open") as system_browser:
+        with patch("scripts.miro_oauth_token.resolve_browser_executable", return_value=browser):
+            with patch("scripts.miro_oauth_token.subprocess.Popen") as popen:
+                with patch("scripts.miro_oauth_token.webbrowser.open") as system_browser:
                     self.assertTrue(
                         open_authorize_url(
                             "https://example.invalid/oauth", browser="yandex"
@@ -250,10 +245,10 @@ class MiroOAuthTokenTests(unittest.TestCase):
         system_browser.assert_not_called()
 
     def test_open_authorize_url_falls_back_to_system_browser(self) -> None:
-        with patch("miro_oauth_token.resolve_browser_executable", return_value=None):
-            with patch("miro_oauth_token.subprocess.Popen") as popen:
+        with patch("scripts.miro_oauth_token.resolve_browser_executable", return_value=None):
+            with patch("scripts.miro_oauth_token.subprocess.Popen") as popen:
                 with patch(
-                    "miro_oauth_token.webbrowser.open", return_value=True
+                    "scripts.miro_oauth_token.webbrowser.open", return_value=True
                 ) as system_browser:
                     self.assertTrue(
                         open_authorize_url(
@@ -322,23 +317,23 @@ class MiroOAuthTokenTests(unittest.TestCase):
 
         config = OAuthConfig(client_id="client-1", client_secret="secret-1")
         with patch(
-            "miro_oauth_token.secrets.token_urlsafe", return_value="generated-state"
+            "scripts.miro_oauth_token.secrets.token_urlsafe", return_value="generated-state"
         ) as token_urlsafe:
             with patch(
-                "miro_oauth_token._make_callback_handler", side_effect=make_handler
+                "scripts.miro_oauth_token._make_callback_handler", side_effect=make_handler
             ) as make_callback:
                 with patch(
-                    "miro_oauth_token.callback_bind_hosts", return_value=("127.0.0.1",)
+                    "scripts.miro_oauth_token.callback_bind_hosts", return_value=("127.0.0.1",)
                 ):
                     with patch(
-                        "miro_oauth_token._make_callback_server",
+                        "scripts.miro_oauth_token._make_callback_server",
                         return_value=FakeServer(),
                     ):
                         with patch(
-                            "miro_oauth_token.open_authorize_url", return_value=True
+                            "scripts.miro_oauth_token.open_authorize_url", return_value=True
                         ) as open_url:
                             with patch(
-                                "miro_oauth_token.exchange_access_token",
+                                "scripts.miro_oauth_token.exchange_access_token",
                                 return_value="token-1",
                             ):
                                 token = oauth.authorize_and_get_token(
@@ -364,9 +359,9 @@ class MiroOAuthTokenTests(unittest.TestCase):
                 redirect_uri=redirect_uri,
             )
             with self.subTest(redirect_uri=redirect_uri):
-                with patch("miro_oauth_token._make_callback_handler") as make_handler:
-                    with patch("miro_oauth_token._make_callback_server") as make_server:
-                        with patch("miro_oauth_token.open_authorize_url") as open_url:
+                with patch("scripts.miro_oauth_token._make_callback_handler") as make_handler:
+                    with patch("scripts.miro_oauth_token._make_callback_server") as make_server:
+                        with patch("scripts.miro_oauth_token.open_authorize_url") as open_url:
                             with self.assertRaisesRegex(ValueError, "loopback"):
                                 oauth.authorize_and_get_token(config)
                 make_handler.assert_not_called()
@@ -377,8 +372,8 @@ class MiroOAuthTokenTests(unittest.TestCase):
         config = OAuthConfig(client_id="client-1", client_secret="secret-1")
         for timeout in (0, -1, float("nan"), float("inf"), True):
             with self.subTest(timeout=timeout):
-                with patch("miro_oauth_token._make_callback_handler") as make_handler:
-                    with patch("miro_oauth_token._make_callback_server") as make_server:
+                with patch("scripts.miro_oauth_token._make_callback_handler") as make_handler:
+                    with patch("scripts.miro_oauth_token._make_callback_server") as make_server:
                         with self.assertRaisesRegex(ValueError, "positive finite"):
                             oauth.authorize_and_get_token(
                                 config, timeout_seconds=timeout

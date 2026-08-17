@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import argparse
-import sys
 from pathlib import Path
 
 from common import load_config, vault_path
@@ -9,9 +8,8 @@ from common import load_config, vault_path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SCRIPTS_DIR = REPO_ROOT / "scripts"
-sys.path.insert(0, str(SCRIPTS_DIR))
 
-from obsidian_plugin_setup import (  # noqa: E402
+from scripts.obsidian_plugin_setup import (  # noqa: E402
     ADVANCED_CANVAS_ID,
     ADVANCED_CANVAS_VERSION,
     install_advanced_canvas,

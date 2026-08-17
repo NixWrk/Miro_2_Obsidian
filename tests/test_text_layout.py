@@ -1,4 +1,3 @@
-import sys
 import unittest
 from pathlib import Path
 
@@ -6,9 +5,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[1]
 CONVERTER_DIR = REPO_ROOT / "Json_2_Canvas"
 
-sys.path.insert(0, str(CONVERTER_DIR))
-
-from Converter import (  # noqa: E402
+from Json_2_Canvas.Converter import (  # noqa: E402
     _compact_short_label_html,
     _compact_short_inline_label_heights,
     _compact_tiny_slide_text_heights,

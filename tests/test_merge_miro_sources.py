@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import sys
 import tempfile
 import unittest
 from argparse import Namespace
@@ -12,9 +11,8 @@ from unittest.mock import patch
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS_DIR = REPO_ROOT / "scripts"
-sys.path.insert(0, str(SCRIPTS_DIR))
 
-from merge_miro_sources import (  # noqa: E402
+from scripts.merge_miro_sources import (  # noqa: E402
     WEBSDK_CAPTURE_PROFILE,
     WEBSDK_EXPORTER_VERSION,
     finalize_merged_export,
@@ -192,6 +190,14 @@ class MergeMiroSourcesTests(unittest.TestCase):
         self.assertEqual(item["source_surfaces"], ["rest", "web_sdk"])
         self.assertEqual(
             item["source_provenance"]["original_items"]["web_sdk"], websdk["items"][0]
+        )
+        self.assertEqual(
+            item["source_provenance"]["field_sources"]["data.content"],
+            ["rest", "web_sdk"],
+        )
+        self.assertEqual(
+            item["source_provenance"]["selected_field_sources"]["data.content"],
+            "rest",
         )
         self.assertFalse(merged["completeness"]["complete"])
         self.assertFalse(merged["completeness"]["assets"]["checked"])
@@ -518,6 +524,25 @@ class MergeMiroSourcesTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "field provenance"):
             validate_canonical_export(canonical)
 
+    def test_canonical_validator_rejects_tampered_selected_field_provenance(self) -> None:
+        rest = rest_export([{"id": "text-1", "type": "text"}])
+        merged = merge_sources(rest, websdk_export([]))
+        with tempfile.TemporaryDirectory(prefix="miro2obs_canonical_selected_") as tmp:
+            root = Path(tmp)
+            rest_path = root / "rest.json"
+            rest_path.write_text(json.dumps(rest), encoding="utf-8")
+            canonical = finalize_merged_export(
+                merged,
+                source_json=rest_path,
+                output_json=root / "canonical.json",
+            )
+        canonical["items"][0]["source_provenance"]["selected_field_sources"] = {
+            "id": "web_sdk"
+        }
+
+        with self.assertRaisesRegex(ValueError, "selected field provenance"):
+            validate_canonical_export(canonical)
+
     def test_canonical_validator_revalidates_source_metadata(self) -> None:
         rest = rest_export([])
         merged = merge_sources(rest, websdk_export([]))
@@ -608,7 +633,7 @@ class MergeMiroSourcesTests(unittest.TestCase):
                 output=output_path,
             )
 
-            with patch("merge_miro_sources.parse_args", return_value=args):
+            with patch("scripts.merge_miro_sources.parse_args", return_value=args):
                 self.assertEqual(main(), 0)
 
             merged = json.loads(output_path.read_text(encoding="utf-8"))
@@ -702,7 +727,7 @@ class MergeMiroSourcesTests(unittest.TestCase):
             output_path = root / "canonical.json"
             rest_path.write_text(json.dumps(rest), encoding="utf-8")
             with patch(
-                "merge_miro_sources.download_export_assets", side_effect=download
+                "scripts.merge_miro_sources.download_export_assets", side_effect=download
             ) as asset_download:
                 canonical = finalize_merged_export(
                     merged,

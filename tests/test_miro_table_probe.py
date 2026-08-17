@@ -10,9 +10,7 @@ from unittest.mock import patch
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS_DIR = REPO_ROOT / "scripts"
 
-sys.path.insert(0, str(SCRIPTS_DIR))
-
-from miro_table_probe import (  # noqa: E402
+from scripts.miro_table_probe import (  # noqa: E402
     build_detail_probe_requests,
     build_table_probe_requests,
     classify_status,
@@ -193,9 +191,9 @@ class MiroTableProbeTests(unittest.TestCase):
     def test_cli_writes_probe_output_without_printing_token(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             output = Path(tmp) / "table_probe.json"
-            with patch("miro_table_probe.resolve_token_from_args", return_value="secret-token"):
+            with patch("scripts.miro_table_probe.resolve_token_from_args", return_value="secret-token"):
                 with patch(
-                    "miro_table_probe.run_table_probe",
+                    "scripts.miro_table_probe.run_table_probe",
                     return_value={
                         "kind": "miro_table_source_probe",
                         "summary": {
@@ -212,7 +210,7 @@ class MiroTableProbeTests(unittest.TestCase):
                         "contentful_table_items": [],
                     },
                 ):
-                    with patch.object(sys, "argv", ["miro_table_probe.py", "--board-id", "board-1", "--output", str(output)]):
+                    with patch.object(sys, "argv", ["scripts.miro_table_probe.py", "--board-id", "board-1", "--output", str(output)]):
                         self.assertEqual(main(), 0)
 
             text = output.read_text(encoding="utf-8")

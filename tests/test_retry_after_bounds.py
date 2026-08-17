@@ -1,13 +1,11 @@
 from __future__ import annotations
 
-import sys
 from pathlib import Path
 
 
 MIRO_JSON_DIR = Path(__file__).resolve().parents[1] / "Miro_2_Json"
-sys.path.insert(0, str(MIRO_JSON_DIR))
 
-from miro_downloader import (  # noqa: E402
+from Miro_2_Json.miro_downloader import (  # noqa: E402
     MAX_RETRY_DELAY_SECONDS,
     _retry_delay_seconds,
 )

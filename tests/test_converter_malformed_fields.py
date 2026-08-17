@@ -1,13 +1,11 @@
 from __future__ import annotations
 
-import sys
 from pathlib import Path
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(REPO_ROOT / "Json_2_Canvas"))
 
-from Converter import (  # noqa: E402
+from Json_2_Canvas.Converter import (  # noqa: E402
     _source_canvas_metadata,
     convert_item_to_canvas_node,
     convert_item_to_edge,

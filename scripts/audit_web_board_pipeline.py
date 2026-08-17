@@ -5,7 +5,6 @@ import json
 import os
 import re
 
-import sys
 import tempfile
 from collections import Counter
 from dataclasses import asdict, dataclass
@@ -25,21 +24,18 @@ OBSIDIAN_UNLOCKED_MIN_ZOOM = 2**-12
 AUDIT_SENTINEL_NAME = ".miro-web-board-audit"
 AUDIT_SENTINEL_CONTENT = "miro-web-board-audit-v1\n"
 
-sys.path.insert(0, str(CONVERTER_DIR))
-sys.path.insert(0, str(REPO_ROOT / "scripts"))
-
-from Converter import OBSIDIAN_FONT_SIZE, convert_miro_to_canvas  # noqa: E402
-from Scale_engine import ViewProfile, pick_recommended_scale  # noqa: E402
-from audit_item_node_mapping import summarize_mapping  # noqa: E402
-from audit_missing_miro_items import audit_missing_items  # noqa: E402
-from audit_node_overlaps import audit_nodes, build_miro_source_rects, overlap_to_dict  # noqa: E402
-from merge_miro_sources import (  # noqa: E402
+from Json_2_Canvas.Converter import OBSIDIAN_FONT_SIZE, convert_miro_to_canvas  # noqa: E402
+from Json_2_Canvas.Scale_engine import ViewProfile, pick_recommended_scale  # noqa: E402
+from scripts.audit_item_node_mapping import summarize_mapping  # noqa: E402
+from scripts.audit_missing_miro_items import audit_missing_items  # noqa: E402
+from scripts.audit_node_overlaps import audit_nodes, build_miro_source_rects, overlap_to_dict  # noqa: E402
+from scripts.merge_miro_sources import (  # noqa: E402
     DEFAULT_MAX_SOURCE_AGE_HOURS,
     validate_canonical_export,
     validate_rest_export,
     validate_websdk_export,
 )
-from miro_export_bundle import (  # noqa: E402
+from scripts.miro_export_bundle import (  # noqa: E402
     copy_referenced_sidecar,
     is_link_or_reparse,
     publish_staged_directory,
@@ -48,8 +44,8 @@ from miro_export_bundle import (  # noqa: E402
     require_regular_file,
     sidecar_path,
 )
-from miro_capability_probe import load_json as load_strict_json  # noqa: E402
-from miro_rest_export_board import export_complete_board_source, write_json  # noqa: E402
+from scripts.miro_capability_probe import load_json as load_strict_json  # noqa: E402
+from scripts.miro_rest_export_board import export_complete_board_source, write_json  # noqa: E402
 
 
 BOARD_LINK_RE = re.compile(
@@ -456,7 +452,6 @@ def export_rest_board(
 
 def render_canvas_check(canvas_path: Path, screenshot_path: Path) -> dict[str, Any]:
     try:
-        sys.path.insert(0, str(RENDER_DIR))
         from capture_fixture import capture_canvas  # type: ignore  # noqa: PLC0415
         from PIL import Image  # noqa: PLC0415
 

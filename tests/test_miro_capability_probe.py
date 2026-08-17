@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -9,9 +8,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS_DIR = REPO_ROOT / "scripts"
 
-sys.path.insert(0, str(SCRIPTS_DIR))
-
-from miro_capability_probe import (  # noqa: E402
+from scripts.miro_capability_probe import (  # noqa: E402
     build_coverage_rows,
     load_json,
     render_markdown_report,

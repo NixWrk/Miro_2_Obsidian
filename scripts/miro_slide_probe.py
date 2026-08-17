@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import sys
 from collections import Counter
 from pathlib import Path
 from typing import Any
@@ -10,10 +9,9 @@ from typing import Any
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS_DIR = REPO_ROOT / "scripts"
-sys.path.insert(0, str(SCRIPTS_DIR))
 
-from miro_oauth_token import DEFAULT_AUTHORIZE_URL, DEFAULT_BROWSER, DEFAULT_REDIRECT_URI  # noqa: E402
-from miro_rest_export_board import resolve_token_from_args, write_json  # noqa: E402
+from scripts.miro_oauth_token import DEFAULT_AUTHORIZE_URL, DEFAULT_BROWSER, DEFAULT_REDIRECT_URI  # noqa: E402
+from scripts.miro_rest_export_board import resolve_token_from_args, write_json  # noqa: E402
 
 
 DEFAULT_BASE_URL = "https://api.miro.com/v2"

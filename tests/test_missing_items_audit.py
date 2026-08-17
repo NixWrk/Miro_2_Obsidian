@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import sys
 import unittest
 from pathlib import Path
 
@@ -8,9 +7,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS_DIR = REPO_ROOT / "scripts"
 
-sys.path.insert(0, str(SCRIPTS_DIR))
-
-from audit_missing_miro_items import audit_missing_items, classify_missing_item  # noqa: E402
+from scripts.audit_missing_miro_items import audit_missing_items, classify_missing_item  # noqa: E402
 
 
 class MissingItemsAuditTests(unittest.TestCase):

@@ -5,7 +5,6 @@ import copy
 import html
 import json
 import re
-import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable
@@ -134,8 +133,7 @@ def node_rect(node: dict[str, Any]) -> NodeRect | None:
 
 
 def estimate_missing_text_height(item: dict[str, Any], *, width: float) -> float:
-    sys.path.insert(0, str(CONVERTER_DIR))
-    from Converter import (  # noqa: WPS433
+    from Json_2_Canvas.Converter import (  # noqa: WPS433
         OBSIDIAN_FONT_SIZE,
         _estimate_render_height,
         _extract_font_base_px,
@@ -212,8 +210,7 @@ def miro_source_rect_for_item(item: dict[str, Any], *, scale: float) -> tuple[No
 
 
 def build_miro_source_rects(miro_root: Any, *, scale: float) -> tuple[dict[str, NodeRect], dict[str, str]]:
-    sys.path.insert(0, str(CONVERTER_DIR))
-    from Converter import (  # noqa: WPS433
+    from Json_2_Canvas.Converter import (  # noqa: WPS433
         CONTAINER_TYPES,
         FRAME_LIKE_TYPES,
         _frame_rect_unscaled,

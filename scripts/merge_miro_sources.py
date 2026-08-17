@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import argparse
 import math
-import sys
 from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -11,15 +10,14 @@ from typing import Any, Iterable
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS_DIR = REPO_ROOT / "scripts"
-sys.path.insert(0, str(SCRIPTS_DIR))
 
-from miro_capability_probe import iter_items, load_json, normalize_item_type  # noqa: E402
-from miro_export_bundle import (  # noqa: E402
+from scripts.miro_capability_probe import iter_items, load_json, normalize_item_type  # noqa: E402
+from scripts.miro_export_bundle import (  # noqa: E402
     copy_referenced_sidecar,
     publish_staged_bundle,
     staged_export_path,
 )
-from miro_rest_export_board import (  # noqa: E402
+from scripts.miro_rest_export_board import (  # noqa: E402
     download_export_assets,
     stable_enrichment_items,
     summarize_export_asset_requirements,
@@ -666,14 +664,19 @@ def validate_canonical_export(
                 normalized["web_sdk"] = normalize_websdk_item(
                     ordered_originals["web_sdk"]
                 )
-            expected_fields = _item_provenance(
-                ordered_originals, normalized
-            )["field_sources"]
-            if provenance.get("field_sources") != expected_fields:
+            expected_provenance = _item_provenance(ordered_originals, normalized)
+            if provenance.get("field_sources") != expected_provenance["field_sources"]:
                 raise ValueError(
                     f"Canonical {label} #{index} field provenance is inconsistent"
                 )
-
+            selected_fields = provenance.get("selected_field_sources")
+            if (
+                selected_fields is not None
+                and selected_fields != expected_provenance["selected_field_sources"]
+            ):
+                raise ValueError(
+                    f"Canonical {label} #{index} selected field provenance is inconsistent"
+                )
     completeness = payload.get("completeness")
     if not isinstance(completeness, dict) or completeness.get("complete") is not True:
         raise ValueError("Canonical completeness.complete must be true")
@@ -910,6 +913,16 @@ def _leaf_paths(value: Any, prefix: tuple[str, ...] = ()) -> Iterable[str]:
         yield ".".join(prefix)
 
 
+def _selected_field_sources(
+    source_items: dict[str, dict[str, Any]], normalized: dict[str, dict[str, Any]]
+) -> dict[str, str]:
+    selected: dict[str, str] = {}
+    for surface, item in {**source_items, **normalized}.items():
+        for path in _leaf_paths(item):
+            selected.setdefault(path, surface)
+    return dict(sorted(selected.items()))
+
+
 def _item_provenance(
     source_items: dict[str, dict[str, Any]], normalized: dict[str, dict[str, Any]]
 ) -> dict[str, Any]:
@@ -922,6 +935,7 @@ def _item_provenance(
     return {
         "surfaces": list(source_items),
         "field_sources": dict(sorted(field_sources.items())),
+        "selected_field_sources": _selected_field_sources(source_items, normalized),
         "original_items": deepcopy(source_items),
     }
 

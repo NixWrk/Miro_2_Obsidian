@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import sys
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -8,9 +7,8 @@ from unittest.mock import patch
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 MIRO_JSON_DIR = REPO_ROOT / "Miro_2_Json"
-sys.path.insert(0, str(MIRO_JSON_DIR))
 
-from miro_downloader import get_items_on_board  # noqa: E402
+from Miro_2_Json.miro_downloader import get_items_on_board  # noqa: E402
 
 
 class FakeResponse:
@@ -52,7 +50,7 @@ class MiroDownloaderPaginationTests(unittest.TestCase):
         session = FakeSession(collection_payloads)
         metadata: dict = {}
 
-        with patch("miro_downloader.requests.Session", return_value=session):
+        with patch("Miro_2_Json.miro_downloader.requests.Session", return_value=session):
             items = get_items_on_board(
                 "board-1",
                 "secret-token",
@@ -76,7 +74,7 @@ class MiroDownloaderPaginationTests(unittest.TestCase):
             ]
         )
 
-        with patch("miro_downloader.requests.Session", return_value=session):
+        with patch("Miro_2_Json.miro_downloader.requests.Session", return_value=session):
             with self.assertRaisesRegex(RuntimeError, "left api.miro.com"):
                 get_items_on_board("board-1", "secret-token", prefer_experimental_items=False)
 
@@ -90,7 +88,7 @@ class MiroDownloaderPaginationTests(unittest.TestCase):
             ]
         )
 
-        with patch("miro_downloader.requests.Session", return_value=session):
+        with patch("Miro_2_Json.miro_downloader.requests.Session", return_value=session):
             with self.assertRaisesRegex(RuntimeError, "repeated the same request"):
                 get_items_on_board("board-1", "secret-token", prefer_experimental_items=False)
 

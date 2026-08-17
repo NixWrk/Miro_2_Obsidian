@@ -5,14 +5,13 @@ import html
 import json
 import math
 import re
-import sys
 from collections import Counter, defaultdict
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from statistics import median
 from typing import Any
 
-from audit_missing_miro_items import classify_missing_item
+from scripts.audit_missing_miro_items import classify_missing_item
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -49,8 +48,7 @@ def load_json(path: Path) -> Any:
 
 
 def _iter_source_items(miro_root: Any) -> list[dict[str, Any]]:
-    sys.path.insert(0, str(CONVERTER_DIR))
-    from Converter import iter_objects  # noqa: PLC0415
+    from Json_2_Canvas.Converter import iter_objects  # noqa: PLC0415
 
     return [item for item in iter_objects(miro_root) if isinstance(item, dict) and item.get("id") is not None]
 
@@ -89,8 +87,7 @@ def _connector_endpoints(item: dict[str, Any]) -> tuple[str, str]:
 
 def expected_node_types(item: dict[str, Any]) -> set[str]:
     item_type = str(item.get("type") or "").lower()
-    sys.path.insert(0, str(CONVERTER_DIR))
-    from Converter import has_recoverable_item_content  # noqa: PLC0415
+    from Json_2_Canvas.Converter import has_recoverable_item_content  # noqa: PLC0415
 
     recoverable = has_recoverable_item_content(item)
     if item_type in {"image", "document", "doc_format", "embed"} and str(item.get("local_name") or "").strip():
@@ -234,7 +231,7 @@ def _append_geometry_drift_issues(
     nodes_by_id: dict[str, list[dict[str, Any]]],
     scale: float,
 ) -> None:
-    from audit_node_overlaps import build_miro_source_rects  # noqa: PLC0415
+    from scripts.audit_node_overlaps import build_miro_source_rects  # noqa: PLC0415
 
     source_rects, _source_missing = build_miro_source_rects(miro_root, scale=scale)
     candidates: list[tuple[str, dict[str, Any], dict[str, Any], Any, tuple[float, float, float, float]]] = []

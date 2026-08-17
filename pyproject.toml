@@ -1,3 +1,33 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "miro-2-obsidian"
+version = "0.1.0"
+description = "Source-preserving Miro export pipeline for Obsidian Canvas"
+readme = "README.md"
+requires-python = ">=3.13"
+license = "MIT"
+dependencies = [
+    "customtkinter==6.0.0",
+    "requests==2.34.2",
+]
+
+[project.scripts]
+miro2obsidian = "scripts.miro_pipeline:main"
+miro2obsidian-gui = "Miro_2_Obsidian_GUI:main"
+
+[tool.setuptools]
+py-modules = ["Miro_2_Obsidian_GUI"]
+
+[tool.setuptools.packages.find]
+include = [
+    "Json_2_Canvas*",
+    "Miro_2_Json*",
+    "scripts*",
+    "miro2obsidian*",
+]
 [tool.ruff]
 target-version = "py313"
 

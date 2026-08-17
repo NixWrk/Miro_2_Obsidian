@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import sys
 import tempfile
 import unittest
 from argparse import Namespace
@@ -12,9 +11,8 @@ from unittest.mock import patch
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS_DIR = REPO_ROOT / "scripts"
-sys.path.insert(0, str(SCRIPTS_DIR))
 
-from audit_web_board_pipeline import (  # noqa: E402
+from scripts.audit_web_board_pipeline import (  # noqa: E402
     AUDIT_SENTINEL_CONTENT,
     AUDIT_SENTINEL_NAME,
     BoardRef,
@@ -300,7 +298,7 @@ class WebBoardPipelineAuditTests(unittest.TestCase):
         with tempfile.TemporaryDirectory(prefix="miro2obs_web_export_") as tmp:
             output_json = Path(tmp) / "board.json"
             with patch(
-                "audit_web_board_pipeline.export_complete_board_source",
+                "scripts.audit_web_board_pipeline.export_complete_board_source",
                 return_value=(payload, info),
             ) as export:
                 result = export_rest_board(
@@ -376,7 +374,7 @@ class WebBoardPipelineAuditTests(unittest.TestCase):
             source_json = root / "uXjVLegacy=.json"
             source_json.write_text("[]", encoding="utf-8")
             out_dir = root / "out"
-            with patch("audit_web_board_pipeline.convert_miro_to_canvas") as convert:
+            with patch("scripts.audit_web_board_pipeline.convert_miro_to_canvas") as convert:
                 record = audit_one_board(
                     BoardRef(
                         board_id="uXjVLegacy=",
@@ -420,7 +418,7 @@ class WebBoardPipelineAuditTests(unittest.TestCase):
             marker.write_text("old", encoding="utf-8")
 
             with patch(
-                "audit_web_board_pipeline.convert_miro_to_canvas",
+                "scripts.audit_web_board_pipeline.convert_miro_to_canvas",
                 side_effect=RuntimeError("boom"),
             ):
                 with self.assertRaisesRegex(RuntimeError, "boom"):
@@ -446,7 +444,7 @@ class WebBoardPipelineAuditTests(unittest.TestCase):
                 json.dumps(strict_rest_source("uXjVOther=", [])),
                 encoding="utf-8",
             )
-            with patch("audit_web_board_pipeline.convert_miro_to_canvas") as convert:
+            with patch("scripts.audit_web_board_pipeline.convert_miro_to_canvas") as convert:
                 record = audit_one_board(
                     BoardRef(
                         board_id="uXjVExpected=",
@@ -483,7 +481,7 @@ class WebBoardPipelineAuditTests(unittest.TestCase):
                 ),
                 encoding="utf-8",
             )
-            with patch("audit_web_board_pipeline.convert_miro_to_canvas") as convert:
+            with patch("scripts.audit_web_board_pipeline.convert_miro_to_canvas") as convert:
                 record = audit_one_board(
                     BoardRef(
                         board_id="uXjVStale=",
@@ -528,7 +526,7 @@ class WebBoardPipelineAuditTests(unittest.TestCase):
                 json.dumps(strict_rest_source("uXjVAssets=", [item])),
                 encoding="utf-8",
             )
-            with patch("audit_web_board_pipeline.convert_miro_to_canvas") as convert:
+            with patch("scripts.audit_web_board_pipeline.convert_miro_to_canvas") as convert:
                 record = audit_one_board(
                     BoardRef(
                         board_id="uXjVAssets=",
@@ -575,7 +573,7 @@ class WebBoardPipelineAuditTests(unittest.TestCase):
                 json.dumps(strict_rest_source("uXjVAssets=", [item])),
                 encoding="utf-8",
             )
-            with patch("audit_web_board_pipeline.convert_miro_to_canvas") as convert:
+            with patch("scripts.audit_web_board_pipeline.convert_miro_to_canvas") as convert:
                 record = audit_one_board(
                     BoardRef(
                         board_id="uXjVAssets=",
@@ -613,15 +611,15 @@ class WebBoardPipelineAuditTests(unittest.TestCase):
 
             with (
                 patch(
-                    "audit_web_board_pipeline.parse_args",
+                    "scripts.audit_web_board_pipeline.parse_args",
                     return_value=Namespace(out_dir=out_dir),
                 ),
                 patch(
-                    "audit_web_board_pipeline.run_audit",
+                    "scripts.audit_web_board_pipeline.run_audit",
                     return_value={"summary": {"boards": 1}},
                 ),
                 patch(
-                    "audit_web_board_pipeline.write_json",
+                    "scripts.audit_web_board_pipeline.write_json",
                     side_effect=RuntimeError("report write failed"),
                 ),
             ):

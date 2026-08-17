@@ -11,10 +11,8 @@ from unittest.mock import patch
 REPO_ROOT = Path(__file__).resolve().parents[1]
 MIRO_JSON_DIR = REPO_ROOT / "Miro_2_Json"
 
-sys.path.insert(0, str(MIRO_JSON_DIR))
-
-from utils import safe_filename  # noqa: E402
-from miro_downloader import (  # noqa: E402
+from Miro_2_Json.utils import safe_filename  # noqa: E402
+from Miro_2_Json.miro_downloader import (  # noqa: E402
     download_all,
     download_resource_with_redirect,
     read_json,
@@ -61,7 +59,7 @@ class MiroDownloaderSecurityTests(unittest.TestCase):
 
     def setUp(self) -> None:
         resolver = patch(
-            "miro_downloader.socket.getaddrinfo",
+            "Miro_2_Json.miro_downloader.socket.getaddrinfo",
             return_value=[(2, 1, 6, "", ("93.184.216.34", 443))],
         )
         resolver.start()
@@ -75,7 +73,7 @@ class MiroDownloaderSecurityTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             target = Path(tmp) / "asset.bin"
             with patch(
-                "miro_downloader.requests.get", side_effect=responses
+                "Miro_2_Json.miro_downloader.requests.get", side_effect=responses
             ) as request:
                 result = download_resource_with_redirect(
                     "https://api.miro.com/v2/boards/board/images/image?redirect=true",
@@ -96,7 +94,7 @@ class MiroDownloaderSecurityTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             target = Path(tmp) / "asset.bin"
             with patch(
-                "miro_downloader.requests.get",
+                "Miro_2_Json.miro_downloader.requests.get",
                 return_value=FakeResponse(200, body=b"asset"),
             ) as request:
                 result = download_resource_with_redirect(
@@ -112,7 +110,7 @@ class MiroDownloaderSecurityTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             target = Path(tmp) / "asset.bin"
             with patch(
-                "miro_downloader.requests.get",
+                "Miro_2_Json.miro_downloader.requests.get",
                 return_value=FakeResponse(200, body=b"asset"),
             ) as request:
                 download_resource_with_redirect(
@@ -132,7 +130,7 @@ class MiroDownloaderSecurityTests(unittest.TestCase):
         )
         with tempfile.TemporaryDirectory() as tmp:
             target = Path(tmp) / "asset.bin"
-            with patch("miro_downloader.requests.get") as request:
+            with patch("Miro_2_Json.miro_downloader.requests.get") as request:
                 for url in blocked:
                     with self.subTest(url=url):
                         self.assertIsNone(
@@ -151,7 +149,7 @@ class MiroDownloaderSecurityTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             target = Path(tmp) / "asset.bin"
             partial = target.with_suffix(".bin.part")
-            with patch("miro_downloader.requests.get", return_value=response):
+            with patch("Miro_2_Json.miro_downloader.requests.get", return_value=response):
                 result = download_resource_with_redirect(
                     "https://assets.example.test/asset",
                     target,
@@ -167,7 +165,7 @@ class MiroDownloaderSecurityTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             target = Path(tmp) / "asset.png"
             with patch(
-                "miro_downloader.requests.get", return_value=FakeResponse(200, body=b"")
+                "Miro_2_Json.miro_downloader.requests.get", return_value=FakeResponse(200, body=b"")
             ):
                 result = download_resource_with_redirect(
                     "https://assets.example.test/asset.png",
@@ -184,7 +182,7 @@ class MiroDownloaderSecurityTests(unittest.TestCase):
         )
         with tempfile.TemporaryDirectory() as tmp:
             target = Path(tmp) / "asset.png"
-            with patch("miro_downloader.requests.get", return_value=response):
+            with patch("Miro_2_Json.miro_downloader.requests.get", return_value=response):
                 result = download_resource_with_redirect(
                     "https://assets.example.test/asset.png",
                     target,
@@ -198,10 +196,10 @@ class MiroDownloaderSecurityTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             target = Path(tmp) / "asset.bin"
             with patch(
-                "miro_downloader.socket.getaddrinfo",
+                "Miro_2_Json.miro_downloader.socket.getaddrinfo",
                 return_value=[(2, 1, 6, "", ("127.0.0.1", 443))],
             ):
-                with patch("miro_downloader.requests.get") as request:
+                with patch("Miro_2_Json.miro_downloader.requests.get") as request:
                     result = download_resource_with_redirect(
                         "https://private.example.test/asset",
                         target,
@@ -217,7 +215,7 @@ class MiroDownloaderSecurityTests(unittest.TestCase):
         )
         with tempfile.TemporaryDirectory() as tmp:
             target = Path(tmp) / "asset"
-            with patch("miro_downloader.requests.get", return_value=response):
+            with patch("Miro_2_Json.miro_downloader.requests.get", return_value=response):
                 result = download_resource_with_redirect(
                     "https://assets.example.test/asset",
                     target,
@@ -237,7 +235,7 @@ class MiroDownloaderSecurityTests(unittest.TestCase):
         )
         with tempfile.TemporaryDirectory() as tmp:
             target = Path(tmp) / "asset.png"
-            with patch("miro_downloader.requests.get", return_value=response):
+            with patch("Miro_2_Json.miro_downloader.requests.get", return_value=response):
                 result = download_resource_with_redirect(
                     "https://assets.example.test/asset.png",
                     target,
@@ -255,7 +253,7 @@ class MiroDownloaderSecurityTests(unittest.TestCase):
         )
         with tempfile.TemporaryDirectory() as tmp:
             target = Path(tmp) / "document.html"
-            with patch("miro_downloader.requests.get", return_value=response):
+            with patch("Miro_2_Json.miro_downloader.requests.get", return_value=response):
                 result = download_resource_with_redirect(
                     "https://assets.example.test/document",
                     target,
@@ -278,7 +276,7 @@ class MiroDownloaderSecurityTests(unittest.TestCase):
         )
         with tempfile.TemporaryDirectory() as tmp:
             target = Path(tmp) / "document"
-            with patch("miro_downloader.requests.get", return_value=response):
+            with patch("Miro_2_Json.miro_downloader.requests.get", return_value=response):
                 result = download_resource_with_redirect(
                     "https://assets.example.test/document",
                     target,
@@ -305,9 +303,9 @@ class MiroDownloaderSecurityTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             target = Path(tmp) / "asset"
             with patch(
-                "miro_downloader.requests.get", side_effect=responses
+                "Miro_2_Json.miro_downloader.requests.get", side_effect=responses
             ) as request:
-                with patch("miro_downloader.time.sleep"):
+                with patch("Miro_2_Json.miro_downloader.time.sleep"):
                     result = download_resource_with_redirect(
                         origin,
                         target,
@@ -342,7 +340,7 @@ class MiroDownloaderSecurityTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             target = Path(tmp) / "image.png"
             with patch(
-                "miro_downloader.download_resource_with_redirect",
+                "Miro_2_Json.miro_downloader.download_resource_with_redirect",
                 side_effect=download,
             ):
                 failures = download_all(

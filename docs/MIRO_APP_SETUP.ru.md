@@ -131,8 +131,8 @@ Copy-Item .miro_oauth.local.example.json .miro_oauth.local.json
 Установите runtime dependencies и запустите desktop app:
 
 ```powershell
-python -m pip install -r requirements.txt
-python Miro_2_Obsidian_GUI.py
+python -m pip install .
+miro2obsidian-gui
 ```
 
 Выберите **Miro account** и нажмите **Authenticate / refresh**. Browser откроет
@@ -158,7 +158,7 @@ python tools\miro_websdk_exporter\serve_no_cache.py --port 8766
 4. Нажмите **Export board**, а не **Export selection**.
 5. Сохраните скачанный JSON. Он должен относиться к той же доске и быть получен
    близко по времени к REST-экспорту.
-6. Передайте его в `scripts/miro_pipeline.py` через `--websdk-json`, как показано
+6. Передайте его в `miro2obsidian` через `--websdk-json`, как показано
    в [README](../README.ru.md#максимально-полный-экспорт).
 
 Сейчас скачанный Web SDK JSON является ручным мостом. В будущем локальный

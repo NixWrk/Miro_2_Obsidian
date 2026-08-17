@@ -1,18 +1,14 @@
 from __future__ import annotations
 
-import sys
 import threading
-from pathlib import Path
 from urllib.error import HTTPError
 from urllib.request import urlopen
 
 import pytest
 
 
-SCRIPTS_DIR = Path(__file__).resolve().parents[1] / "scripts"
-sys.path.insert(0, str(SCRIPTS_DIR))
 
-import miro_oauth_token as oauth  # noqa: E402
+from scripts import miro_oauth_token as oauth
 
 
 def test_oauth_callback_rejects_malformed_then_keeps_first_valid_result() -> None:

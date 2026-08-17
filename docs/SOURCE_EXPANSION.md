@@ -20,7 +20,8 @@ The classifications are:
 - `converter_candidate`: useful source data exists but Canvas loses it;
 - `websdk_export_candidate`: Web SDK exposes more than REST;
 - `separate_source`: data comes from another endpoint, such as comments;
-- `needs_probe`: available evidence is inconclusive;
+-
+eeds_probe`: available evidence is inconclusive;
 - `source_limited`: no current public source exposes useful content.
 
 ## Local workspace
@@ -28,11 +29,12 @@ The classifications are:
 Keep generated evidence in an ignored directory:
 
 ```powershell
-python scripts\miro_source_expansion_workflow.py plan `
+python -m scripts.miro_source_expansion_workflow plan `
   --output-dir work\source_expansion
 ```
 
-The workflow writes `workflow_plan.md`, capability reports, `next_actions.md`,
+The workflow writes `workflow_plan.md`, capability reports,
+ext_actions.md`,
 and a merged diagnostic JSON. These are local evidence, not repository files.
 
 ## Authentication
@@ -62,14 +64,14 @@ an executable path only when an explicit browser is required.
 Generate a manifest without contacting Miro:
 
 ```powershell
-python scripts\miro_rest_generate_probe_board.py `
+python -m scripts.miro_rest_generate_probe_board `
   --output work\source_expansion\rest_probe_manifest.json
 ```
 
 Create or update the probe board only after reviewing the manifest:
 
 ```powershell
-python scripts\miro_rest_generate_probe_board.py --execute --oauth `
+python -m scripts.miro_rest_generate_probe_board --execute --oauth `
   --output work\source_expansion\rest_probe_result.json
 ```
 
@@ -81,7 +83,7 @@ The generator records item-level API rejections and continues. Add
 After exporting the same board from both sources:
 
 ```powershell
-python scripts\miro_source_expansion_workflow.py analyze `
+python -m scripts.miro_source_expansion_workflow analyze `
   --rest-json work\source_expansion\rest_export.json `
   --websdk-json work\source_expansion\websdk_export.json `
   --output-dir work\source_expansion
@@ -95,7 +97,7 @@ panel; selection and generated-probe exports do not claim full-board capture.
 Comments are not normal board items:
 
 ```powershell
-python scripts\miro_comment_probe.py --board-id <board_id> `
+python -m scripts.miro_comment_probe --board-id <board_id> `
   --output work\source_expansion\comment_probe_result.json
 ```
 
@@ -103,7 +105,7 @@ Tables require evidence JSON because current public exports may expose geometry
 without cell text:
 
 ```powershell
-python scripts\miro_table_probe.py --board-id <board_id> `
+python -m scripts.miro_table_probe --board-id <board_id> `
   --evidence-json work\source_expansion\rest_export.json `
   --output work\source_expansion\table_probe_result.json
 ```
@@ -111,7 +113,7 @@ python scripts\miro_table_probe.py --board-id <board_id> `
 Slides require parent-chain and frame checks:
 
 ```powershell
-python scripts\miro_slide_probe.py --board-id <board_id> `
+python -m scripts.miro_slide_probe --board-id <board_id> `
   --evidence-json work\source_expansion\rest_export.json `
   --evidence-json work\source_expansion\websdk_export.json `
   --output work\source_expansion\slide_probe_result.json
@@ -141,5 +143,5 @@ Geometry-only table objects must not be presented as recovered table content.
   warning; source data must not be silently replaced by a smaller link card.
 - Real-source evidence must be reduced to synthetic IDs, URLs, text, and the
   minimum fields needed for the regression.
-- Run `python scripts\run_regression.py` before committing a source-expansion
+- Run `python -m scripts.run_regression` before committing a source-expansion
   change.

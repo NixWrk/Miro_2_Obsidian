@@ -1,14 +1,12 @@
 from __future__ import annotations
 
-import sys
 import unittest
 from pathlib import Path
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(REPO_ROOT / "Json_2_Canvas"))
 
-from Converter import convert_item_to_canvas_node  # noqa: E402
+from Json_2_Canvas.Converter import convert_item_to_canvas_node  # noqa: E402
 
 
 def convert(item: dict) -> dict | None:

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import argparse
 import shutil
-import sys
 import tempfile
 from pathlib import Path
 from typing import Any
@@ -10,15 +9,14 @@ from typing import Any
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS_DIR = REPO_ROOT / "scripts"
-sys.path.insert(0, str(SCRIPTS_DIR))
 
-from merge_miro_sources import (  # noqa: E402
+from scripts.merge_miro_sources import (  # noqa: E402
     DEFAULT_MAX_SOURCE_AGE_HOURS,
     finalize_merged_export,
     merge_sources,
     validate_rest_export,
 )
-from miro_export_bundle import (  # noqa: E402
+from scripts.miro_export_bundle import (  # noqa: E402
     copy_referenced_sidecar,
     is_link_or_reparse,
     publish_staged_bundle,
@@ -27,8 +25,8 @@ from miro_export_bundle import (  # noqa: E402
     require_regular_file,
     staged_export_path,
 )
-from miro_rest_export_board import stable_enrichment_items, validate_export_assets, write_json  # noqa: E402
-from miro_capability_probe import (  # noqa: E402
+from scripts.miro_rest_export_board import stable_enrichment_items, validate_export_assets, write_json  # noqa: E402
+from scripts.miro_capability_probe import (  # noqa: E402
     build_coverage_rows,
     load_json,
     render_markdown_report,
@@ -67,7 +65,7 @@ def build_workflow_plan(
             "## 1. Prepare REST probe manifest",
             "",
             "```powershell",
-            f"python scripts\\miro_rest_generate_probe_board.py --output {_path_for_markdown(rest_manifest)}",
+            f"python -m scripts.miro_rest_generate_probe_board --output {_path_for_markdown(rest_manifest)}",
             "```",
             "",
             "## 2. Create or update the maximum REST probe board",
@@ -80,13 +78,13 @@ def build_workflow_plan(
             "Developer token-env run:",
             "",
             "```powershell",
-            f"python scripts\\miro_rest_generate_probe_board.py --execute{board_arg} --output {_path_for_markdown(rest_result)}",
+            f"python -m scripts.miro_rest_generate_probe_board --execute{board_arg} --output {_path_for_markdown(rest_result)}",
             "```",
             "",
             "Local OAuth run:",
             "",
             "```powershell",
-            f"python scripts\\miro_rest_generate_probe_board.py --execute --oauth{board_arg} --output {_path_for_markdown(rest_result)}",
+            f"python -m scripts.miro_rest_generate_probe_board --execute --oauth{board_arg} --output {_path_for_markdown(rest_result)}",
             "```",
             "",
             "## 3. Finalize probe items before either export",
@@ -128,7 +126,7 @@ def build_workflow_plan(
             "",
             "```powershell",
             (
-                "python scripts\\miro_slide_probe.py "
+                "python -m scripts.miro_slide_probe "
                 f"--board-id {board_id or '<board_id>'} "
                 f"--evidence-json {_path_for_markdown(rest_export)} "
                 f"--evidence-json {_path_for_markdown(websdk_export)} "
@@ -142,7 +140,7 @@ def build_workflow_plan(
             "",
             "```powershell",
             (
-                "python scripts\\miro_source_expansion_workflow.py analyze "
+                "python -m scripts.miro_source_expansion_workflow analyze "
                 f"--rest-json {_path_for_markdown(rest_export)} "
                 f"--websdk-json {_path_for_markdown(websdk_export)} "
                 f"--board-id {board_id or '<board_id>'} "

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import argparse
-import sys
 from collections import Counter
 from pathlib import Path
 from typing import Any
@@ -9,17 +8,15 @@ from typing import Any
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 MIRO_JSON_DIR = REPO_ROOT / "Miro_2_Json"
-sys.path.insert(0, str(MIRO_JSON_DIR))
-sys.path.insert(0, str(REPO_ROOT / "scripts"))
 
-from miro_downloader import get_boards  # noqa: E402
-from miro_oauth_token import (  # noqa: E402
+from Miro_2_Json.miro_downloader import get_boards  # noqa: E402
+from scripts.miro_oauth_token import (  # noqa: E402
     DEFAULT_AUTHORIZE_URL,
     DEFAULT_BROWSER,
     DEFAULT_REDIRECT_URI,
     DEFAULT_SCOPES,
 )
-from miro_rest_export_board import resolve_token_from_args, write_json  # noqa: E402
+from scripts.miro_rest_export_board import resolve_token_from_args, write_json  # noqa: E402
 
 
 def summarize_boards(boards: list[dict[str, Any]]) -> dict[str, Any]:

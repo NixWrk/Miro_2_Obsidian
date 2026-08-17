@@ -1,15 +1,12 @@
 from __future__ import annotations
 
 import os
-import sys
 from pathlib import Path
 
 
 SCRIPTS_DIR = Path(__file__).resolve().parents[1] / "scripts"
-if str(SCRIPTS_DIR) not in sys.path:
-    sys.path.insert(0, str(SCRIPTS_DIR))
 
-from miro_oauth_token import (  # noqa: E402
+from scripts.miro_oauth_token import (  # noqa: E402
     DEFAULT_REDIRECT_URI,
     DEFAULT_SCOPES,
     authorize_and_get_token as _authorize_and_get_token,

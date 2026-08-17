@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -9,10 +8,9 @@ from unittest.mock import patch
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 MIRO_JSON_DIR = REPO_ROOT / "Miro_2_Json"
-sys.path.insert(0, str(MIRO_JSON_DIR))
 
-from download_worker import run_download  # noqa: E402
-from miro_downloader import download_all, write_json  # noqa: E402
+from Miro_2_Json.download_worker import run_download  # noqa: E402
+from Miro_2_Json.miro_downloader import download_all, write_json  # noqa: E402
 
 
 def worker_kwargs(root: Path, *, ask_strategy):
@@ -46,8 +44,8 @@ class MiroDownloadWorkerTests(unittest.TestCase):
             kwargs = worker_kwargs(root, ask_strategy=lambda _paths: "overwrite")
             kwargs["canonical"] = True
             with (
-                patch("download_worker.export_complete_board_source", return_value=(payload, info)) as export,
-                patch("download_worker.get_items_on_board") as legacy_items,
+                patch("Miro_2_Json.download_worker.export_complete_board_source", return_value=(payload, info)) as export,
+                patch("Miro_2_Json.download_worker.get_items_on_board") as legacy_items,
             ):
                 result = run_download(**kwargs)
 
@@ -62,8 +60,8 @@ class MiroDownloadWorkerTests(unittest.TestCase):
             root = Path(tmp)
             (root / "team_board.json").write_text("[]", encoding="utf-8")
             with (
-                patch("download_worker.get_items_on_board", return_value=[]),
-                patch("download_worker.write_json") as save,
+                patch("Miro_2_Json.download_worker.get_items_on_board", return_value=[]),
+                patch("Miro_2_Json.download_worker.write_json") as save,
             ):
                 result = run_download(**worker_kwargs(root, ask_strategy=lambda _paths: None))
 
@@ -76,8 +74,8 @@ class MiroDownloadWorkerTests(unittest.TestCase):
             root = Path(tmp)
             expected = root / "team_board.json"
             with (
-                patch("download_worker.get_items_on_board", return_value=[item]),
-                patch("download_worker.write_json") as save,
+                patch("Miro_2_Json.download_worker.get_items_on_board", return_value=[item]),
+                patch("Miro_2_Json.download_worker.write_json") as save,
             ):
                 result = run_download(**worker_kwargs(root, ask_strategy=lambda _paths: "overwrite"))
 
@@ -114,8 +112,8 @@ class MiroDownloadWorkerTests(unittest.TestCase):
             kwargs = worker_kwargs(root, ask_strategy=lambda _paths: "overwrite")
             kwargs["on_file_fail"] = lambda item_id, reason: failures.append((str(item_id), reason))
             with (
-                patch("download_worker.get_items_on_board", return_value=[item]),
-                patch("download_worker.write_json") as save,
+                patch("Miro_2_Json.download_worker.get_items_on_board", return_value=[item]),
+                patch("Miro_2_Json.download_worker.write_json") as save,
             ):
                 with self.assertRaisesRegex(RuntimeError, "asset download"):
                     run_download(**kwargs)
@@ -144,7 +142,7 @@ class MiroDownloadWorkerTests(unittest.TestCase):
         with tempfile.TemporaryDirectory(prefix="miro2obs_worker_error_") as tmp:
             root = Path(tmp)
             with patch(
-                "miro_downloader.download_resource_with_redirect",
+                "Miro_2_Json.miro_downloader.download_resource_with_redirect",
                 side_effect=RuntimeError("worker failed"),
             ):
                 with self.assertRaisesRegex(RuntimeError, "asset download worker"):

@@ -3,7 +3,6 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import sys
 import tempfile
 from collections import Counter
 from copy import deepcopy
@@ -14,10 +13,8 @@ from typing import Any
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 MIRO_JSON_DIR = REPO_ROOT / "Miro_2_Json"
-sys.path.insert(0, str(MIRO_JSON_DIR))
-sys.path.insert(0, str(REPO_ROOT / "scripts"))
 
-from miro_downloader import (  # noqa: E402
+from Miro_2_Json.miro_downloader import (  # noqa: E402
     _dedupe_miro_items,
     add_browser_links,
     download_all,
@@ -25,19 +22,19 @@ from miro_downloader import (  # noqa: E402
     downloaded_file_error,
     get_items_on_board,
 )
-from miro_export_bundle import (  # noqa: E402
+from scripts.miro_export_bundle import (  # noqa: E402
     publish_staged_bundle,
     referenced_local_names,
     sidecar_path,
     staged_export_path,
 )
-from miro_oauth_token import (  # noqa: E402
+from scripts.miro_oauth_token import (  # noqa: E402
     DEFAULT_AUTHORIZE_URL,
     DEFAULT_BROWSER,
     DEFAULT_REDIRECT_URI,
     DEFAULT_SCOPES,
 )
-from utils import allocate_unique_batch_names, compute_target_filename  # noqa: E402
+from Miro_2_Json.utils import allocate_unique_batch_names, compute_target_filename  # noqa: E402
 
 
 IMAGE_URL_KEYS = ("imageUrl", "url", "downloadUrl", "previewUrl", "thumbnailUrl")
@@ -133,7 +130,7 @@ def export_board_comments(
     logger: Any | None = None,
     metadata: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
-    from miro_comment_probe import run_comment_probe  # noqa: PLC0415
+    from scripts.miro_comment_probe import run_comment_probe  # noqa: PLC0415
 
     payload = run_comment_probe(board_id=board_id, token=token)
     completeness = payload.get("completeness")
@@ -991,7 +988,7 @@ def export_complete_board_source(
 
 def resolve_token_from_args(args: argparse.Namespace) -> str:
     if args.oauth:
-        from miro_oauth_token import (
+        from scripts.miro_oauth_token import (
             authorize_and_get_token,
             config_from_env,
             exchange_manual_authorization,

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import os
-import sys
 import tempfile
 import unittest
 from argparse import Namespace
@@ -14,10 +13,9 @@ from unittest.mock import patch
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS_DIR = REPO_ROOT / "scripts"
-sys.path.insert(0, str(SCRIPTS_DIR))
 
-from audit_web_board_pipeline import BoardRef  # noqa: E402
-from compare_miro_export_sources import (  # noqa: E402
+from scripts.audit_web_board_pipeline import BoardRef  # noqa: E402
+from scripts.compare_miro_export_sources import (  # noqa: E402
     DEFAULT_BOARD_LIST,
     LEGACY_EXP,
     MERGED_REST_EXP_WEBSDK,
@@ -39,7 +37,7 @@ from compare_miro_export_sources import (  # noqa: E402
     resolve_runtime_token,
     source_keys_require_token,
 )
-from merge_miro_sources import WEBSDK_CAPTURE_PROFILE, WEBSDK_EXPORTER_VERSION  # noqa: E402
+from scripts.merge_miro_sources import WEBSDK_CAPTURE_PROFILE, WEBSDK_EXPORTER_VERSION  # noqa: E402
 
 
 def websdk_export(board_id: str, items: list[dict]) -> dict:
@@ -238,7 +236,7 @@ class CompareMiroExportSourcesTests(unittest.TestCase):
         with tempfile.TemporaryDirectory(prefix="miro2obs_websdk_root_") as tmp:
             root = Path(tmp)
             with patch(
-                "compare_miro_export_sources.require_regular_directory",
+                "scripts.compare_miro_export_sources.require_regular_directory",
                 side_effect=RuntimeError("not a regular directory"),
             ):
                 with self.assertRaisesRegex(RuntimeError, "not a regular directory"):
@@ -283,7 +281,7 @@ class CompareMiroExportSourcesTests(unittest.TestCase):
         with tempfile.TemporaryDirectory(prefix="miro2obs_source_compare_") as tmp:
             out_dir = Path(tmp)
             with patch(
-                "compare_miro_export_sources.export_complete_board_source",
+                "scripts.compare_miro_export_sources.export_complete_board_source",
                 side_effect=complete_export,
             ) as export:
                 result = materialize_source(
@@ -394,7 +392,7 @@ class CompareMiroExportSourcesTests(unittest.TestCase):
                 }
 
             with patch(
-                "compare_miro_export_sources.download_export_assets",
+                "scripts.compare_miro_export_sources.download_export_assets",
                 side_effect=download_merged_assets,
             ) as asset_download:
                 result = materialize_source(
@@ -447,7 +445,7 @@ class CompareMiroExportSourcesTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory(prefix="miro2obs_legacy_unicode_") as tmp:
             root = Path(tmp)
-            with patch("download_worker.run_download", side_effect=fake_run_download):
+            with patch("Miro_2_Json.download_worker.run_download", side_effect=fake_run_download):
                 result = materialize_source(
                     board,
                     LEGACY_EXP,
@@ -496,7 +494,7 @@ class CompareMiroExportSourcesTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory(prefix="miro2obs_legacy_assets_") as tmp:
             root = Path(tmp)
-            with patch("download_worker.run_download", side_effect=fake_run_download):
+            with patch("Miro_2_Json.download_worker.run_download", side_effect=fake_run_download):
                 result = materialize_source(
                     board,
                     LEGACY_EXP,
@@ -532,7 +530,7 @@ class CompareMiroExportSourcesTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory(prefix="miro2obs_legacy_keep_") as tmp:
             root = Path(tmp)
-            with patch("download_worker.run_download", side_effect=successful_download):
+            with patch("Miro_2_Json.download_worker.run_download", side_effect=successful_download):
                 first = materialize_source(
                     board,
                     LEGACY_EXP,
@@ -544,7 +542,7 @@ class CompareMiroExportSourcesTests(unittest.TestCase):
                 )
             output = Path(first.source_json)
             with patch(
-                "download_worker.run_download",
+                "Miro_2_Json.download_worker.run_download",
                 side_effect=RuntimeError("download failed"),
             ):
                 second = materialize_source(
@@ -822,15 +820,15 @@ class CompareMiroExportSourcesTests(unittest.TestCase):
             )
 
             with (
-                patch("compare_miro_export_sources.parse_args", return_value=args),
+                patch("scripts.compare_miro_export_sources.parse_args", return_value=args),
                 patch(
-                    "compare_miro_export_sources.resolve_runtime_token", return_value=""
+                    "scripts.compare_miro_export_sources.resolve_runtime_token", return_value=""
                 ),
                 patch(
-                    "compare_miro_export_sources.load_board_refs", return_value=[board]
+                    "scripts.compare_miro_export_sources.load_board_refs", return_value=[board]
                 ),
                 patch(
-                    "compare_miro_export_sources._run_comparison",
+                    "scripts.compare_miro_export_sources._run_comparison",
                     side_effect=RuntimeError("comparison failed"),
                 ),
             ):
@@ -864,7 +862,7 @@ class CompareMiroExportSourcesTests(unittest.TestCase):
             with (
                 patch.dict(os.environ, {}, clear=False),
                 patch(
-                    "compare_miro_export_sources.config_from_env",
+                    "scripts.compare_miro_export_sources.config_from_env",
                     return_value=fake_config,
                 ),
             ):
@@ -890,7 +888,7 @@ class CompareMiroExportSourcesTests(unittest.TestCase):
         with tempfile.TemporaryDirectory(prefix="miro2obs_refresh_boards_") as tmp:
             output = Path(tmp) / "boards.json"
             with patch(
-                "compare_miro_export_sources.get_boards", return_value=boards
+                "scripts.compare_miro_export_sources.get_boards", return_value=boards
             ) as get_boards:
                 summary = refresh_board_list(output, token="token-1")
             payload = json.loads(output.read_text(encoding="utf-8"))

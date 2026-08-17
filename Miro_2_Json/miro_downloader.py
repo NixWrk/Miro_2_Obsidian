@@ -24,7 +24,7 @@ import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
-from utils import (
+from Miro_2_Json.utils import (
     add_extension_unique,
     ensure_unique_filename,
     extract_doc_format_title,

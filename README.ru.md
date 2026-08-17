@@ -31,6 +31,8 @@ canonical JSON сохраняются исходные объекты обоих
 Pipeline работает и покрыт автоматическими тестами. Сейчас это pre-release,
 ориентированный на Windows и проверенный на Python 3.13.
 
+Исторический ключ Miro отозван и отсутствует в release tree.
+
 Обратной синхронизации с Miro нет. Запланированный Obsidian-плагин
 [`miro-canvas`](docs/miro-canvas.ru.md) является отдельным офлайн-слоем для
 более точного отображения и удобного редактирования; он пока не реализован.
@@ -56,12 +58,13 @@ REST остаётся главным источником для совпада�
 Рабочая среда:
 
 ```powershell
-python -m pip install -r requirements.txt
+python -m pip install .
 ```
 
 Разработка, тесты и визуальная регрессия:
 
 ```powershell
+python -m pip install -e .
 python -m pip install -r requirements-dev.txt
 python -m playwright install chromium
 ```
@@ -79,7 +82,7 @@ python -m playwright install chromium
 Этот режим не требует Miro credentials или доступа к сети:
 
 ```powershell
-python scripts\miro_pipeline.py `
+miro2obsidian `
   --existing-json `
   --source-json path\to\board.json `
   --vault-root path\to\ObsidianVault `
@@ -89,7 +92,7 @@ python scripts\miro_pipeline.py `
 ### GUI
 
 ```powershell
-python Miro_2_Obsidian_GUI.py
+miro2obsidian-gui
 ```
 
 GUI разделяет четыре сценария:
@@ -128,7 +131,7 @@ python tools\miro_websdk_exporter\serve_no_cache.py --port 8766
 7. Передайте скачанный JSON в production pipeline:
 
 ```powershell
-python scripts\miro_pipeline.py `
+miro2obsidian `
   --oauth `
   --board-id <board_id> `
   --websdk-json path\to\websdk-board.json `
@@ -171,20 +174,20 @@ REST comments; часть данных таблиц, документов, slide
 Полный regression loop:
 
 ```powershell
-python scripts\run_regression.py
+python -m scripts.run_regression
 ```
 
 Быстрый структурный прогон без browser screenshots:
 
 ```powershell
-python scripts\run_regression.py --skip-render
+python -m scripts.run_regression --skip-render
 ```
 
 Отдельные проверки:
 
 ```powershell
-python -m compileall -q Json_2_Canvas Miro_2_Json scripts tools tests Miro_2_Obsidian_GUI.py
-python -m ruff check Json_2_Canvas Miro_2_Json scripts tools tests Miro_2_Obsidian_GUI.py
+python -m compileall -q Json_2_Canvas Miro_2_Json miro2obsidian scripts tools tests Miro_2_Obsidian_GUI.py
+python -m ruff check Json_2_Canvas Miro_2_Json miro2obsidian scripts tools tests Miro_2_Obsidian_GUI.py
 python -m pytest -q
 node tests\websdk_serialization_smoke.js tools\miro_websdk_exporter\exporter.js
 node tests\websdk_capture_completeness_smoke.js tools\miro_websdk_exporter\exporter.js

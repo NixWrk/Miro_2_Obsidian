@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import sys
 import unittest
 from pathlib import Path
 
@@ -8,9 +7,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[1]
 CONVERTER_DIR = REPO_ROOT / "Json_2_Canvas"
 
-sys.path.insert(0, str(CONVERTER_DIR))
-
-from Scale_engine import (  # noqa: E402
+from Json_2_Canvas.Scale_engine import (  # noqa: E402
     OBSIDIAN_FONT_SIZE,
     ViewProfile,
     normalize_scale_mode,

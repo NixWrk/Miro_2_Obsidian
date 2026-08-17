@@ -17,6 +17,10 @@ from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any, Dict, Iterable, List, Optional
 from urllib.parse import parse_qs, unquote, urlparse
 
+from Json_2_Canvas.canvas_layout import center_nodes
+from Json_2_Canvas.miro_model import view
+from Json_2_Canvas.publication import write_json_atomic
+
 
 # =========================
 # Constants
@@ -1448,7 +1452,7 @@ def _source_declares_complete_assets(miro_root: Any) -> bool:
 def _required_source_asset_issues(miro_root: Any, files_folder: str) -> List[str]:
     issues: List[str] = []
     for item in iter_objects(miro_root):
-        item_type = str(item.get("type") or "").lower()
+        item_type = view(item).kind
         if item_type not in {"image", "document", "doc_format", "embed"}:
             continue
         data = item.get("data") if isinstance(item.get("data"), dict) else {}
@@ -3148,19 +3152,15 @@ def _node_center_inside_rect(
 
 
 def _frame_rect_unscaled(mi_frame: Dict[str, Any]) -> Optional[Dict[str, float]]:
-    geom = mi_frame.get("geometry") or {}
-    pos = mi_frame.get("position") or {}
-    try:
-        w = float(geom.get("width") or 0.0)
-        h = float(geom.get("height") or 0.0)
-        xc = float(pos.get("x") or 0.0)
-        yc = float(pos.get("y") or 0.0)
-    except Exception:
+    bounds = view(mi_frame).bounds
+    if bounds is None:
         return None
-    if w <= 0 or h <= 0:
-        return None
-    return {"x": xc - w / 2.0, "y": yc - h / 2.0, "width": w, "height": h}
-
+    return {
+        "x": bounds.x,
+        "y": bounds.y,
+        "width": bounds.width,
+        "height": bounds.height,
+    }
 
 def _normalize_child_pos_to_canvas(item, parent_rect, *, margin_ratio: float = 0.05):
     pos = item.get("position") or {}
@@ -3309,7 +3309,7 @@ def _slide_child_source_visual_height(
     if geom.get("height") is not None:
         return None
 
-    item_type = str(item.get("type") or "").lower()
+    item_type = view(item).kind
     if item_type not in {"text", "shape", "sticky_note"}:
         return None
 
@@ -3346,7 +3346,7 @@ def _slide_thumbnail_content_size_boost(fit: float) -> float:
 
 
 def _slide_thumbnail_text_size_boost(item: Dict[str, Any], frame_boost: float) -> float:
-    item_type = str(item.get("type") or "").lower()
+    item_type = view(item).kind
     if item_type == "shape":
         data = item.get("data") if isinstance(item.get("data"), dict) else {}
         if not str(data.get("content") or "").strip():
@@ -4507,23 +4507,19 @@ def _convert_item_to_canvas_node(
     Generic Miro text/shape/sticky nodes preserve source geometry by default.
     If min-font text no longer fits, Obsidian handles the internal overflow.
     """
-    item_type = (item.get("type") or "").lower()
+    item_view = view(item)
+    item_type = item_view.kind
     text_style_mode = normalize_text_style_mode(text_style_mode)
-    pos = (item.get("position") or {}) if isinstance(item.get("position"), dict) else {}
-    geom = (
-        (item.get("geometry") or {}) if isinstance(item.get("geometry"), dict) else {}
-    )
-
+    pos = item_view.position
+    geom = item_view.geometry
     width = float(geom.get("width", 250) or 250)
 
     # высота: если у TEXT отсутствует geometry.height — оценим по контенту
     raw_h = geom.get("height")
     if raw_h is None and item_type == "text":
         base_font_px0 = _extract_font_base_px(item, fallback=OBSIDIAN_FONT_SIZE)
-        lh0 = _extract_line_height(item.get("style") or {}, default=1.35)
-        content_html = ((item.get("data") or {}).get("content")) or (
-            item.get("plain_text") or ""
-        )
+        lh0 = _extract_line_height(item_view.style, default=1.35)
+        content_html = item_view.data.get("content") or item.get("plain_text") or ""
         content_html = _strip_edge_empty_paragraphs(content_html)
 
         height = _estimate_render_height(
@@ -4537,7 +4533,7 @@ def _convert_item_to_canvas_node(
     base_w, base_h = width * scale, height * scale
 
     base = {
-        "id": str(item.get("id", "")),
+        "id": item_view.id,
         "x": x * scale,
         "y": y * scale,
         "width": base_w,
@@ -4582,7 +4578,7 @@ def _convert_item_to_canvas_node(
         anchor_x = float(pos.get("x", 0) or 0.0) * scale
         anchor_y = float(pos.get("y", 0) or 0.0) * scale
         node = {
-            "id": str(item.get("id", "")),
+            "id": item_view.id,
             "type": "text",
             "x": anchor_x + COMMENT_NODE_OFFSET_X,
             "y": anchor_y - node_h / 2.0,
@@ -5212,7 +5208,7 @@ def _convert_item_to_canvas_node(
                 f'<p style="font-size:0.8em; opacity:0.6;">{limitation}</p>'
             )
             node = {
-                "id": str(item.get("id", "")),
+                "id": item_view.id,
                 "type": "text",
                 "x": center_x - node_w / 2.0,
                 "y": center_y - node_h / 2.0,
@@ -5375,7 +5371,7 @@ def convert_item_to_canvas_node(
         grow_text_nodes,
         text_style_mode,
     )
-    item_type = str(item.get("type") or "").lower()
+    item_type = view(item).kind
     if item_type in {"image", "document"} and (
         item["position"].get("slotId")
         or "/doc_formats/" in str(item["parent"]["links"].get("self") or "")
@@ -5397,7 +5393,8 @@ def convert_item_to_edge(
     item: Dict[str, Any], theme: str = "light"
 ) -> Optional[Dict[str, Any]]:
     item = _normalize_item_for_conversion(item)
-    if (item.get("type") or "").lower() != "connector":
+    item_view = view(item)
+    if item_view.kind != "connector":
         return None
 
     start = (item.get("startItem") or {}).get("id")
@@ -5406,7 +5403,7 @@ def convert_item_to_edge(
         return None
 
     edge: Dict[str, Any] = {
-        "id": str(item.get("id", "")),
+        "id": item_view.id,
         "fromNode": str(start),
         "toNode": str(end),
     }
@@ -6269,19 +6266,7 @@ def _convert_miro_to_canvas_impl(
         )
 
     # --- НОРМАЛИЗАЦИЯ: центрируем «вещественные» элементы в (0, 0)
-    bb = _bbox_of_real_nodes(nodes, include_groups=False)  # считаем только по non-group
-    if bb:
-        cx = bb["x"] + bb["width"] / 2.0
-        cy = bb["y"] + bb["height"] / 2.0
-        dx, dy = -cx, -cy
-        if abs(dx) > 1e-9 or abs(dy) > 1e-9:
-            for n in nodes:
-                try:
-                    n["x"] = float(n["x"]) + dx
-                    n["y"] = float(n["y"]) + dy
-                except Exception:
-                    # пропускаем элементы без координат (на всякий случай)
-                    pass
+    center_nodes(nodes, _bbox_of_real_nodes(nodes, include_groups=False))
 
     node_ids = {str(node.get("id") or "") for node in nodes}
     edges = [
@@ -6303,24 +6288,7 @@ def _convert_miro_to_canvas_impl(
         }
 
     _mkdir_with_tracking(Path(target_dir), _created_attachment_paths)
-    descriptor, temp_canvas_name = tempfile.mkstemp(
-        prefix=f".{Path(canvas_path).name}.",
-        suffix=".tmp",
-        dir=target_dir,
-    )
-    temp_canvas_path = Path(temp_canvas_name)
-    try:
-        with os.fdopen(descriptor, "w", encoding="utf-8") as f:
-            json.dump(
-                canvas_obj,
-                f,
-                ensure_ascii=False,
-                indent=2,
-                allow_nan=False,
-            )
-        os.replace(temp_canvas_path, canvas_path)
-    finally:
-        temp_canvas_path.unlink(missing_ok=True)
+    write_json_atomic(Path(canvas_path), canvas_obj)
 
     cleanup_sources(
         json_file=json_path,

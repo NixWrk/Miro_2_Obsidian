@@ -21,7 +21,7 @@ from Miro_2_Obsidian_GUI import (
     default_web_board_list,
     show_error_later,
 )
-from miro_oauth_token import OAuthConfig
+from scripts.miro_oauth_token import OAuthConfig
 
 
 class _Value:

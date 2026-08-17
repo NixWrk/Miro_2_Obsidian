@@ -10,9 +10,7 @@ from unittest.mock import patch
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS_DIR = REPO_ROOT / "scripts"
 
-sys.path.insert(0, str(SCRIPTS_DIR))
-
-from miro_slide_probe import (  # noqa: E402
+from scripts.miro_slide_probe import (  # noqa: E402
     build_detail_probe_requests,
     build_slide_probe_requests,
     classify_status,
@@ -221,9 +219,9 @@ class MiroSlideProbeTests(unittest.TestCase):
     def test_cli_writes_probe_output_without_printing_token(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             output = Path(tmp) / "slide_probe.json"
-            with patch("miro_slide_probe.resolve_token_from_args", return_value="secret-token"):
+            with patch("scripts.miro_slide_probe.resolve_token_from_args", return_value="secret-token"):
                 with patch(
-                    "miro_slide_probe.run_slide_probe",
+                    "scripts.miro_slide_probe.run_slide_probe",
                     return_value={
                         "kind": "miro_slide_source_probe",
                         "summary": {
@@ -241,7 +239,7 @@ class MiroSlideProbeTests(unittest.TestCase):
                         "contentful_slide_items": [],
                     },
                 ):
-                    with patch.object(sys, "argv", ["miro_slide_probe.py", "--board-id", "board-1", "--output", str(output)]):
+                    with patch.object(sys, "argv", ["scripts.miro_slide_probe.py", "--board-id", "board-1", "--output", str(output)]):
                         self.assertEqual(main(), 0)
 
             text = output.read_text(encoding="utf-8")

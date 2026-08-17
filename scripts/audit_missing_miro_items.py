@@ -4,7 +4,6 @@ import argparse
 import html
 import json
 import re
-import sys
 from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
@@ -102,8 +101,7 @@ def _has_canvas_position(item: dict[str, Any]) -> bool:
 
 
 def _has_recoverable_content(item: dict[str, Any]) -> bool:
-    sys.path.insert(0, str(CONVERTER_DIR))
-    from Converter import has_recoverable_item_content  # noqa: WPS433
+    from Json_2_Canvas.Converter import has_recoverable_item_content  # noqa: WPS433
 
     return has_recoverable_item_content(item)
 
@@ -238,8 +236,7 @@ def _requires_file_node(item: dict[str, Any]) -> bool:
 
 
 def audit_missing_items(miro_root: Any, canvas_root: dict[str, Any]) -> list[MissingMiroItem]:
-    sys.path.insert(0, str(CONVERTER_DIR))
-    from Converter import iter_objects, source_completeness_issues  # noqa: WPS433
+    from Json_2_Canvas.Converter import iter_objects, source_completeness_issues  # noqa: WPS433
 
     represented = represented_canvas_ids(canvas_root)
     nodes_by_id: dict[str, list[dict[str, Any]]] = {}

@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from math import inf, isfinite
 from typing import Any, Dict, Iterable, Optional, Tuple
 
-from Converter import (
+from Json_2_Canvas.Converter import (
     COMMENT_NODE_MIN_HEIGHT,
     COMMENT_NODE_WIDTH,
     OBSIDIAN_FONT_SIZE,
