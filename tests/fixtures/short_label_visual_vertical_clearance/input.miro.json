@@ -1,6 +1,6 @@
 [
   {
-    "id": "<redacted-long-id>",
+    "id": "label-rice",
     "type": "text",
     "position": {
       "x": 0,
@@ -23,9 +23,9 @@
     }
   },
   {
-    "id": "<redacted-long-id>",
+    "id": "image-rice",
     "type": "image",
-    "local_name": "sample_<redacted-long-id>.png",
+    "local_name": "rice_image.png",
     "position": {
       "x": 0,
       "y": 0,
@@ -41,7 +41,7 @@
     }
   },
   {
-    "id": "<redacted-long-id>",
+    "id": "label-kano",
     "type": "text",
     "position": {
       "x": 280,
@@ -64,9 +64,9 @@
     }
   },
   {
-    "id": "<redacted-long-id>",
+    "id": "image-kano",
     "type": "image",
-    "local_name": "sample_<redacted-long-id>.png",
+    "local_name": "kano_image.png",
     "position": {
       "x": 280,
       "y": 0,

@@ -1,6 +1,6 @@
 # slide_container deck membership
 
-Real local source evidence in `work/MIRO2OBSIDIAN/Miro_2_JSON/Dev team_Slides.json`
+Minimized source evidence from a dedicated slide test board
 contains `slide_container` items whose child frames have `parent.id` set to the
 owning deck. The converter must preserve that membership.
 

@@ -32,7 +32,7 @@ class MiroSourceExpansionWorkflowTests(unittest.TestCase):
 
         self.assertIn("miro_rest_generate_probe_board.py --output", plan)
         self.assertIn("MIRO_ACCESS_TOKEN", plan)
-        self.assertIn("Yandex Browser", plan)
+        self.assertIn("system browser", plan)
         self.assertIn("http://localhost:8765/callback", plan)
         self.assertIn("Use this URI for SDK authorization", plan)
         self.assertIn("partial API failures", plan)

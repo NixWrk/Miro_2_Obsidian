@@ -167,10 +167,9 @@ def rest_export(
 
 
 class CompareMiroExportSourcesTests(unittest.TestCase):
-    def test_default_board_list_uses_curated_web_boards(self) -> None:
+    def test_default_board_list_uses_ignored_work_directory(self) -> None:
         self.assertEqual(DEFAULT_BOARD_LIST.name, "Web_boards.md")
-        self.assertIn("Obs_Miro", str(DEFAULT_BOARD_LIST))
-        self.assertIn("Концепт", str(DEFAULT_BOARD_LIST))
+        self.assertEqual(DEFAULT_BOARD_LIST.parent.name, "work")
 
     def test_expand_source_keys_adds_merge_dependencies_once(self) -> None:
         self.assertEqual(

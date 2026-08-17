@@ -1,10 +1,10 @@
 {
   "verified_at": "2026-06-11",
-  "board_id": "uXjVSourceProbe=",
-  "table_id": "<redacted-long-id>",
+  "board_id": "board-probe",
+  "table_id": "table-1",
   "source_surfaces": {
     "rest_table_probe": {
-      "artifact": "work/MIRO2OBSIDIAN/source_expansion/table_probe_result.json",
+      "artifact": "work/source_expansion/table_probe_result.json",
       "summary": {
         "checked": 19,
         "available": 13,
@@ -13,7 +13,7 @@
         "evidence_table_items": 7,
         "auth_blocked_paths": [
           "experimental_tables_collection",
-          "experimental_table_detail_<redacted-long-id>"
+          "experimental_table_detail_table-1"
         ]
       },
       "decision": "table_geometry_without_content_and_blocked_candidate"

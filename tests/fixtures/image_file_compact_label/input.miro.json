@@ -1,8 +1,8 @@
 [
   {
-    "id": "<redacted-long-id>",
+    "id": "image-1",
     "type": "image",
-    "local_name": "Публичная_uXjVLargeFixture=_<redacted-long-id>.png",
+    "local_name": "sample_board_image.png",
     "position": {
       "x": 0,
       "y": 0,

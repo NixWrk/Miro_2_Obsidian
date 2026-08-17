@@ -1,0 +1,49 @@
+name: Bug report
+description: Report a reproducible export, conversion, or validation problem
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: Do not attach private board exports, credentials, OAuth callback URLs, or access tokens.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What happened, and what did you expect?
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction
+      description: Provide the smallest synthetic example and exact command or GUI workflow.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Commit hash or release version.
+    validations:
+      required: true
+  - type: dropdown
+    id: stage
+    attributes:
+      label: Stage
+      options:
+        - Miro authentication
+        - REST export or assets
+        - Web SDK export
+        - Source merge
+        - Canvas conversion
+        - Obsidian display
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Sanitized logs
+      description: Remove tokens, client credentials, board IDs, callback codes, private URLs, and personal paths.
+      render: text

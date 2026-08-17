@@ -16,7 +16,7 @@ local, and easy to remove if an Obsidian update changes those internals.
 
 Conversion policy:
 
-- Use this plugin in the controlled work vault when validating very large
+- Use this plugin in a controlled test vault when validating very large
   Miro boards where readability is more important than stock Obsidian zoom
   compatibility.
 - For zoom-unlocked validation, run local samples with `--scale-mode readable`

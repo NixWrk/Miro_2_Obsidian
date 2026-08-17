@@ -10,36 +10,36 @@
     "edge_count": 0,
     "nodes": [
       {
-        "id": "<redacted-long-id>",
+        "id": "label-rice",
         "type": "text",
         "min_width": 120,
         "text_contains": "RICE"
       },
       {
-        "id": "<redacted-long-id>",
+        "id": "label-kano",
         "type": "text",
         "min_width": 108,
         "text_contains": "Кано"
       },
       {
-        "id": "<redacted-long-id>",
+        "id": "image-rice",
         "type": "file",
-        "file_contains": "<redacted-long-id>.png"
+        "file_contains": "rice_image.png"
       },
       {
-        "id": "<redacted-long-id>",
+        "id": "image-kano",
         "type": "file",
-        "file_contains": "<redacted-long-id>.png"
+        "file_contains": "kano_image.png"
       }
     ],
     "non_overlapping_pairs": [
       [
-        "<redacted-long-id>",
-        "<redacted-long-id>"
+        "label-rice",
+        "image-rice"
       ],
       [
-        "<redacted-long-id>",
-        "<redacted-long-id>"
+        "label-kano",
+        "image-kano"
       ]
     ]
   }

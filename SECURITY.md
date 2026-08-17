@@ -10,10 +10,11 @@ published yet.
 Do not disclose vulnerabilities, credentials, private board data, or OAuth
 callback codes in a public issue.
 
-Use GitHub's private vulnerability reporting feature when it is enabled for the
-repository. Otherwise, contact the repository owner privately through the
-owner's GitHub profile and include only enough information to establish a safe
-reporting channel.
+Use the repository's
+[private security advisory form](https://github.com/NixWrk/Miro_2_Obsidian/security/advisories/new).
+If that form is unavailable, contact the repository owner through the GitHub
+profile and include only enough information to establish a private reporting
+channel. Never put a credential or private board sample in a public issue.
 
 Please include:
 
@@ -33,10 +34,14 @@ Please include:
 - Revoke and rotate a credential immediately if it enters Git history. Deleting
   it from the latest commit is not sufficient.
 
-The current working tree intentionally contains only
-`.miro_oauth.local.example.json` with placeholders. This does not certify the
-Git history: a previously committed Miro credential must be revoked and removed
-from reachable history before the repository is made public.
+The release tree intentionally contains only `.miro_oauth.local.example.json`
+with placeholders. The publication process removes the known historical
+credential from reachable branches and tags. Rotation is still mandatory:
+existing clones, forks, caches, and pull-request references may retain old
+objects even after a history rewrite.
+
+After a history rewrite, discard old clones or re-clone them. Do not merge an
+old branch back into the cleaned history.
 
 ## Local services
 

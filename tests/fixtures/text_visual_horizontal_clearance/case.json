@@ -10,21 +10,21 @@
     "edge_count": 0,
     "nodes": [
       {
-        "id": "<redacted-long-id>",
+        "id": "text-1",
         "type": "text",
         "width": 494,
         "text_contains": "New feature"
       },
       {
-        "id": "<redacted-long-id>",
+        "id": "image-1",
         "type": "file",
-        "file_contains": "<redacted-long-id>.png"
+        "file_contains": "sample_image.png"
       }
     ],
     "non_overlapping_pairs": [
       [
-        "<redacted-long-id>",
-        "<redacted-long-id>"
+        "text-1",
+        "image-1"
       ]
     ]
   }

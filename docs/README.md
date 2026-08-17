@@ -24,9 +24,10 @@ translation is not yet available.
 
 ## Maintainer evidence
 
-- [Miro API and item capability matrix](../tasks/miro_capabilities.md)
-- [Source expansion runbook](../tasks/miro_source_expansion_runbook.md)
-- [Converter problem library](../tasks/problem_library.md)
+- [Miro API and item capability matrix](MIRO_CAPABILITIES.md)
+- [Source expansion runbook](SOURCE_EXPANSION.md)
+- [Public roadmap](../ROADMAP.md)
 
-Files under `tasks/` are engineering records rather than polished user guides.
-They preserve the evidence behind source limitations and regression decisions.
+Historical maintainer journals and real-board diagnostics are intentionally not
+published. Reproducible behavior belongs in minimized fixtures and executable
+tests.

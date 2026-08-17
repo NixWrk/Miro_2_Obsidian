@@ -23,7 +23,7 @@ DEFAULT_REDIRECT_URI = "http://localhost:8765/callback"
 ALTERNATE_LOOPBACK_REDIRECT_URI = "http://127.0.0.1:8765/callback"
 DEFAULT_SCOPES = "boards:read team:read"
 DEFAULT_TIMEOUT_SECONDS = 300
-DEFAULT_BROWSER = "yandex"
+DEFAULT_BROWSER = "system"
 LOCAL_CONFIG_ENV = "MIRO_OAUTH_CONFIG"
 LOCAL_CONFIG_NAME = ".miro_oauth.local.json"
 
@@ -542,7 +542,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--browser",
         default=DEFAULT_BROWSER,
-        help="Browser to open for OAuth. Default: yandex.",
+        help="Browser to open for OAuth. Default: system.",
     )
     parser.add_argument("--no-open-browser", action="store_true")
     parser.add_argument(

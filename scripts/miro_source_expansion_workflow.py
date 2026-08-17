@@ -36,7 +36,7 @@ from miro_capability_probe import (  # noqa: E402
 )
 
 
-DEFAULT_WORK_DIR = Path("work") / "MIRO2OBSIDIAN" / "source_expansion"
+DEFAULT_WORK_DIR = REPO_ROOT / "work" / "source_expansion"
 WEBSDK_APP_ENTRYPOINT = "index.html"
 OUTPUT_SENTINEL_NAME = ".miro-source-expansion"
 OUTPUT_SENTINEL_CONTENT = "miro-source-expansion-v1\n"
@@ -73,7 +73,7 @@ def build_workflow_plan(
             "## 2. Create or update the maximum REST probe board",
             "",
             "Direct Miro export requires your own Miro Developer App. Use `MIRO_CLIENT_ID` and `MIRO_CLIENT_SECRET` with `--oauth`, or set `MIRO_ACCESS_TOKEN` only when that token was issued by your own app.",
-            "OAuth opens Yandex Browser by default and uses `http://localhost:8765/callback`.",
+            "OAuth opens the system browser by default and uses `http://localhost:8765/callback`.",
             "The generator records partial API failures in the result JSON instead of hiding successful items.",
             "If the Miro plan cannot create more boards, create or choose an empty board in the app-visible team and pass its id with `--board-id`.",
             "",

@@ -16,6 +16,8 @@ REPO_ROOT = Path(__file__).resolve().parent
 SCRIPTS_DIR = REPO_ROOT / "scripts"
 MIRO_JSON_DIR = REPO_ROOT / "Miro_2_Json"
 CONVERTER_DIR = REPO_ROOT / "Json_2_Canvas"
+DEFAULT_EXPORT_ROOT = Path.home() / "Documents" / "Miro 2 Obsidian"
+BOARD_LIST_ENV = "MIRO_BOARD_LIST"
 
 sys.path.insert(0, str(SCRIPTS_DIR))
 sys.path.insert(0, str(MIRO_JSON_DIR))
@@ -50,11 +52,11 @@ def board_id_from_text(value: str) -> str:
 
 
 def default_web_board_list() -> Path | None:
-    root = REPO_ROOT / "work" / "MIRO2OBSIDIAN" / "Obs_Miro"
-    if not root.exists():
+    configured = os.environ.get(BOARD_LIST_ENV, "").strip()
+    if not configured:
         return None
-    matches = sorted(root.rglob("Web_boards.md"))
-    return matches[0] if matches else None
+    path = Path(configured).expanduser()
+    return path if path.is_file() else None
 
 
 def board_refs_from_markdown(path: Path) -> list[tuple[str, str]]:
@@ -98,7 +100,7 @@ def board_output_name(label: str, board_id: str) -> str:
 
 
 def default_source_json_path(target_text: str, label: str, board_id: str) -> Path:
-    base = Path(target_text.strip()) if target_text.strip() else REPO_ROOT / "work" / "MIRO2OBSIDIAN" / "Miro_2_JSON"
+    base = Path(target_text.strip()) if target_text.strip() else DEFAULT_EXPORT_ROOT
     return base / "_miro_sources" / f"{board_output_name(label, board_id)}.json"
 
 

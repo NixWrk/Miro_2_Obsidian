@@ -8,7 +8,10 @@ __pycache__/
 dist/
 build/
 .env
-.miro_oauth.local.json
+.env.*
+!.env.example
+.miro_oauth.local.*
+!.miro_oauth.local.example.json
 .venv/
 venv/
 
@@ -42,3 +45,5 @@ _obsidian_oracle_vault/
 
 # Claude Code local settings
 .claude/
+.understand-anything/
+.publication-work/

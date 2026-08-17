@@ -18,10 +18,9 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 CONVERTER_DIR = REPO_ROOT / "Json_2_Canvas"
 SCRIPTS_DIR = REPO_ROOT / "scripts"
 MIRO_JSON_DIR = REPO_ROOT / "Miro_2_Json"
-DEFAULT_BOARD_LIST = (
-    REPO_ROOT / "work" / "MIRO2OBSIDIAN" / "Obs_Miro" / "Концепт" / "Web_boards.md"
-)
-DEFAULT_WEBSDK_ROOT = REPO_ROOT / "work" / "MIRO2OBSIDIAN" / "websdk_exports"
+WORK_ROOT = REPO_ROOT / "work"
+DEFAULT_BOARD_LIST = WORK_ROOT / "Web_boards.md"
+DEFAULT_WEBSDK_ROOT = WORK_ROOT / "websdk_exports"
 DEFAULT_OUT_DIR = (
     REPO_ROOT / "tools" / "canvas_render" / ".out" / "export_source_compare"
 )

@@ -568,6 +568,20 @@ node с тем же ID, что и Miro item, связывается без за�
 - [ ] `MIND-005` `P2 P` Поддержать collapsed state только при наличии source data.
 - [ ] `MIND-006` `P3 S` Legacy `mindmap` без recoverable nodes остаётся
   source-limited.
+- [ ] `MIND-007` `P1 P` Для child/sibling insert, drag reparent, collapse/expand,
+  keyboard navigation и переключения mind map / Markdown сначала оценить
+  открытый MIT-проект
+  [`obsidian-enhancing-mindmap`](https://github.com/MarkMindCkm/obsidian-enhancing-mindmap),
+  а не писать новый layout вслепую.
+- [ ] `MIND-008` `P0 P` Текущий
+  [`obsidian-markmind`](https://github.com/MarkMindCkm/obsidian-markmind)
+  использовать только как UX-reference: его README прямо говорит, что проект
+  не open source, поэтому код и внутреннюю реализацию из него не копировать.
+- [ ] `MIND-009` `P1 P` При переносе MIT-кода сохранить copyright и текст
+  лицензии в third-party notices; не подключать весь plugin как runtime
+  dependency без доказанной необходимости.
+- [ ] `MIND-010` `P0 P` Оставить native Canvas JSON источником истины, чтобы
+  mind-map editing не создавал закрытый формат и не ломал обычный Canvas.
 
 ## Защита от редактирования
 
@@ -766,7 +780,7 @@ node с тем же ID, что и Miro item, связывается без за�
 - [ ] `TEST-008` Сохранить 0 broken file refs, 0 duplicate IDs и 0 dangling
   Canvas edges.
 - [ ] `TEST-009` Выполнить fresh production conversion и visual run по всем
-  доступным web boards из `work/MIRO2OBSIDIAN/Obs_Miro/Концепт/Web_boards.md`.
+  доступным тестовым доскам из явно выбранного локального списка.
 - [ ] `TEST-010` Unknown/new item type не вызывает crash и попадает в diagnostics
   с полным raw payload.
 - [ ] `TEST-011` Открытие, pan, zoom, selection и закрытие `TEST_BOARD` не дают

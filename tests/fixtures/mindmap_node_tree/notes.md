@@ -1,4 +1,4 @@
-Mind map nodes observed in the foto REST/Web SDK probe.
+Mind map nodes observed in a dedicated REST/Web SDK probe board.
 
 Problem: `CONV-023` - `mindmap_node` content lived under `data.nodeView.data.content`, and child nodes used `position.relativeTo = parent_top_left`.
 

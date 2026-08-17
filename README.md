@@ -32,9 +32,9 @@ before producing the `.canvas` file.
 The conversion pipeline is working and covered by an automated regression
 suite. It is currently a Windows-focused pre-release tested with Python 3.13.
 
-Do not make the repository public until the previously committed Miro OAuth
-credential has been revoked and removed from reachable Git history. The current
-working tree does not contain that credential; see [`SECURITY.md`](SECURITY.md).
+The known historical Miro OAuth credential is absent from the release tree and
+the public history is prepared without it. The credential must still be revoked
+and rotated before repository visibility changes; see [`SECURITY.md`](SECURITY.md).
 
 This project does not synchronize changes back to Miro. The planned
 [`miro-canvas`](docs/miro-canvas.md) Obsidian plugin is a separate offline layer
@@ -178,7 +178,7 @@ Web SDK cannot replace REST comments, and some table, document, slide, and
 unsupported-widget details may not be available from either public surface.
 
 See the measured [Miro versus Canvas display gaps](docs/MIRO_VS_CANVAS_DISPLAY_GAPS.md)
-and the [Miro capability matrix](tasks/miro_capabilities.md).
+and the [Miro capability matrix](docs/MIRO_CAPABILITIES.md).
 
 ## Validation
 
@@ -219,8 +219,8 @@ visual source of truth; see [`tools/obsidian_oracle`](tools/obsidian_oracle/READ
 | `tools/canvas_render/` | Fast diagnostic Canvas renderer |
 | `tools/obsidian_oracle/` | Real-Obsidian staging and screenshot checks |
 | `tools/obsidian_plugins/` | Small local plugins used by the validation workflow |
-| `docs/` | Product plans and measured display limitations |
-| `tasks/` | Maintainer research, capability evidence, and problem records |
+| `docs/` | Setup, capability evidence, runbooks, product plans, and display limitations |
+| `ROADMAP.md` | Remaining public-release, onboarding, conversion, and plugin work |
 
 Local boards, exports, vaults, credentials, browser output, and caches are
 excluded by `.gitignore`.
@@ -231,10 +231,14 @@ excluded by `.gitignore`.
 - [Beginner Miro app setup](docs/MIRO_APP_SETUP.md)
 - [Web SDK exporter](tools/miro_websdk_exporter/README.md)
 - [Miro versus Canvas display gaps](docs/MIRO_VS_CANVAS_DISPLAY_GAPS.md)
+- [Miro API and item capability matrix](docs/MIRO_CAPABILITIES.md)
+- [Source-expansion runbook](docs/SOURCE_EXPANSION.md)
 - [`miro-canvas` offline plugin plan](docs/miro-canvas.md)
+- [Roadmap](ROADMAP.md)
 - [Fixture format](tests/fixtures/README.md)
 - [Contributing](CONTRIBUTING.md)
 - [Security policy](SECURITY.md)
+- [Third-party notices](THIRD_PARTY_NOTICES.md)
 
 ## Security
 
@@ -245,6 +249,9 @@ fork.
 
 ## License
 
-No open-source license has been selected yet. A `LICENSE` file must be added
-before an open-source release; until then, do not assume permission to copy,
-modify, or redistribute the code.
+Released under the [MIT License](LICENSE). Miro, Obsidian, JSON Canvas, optional
+plugins, and Python dependencies retain their own terms and licenses; see
+[`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
+
+This is an independent interoperability project. It is not affiliated with,
+endorsed by, or sponsored by Miro or Obsidian.

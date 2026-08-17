@@ -10,7 +10,7 @@
     "edge_count": 0,
     "nodes": [
       {
-        "id": "<redacted-long-id>",
+        "id": "label-priority",
         "type": "text",
         "min_width": 360,
         "height": 51,
@@ -27,7 +27,7 @@
     ],
     "non_overlapping_pairs": [
       [
-        "<redacted-long-id>",
+        "label-priority",
         "distant-neighbor"
       ]
     ]

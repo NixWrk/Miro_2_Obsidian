@@ -10,9 +10,9 @@
     "edge_count": 0,
     "nodes": [
       {
-        "id": "<redacted-long-id>",
+        "id": "image-1",
         "type": "file",
-        "file_contains": "<redacted-long-id>.png",
+        "file_contains": "sample_board_image.png",
         "file_not_contains": "img_1100752501.png"
       }
     ]

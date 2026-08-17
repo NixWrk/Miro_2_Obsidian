@@ -7,8 +7,8 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 EVIDENCE_PATH = REPO_ROOT / "tests" / "fixtures" / "table_source_limited" / "source_evidence_2026-06-11.json"
-CAPABILITIES_PATH = REPO_ROOT / "tasks" / "miro_capabilities.md"
-RUNBOOK_PATH = REPO_ROOT / "tasks" / "miro_source_expansion_runbook.md"
+CAPABILITIES_PATH = REPO_ROOT / "docs" / "MIRO_CAPABILITIES.md"
+RUNBOOK_PATH = REPO_ROOT / "docs" / "SOURCE_EXPANSION.md"
 
 
 class TableSourceEvidenceTests(unittest.TestCase):
@@ -18,11 +18,11 @@ class TableSourceEvidenceTests(unittest.TestCase):
         websdk = evidence["source_surfaces"]["web_sdk_deep_diagnostics"]
 
         self.assertEqual(evidence["verified_at"], "2026-06-11")
-        self.assertEqual(evidence["board_id"], "uXjVSourceProbe=")
-        self.assertEqual(evidence["table_id"], "<redacted-long-id>")
+        self.assertEqual(evidence["board_id"], "board-probe")
+        self.assertEqual(evidence["table_id"], "table-1")
         self.assertEqual(rest["summary"]["contentful_table_items"], 0)
         self.assertEqual(rest["decision"], "table_geometry_without_content_and_blocked_candidate")
-        self.assertIn("experimental_table_detail_<redacted-long-id>", rest["summary"]["auth_blocked_paths"])
+        self.assertIn("experimental_table_detail_table-1", rest["summary"]["auth_blocked_paths"])
         self.assertEqual(websdk["exporter_version"], "20260611-deep-table")
         self.assertEqual(websdk["prototype_names"][:3], ["Unsupported", "Unsupported", "BaseItem"])
         self.assertEqual(websdk["textish_values"], [])
@@ -35,7 +35,6 @@ class TableSourceEvidenceTests(unittest.TestCase):
 
         for text in (capabilities, runbook):
             self.assertIn("2026-06-11", text)
-            self.assertIn("<redacted-long-id>", text)
             self.assertIn("20260611-deep-table", text)
             self.assertIn("source_evidence_2026-06-11.json", text)
 

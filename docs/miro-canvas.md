@@ -231,7 +231,7 @@ their internals. The plugin can improve rendering only when data exists.
 - Exact slide and document internals may be partial.
 
 The [display-gap report](MIRO_VS_CANVAS_DISPLAY_GAPS.md) records the measured
-baseline and the [capability matrix](../tasks/miro_capabilities.md) records source
+baseline and the [capability matrix](MIRO_CAPABILITIES.md) records source
 evidence.
 
 ## Implementation order
@@ -268,6 +268,16 @@ evidence.
 
 - Add frame, slide, document, image, preview, card, tag, code, and mind-map
   renderers where source data is available.
+- For mind-map editing, evaluate the MIT-licensed
+  [`obsidian-enhancing-mindmap`](https://github.com/MarkMindCkm/obsidian-enhancing-mindmap)
+  tree model and interactions before writing new layout code. Candidate behavior
+  includes child/sibling insertion, drag reparenting, collapse/expand, keyboard
+  navigation, and Markdown view switching.
+- Treat the current
+  [`obsidian-markmind`](https://github.com/MarkMindCkm/obsidian-markmind) only as
+  a UX reference: its README says it is not open source, so its implementation
+  must not be copied. Keep native Canvas data as the source of truth and record
+  any reused MIT code and copyright in third-party notices.
 - Add provenance and source-limitation inspection without default board clutter.
 
 ### M5: release hardening

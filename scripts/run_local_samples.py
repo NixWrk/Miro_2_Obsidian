@@ -17,7 +17,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 CONVERTER_DIR = REPO_ROOT / "Json_2_Canvas"
 RENDER_DIR = REPO_ROOT / "tools" / "canvas_render"
 ORACLE_DIR = REPO_ROOT / "tools" / "obsidian_oracle"
-DEFAULT_SAMPLE_ROOT = REPO_ROOT / "work" / "MIRO2OBSIDIAN"
+DEFAULT_SAMPLE_ROOT = REPO_ROOT / "work"
 DEFAULT_OUT_DIR = RENDER_DIR / ".out" / "local_samples"
 
 sys.path.insert(0, str(CONVERTER_DIR))
@@ -315,7 +315,7 @@ def run_sample(
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Run converter checks against local work Miro samples.")
+    parser = argparse.ArgumentParser(description="Run converter checks against local Miro samples.")
     parser.add_argument("samples", nargs="*", help="Sample filename/path fragments. Defaults to all discovered JSON files.")
     parser.add_argument("--sample-root", type=Path, default=DEFAULT_SAMPLE_ROOT)
     parser.add_argument("--out-dir", type=Path, default=DEFAULT_OUT_DIR)
@@ -340,7 +340,7 @@ def main() -> int:
     )
     parser.add_argument("--skip-fit-check", action="store_true")
     parser.add_argument("--skip-render", action="store_true")
-    parser.add_argument("--include-miro-json", action="store_true", help="Also discover work/MIRO2OBSIDIAN/Miro_2_JSON.")
+    parser.add_argument("--include-miro-json", action="store_true", help="Also discover the Miro_2_JSON folder under --sample-root.")
     parser.add_argument("--allow-missing-files", action="store_true")
     parser.add_argument("--stage-vault", action="store_true", help="Write converted canvases into the local oracle vault.")
     parser.add_argument("--raw-render", action="store_true", help="Capture the full stage instead of a fitted viewport.")

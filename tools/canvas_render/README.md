@@ -55,7 +55,7 @@ python tools\canvas_render\capture_fixture.py --all
 Actual screenshots are written to `tools/canvas_render/.out/` and ignored by
 Git.
 
-Fixture baselines use stable fixed-viewport screenshots fitted to the complete stage. Local `work` samples
+Fixture baselines use stable fixed-viewport screenshots fitted to the complete stage. Local samples under the ignored `work/` directory
 use `Scale_engine` scale modes and fitted viewport captures through
 `scripts/run_local_samples.py`, so large boards can be inspected without
 changing committed fixture baselines.

@@ -34,3 +34,13 @@ jobs:
         run: |
           node tests/websdk_serialization_smoke.js tools/miro_websdk_exporter/exporter.js
           node tests/websdk_capture_completeness_smoke.js tools/miro_websdk_exporter/exporter.js
+
+  dependency-audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Audit Python dependencies
+        uses: pypa/gh-action-pip-audit@1220774d901786e6f652ae159f7b6bc8fea6d266 # v1.1.0
+        with:
+          inputs: requirements.txt requirements-dev.txt

@@ -18,6 +18,7 @@ from Miro_2_Obsidian_GUI import (
     board_output_name,
     board_refs_from_file,
     default_source_json_path,
+    default_web_board_list,
     show_error_later,
 )
 from miro_oauth_token import OAuthConfig
@@ -94,6 +95,24 @@ class MiroObsidianGuiHelperTests(unittest.TestCase):
 
         self.assertEqual(result.parent, target / "_miro_sources")
         self.assertEqual(result.name, "Board_Alpha_uXjAlpha=.json")
+
+    def test_default_source_json_path_uses_user_export_root_when_target_is_empty(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            export_root = Path(tmp) / "exports"
+            with patch("Miro_2_Obsidian_GUI.DEFAULT_EXPORT_ROOT", export_root):
+                result = default_source_json_path("", "Board", "uXjAlpha=")
+
+        self.assertEqual(result.parent, export_root / "_miro_sources")
+
+    def test_default_board_list_requires_explicit_environment_path(self) -> None:
+        with patch.dict(os.environ, {}, clear=True):
+            self.assertIsNone(default_web_board_list())
+
+        with tempfile.TemporaryDirectory() as tmp:
+            board_list = Path(tmp) / "boards.md"
+            board_list.write_text("# Boards", encoding="utf-8")
+            with patch.dict(os.environ, {"MIRO_BOARD_LIST": str(board_list)}, clear=True):
+                self.assertEqual(default_web_board_list(), board_list)
 
     def test_board_label_includes_team_and_collection_when_present(self) -> None:
         self.assertEqual(

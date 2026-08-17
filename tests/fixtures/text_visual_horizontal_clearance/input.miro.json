@@ -1,6 +1,6 @@
 [
   {
-    "id": "<redacted-long-id>",
+    "id": "text-1",
     "type": "text",
     "position": {
       "x": 0,
@@ -23,9 +23,9 @@
     }
   },
   {
-    "id": "<redacted-long-id>",
+    "id": "image-1",
     "type": "image",
-    "local_name": "sample_<redacted-long-id>.png",
+    "local_name": "sample_image.png",
     "position": {
       "x": 510,
       "y": 0,

@@ -65,6 +65,8 @@ class FakeSession:
 
 
 class MiroOAuthTokenTests(unittest.TestCase):
+    def test_default_browser_is_system_browser(self) -> None:
+        self.assertEqual(oauth.DEFAULT_BROWSER, "system")
     def test_default_scopes_are_read_only(self) -> None:
         self.assertEqual(DEFAULT_SCOPES, "boards:read team:read")
 

@@ -1,8 +1,8 @@
 # Contributing
 
-Contributions are welcome after the repository owner selects a license. Until
-then, use issues or private discussion to propose changes rather than assuming
-redistribution rights.
+Contributions are welcome under the repository's [MIT License](LICENSE). By
+submitting a contribution, you agree that it may be distributed under that
+license and that you have the right to provide it.
 
 ## Development setup
 
@@ -41,6 +41,10 @@ fixture in `tests/fixtures/<case_name>/`:
 
 Do not add complete private board exports as fixtures. Remove unrelated content,
 personal data, tokens, private URLs, and unnecessary assets first.
+
+Use synthetic IDs and URLs wherever the exact source value is not required for
+the regression. Do not attach unsanitized exports to public issues or pull
+requests.
 
 ## Scope
 

@@ -626,7 +626,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--oauth-authorize-url", default=DEFAULT_AUTHORIZE_URL)
     parser.add_argument("--oauth-token-url", default="https://api.miro.com/v1/oauth/token")
     parser.add_argument("--oauth-timeout-seconds", type=int, default=300)
-    parser.add_argument("--oauth-browser", default=DEFAULT_BROWSER, help="Browser to open for OAuth. Default: yandex.")
+    parser.add_argument("--oauth-browser", default=DEFAULT_BROWSER, help="Browser to open for OAuth. Default: system.")
     parser.add_argument("--oauth-no-open-browser", action="store_true")
     parser.add_argument("--oauth-code", help="Exchange an already obtained authorization code.")
     parser.add_argument("--oauth-callback-url", help="Exchange a copied localhost callback URL containing ?code=...")

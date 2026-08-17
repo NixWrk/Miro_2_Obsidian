@@ -164,7 +164,7 @@ REST comments; часть данных таблиц, документов, slide
 не отдаваться ни одним публичным источником.
 
 Смотрите [фактические отличия Miro и Canvas](docs/MIRO_VS_CANVAS_DISPLAY_GAPS.ru.md)
-и [матрицу возможностей Miro](tasks/miro_capabilities.md).
+и [матрицу возможностей Miro](docs/MIRO_CAPABILITIES.md).
 
 ## Проверка
 
@@ -199,10 +199,14 @@ Web-renderer служит быстрой диагностикой. Источн�
 - [Подключение собственного Miro app](docs/MIRO_APP_SETUP.ru.md)
 - [Web SDK exporter](tools/miro_websdk_exporter/README.md)
 - [Отличия Miro и Canvas](docs/MIRO_VS_CANVAS_DISPLAY_GAPS.ru.md)
+- [Матрица возможностей Miro](docs/MIRO_CAPABILITIES.md)
+- [Source-expansion runbook](docs/SOURCE_EXPANSION.md)
 - [Полный план `miro-canvas`](docs/miro-canvas.ru.md)
+- [Roadmap](ROADMAP.md)
 - [Формат fixtures](tests/fixtures/README.md)
 - [Contributing](CONTRIBUTING.md)
 - [Security policy](SECURITY.md)
+- [Third-party notices](THIRD_PARTY_NOTICES.md)
 
 ## Безопасность
 
@@ -212,6 +216,10 @@ Web-renderer служит быстрой диагностикой. Источн�
 
 ## Лицензия
 
-Open-source лицензия пока не выбрана. До публичного open-source release нужно
-добавить `LICENSE`; до этого нельзя считать, что копирование, изменение и
-распространение кода разрешены.
+Проект опубликован по [лицензии MIT](LICENSE). Miro, Obsidian, JSON Canvas,
+необязательные плагины и Python-зависимости сохраняют собственные условия и
+лицензии; подробности приведены в
+[`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
+
+Это независимый проект совместимости. Он не связан с Miro или Obsidian и не
+одобрен ими.
