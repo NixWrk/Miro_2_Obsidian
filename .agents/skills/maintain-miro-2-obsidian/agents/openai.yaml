@@ -1,0 +1,4 @@
+interface:
+  display_name: "Maintain Miro to Obsidian"
+  short_description: "Install, modify, test, and release this repo"
+  default_prompt: "Use $maintain-miro-2-obsidian to set up this repository and complete the requested maintenance task safely."

@@ -82,6 +82,19 @@ python -m pip install -r requirements-dev.txt
 python -m playwright install chromium
 ```
 
+### Coding agents
+
+Repository-aware coding agents should start with [`AGENTS.md`](AGENTS.md).
+Codex users can optionally install the repeatable repository skill:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\install_agent_skill.ps1
+```
+
+Invoke it as `$maintain-miro-2-obsidian`. The skill covers setup, architecture
+rules, testing, packaging, and publishing recipes. No MCP server is required for
+local repository maintenance.
+
 ## Quick start
 
 New to Miro Developer Apps? Start with [Connect your own Miro boards](docs/MIRO_APP_SETUP.md).

@@ -69,6 +69,19 @@ python -m pip install -r requirements-dev.txt
 python -m playwright install chromium
 ```
 
+### LLM-агенты
+
+Агенты, работающие с репозиторием, должны начинать с [`AGENTS.md`](AGENTS.md).
+Пользователи Codex могут дополнительно установить повторяемый skill проекта:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\install_agent_skill.ps1
+```
+
+Он вызывается как `$maintain-miro-2-obsidian` и содержит рецепты установки,
+изменения архитектуры, тестирования, упаковки и публикации. Для локальной работы
+с репозиторием MCP-сервер не требуется.
+
 ## Быстрый старт
 
 Если вы никогда не создавали Miro Developer App, начните с инструкции
