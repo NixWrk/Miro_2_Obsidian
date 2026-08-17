@@ -217,7 +217,7 @@ class ConverterFileSafetyTests(unittest.TestCase):
                 self.skipTest(f"Directory symlinks are unavailable: {exc}")
 
             with self.assertRaisesRegex(
-                ValueError, "destination must be a real directory"
+                ValueError, "destination must be a regular directory"
             ):
                 ensure_move_attachments(str(source), str(destination.parent))
 
