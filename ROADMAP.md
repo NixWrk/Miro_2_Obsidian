@@ -8,6 +8,10 @@ items focus on packaging, onboarding, and richer offline Canvas editing.
 
 - [ ] Revoke and rotate the historical Miro OAuth credential before changing
   the repository visibility.
+- [ ] After switching to public, enable GitHub private vulnerability reporting,
+  secret scanning with push protection, and `main` branch protection requiring
+  the `test` and `dependency-audit` checks. GitHub does not offer these settings
+  for this private repository without a paid plan.
 - [ ] Publish a first pre-release after a clean-machine installation test.
 
 ## Beginner workflow
