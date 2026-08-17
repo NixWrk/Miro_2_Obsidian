@@ -37,6 +37,9 @@ tmp_src.txt
 # Canvas test outputs (в web_test)
 *_TEST.canvas
 
+# Local board workspaces
+/*_TEST/
+
 # Local render/oracle outputs
 work/
 tools/canvas_render/.out/
