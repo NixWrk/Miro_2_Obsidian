@@ -7,6 +7,7 @@ import {
   parseMiroCanvasMetadata,
   validateMiroCanvasMetadata,
 } from "../src/metadata";
+import { createMetadataWriter, type MetadataDocumentStore } from "../src/metadata-writer";
 
 describe("miroCanvas metadata boundary", () => {
   it("distinguishes a native Canvas without metadata", () => {
@@ -29,6 +30,152 @@ describe("miroCanvas metadata boundary", () => {
     expect(result.metadata?.schemaVersion).toBe(1);
     expect(result.migrated).toBe(false);
     expect(result.diagnostics).toEqual([]);
+  });
+
+  it("validates M1 board settings and local appearance overrides", () => {
+    const result = validateMiroCanvasMetadata({
+      schemaVersion: 1,
+      settings: {
+        displayTheme: "dark",
+        reviewMode: true,
+        showAttachmentNames: false,
+        minimapVisible: true,
+        palette: ["#112233", "#AABBCCDD"],
+        recentColors: ["#AABBCC"],
+      },
+      localOverrides: {
+        "node-a": {
+          typography: {
+            fontFamily: "Inter",
+            fontSize: 18,
+            fontWeight: 600,
+            fontStyle: "italic",
+            textDecoration: "underline",
+            textAlign: "center",
+            lineHeight: 1.4,
+            verticalAlign: "middle",
+          },
+          colors: {
+            text: "#FFFFFF",
+            fill: "#223344CC",
+            border: "#445566",
+          },
+          locked: true,
+          showAttachmentName: false,
+        },
+      },
+    });
+
+    expect(result.status).toBe("valid");
+    expect(result.diagnostics).toEqual([]);
+    expect(result.metadata?.settings?.displayTheme).toBe("dark");
+  });
+
+  it("accepts the canonical appearance palette, typography, and transparent colors", () => {
+    const result = validateMiroCanvasMetadata({
+      schemaVersion: 1,
+      settings: {
+        palette: [
+          { id: "custom-blue", label: "Blue", color: "#112233", source: "custom" },
+        ],
+        recentColors: ["#112233"],
+      },
+      localOverrides: {
+        "node-a": {
+          typography: {
+            fontFamily: "Inter",
+            fontSize: 18,
+            format: { bold: true, italic: false, underline: true, strike: false },
+            alignment: "center",
+            lineHeight: 1.35,
+            verticalAlign: "center",
+          },
+          colors: { text: null, fill: "#11223380", border: null, edge: "#445566" },
+        },
+      },
+    });
+
+    expect(result.status).toBe("valid");
+    expect(result.metadata?.settings?.palette).toEqual([
+      { id: "custom-blue", label: "Blue", color: "#112233", source: "custom" },
+    ]);
+    expect(result.metadata?.localOverrides?.["node-a"]?.colors?.text).toBeNull();
+  });
+
+  it("accepts the canonical appearance contract at the writer boundary", () => {
+    let document: Record<string, unknown> = { nodes: [], edges: [] };
+    const store: MetadataDocumentStore = {
+      readDocument: () => document,
+      commitDocument: (next, expected) => {
+        if (JSON.stringify(document) !== JSON.stringify(expected)) {
+          return false;
+        }
+        document = { ...next };
+        return true;
+      },
+    };
+    const writer = createMetadataWriter(store);
+    const result = writer.write("appearance", (draft) => {
+      draft.settings = {
+        displayTheme: "dark",
+        palette: [{ id: "custom-blue", label: "Blue", color: "#112233", source: "custom" }],
+        recentColors: ["#112233"],
+      };
+      draft.localOverrides = {
+        node: {
+          typography: {
+            fontFamily: "Inter",
+            fontSize: 18,
+            format: { bold: true, italic: false, underline: false, strike: false },
+            alignment: "center",
+            lineHeight: 1.35,
+            verticalAlign: "bottom",
+          },
+          colors: { text: null, fill: "#11223380", border: null, edge: "#445566" },
+        },
+      };
+    });
+
+    expect(result.status).toBe("applied");
+    expect((document.miroCanvas as Record<string, unknown>).settings).toMatchObject({
+      palette: [{ color: "#112233" }],
+    });
+    expect(
+      ((document.miroCanvas as Record<string, unknown>).localOverrides as Record<string, Record<string, unknown>>)
+        .node.colors,
+    ).toMatchObject({ text: null, border: null });
+  });
+
+  it("rejects unsafe M1 appearance values and oversized color history", () => {
+    const result = validateMiroCanvasMetadata({
+      schemaVersion: 1,
+      settings: {
+        displayTheme: "sepia<script>",
+        reviewMode: "yes",
+        palette: ["red", "#001122", "#001122"],
+        recentColors: Array.from({ length: 17 }, (_, index) => `#0000${index.toString(16).padStart(2, "0")}`),
+      },
+      localOverrides: {
+        "node-a": {
+          typography: {
+            fontWeight: 950,
+            fontStyle: "oblique",
+            lineHeight: 0,
+          },
+          colors: { text: "var(--dangerous)" },
+        },
+      },
+    });
+
+    expect(result.status).toBe("invalid");
+    const codes = result.diagnostics.map((diagnostic) => diagnostic.code);
+    expect(codes).toContain("enum-value-invalid");
+    expect(codes).toContain("boolean-expected");
+    expect(codes).toContain("color-invalid");
+    expect(codes).toContain("duplicate-color");
+    expect(codes).toContain("color-limit-exceeded");
+    expect(codes).toContain("font-weight-invalid");
+    expect(codes).toContain("positive-number-expected");
   });
 
   it("validates the M0 metadata containers and reports malformed fields", () => {

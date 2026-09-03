@@ -9,6 +9,19 @@
  * `miroSource`.
  */
 
+import {
+  isSafeFontFamily,
+  isValidFontSize,
+  isValidLineHeight,
+} from "./appearance";
+import type {
+  AppearanceColor,
+  PaletteColor,
+  TextAlignment,
+  TypographyFormat,
+  VerticalAlign,
+} from "./appearance";
+
 export const MIRO_CANVAS_SCHEMA_VERSION = 1 as const;
 
 export type MiroCanvasSchemaVersion = typeof MIRO_CANVAS_SCHEMA_VERSION;
@@ -71,13 +84,45 @@ export interface MiroCanvasDeck {
 export interface MiroCanvasTypographyOverride {
   readonly fontFamily?: string;
   readonly fontSize?: number;
+  /** Canonical appearance representation. */
+  readonly format?: TypographyFormat | string;
+  readonly alignment?: TextAlignment | "start" | "end" | "centre";
+  readonly lineHeight?: number;
+  readonly verticalAlign?: VerticalAlign | "middle";
+  /** M0/M1 flat aliases accepted when reading older metadata. */
+  readonly fontWeight?: "normal" | "bold" | number;
+  readonly fontStyle?: "normal" | "italic";
+  readonly textDecoration?: "none" | "underline" | "line-through" | "underline line-through" | "line-through underline";
+  readonly textAlign?: TextAlignment | "start" | "end" | "centre";
+  readonly [key: string]: unknown;
+}
+
+export interface MiroCanvasColorOverride {
+  readonly text?: AppearanceColor;
+  readonly fill?: AppearanceColor;
+  readonly border?: AppearanceColor;
+  readonly edge?: AppearanceColor;
   readonly [key: string]: unknown;
 }
 
 export interface MiroCanvasLocalOverride {
   readonly typography?: MiroCanvasTypographyOverride;
+  readonly colors?: MiroCanvasColorOverride;
   readonly locked?: boolean;
   readonly showAttachmentName?: boolean;
+  readonly [key: string]: unknown;
+}
+
+export type MiroCanvasDisplayTheme = "system" | "light" | "dark";
+
+export interface MiroCanvasSettings {
+  readonly displayTheme?: MiroCanvasDisplayTheme;
+  readonly reviewMode?: boolean;
+  readonly showAttachmentNames?: boolean;
+  readonly minimapVisible?: boolean;
+  /** Object entries are canonical; string entries remain readable from M0. */
+  readonly palette?: readonly (PaletteColor | string)[];
+  readonly recentColors?: readonly string[];
   readonly [key: string]: unknown;
 }
 
@@ -107,6 +152,7 @@ export interface MiroCanvasFreeAnchor {
 
 export interface MiroCanvasMetadata {
   readonly schemaVersion: MiroCanvasSchemaVersion;
+  readonly settings?: MiroCanvasSettings;
   readonly transform?: MiroCanvasTransform;
   readonly bindings?: Readonly<Record<string, MiroCanvasBinding>>;
   readonly zOrder?: readonly string[];
@@ -165,6 +211,7 @@ type PropertyRead =
 
 const METADATA_FIELDS = new Set([
   "schemaVersion",
+  "settings",
   "transform",
   "bindings",
   "zOrder",
@@ -178,8 +225,28 @@ const TRANSFORM_FIELDS = new Set(["scale", "offsetX", "offsetY"]);
 const BINDING_FIELDS = new Set(["sourceId", "role"]);
 const DECK_FIELDS = new Set(["id", "sourceId", "startNode", "syntheticLayout", "slides"]);
 const SLIDE_FIELDS = new Set(["id", "sourceId", "nodeId", "syntheticLayout"]);
-const OVERRIDE_FIELDS = new Set(["typography", "locked", "showAttachmentName"]);
-const TYPOGRAPHY_FIELDS = new Set(["fontFamily", "fontSize"]);
+const SETTINGS_FIELDS = new Set([
+  "displayTheme",
+  "reviewMode",
+  "showAttachmentNames",
+  "minimapVisible",
+  "palette",
+  "recentColors",
+]);
+const OVERRIDE_FIELDS = new Set(["typography", "colors", "locked", "showAttachmentName"]);
+const TYPOGRAPHY_FIELDS = new Set([
+  "fontFamily",
+  "fontSize",
+  "format",
+  "alignment",
+  "fontWeight",
+  "fontStyle",
+  "textDecoration",
+  "textAlign",
+  "lineHeight",
+  "verticalAlign",
+]);
+const COLOR_FIELDS = new Set(["text", "fill", "border", "edge"]);
 const COMMENT_FIELDS = new Set([
   "id",
   "sourceId",
@@ -190,6 +257,10 @@ const COMMENT_FIELDS = new Set([
 ]);
 
 const ANCHOR_NUMBER_FIELDS = new Set(["x", "y", "u", "v"]);
+const HEX_COLOR_PATTERN = /^#[0-9a-fA-F]{6}(?:[0-9a-fA-F]{2})?$/;
+const PALETTE_SOURCES = new Set(["miro", "obsidian", "custom"]);
+const MAX_PALETTE_COLORS = 128;
+const MAX_RECENT_COLORS = 12;
 
 /**
  * `Array.isArray` normally cannot fail for JSON values, but a revoked Proxy
@@ -542,6 +613,184 @@ function validateDecks(
   });
 }
 
+function validateEnumIfPresent(
+  record: UnknownRecord,
+  field: string,
+  allowed: ReadonlySet<string>,
+  path: string,
+  diagnostics: MiroCanvasDiagnostic[],
+): void {
+  const property = readOwn(record, field);
+  if (property.state === "error") {
+    addError(diagnostics, "property-read-failed", pathFor(path, field), "The property could not be read safely.");
+  } else if (
+    property.state === "present" &&
+    (typeof property.value !== "string" || !allowed.has(property.value))
+  ) {
+    addError(diagnostics, "enum-value-invalid", pathFor(path, field), "The value is not one of the supported options.");
+  }
+}
+
+function validateColor(
+  value: unknown,
+  path: string,
+  diagnostics: MiroCanvasDiagnostic[],
+  options: { readonly nullable?: boolean } = {},
+): void {
+  if (options.nullable === true && value === null) {
+    return;
+  }
+  if (typeof value !== "string" || !HEX_COLOR_PATTERN.test(value)) {
+    addError(diagnostics, "color-invalid", path, "Colors must use #RRGGBB, #RRGGBBAA, or null for a transparent slot.");
+  }
+}
+
+function validatePaletteEntry(value: unknown, path: string, diagnostics: MiroCanvasDiagnostic[]): string | undefined {
+  if (typeof value === "string") {
+    validateColor(value, path, diagnostics);
+    return HEX_COLOR_PATTERN.test(value) ? value.toUpperCase() : undefined;
+  }
+  if (!isRecord(value)) {
+    addError(diagnostics, "palette-entry-invalid", path, "Palette entries must be colors or palette objects.");
+    return undefined;
+  }
+  const color = readOwn(value, "color");
+  if (color.state === "error") {
+    addError(diagnostics, "property-read-failed", pathFor(path, "color"), "The palette color could not be read safely.");
+  } else if (color.state !== "present") {
+    addError(diagnostics, "palette-color-missing", pathFor(path, "color"), "Palette objects must contain a color.");
+  } else {
+    validateColor(color.value, pathFor(path, "color"), diagnostics);
+  }
+  validateStringIfPresent(value, "id", path, diagnostics);
+  validateStringIfPresent(value, "label", path, diagnostics);
+  validateEnumIfPresent(value, "source", PALETTE_SOURCES, path, diagnostics);
+  return color.state === "present" && typeof color.value === "string" && HEX_COLOR_PATTERN.test(color.value)
+    ? color.value.toUpperCase()
+    : undefined;
+}
+
+function validateColorList(
+  value: unknown,
+  path: string,
+  diagnostics: MiroCanvasDiagnostic[],
+  maximum: number,
+  options: { readonly palette?: boolean; readonly nullable?: boolean } = {},
+): void {
+  if (!isArray(value)) {
+    addError(diagnostics, "array-expected", path, "The color collection must be an array.");
+    return;
+  }
+  const length = readOwn(value as unknown as UnknownRecord, "length");
+  if (
+    length.state !== "present" ||
+    typeof length.value !== "number" ||
+    !Number.isSafeInteger(length.value) ||
+    length.value < 0
+  ) {
+    addError(diagnostics, "array-length-invalid", path, "The color collection length is invalid.");
+    return;
+  }
+  if (length.value > maximum) {
+    addError(
+      diagnostics,
+      "color-limit-exceeded",
+      path,
+      `The color collection may contain at most ${maximum} entries.`,
+    );
+  }
+  const seen = new Set<string>();
+  forEachArrayIndex(value, path, diagnostics, (item, index) => {
+    const normalized = options.palette === true
+      ? validatePaletteEntry(item, `${path}[${index}]`, diagnostics)
+      : (validateColor(item, `${path}[${index}]`, diagnostics, options),
+        typeof item === "string" && HEX_COLOR_PATTERN.test(item) ? item.toUpperCase() : undefined);
+    if (normalized !== undefined) {
+      if (seen.has(normalized)) {
+        addError(diagnostics, "duplicate-color", `${path}[${index}]`, "The color collection contains a duplicate.");
+      }
+      seen.add(normalized);
+    }
+  });
+}
+
+function validateSettings(
+  value: unknown,
+  path: string,
+  diagnostics: MiroCanvasDiagnostic[],
+): void {
+  if (!isRecord(value)) {
+    addError(diagnostics, "object-expected", path, "Board settings must be an object.");
+    return;
+  }
+  warnUnknownFields(value, SETTINGS_FIELDS, path, diagnostics);
+  validateEnumIfPresent(
+    value,
+    "displayTheme",
+    new Set(["system", "light", "dark"]),
+    path,
+    diagnostics,
+  );
+  validateBooleanIfPresent(value, "reviewMode", path, diagnostics);
+  validateBooleanIfPresent(value, "showAttachmentNames", path, diagnostics);
+  validateBooleanIfPresent(value, "minimapVisible", path, diagnostics);
+
+  const palette = readOwn(value, "palette");
+  if (palette.state === "error") {
+    addError(diagnostics, "property-read-failed", pathFor(path, "palette"), "The property could not be read safely.");
+  } else if (palette.state === "present") {
+    validateColorList(palette.value, pathFor(path, "palette"), diagnostics, MAX_PALETTE_COLORS, { palette: true });
+  }
+  const recentColors = readOwn(value, "recentColors");
+  if (recentColors.state === "error") {
+    addError(diagnostics, "property-read-failed", pathFor(path, "recentColors"), "The property could not be read safely.");
+  } else if (recentColors.state === "present") {
+    validateColorList(recentColors.value, pathFor(path, "recentColors"), diagnostics, MAX_RECENT_COLORS);
+  }
+}
+
+function validateColors(
+  value: unknown,
+  path: string,
+  diagnostics: MiroCanvasDiagnostic[],
+): void {
+  if (!isRecord(value)) {
+    addError(diagnostics, "object-expected", path, "Color overrides must be an object.");
+    return;
+  }
+  warnUnknownFields(value, COLOR_FIELDS, path, diagnostics);
+  for (const field of COLOR_FIELDS) {
+    const property = readOwn(value, field);
+    if (property.state === "error") {
+      addError(diagnostics, "property-read-failed", pathFor(path, field), "The property could not be read safely.");
+    } else if (property.state === "present") {
+      validateColor(property.value, pathFor(path, field), diagnostics, { nullable: true });
+    }
+  }
+}
+
+function validateTypographyFormat(value: unknown, path: string, diagnostics: MiroCanvasDiagnostic[]): void {
+  if (typeof value === "string") {
+    const words = value.toLowerCase().split(/[\s+,|]+/u).filter(Boolean);
+    if (words.some((word) => !["normal", "bold", "italic", "underline", "strike", "strikethrough"].includes(word))) {
+      addError(diagnostics, "format-invalid", path, "Typography format contains an unknown value.");
+    }
+    return;
+  }
+  if (!isRecord(value)) {
+    addError(diagnostics, "format-invalid", path, "Typography format must be an object or known string.");
+    return;
+  }
+  for (const field of ["bold", "italic", "underline", "strike", "strikethrough"]) {
+    const flag = readOwn(value, field);
+    if (flag.state === "error") {
+      addError(diagnostics, "property-read-failed", pathFor(path, field), "The format flag could not be read safely.");
+    } else if (flag.state === "present" && typeof flag.value !== "boolean") {
+      addError(diagnostics, "format-flag-invalid", pathFor(path, field), "Format flags must be boolean.");
+    }
+  }
+}
+
 function validateTypography(
   value: unknown,
   path: string,
@@ -555,15 +804,78 @@ function validateTypography(
   const fontFamily = readOwn(value, "fontFamily");
   if (fontFamily.state === "error") {
     addError(diagnostics, "property-read-failed", pathFor(path, "fontFamily"), "The property could not be read safely.");
-  } else if (fontFamily.state === "present") {
-    requireNonEmptyString(fontFamily.value, pathFor(path, "fontFamily"), diagnostics);
+  } else if (fontFamily.state === "present" && !isSafeFontFamily(fontFamily.value)) {
+    addError(diagnostics, "font-family-invalid", pathFor(path, "fontFamily"), "Font family contains unsupported CSS syntax.");
   }
   const fontSize = readOwn(value, "fontSize");
   if (fontSize.state === "error") {
     addError(diagnostics, "property-read-failed", pathFor(path, "fontSize"), "The property could not be read safely.");
-  } else if (fontSize.state === "present") {
-    requireFiniteNumber(fontSize.value, pathFor(path, "fontSize"), diagnostics, { positive: true });
+  } else if (fontSize.state === "present" && !isValidFontSize(fontSize.value)) {
+    addError(
+      diagnostics,
+      "font-size-invalid",
+      pathFor(path, "fontSize"),
+      "Font size must be finite and within the supported appearance range.",
+    );
   }
+  const format = readOwn(value, "format");
+  if (format.state === "error") {
+    addError(diagnostics, "property-read-failed", pathFor(path, "format"), "The format could not be read safely.");
+  } else if (format.state === "present") {
+    validateTypographyFormat(format.value, pathFor(path, "format"), diagnostics);
+  }
+  validateEnumIfPresent(
+    value,
+    "alignment",
+    new Set(["left", "center", "right", "justify", "start", "end", "centre"]),
+    path,
+    diagnostics,
+  );
+  const fontWeight = readOwn(value, "fontWeight");
+  if (fontWeight.state === "error") {
+    addError(diagnostics, "property-read-failed", pathFor(path, "fontWeight"), "The font weight could not be read safely.");
+  } else if (
+    fontWeight.state === "present" &&
+    fontWeight.value !== "normal" &&
+    fontWeight.value !== "bold" &&
+    (
+      typeof fontWeight.value !== "number" ||
+      !Number.isInteger(fontWeight.value) ||
+      fontWeight.value < 100 ||
+      fontWeight.value > 900 ||
+      fontWeight.value % 100 !== 0
+    )
+  ) {
+    addError(diagnostics, "font-weight-invalid", pathFor(path, "fontWeight"), "Font weight must be normal, bold, or 100-900.");
+  }
+  validateEnumIfPresent(value, "fontStyle", new Set(["normal", "italic"]), path, diagnostics);
+  validateEnumIfPresent(
+    value,
+    "textDecoration",
+    new Set(["none", "underline", "line-through", "underline line-through", "line-through underline"]),
+    path,
+    diagnostics,
+  );
+  validateEnumIfPresent(
+    value,
+    "textAlign",
+    new Set(["left", "center", "right", "justify", "start", "end", "centre"]),
+    path,
+    diagnostics,
+  );
+  const lineHeight = readOwn(value, "lineHeight");
+  if (lineHeight.state === "error") {
+    addError(diagnostics, "property-read-failed", pathFor(path, "lineHeight"), "The line height could not be read safely.");
+  } else if (lineHeight.state === "present") {
+    if (!isValidLineHeight(lineHeight.value)) {
+      if (typeof lineHeight.value === "number" && Number.isFinite(lineHeight.value) && lineHeight.value <= 0) {
+        addError(diagnostics, "positive-number-expected", pathFor(path, "lineHeight"), "Expected a line height greater than zero.");
+      } else {
+        addError(diagnostics, "line-height-invalid", pathFor(path, "lineHeight"), "Line height is outside the supported appearance range.");
+      }
+    }
+  }
+  validateEnumIfPresent(value, "verticalAlign", new Set(["top", "center", "middle", "bottom"]), path, diagnostics);
 }
 
 function validateLocalOverrides(
@@ -603,6 +915,12 @@ function validateLocalOverrides(
       addError(diagnostics, "property-read-failed", pathFor(overridePath, "typography"), "The property could not be read safely.");
     } else if (typography.state === "present") {
       validateTypography(typography.value, pathFor(overridePath, "typography"), diagnostics);
+    }
+    const colors = readOwn(property.value, "colors");
+    if (colors.state === "error") {
+      addError(diagnostics, "property-read-failed", pathFor(overridePath, "colors"), "The property could not be read safely.");
+    } else if (colors.state === "present") {
+      validateColors(colors.value, pathFor(overridePath, "colors"), diagnostics);
     }
     validateBooleanIfPresent(property.value, "locked", overridePath, diagnostics);
     validateBooleanIfPresent(property.value, "showAttachmentName", overridePath, diagnostics);
@@ -726,6 +1044,13 @@ function validateMetadataObject(value: unknown): MiroCanvasMetadataValidationRes
       schemaVersion: schemaVersion.value,
       diagnostics,
     };
+  }
+
+  const settings = readOwn(value, "settings");
+  if (settings.state === "error") {
+    addError(diagnostics, "property-read-failed", "miroCanvas.settings", "The property could not be read safely.");
+  } else if (settings.state === "present") {
+    validateSettings(settings.value, "miroCanvas.settings", diagnostics);
   }
 
   const transform = readOwn(value, "transform");
@@ -1243,6 +1568,14 @@ export function parseMiroCanvasMetadata(
 export function createDefaultMiroCanvasMetadata(): MiroCanvasMetadata {
   return {
     schemaVersion: MIRO_CANVAS_SCHEMA_VERSION,
+    settings: {
+      displayTheme: "system",
+      reviewMode: false,
+      showAttachmentNames: true,
+      minimapVisible: true,
+      palette: [],
+      recentColors: [],
+    },
     transform: {
       scale: 1,
       offsetX: 0,
