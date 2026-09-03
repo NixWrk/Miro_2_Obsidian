@@ -94,6 +94,14 @@ add that folder as a vault), then open the staged Canvas from the
 `MIRO2OBSIDIAN\_oracle\m0-compatibility` folder. No real UI pass is implied
 until that manual gate is completed.
 
+If opening reports **vault not found**, use **Open another vault → Open folder
+as vault** and select the exact absolute path printed by setup. The `open`
+URI cannot register a new vault. `python -m tools.obsidian_oracle.open_local_vault`
+checks the app registry without changing it and prints the correct path and
+instructions. After registration, run it with `--profile both --open`.
+`check_environment --require-registered` makes missing/unknown registration an
+explicit failure instead of mistaking runtime files on disk for an openable vault.
+
 ### M0 explicit metadata actions
 
 The plugin registers these command-palette commands only for the active native

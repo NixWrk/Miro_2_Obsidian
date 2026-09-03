@@ -9,10 +9,12 @@ try:  # Direct script execution keeps compatibility with existing oracle tools.
     from .init_local_vault import initialize_local_vault
     from .install_miro_canvas_runtime import install_miro_canvas_runtime
     from .stage_compatibility_fixture import stage_all_profiles
+    from .open_local_vault import inspect_registration, registration_instructions
 except ImportError:  # pragma: no cover - exercised by ``python path\tool.py``.
     from init_local_vault import initialize_local_vault
     from install_miro_canvas_runtime import install_miro_canvas_runtime
     from stage_compatibility_fixture import stage_all_profiles
+    from open_local_vault import inspect_registration, registration_instructions
 
 
 def setup_m0_vault(
@@ -58,6 +60,10 @@ def main() -> int:
     print(f"OK: M0 oracle vault={vault}")
     for path in paths:
         print(path)
+    registration = inspect_registration(vault)
+    print(f"Obsidian vault registration: {registration.status}")
+    if registration.status != "registered":
+        print(registration_instructions(vault))
     return 0
 
 

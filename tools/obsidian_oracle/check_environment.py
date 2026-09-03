@@ -15,6 +15,7 @@ try:  # Direct script execution keeps compatibility with existing oracle tools.
     )
     from .compatibility import load_compatibility_matrix
     from .profile import check_profile
+    from .open_local_vault import inspect_registration, registration_instructions
 except ImportError:  # pragma: no cover - exercised by ``python path\tool.py``.
     from common import (
         _is_link_or_reparse as is_link_or_reparse,
@@ -26,6 +27,7 @@ except ImportError:  # pragma: no cover - exercised by ``python path\tool.py``.
     )
     from compatibility import load_compatibility_matrix
     from profile import check_profile
+    from open_local_vault import inspect_registration, registration_instructions
 
 
 def fail(message: str) -> None:
@@ -70,6 +72,11 @@ def main() -> int:
     parser.add_argument(
         "--profile",
         help="Verify one activated M0 profile (native-only, miro-canvas-only, advanced-only, or both).",
+    )
+    parser.add_argument(
+        "--require-registered",
+        action="store_true",
+        help="Require this exact vault to be registered in the local Obsidian app (read-only check).",
     )
     parser.add_argument(
         "--preserve-plugin",
@@ -171,6 +178,12 @@ def main() -> int:
 
     print(f"OK: vault={vault}")
     print(f"OK: work_dir={work}")
+    registration = inspect_registration(vault)
+    print(f"Obsidian vault registration: {registration.status}")
+    if registration.status != "registered":
+        print(registration_instructions(vault))
+        if args.require_registered:
+            fail("The local Obsidian app has no unambiguous registration for this vault")
     return 0
 
 

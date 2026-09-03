@@ -93,6 +93,16 @@ Canvas с `miro-canvas`, native Canvas с Advanced Canvas и оба плагин
 Canvas из `MIRO2OBSIDIAN\_oracle\m0-compatibility`. Выполненный offline
 checker сам по себе не означает real-Obsidian visual pass.
 
+При ошибке **vault not found** выберите **Открыть другое хранилище → Открыть
+папку как хранилище** и укажите абсолютный путь из setup. URI `open` не
+регистрирует новую папку. Команда
+`python -m tools.obsidian_oracle.open_local_vault` проверяет регистрацию без
+изменения глобальных настроек Obsidian и печатает нужный путь. После
+регистрации используйте `--profile both --open`. Опция
+`check_environment --require-registered` делает отсутствие или неопределённость
+регистрации явной ошибкой. Если папки не видно, вставьте полный путь в адресную
+строку выбора папки; диск J: должен быть доступен самому процессу Obsidian.
+
 ### Явные metadata actions
 
 Команды command palette регистрируются только на активном native Canvas, если

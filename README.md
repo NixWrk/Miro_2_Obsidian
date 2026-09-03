@@ -121,6 +121,13 @@ all four offline fixtures, and atomically installs the built `manifest.json`,
 Advanced Canvas runtime. See the [M0 runbook](docs/miro-canvas.md) for the
 profile activation/check commands and the real-Obsidian gate.
 
+If Obsidian reports **vault not found**, first select **Open folder as vault**
+and choose the exact absolute `_obsidian_oracle_vault` path printed by setup
+(not its `MIRO2OBSIDIAN` subfolder). Check registration with
+`python -m tools.obsidian_oracle.open_local_vault`; after registration, use
+`python -m tools.obsidian_oracle.open_local_vault --profile both --open`.
+Creating the folder alone does not register it in Obsidian.
+
 ### Coding agents
 
 Repository-aware coding agents should start with [`AGENTS.md`](AGENTS.md).

@@ -108,6 +108,14 @@ python tools\obsidian_oracle\check_environment.py
 необязательного Advanced Canvas он не устанавливает. Команды активации и
 проверки профилей, а также real-Obsidian gate описаны в [M0 runbook](docs/miro-canvas.ru.md).
 
+Если Obsidian сообщает **vault not found**, сначала выберите **Открыть папку как
+хранилище** и укажите абсолютный путь `_obsidian_oracle_vault`, который вывел
+setup, а не вложенную папку `MIRO2OBSIDIAN`. Проверка регистрации:
+`python -m tools.obsidian_oracle.open_local_vault`. После регистрации открыть
+доску можно командой
+`python -m tools.obsidian_oracle.open_local_vault --profile both --open`.
+Создание папки само по себе не регистрирует хранилище в Obsidian.
+
 ### LLM-агенты
 
 Агенты, работающие с репозиторием, должны начинать с [`AGENTS.md`](AGENTS.md).

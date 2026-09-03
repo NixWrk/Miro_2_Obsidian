@@ -93,6 +93,31 @@ After activation, add `_obsidian_oracle_vault` through Obsidian's vault
 switcher and open the staged file. The scripts cannot register a new vault or
 claim the native undo/redo and interaction gate on their own.
 
+### Fix “vault not found” before opening
+
+An existing folder is not necessarily registered in Obsidian. The `open` URI
+only locates registered vaults; it does not register a new directory. Use
+**Open another vault → Open folder as vault** and select the absolute vault
+root printed by setup, not the inner `MIRO2OBSIDIAN` folder. In a Windows
+folder picker, paste that absolute path into the address bar if browsing does
+not show it. The J: drive must be accessible to the Obsidian process too.
+
+```powershell
+# Read-only check; unregistered/unknown returns exit code 2 with instructions.
+python -m tools.obsidian_oracle.open_local_vault
+# Optional: open only the vault manager to select the folder yourself.
+python -m tools.obsidian_oracle.open_local_vault --choose-vault
+# After registration, validate and open the staged board using its vault ID.
+python -m tools.obsidian_oracle.check_environment --profile both --strict-runtime --require-registered
+python -m tools.obsidian_oracle.open_local_vault --profile both --open
+```
+
+The helper never edits the app's global `obsidian.json`. It refuses to send
+an `open` URI when registration is missing, unknown, or ambiguous, and never
+prints unrelated vault paths. Profile activation on disk does not reload
+plugins in an already open Obsidian window: reload the test vault between
+profile checks. See the official [Obsidian URI documentation](https://help.obsidian.md/Extending+Obsidian/Obsidian+URI).
+
 ## Fixture workflow
 
 Convert and stage one fixture:
