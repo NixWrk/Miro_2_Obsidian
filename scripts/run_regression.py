@@ -31,7 +31,8 @@ def main() -> int:
 
     smoke_cmd = [
         sys.executable,
-        str(repo_root / "tools" / "canvas_render" / "smoke_test.py"),
+        "-m",
+        "tools.canvas_render.smoke_test",
     ]
     smoke_rc = subprocess.call(smoke_cmd, cwd=repo_root)
     if smoke_rc != 0:
@@ -39,7 +40,8 @@ def main() -> int:
 
     render_cmd = [
         sys.executable,
-        str(repo_root / "tools" / "canvas_render" / "capture_fixture.py"),
+        "-m",
+        "tools.canvas_render.capture_fixture",
         "--all",
     ]
     return subprocess.call(render_cmd, cwd=repo_root)

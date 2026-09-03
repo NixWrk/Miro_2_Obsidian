@@ -31,25 +31,25 @@ index.html?canvas=/path/to/file.canvas
 Headless smoke test with Playwright Chromium:
 
 ```powershell
-python tools\canvas_render\smoke_test.py
+python -m tools.canvas_render.smoke_test
 ```
 
 Use the system Microsoft Edge installation:
 
 ```powershell
-python tools\canvas_render\smoke_test.py --browser edge
+python -m tools.canvas_render.smoke_test --browser edge
 ```
 
 Capture every fixture and update diagnostic baselines:
 
 ```powershell
-python tools\canvas_render\capture_fixture.py --all --update-baseline
+python -m tools.canvas_render.capture_fixture --all --update-baseline
 ```
 
 Compare current output with existing baselines:
 
 ```powershell
-python tools\canvas_render\capture_fixture.py --all
+python -m tools.canvas_render.capture_fixture --all
 ```
 
 Actual screenshots are written to `tools/canvas_render/.out/` and ignored by
