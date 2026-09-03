@@ -1,0 +1,9 @@
+/* All plugin selectors are namespaced so ordinary Canvas views remain untouched. */
+.miro-canvas-status {
+  color: var(--text-muted);
+  cursor: default;
+}
+
+.miro-canvas-status[data-miro-canvas-state="canvas"] {
+  color: var(--text-normal);
+}

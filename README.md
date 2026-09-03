@@ -35,9 +35,13 @@ suite. It is currently a Windows-focused pre-release tested with Python 3.13.
 The known historical Miro OAuth credential has been revoked and is absent from
 the release tree. See [`SECURITY.md`](SECURITY.md) for the current handling policy.
 
-This project does not synchronize changes back to Miro. The planned
-[`miro-canvas`](docs/miro-canvas.md) Obsidian plugin is a separate offline layer
-for richer editing and display; it is not implemented yet.
+This project does not synchronize changes back to Miro. The separate offline
+[`miro-canvas`](docs/miro-canvas.md) Obsidian plugin has now entered M0
+implementation under [`plugins/miro-canvas/`](plugins/miro-canvas/). The current
+scope is the plugin shell, versioned schema validation and in-memory migrations,
+plus native Canvas and optional Advanced Canvas adapters. It is not
+production-ready: M1 UI/navigation and richer rendering are not implemented
+yet, and no real-Obsidian visual or interaction verification is claimed.
 
 ## Data flow
 
@@ -80,6 +84,18 @@ Development, tests, and visual regression:
 python -m pip install -e .
 python -m pip install -r requirements-dev.txt
 python -m playwright install chromium
+```
+
+### Develop the `miro-canvas` plugin (M0)
+
+From the repository root:
+
+```powershell
+cd plugins\miro-canvas
+npm ci
+npm run typecheck
+npm test
+npm run build
 ```
 
 ### Coding agents

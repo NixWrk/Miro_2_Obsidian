@@ -2,15 +2,35 @@
 
 [English] | [Full Russian specification](miro-canvas.ru.md)
 
-`miro-canvas` is a planned offline Obsidian plugin that extends any native
-Canvas. On an ordinary board it adds richer editing, comments, locking, themes,
-colors, shapes, connector anchors, and a clickable minimap. When a local Canvas
-contains `miroSource`, it can also render an imported Miro snapshot more
-faithfully without contacting Miro.
+`miro-canvas` is an offline Obsidian plugin under active M0 implementation that
+will extend any native Canvas. On an ordinary board it is planned to add richer
+editing, comments, locking, themes, colors, shapes, connector anchors, and a
+clickable minimap. A future implementation is intended to render an imported
+Miro snapshot more faithfully when a local Canvas contains `miroSource`, without
+contacting Miro.
 
 This document defines the architecture and implementation order. Miro export,
 the canonical REST/Web SDK union, and JSON-to-Canvas conversion remain separate
 from the plugin.
+
+## Current implementation status
+
+M0 implementation has started under `plugins/miro-canvas/`. The current scope is
+the plugin shell, versioned `miroCanvas` schema validation and in-memory
+migrations, plus native Canvas and optional Advanced Canvas adapters. The plugin
+is not production-ready: M1 UI/navigation and richer rendering are not
+implemented yet, and no real-Obsidian visual or interaction verification is
+claimed.
+
+To run the current plugin checks from the repository root:
+
+```powershell
+cd plugins\miro-canvas
+npm ci
+npm run typecheck
+npm test
+npm run build
+```
 
 ## Product boundary
 

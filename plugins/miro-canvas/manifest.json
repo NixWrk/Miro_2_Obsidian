@@ -1,0 +1,9 @@
+{
+  "id": "miro-canvas",
+  "name": "Miro Canvas",
+  "version": "0.1.0",
+  "minAppVersion": "1.5.0",
+  "description": "Offline extensions for native Obsidian Canvas files.",
+  "author": "Miro 2 Obsidian",
+  "isDesktopOnly": false
+}

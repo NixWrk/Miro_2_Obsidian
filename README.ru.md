@@ -33,9 +33,13 @@ Pipeline работает и покрыт автоматическими тес�
 
 Исторический ключ Miro отозван и отсутствует в release tree.
 
-Обратной синхронизации с Miro нет. Запланированный Obsidian-плагин
-[`miro-canvas`](docs/miro-canvas.ru.md) является отдельным офлайн-слоем для
-более точного отображения и удобного редактирования; он пока не реализован.
+Обратной синхронизации с Miro нет. Отдельный офлайн-плагин Obsidian
+[`miro-canvas`](docs/miro-canvas.ru.md) перешёл к реализации M0 в каталоге
+[`plugins/miro-canvas/`](plugins/miro-canvas/). Текущий scope — plugin shell,
+версионированная проверка schema и in-memory migrations, а также native Canvas
+и optional Advanced Canvas adapters. Плагин пока не production-ready: UI и
+навигация M1, а также расширенный renderer ещё не реализованы; real-Obsidian
+визуальная или интерактивная проверка не заявляется.
 
 ## Схема данных
 
@@ -67,6 +71,18 @@ python -m pip install .
 python -m pip install -e .
 python -m pip install -r requirements-dev.txt
 python -m playwright install chromium
+```
+
+### Разработка плагина `miro-canvas` (M0)
+
+Из корня репозитория:
+
+```powershell
+cd plugins\miro-canvas
+npm ci
+npm run typecheck
+npm test
+npm run build
 ```
 
 ### LLM-агенты
