@@ -3,11 +3,10 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from common import load_config, vault_path
-
-
-REPO_ROOT = Path(__file__).resolve().parents[2]
-SCRIPTS_DIR = REPO_ROOT / "scripts"
+try:
+    from .common import load_config, vault_path
+except ImportError:  # pragma: no cover - direct-script compatibility
+    from common import load_config, vault_path
 
 from scripts.obsidian_plugin_setup import (  # noqa: E402
     ADVANCED_CANVAS_ID,

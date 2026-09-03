@@ -1,0 +1,36 @@
+{
+  "nodes": [
+    {
+      "id": "m0-miro-note",
+      "type": "text",
+      "text": "M0 Miro metadata fixture",
+      "x": 480,
+      "y": 0,
+      "width": 360,
+      "height": 140
+    }
+  ],
+  "edges": [],
+  "miroCanvas": {
+    "schemaVersion": 1,
+    "transform": {
+      "scale": 1,
+      "offsetX": 0,
+      "offsetY": 0
+    },
+    "bindings": {
+      "m0-miro-note": {
+        "sourceId": "miro-item-m0-note",
+        "role": "item",
+        "source": "rest"
+      }
+    },
+    "zOrder": [
+      "m0-miro-note"
+    ],
+    "decks": [],
+    "localOverrides": {},
+    "localComments": [],
+    "freeAnchors": {}
+  }
+}

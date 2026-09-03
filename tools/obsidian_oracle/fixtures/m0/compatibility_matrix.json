@@ -1,0 +1,58 @@
+{
+  "schemaVersion": 1,
+  "description": "Offline M0 native/Advanced Canvas compatibility profiles.",
+  "profiles": [
+    {
+      "id": "native-only",
+      "description": "Native Obsidian Canvas without Advanced Canvas or Miro metadata.",
+      "canvas": "native.canvas",
+      "nativeCanvas": true,
+      "advancedCanvas": false,
+      "miroCanvas": false,
+      "expected": {
+        "nativeAdapter": "ready",
+        "advancedAdapter": "unavailable",
+        "metadata": "absent"
+      }
+    },
+    {
+      "id": "miro-canvas-only",
+      "description": "Native Canvas plus miro-canvas metadata, without Advanced Canvas.",
+      "canvas": "miro-metadata.canvas",
+      "nativeCanvas": true,
+      "advancedCanvas": false,
+      "miroCanvas": true,
+      "expected": {
+        "nativeAdapter": "ready",
+        "advancedAdapter": "unavailable",
+        "metadata": "valid"
+      }
+    },
+    {
+      "id": "advanced-only",
+      "description": "Native Obsidian Canvas with the optional Advanced Canvas runtime.",
+      "canvas": "native.canvas",
+      "nativeCanvas": true,
+      "advancedCanvas": true,
+      "miroCanvas": false,
+      "expected": {
+        "nativeAdapter": "ready",
+        "advancedAdapter": "ready",
+        "metadata": "absent"
+      }
+    },
+    {
+      "id": "both",
+      "description": "Native Canvas plus miro-canvas metadata and Advanced Canvas.",
+      "canvas": "miro-metadata.canvas",
+      "nativeCanvas": true,
+      "advancedCanvas": true,
+      "miroCanvas": true,
+      "expected": {
+        "nativeAdapter": "ready",
+        "advancedAdapter": "ready",
+        "metadata": "valid"
+      }
+    }
+  ]
+}

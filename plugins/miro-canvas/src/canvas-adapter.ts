@@ -114,10 +114,31 @@ function isObject(value: unknown): value is UnknownRecord {
 }
 
 function describeError(error: unknown): string {
-	if (error instanceof Error && error.message) {
-		return error.message;
+	// A runtime boundary can hand us a revoked Proxy as the thrown value.  Even
+	// `error instanceof Error` and `error.message` may execute Proxy traps, so
+	// keep diagnostic formatting defensive too.
+	try {
+		if (typeof error === "string" && error) {
+			return error;
+		}
+		if (isObject(error)) {
+			const message = Reflect.get(error, "message", error);
+			if (typeof message === "string" && message) {
+				return message;
+			}
+		}
+	} catch {
+		// Fall through to the stable generic message below.
 	}
 	return "unknown error";
+}
+
+function describePropertyKey(key: PropertyKey): string {
+	try {
+		return String(key);
+	} catch {
+		return "<unprintable key>";
+	}
 }
 
 function addDiagnostic(
@@ -160,7 +181,7 @@ function safeReadResult(
 		addDiagnostic(probe, {
 			code: "native-probe-failed",
 			level: "warning",
-			message: `Reading Canvas runtime property "${String(key)}" failed: ${describeError(error)}.`,
+			message: `Reading Canvas runtime property "${describePropertyKey(key)}" failed: ${describeError(error)}.`,
 			capability,
 		});
 		return { ok: false };
@@ -194,7 +215,7 @@ function safeCallResult(
 		addDiagnostic(probe, {
 			code: "native-operation-failed",
 			level: "warning",
-			message: `Calling Canvas runtime method "${String(method)}" failed: ${describeError(error)}.`,
+			message: `Calling Canvas runtime method "${describePropertyKey(method)}" failed: ${describeError(error)}.`,
 			capability,
 		});
 		return { ok: false };
@@ -259,6 +280,71 @@ function valueExists(
 	capability?: string,
 ): boolean {
 	return firstDefined(target, keys, probe, capability) !== undefined;
+}
+
+type SafeBooleanResult =
+	| { readonly ok: true; readonly value: boolean }
+	| { readonly ok: false };
+
+function safeIsArray(
+	value: unknown,
+	probe: MutableProbe,
+	capability?: string,
+): SafeBooleanResult {
+	try {
+		return { ok: true, value: Array.isArray(value) };
+	} catch (error) {
+		addDiagnostic(probe, {
+			code: "native-probe-failed",
+			level: "warning",
+			message: `Checking whether a Canvas value is an array failed: ${describeError(error)}.`,
+			capability,
+		});
+		return { ok: false };
+	}
+}
+
+function safeInstanceOf(
+	value: unknown,
+	constructor: Function,
+	constructorName: string,
+	probe: MutableProbe,
+	capability?: string,
+): SafeBooleanResult {
+	try {
+		return { ok: true, value: value instanceof constructor };
+	} catch (error) {
+		addDiagnostic(probe, {
+			code: "native-probe-failed",
+			level: "warning",
+			message: `Checking whether a Canvas value is a ${constructorName} failed: ${describeError(error)}.`,
+			capability,
+		});
+		return { ok: false };
+	}
+}
+
+function readRequiredCapabilities(
+	options: CanvasAdapterOptions,
+	probe: MutableProbe,
+): readonly unknown[] {
+	const required = safeRead(options, "requiredCapabilities", probe);
+	if (required === undefined || required === null) {
+		return [];
+	}
+	const arrayResult = safeIsArray(required, probe);
+	if (!arrayResult.ok) {
+		return [];
+	}
+	if (!arrayResult.value) {
+		addDiagnostic(probe, {
+			code: "native-options-invalid",
+			level: "warning",
+			message: "Canvas adapter requiredCapabilities must be an array; the requirement list was ignored.",
+		});
+		return [];
+	}
+	return readArrayCollection(required as unknown[], probe, "required capabilities") ?? [];
 }
 
 function resolveRuntime(view: unknown, probe: MutableProbe): unknown {
@@ -413,9 +499,10 @@ function createProbe(view: unknown, options: CanvasAdapterOptions = {}): CanvasA
 		}
 	}
 
-	for (const capability of options.requiredCapabilities ?? []) {
-		if (!probe.capabilities.has(capability)) {
-			warnUnsupported(probe, capability, `Required Canvas capability "${capability}" is unavailable.`);
+	for (const capability of readRequiredCapabilities(options, probe)) {
+		if (!probe.capabilities.has(capability as CanvasCapability)) {
+			const capabilityName = typeof capability === "string" ? capability : describePropertyKey(capability as PropertyKey);
+			warnUnsupported(probe, capabilityName, `Required Canvas capability "${capabilityName}" is unavailable.`);
 		}
 	}
 
@@ -605,14 +692,26 @@ function readCollection(raw: unknown, probe: MutableProbe, capability: string): 
 	if (raw === undefined || raw === null) {
 		return undefined;
 	}
-	if (Array.isArray(raw)) {
-		return readArrayCollection(raw, probe, capability);
+	const arrayResult = safeIsArray(raw, probe, capability);
+	if (!arrayResult.ok) {
+		return undefined;
+	}
+	if (arrayResult.value) {
+		return readArrayCollection(raw as unknown[], probe, capability);
 	}
 	if (!isObject(raw)) {
 		return undefined;
 	}
 
-	if (raw instanceof Map || raw instanceof Set) {
+	const mapResult = safeInstanceOf(raw, Map, "Map", probe, capability);
+	if (!mapResult.ok) {
+		return undefined;
+	}
+	const setResult = safeInstanceOf(raw, Set, "Set", probe, capability);
+	if (!setResult.ok) {
+		return undefined;
+	}
+	if (mapResult.value || setResult.value) {
 		const valuesResult = safeCallResult(raw, "values", [], probe, capability);
 		return valuesResult.ok ? readIterator(valuesResult.value, probe, capability) : undefined;
 	}

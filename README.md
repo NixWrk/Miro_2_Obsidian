@@ -36,12 +36,15 @@ The known historical Miro OAuth credential has been revoked and is absent from
 the release tree. See [`SECURITY.md`](SECURITY.md) for the current handling policy.
 
 This project does not synchronize changes back to Miro. The separate offline
-[`miro-canvas`](docs/miro-canvas.md) Obsidian plugin has now entered M0
-implementation under [`plugins/miro-canvas/`](plugins/miro-canvas/). The current
-scope is the plugin shell, versioned schema validation and in-memory migrations,
-plus native Canvas and optional Advanced Canvas adapters. It is not
-production-ready: M1 UI/navigation and richer rendering are not implemented
-yet, and no real-Obsidian visual or interaction verification is claimed.
+[`miro-canvas`](docs/miro-canvas.md) Obsidian plugin has a repository-level M0
+foundation under [`plugins/miro-canvas/`](plugins/miro-canvas/): a native Canvas
+adapter, an optional Advanced Canvas adapter, versioned schema validation and
+in-memory migrations, an explicit metadata writer with a guarded atomic
+compare-and-swap (CAS) bridge, and a deterministic four-profile compatibility
+matrix with a project-local test vault. The plugin is not production-ready.
+The real-Obsidian gate is still open: native Ctrl+Z/redo behavior and visual or
+interaction verification in the real application have not been claimed. M1
+navigation/safety, M2 authoring, and M3 geometry/rendering remain on the plan.
 
 ## Data flow
 
@@ -97,6 +100,26 @@ npm run typecheck
 npm test
 npm run build
 ```
+
+Build and deploy the local runtime to the guarded M0 test vault from the
+repository root:
+
+```powershell
+cd plugins\miro-canvas
+npm ci
+npm run typecheck
+npm test
+npm run build
+cd ..\..
+python tools\obsidian_oracle\setup_m0_vault.py
+python tools\obsidian_oracle\check_environment.py
+```
+
+`setup_m0_vault.py` creates the project-local `_obsidian_oracle_vault`, stages
+all four offline fixtures, and atomically installs the built `manifest.json`,
+`main.js`, and `styles.css` for `miro-canvas`. It does not install the optional
+Advanced Canvas runtime. See the [M0 runbook](docs/miro-canvas.md) for the
+profile activation/check commands and the real-Obsidian gate.
 
 ### Coding agents
 

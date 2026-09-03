@@ -15,14 +15,19 @@ from the plugin.
 
 ## Current implementation status
 
-M0 implementation has started under `plugins/miro-canvas/`. The current scope is
-the plugin shell, versioned `miroCanvas` schema validation and in-memory
-migrations, plus native Canvas and optional Advanced Canvas adapters. The plugin
-is not production-ready: M1 UI/navigation and richer rendering are not
-implemented yet, and no real-Obsidian visual or interaction verification is
-claimed.
+The repository-level M0 foundation is implemented under
+`plugins/miro-canvas/`. It includes the plugin shell, versioned `miroCanvas`
+schema validation and in-memory migrations, read-only native/Advanced Canvas
+adapters, an explicit metadata writer with a guarded atomic compare-and-swap
+(CAS) bridge, and a deterministic four-profile compatibility matrix with a
+project-local test vault harness.
 
-To run the current plugin checks from the repository root:
+M0 is not production-ready yet. The real-Obsidian gate remains open: native
+Ctrl+Z/redo behavior for metadata actions and real visual/interaction
+verification have not been claimed. M1 navigation/safety, M2 authoring, and M3
+geometry/rendering remain future work.
+
+To run the plugin checks from the repository root:
 
 ```powershell
 cd plugins\miro-canvas
@@ -31,6 +36,116 @@ npm run typecheck
 npm test
 npm run build
 ```
+
+To build and deploy the local runtime into the guarded M0 test vault:
+
+```powershell
+cd plugins\miro-canvas
+npm ci
+npm run typecheck
+npm test
+npm run build
+cd ..\..
+python tools\obsidian_oracle\setup_m0_vault.py
+python tools\obsidian_oracle\check_environment.py
+```
+
+The setup script creates `_obsidian_oracle_vault`, stages all four committed
+fixtures below its `MIRO2OBSIDIAN\_oracle\m0-compatibility` folder, and copies
+only the built `manifest.json`, `main.js`, and `styles.css` into
+`.obsidian\plugins\miro-canvas`. The target is guarded: arbitrary vault paths
+and link/reparse-point paths are refused. Advanced Canvas receives a placeholder
+manifest unless its real runtime is copied or installed separately; therefore a
+successful offline matrix check is not a real-Obsidian visual pass.
+
+### M0 profile activation and checks
+
+Each activation stages the selected Canvas fixture and atomically updates the
+controlled entries in `.obsidian\community-plugins.json`. The exact four
+profile pairs, run from the repository root, are:
+
+```powershell
+python tools\obsidian_oracle\activate_profile.py native-only
+python tools\obsidian_oracle\check_environment.py --profile native-only
+
+python tools\obsidian_oracle\activate_profile.py miro-canvas-only
+python tools\obsidian_oracle\check_environment.py --profile miro-canvas-only
+
+python tools\obsidian_oracle\activate_profile.py advanced-only
+python tools\obsidian_oracle\check_environment.py --profile advanced-only
+
+python tools\obsidian_oracle\activate_profile.py both
+python tools\obsidian_oracle\check_environment.py --profile both
+```
+
+The four rows mean native Canvas alone, native Canvas plus `miro-canvas`, native
+Canvas plus Advanced Canvas, and both optional plugins. The profile checker
+validates enabled-plugin state, fixture metadata, and the committed matrix. It
+reports missing plugin binaries as warnings unless `--strict-runtime` is
+given. For a real Advanced Canvas run, first install a pinned, hash-verified
+runtime with `python -m tools.obsidian_oracle.install_plugin_runtime
+advanced-canvas` or copy one from an existing vault; then rerun the relevant
+profile with `--strict-runtime`.
+
+The scripts only prepare files. They do not register or open the project-local
+vault in a user's Obsidian window. Before a real-app check, open
+`_obsidian_oracle_vault` once through Obsidian's vault switcher (or otherwise
+add that folder as a vault), then open the staged Canvas from the
+`MIRO2OBSIDIAN\_oracle\m0-compatibility` folder. No real UI pass is implied
+until that manual gate is completed.
+
+### M0 explicit metadata actions
+
+The plugin registers these command-palette commands only for the active native
+Canvas when its known persistence boundary is compatible:
+
+| Command | Effect |
+|---|---|
+| `Miro Canvas: Initialize board metadata` | Explicitly creates schema-v1 `miroCanvas` metadata; it is a no-op when the default is already present. |
+| Native Canvas `Ctrl/Cmd+Z` | Uses Obsidian's native undo history after an explicit metadata transaction. |
+| Native Canvas `Ctrl/Cmd+Y` (or the platform redo action) | Uses Obsidian's native redo history after an explicit metadata transaction. |
+| `Miro Canvas: Show plugin status` | Reports adapter, metadata, persistence, and optional Advanced Canvas state. |
+
+Opening or inspecting a board does not write a file. Every metadata mutation is
+an explicit writer call (the internal `MetadataWriter.write(action, mutate)`
+API): it clones a JSON-safe document, validates the proposed schema, preserves
+`miroSource`, and sends one complete-document transaction to the host. The
+native bridge records that transaction through `requestSave(true)`, so native
+Ctrl/Cmd+Z and Ctrl/Cmd+Y are the intended undo/redo path; the plugin does not
+maintain a competing user-facing history stack. The explicit public command in
+M0 is `Initialize board metadata`; later feature controls will use the same
+writer boundary. Native hotkey behavior is still part of the real-app gate.
+
+### M0 atomic CAS bridge and fail-closed behavior
+
+`src/obsidian-metadata-store.ts` is the only native root-data bridge. It accepts
+the currently known shape (`Canvas.data` as a writable data property and a
+synchronous `requestSave(true)` native history/save boundary), returns detached
+snapshots,
+and exposes `commitDocument(next, expected)` to `MetadataWriter`. It does not
+guess `getData`, `setData`, `importData`, vault writes, or a text-view
+serialization path for persistence.
+
+The bridge compares the live root to `expected`, replaces it with a detached
+clone, calls `requestSave(true)`, verifies the resulting root, and restores the
+previous root when the host rejects, throws, returns an async thenable, or
+produces a different document. The writer additionally rejects malformed or
+unsupported existing metadata, invalid proposed metadata, cyclic/non-JSON
+documents, stale CAS/history snapshots, and any change to immutable
+`miroSource`. The bridge does not intentionally accept or record failed
+transactions; failure behavior inside the private Obsidian runtime remains part
+of the real-application gate.
+
+This proves atomic in-memory root replacement and native undo snapshot creation;
+Obsidian still schedules its normal debounced file save, so a durable disk flush
+is not synchronously proven and this is not a filesystem transaction.
+
+If the private runtime shape is missing, read-only, accessor-backed, malformed,
+or otherwise incompatible, the bridge reports `unavailable`/`incompatible`
+and does not expose a writable store. The plugin remains loaded and native
+Canvas remains usable; only metadata persistence commands are disabled and a
+diagnostic status is shown. This fail-closed behavior is covered by offline
+unit tests, not yet by a real Obsidian session.
 
 ## Product boundary
 
@@ -42,6 +157,9 @@ npm run build
 - The same `.canvas` file remains valid and useful without `miro-canvas`.
 - Standard Canvas and Obsidian behavior remains available: Markdown, wikilinks,
   normal links, embeds, drag and drop, hotkeys, undo/redo, and context menus.
+- M0 metadata writes are explicit actions and are committed through the native
+  Canvas history boundary; native Ctrl/Cmd+Z and Ctrl/Cmd+Y replay remains to be
+  verified in the real application.
 - Missing source data is shown as a diagnostic, never invented.
 - Opening a board is read-only; metadata changes only after an explicit user
   action and participates in undo/redo.
@@ -60,6 +178,7 @@ Obsidian Canvas view
   -> thin CanvasAdapter for private runtime details
   -> framework-free feature modules
   -> optional AdvancedCanvasAdapter
+  -> explicit root-metadata CAS bridge
   -> versioned miroCanvas metadata
 ```
 
@@ -258,11 +377,19 @@ evidence.
 
 ### M0: adapter and persistence
 
-- Create the minimal plugin scaffold under `plugins/miro-canvas/`.
-- Isolate private Canvas access in `CanvasAdapter`.
-- Read and validate `miroCanvas.schemaVersion` without writing on open.
-- Add atomic metadata writes integrated with undo/redo.
-- Prove native-only and Advanced-Canvas coexistence with one fixture each.
+Repository-level M0 status: the scaffold, schema boundary, read-only adapters,
+explicit CAS writer, and four offline compatibility fixtures are implemented
+and covered by automated tests.
+
+- [x] Create the minimal plugin scaffold under `plugins/miro-canvas/`.
+- [x] Isolate native and optional Advanced Canvas access behind adapters.
+- [x] Read and validate `miroCanvas.schemaVersion` without writing on open.
+- [x] Add explicit whole-document CAS metadata writes with detached snapshots,
+  rollback, and the native Canvas history boundary for undo/redo.
+- [x] Stage native-only, `miro-canvas`-only, Advanced-only, and both-plugin
+  offline fixtures with guarded activation/check scripts.
+- [ ] Open the project vault in real Obsidian and verify visual/interaction
+  behavior, including native Ctrl+Z/Ctrl+Y replay and the final screenshots.
 
 ### M1: navigation and safety
 

@@ -12,7 +12,10 @@ FIXTURES_DIR = REPO_ROOT / "tests" / "fixtures"
 CONVERTER_DIR = REPO_ROOT / "Json_2_Canvas"
 
 from Json_2_Canvas.Converter import convert_miro_to_canvas  # noqa: E402
-from common import load_config, load_json, vault_path  # noqa: E402
+try:
+    from .common import load_config, load_json, vault_path
+except ImportError:  # pragma: no cover - direct-script compatibility
+    from common import load_config, load_json, vault_path  # noqa: E402
 
 
 def fixture_dir(name: str) -> Path:

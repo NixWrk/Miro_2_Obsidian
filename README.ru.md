@@ -33,13 +33,16 @@ Pipeline работает и покрыт автоматическими тес�
 
 Исторический ключ Miro отозван и отсутствует в release tree.
 
-Обратной синхронизации с Miro нет. Отдельный офлайн-плагин Obsidian
-[`miro-canvas`](docs/miro-canvas.ru.md) перешёл к реализации M0 в каталоге
-[`plugins/miro-canvas/`](plugins/miro-canvas/). Текущий scope — plugin shell,
-версионированная проверка schema и in-memory migrations, а также native Canvas
-и optional Advanced Canvas adapters. Плагин пока не production-ready: UI и
-навигация M1, а также расширенный renderer ещё не реализованы; real-Obsidian
-визуальная или интерактивная проверка не заявляется.
+Обратной синхронизации с Miro нет. Для отдельного офлайн-плагина Obsidian
+[`miro-canvas`](docs/miro-canvas.ru.md) в каталоге
+[`plugins/miro-canvas/`](plugins/miro-canvas/) готов repository-level фундамент
+M0: native Canvas adapter, optional Advanced Canvas adapter, версионированная
+проверка schema и in-memory migrations, explicit metadata writer с защищённым
+atomic compare-and-swap (CAS) bridge, а также детерминированная матрица из
+четырёх профилей и project-local test vault. Плагин пока не production-ready.
+Real-Obsidian gate остаётся открытым: поведение native Ctrl+Z/redo и визуальная
+или интерактивная проверка в настоящем приложении пока не заявляются. В планах
+остаются navigation/safety M1, authoring M2 и geometry/rendering M3.
 
 ## Схема данных
 
@@ -84,6 +87,26 @@ npm run typecheck
 npm test
 npm run build
 ```
+
+Собрать и развернуть локальный runtime в защищённый M0 test vault можно из
+корня репозитория:
+
+```powershell
+cd plugins\miro-canvas
+npm ci
+npm run typecheck
+npm test
+npm run build
+cd ..\..
+python tools\obsidian_oracle\setup_m0_vault.py
+python tools\obsidian_oracle\check_environment.py
+```
+
+`setup_m0_vault.py` создаёт project-local `_obsidian_oracle_vault`, раскладывает
+все четыре offline fixtures и атомарно устанавливает собранные
+`manifest.json`, `main.js` и `styles.css` для `miro-canvas`. Runtime
+необязательного Advanced Canvas он не устанавливает. Команды активации и
+проверки профилей, а также real-Obsidian gate описаны в [M0 runbook](docs/miro-canvas.ru.md).
 
 ### LLM-агенты
 

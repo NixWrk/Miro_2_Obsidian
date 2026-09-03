@@ -15,11 +15,16 @@ OAuth или интернетом.
 
 ## Текущий статус реализации
 
-Реализация M0 началась в `plugins/miro-canvas/`. Текущий scope ограничен plugin
-shell, версионированной проверкой `miroCanvas` schema и in-memory migrations,
-а также native Canvas и optional Advanced Canvas adapters. Плагин пока не
-production-ready: UI и навигация M1, а также расширенный renderer ещё не
-реализованы; real-Obsidian визуальная или интерактивная проверка не заявляется.
+Repository-level фундамент M0 реализован в `plugins/miro-canvas/`. Он включает
+plugin shell, версионированную проверку `miroCanvas` schema и in-memory
+migrations, read-only native/Advanced Canvas adapters, explicit metadata writer
+с защищённым atomic compare-and-swap (CAS) bridge, а также детерминированную
+матрицу из четырёх профилей и project-local test-vault harness.
+
+M0 пока не production-ready. Real-Obsidian gate остаётся открытым: поведение
+native Ctrl+Z/redo для metadata actions и реальная визуальная/интерактивная
+проверка ещё не заявляются. Navigation/safety M1, authoring M2 и
+geometry/rendering M3 остаются дальнейшей работой.
 
 Текущие проверки плагина из корня репозитория:
 
@@ -30,6 +35,112 @@ npm run typecheck
 npm test
 npm run build
 ```
+
+Собрать и развернуть локальный runtime в защищённый M0 test vault можно из
+корня репозитория:
+
+```powershell
+cd plugins\miro-canvas
+npm ci
+npm run typecheck
+npm test
+npm run build
+cd ..\..
+python tools\obsidian_oracle\setup_m0_vault.py
+python tools\obsidian_oracle\check_environment.py
+```
+
+`setup_m0_vault.py` создаёт `_obsidian_oracle_vault`, раскладывает все четыре
+committed fixtures в `MIRO2OBSIDIAN\_oracle\m0-compatibility` и атомарно
+копирует только собранные `manifest.json`, `main.js` и `styles.css` для
+`miro-canvas`. Цель защищена: произвольный vault или путь через link/reparse
+point отклоняется. Для Advanced Canvas сначала будет создан placeholder
+manifest; настоящий runtime нужно отдельно скопировать или установить, поэтому
+успешная offline matrix check не является real-Obsidian visual pass.
+
+### Активация и проверка M0-профилей
+
+Каждая активация раскладывает выбранный Canvas fixture и атомарно обновляет
+контролируемые записи `.obsidian\community-plugins.json`. Ниже приведены
+ровно четыре пары команд; запускать их нужно из корня репозитория:
+
+```powershell
+python tools\obsidian_oracle\activate_profile.py native-only
+python tools\obsidian_oracle\check_environment.py --profile native-only
+
+python tools\obsidian_oracle\activate_profile.py miro-canvas-only
+python tools\obsidian_oracle\check_environment.py --profile miro-canvas-only
+
+python tools\obsidian_oracle\activate_profile.py advanced-only
+python tools\obsidian_oracle\check_environment.py --profile advanced-only
+
+python tools\obsidian_oracle\activate_profile.py both
+python tools\obsidian_oracle\check_environment.py --profile both
+```
+
+Профили означают соответственно native Canvas без optional plugins, native
+Canvas с `miro-canvas`, native Canvas с Advanced Canvas и оба плагина. Checker
+проверяет enabled-plugin state, metadata fixture и committed matrix. Отсутствие
+бинарников плагинов является warning, если не указан `--strict-runtime`.
+Для реального Advanced Canvas сначала установите pinned hash-verified runtime
+командой `python -m tools.obsidian_oracle.install_plugin_runtime advanced-canvas`
+или скопируйте его из существующего vault; затем повторите проверку нужного
+профиля с `--strict-runtime`.
+
+Скрипты только готовят файлы и не регистрируют/не открывают project-local vault
+в окне пользователя. Перед real-app check добавьте `_obsidian_oracle_vault`
+через vault switcher Obsidian (или другим штатным способом), затем откройте
+Canvas из `MIRO2OBSIDIAN\_oracle\m0-compatibility`. Выполненный offline
+checker сам по себе не означает real-Obsidian visual pass.
+
+### Явные metadata actions
+
+Команды command palette регистрируются только на активном native Canvas, если
+известная persistence boundary совместима:
+
+| Команда | Действие |
+|---|---|
+| `Miro Canvas: Initialize board metadata` | Явно создаёт `miroCanvas` schema v1; при уже существующем default metadata это no-op. |
+| Native Canvas `Ctrl/Cmd+Z` | Использует native undo history Obsidian после explicit metadata transaction. |
+| Native Canvas `Ctrl/Cmd+Y` (или штатное действие redo) | Использует native redo history Obsidian после explicit metadata transaction. |
+| `Miro Canvas: Show plugin status` | Показывает adapter, metadata, persistence и optional Advanced Canvas state. |
+
+Открытие или inspection Canvas ничего не записывает. Каждая metadata mutation
+проходит explicit writer (внутренний API `MetadataWriter.write(action, mutate)`):
+detached JSON-safe copy, schema validation, проверка неизменности `miroSource`
+и одна complete-document transaction в host. Native bridge записывает такую
+транзакцию через `requestSave(true)`, поэтому native Ctrl/Cmd+Z и Ctrl/Cmd+Y —
+предполагаемый путь undo/redo; отдельного user-facing history stack у плагина
+нет. Public command M0 — `Initialize board metadata`; будущие controls будут
+использовать ту же writer boundary. Проверка native hotkeys остаётся real-app gate.
+
+### Atomic CAS bridge и fail-closed
+
+`src/obsidian-metadata-store.ts` — единственный native root-data bridge. Он
+поддерживает известную форму (`Canvas.data` как writable data property и
+синхронный `requestSave(true)` native history/save boundary), отдаёт detached
+snapshots и
+передаёт `commitDocument(next, expected)` в `MetadataWriter`. Bridge не угадывает
+`getData`, `setData`, `importData`, vault writes или text-view serialization.
+
+Bridge сравнивает live root с `expected`, заменяет его detached clone, вызывает
+`requestSave(true)`, проверяет результат и восстанавливает предыдущий root, если host
+отклонил транзакцию, выбросил ошибку, вернул async thenable или записал другой
+document. Writer дополнительно отклоняет malformed/unsupported metadata,
+invalid candidate, cyclic/non-JSON document, stale CAS/history и любое изменение
+immutable `miroSource`. Bridge намеренно не принимает и не записывает неудачные
+транзакции; поведение при внутреннем сбое private Obsidian runtime остаётся
+частью проверки в реальном приложении.
+
+Это доказывает atomic in-memory root replacement и создание native undo snapshot;
+Obsidian всё ещё планирует обычное debounced сохранение файла, поэтому durable
+disk flush синхронно не доказан и это не filesystem transaction.
+
+Если private runtime shape отсутствует, read-only, accessor-backed, malformed или
+несовместим, bridge сообщает `unavailable`/`incompatible` и не выдаёт writable
+store. Плагин остаётся загружен, native Canvas продолжает работать, а только
+metadata persistence commands выключаются с diagnostic status. Поведение
+покрыто offline unit tests; реальный Obsidian session пока не проверен.
 
 ## Пользовательское ядро
 
@@ -84,11 +195,11 @@ layer, а доска и собственные функции `miro-canvas` пр
 
 - [ ] `ARCH-001` `P0 P` Использовать нативный Canvas view как единственный
   обязательный runtime и не заменять его отдельным редактором.
-- [ ] `ARCH-002` `P0 P` Не зависеть при загрузке или сохранении от Advanced
+- [x] `ARCH-002` `P0 P` Не зависеть при загрузке или сохранении от Advanced
   Canvas, Canvas Minimap, Excalidraw или другого community plugin.
-- [ ] `ARCH-003` `P0 P` Подключать Advanced Canvas только через optional adapter
+- [x] `ARCH-003` `P0 P` Подключать Advanced Canvas только через optional adapter
   с runtime detection, проверкой capabilities и graceful disable.
-- [ ] `ARCH-004` `P0 P` Не форкать и не копировать код Advanced Canvas;
+- [x] `ARCH-004` `P0 P` Не форкать и не копировать код Advanced Canvas;
   совместимость строить на данных, событиях и минимальном feature detection.
 - [ ] `ARCH-005` `P0 P` Один и тот же `.canvas` без потери данных открывается в
   режимах: native only, `miro-canvas`, Advanced Canvas и оба plugins вместе.
@@ -98,7 +209,7 @@ layer, а доска и собственные функции `miro-canvas` пр
   `CanvasAdapter`; Advanced Canvas integration не должна растекаться по features.
 - [ ] `ARCH-008` `P1 P` Читать Advanced JSON Canvas metadata, когда она есть, но
   реализовать необходимое отображение этого metadata и без Advanced Canvas.
-- [ ] `ARCH-009` `P0 P` Размещать исходники в `plugins/miro-canvas/` этого repo,
+- [x] `ARCH-009` `P0 P` Размещать исходники в `plugins/miro-canvas/` этого repo,
   собирать TypeScript через esbuild и не добавлять UI framework/runtime dependency.
 - [ ] `ARCH-010` `P1 P` Выносить plugin в отдельный repository только перед
   независимыми releases/community publication, когда граница кода стабилизируется.
@@ -202,7 +313,7 @@ node с тем же ID, что и Miro item, связывается без за�
 
 ### Data bridge
 
-- [ ] `DATA-001` `P0 B` Добавить версионированный `miroCanvas.schemaVersion`.
+- [x] `DATA-001` `P0 B` Добавить версионированный `miroCanvas.schemaVersion`.
 - [ ] `DATA-002` `P0 B` Сохранить точный scale и итоговый translation конвертера.
 - [ ] `DATA-003` `P0 B` Сохранить binding только для comments, diagnostics,
   document slots, slide sequence edges и других синтетических объектов.
@@ -212,18 +323,18 @@ node с тем же ID, что и Miro item, связывается без за�
   синтетической раскладки slide thumbnails.
 - [ ] `DATA-006` `P1 P` Индексировать `miroSource` один раз, без копирования
   полного payload в DOM attributes.
-- [ ] `DATA-007` `P0 P` Валидировать версии и обязательные поля; при ошибке
+- [x] `DATA-007` `P0 P` Валидировать версии и обязательные поля; при ошибке
   отключать только Miro-слой, сохраняя нативный Canvas.
-- [ ] `DATA-008` `P1 P` Поддержать миграции metadata между версиями без
+- [x] `DATA-008` `P1 P` Поддержать миграции metadata между версиями без
   переписывания файла при открытии.
-- [ ] `DATA-009` `P0 P` Никогда не изменять или сокращать `miroSource`.
+- [x] `DATA-009` `P0 P` Никогда не изменять или сокращать `miroSource`.
 - [ ] `DATA-010` `P1 P` Показывать provenance REST/Web SDK и completeness в
   inspector, а не отдельными шумными узлами по умолчанию.
 - [ ] `DATA-011` `P0 P` Хранить local typography, lock и attachment-title settings
   как overrides по стабильному Canvas/source ID.
 - [ ] `DATA-012` `P0 P` Хранить local comments и free anchors отдельно от
   immutable `miroSource`.
-- [ ] `DATA-013` `P0 P` Записывать metadata только после явного действия и одной
+- [x] `DATA-013` `P0 P` Записывать metadata только после явного действия и одной
   транзакцией, совместимой с undo/redo.
 - [ ] `DATA-014` `P1 B` При повторном импорте переносить overrides, comments и
   anchors по source ID, не затирая ручную работу.

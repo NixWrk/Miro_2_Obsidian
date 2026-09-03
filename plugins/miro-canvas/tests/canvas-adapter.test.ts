@@ -6,6 +6,12 @@ import {
 	createCanvasAdapter,
 } from "../src/canvas-adapter";
 
+function revokedProxy<T extends object>(value: T): T {
+	const revocable = Proxy.revocable(value, {});
+	revocable.revoke();
+	return revocable.proxy;
+}
+
 describe("CanvasAdapter", () => {
 	it("exposes only recognised capabilities for a valid native runtime", () => {
 		const node = { id: "node-1" };
@@ -136,6 +142,75 @@ describe("CanvasAdapter", () => {
 
 		expect(() => adapter.getViewport()).not.toThrow();
 		expect(adapter.diagnostics.some((item) => item.code === "native-probe-failed")).toBe(true);
+	});
+
+	it("fails closed when collection brand checks see revoked or hostile Proxies", () => {
+		const hostilePrototype = new Proxy({}, {
+			getPrototypeOf: () => {
+				throw new Error("prototype trap");
+			},
+		});
+		const adapter = new CanvasAdapter({
+			canvas: {
+				nodes: revokedProxy([]),
+				edges: revokedProxy(new Map()),
+				selection: hostilePrototype,
+			},
+		});
+
+		let values: readonly unknown[] | undefined;
+		expect(() => {
+			adapter.getNodes();
+			adapter.getEdges();
+			values = adapter.getSelection();
+		}).not.toThrow();
+		expect(values).toBeUndefined();
+		expect(adapter.diagnostics.some((item) => item.code === "native-probe-failed")).toBe(true);
+	});
+
+	it("keeps every public operation safe after the native runtime is revoked", () => {
+		const runtime = revokedProxy({
+			requestSave: () => true,
+		});
+		const adapter = new CanvasAdapter({ canvas: runtime });
+		const revokedOptions = revokedProxy({
+			requiredCapabilities: [CANVAS_CAPABILITIES.document],
+		});
+		const optionAdapter = new CanvasAdapter({ canvas: { nodes: [] } }, revokedOptions);
+
+		expect(() => {
+			adapter.read("missing");
+			adapter.invoke("missing");
+			adapter.getRootElement();
+			adapter.getNodes();
+			adapter.getEdges();
+			adapter.getScene();
+			adapter.getDocument();
+			adapter.getViewport();
+			adapter.setViewport(revokedProxy({ zoom: 1 }));
+			adapter.getSelection();
+			adapter.requestRender();
+			adapter.requestSave();
+			adapter.on("canvas-change", vi.fn());
+			adapter.off("canvas-change", vi.fn());
+			optionAdapter.getNodes();
+		}).not.toThrow();
+		expect(adapter.diagnostics.some((item) => item.code === "native-probe-failed")).toBe(true);
+		expect(optionAdapter.diagnostics.some((item) => item.code === "native-probe-failed")).toBe(true);
+	});
+
+	it("does not let a hostile thrown Proxy break error diagnostics", () => {
+		const thrown = revokedProxy({});
+		const adapter = new CanvasAdapter({
+			canvas: {
+				requestSave: () => {
+					throw thrown;
+				},
+			},
+		});
+
+		expect(() => adapter.requestSave()).not.toThrow();
+		expect(adapter.diagnostics.some((item) => item.code === "native-operation-failed")).toBe(true);
 	});
 
 	it("reports required capabilities without making startup throw", () => {

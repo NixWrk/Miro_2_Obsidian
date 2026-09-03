@@ -6,6 +6,11 @@ import {
   type AdvancedCanvasInspection,
   type CanvasSessionInspection,
 } from "./canvas-session";
+import { MetadataWriter, type MetadataWriteResult } from "./metadata-writer";
+import {
+  createObsidianMetadataStore,
+  type ObsidianMetadataStoreProbe,
+} from "./obsidian-metadata-store";
 
 const NATIVE_CANVAS_VIEW_TYPE = "canvas";
 
@@ -33,6 +38,9 @@ export default class MiroCanvasPlugin extends Plugin {
   private shellDisposed = false;
   private advancedInspection: AdvancedCanvasInspection | null = null;
   private canvasInspection: CanvasSessionInspection | null = null;
+  private metadataStoreProbe: ObsidianMetadataStoreProbe | null = null;
+  private metadataWriter: MetadataWriter | null = null;
+  private currentCanvasView: unknown = null;
 
   override async onload(): Promise<void> {
     this.shellDisposed = false;
@@ -57,6 +65,23 @@ export default class MiroCanvasPlugin extends Plugin {
       callback: () => this.showStatus(),
     });
 
+    this.addCommand({
+      id: "initialize-metadata",
+      name: "Initialize board metadata",
+      checkCallback: (checking) => {
+        const writer = this.ensureMetadataWriter();
+        if (!writer) {
+          return false;
+        }
+        if (!checking) {
+          this.runMetadataAction(
+            writer.write("initialize-metadata", () => undefined),
+          );
+        }
+        return true;
+      },
+    });
+
     this.registerEvent(
       this.app.workspace.on(
         "active-leaf-change",
@@ -76,13 +101,44 @@ export default class MiroCanvasPlugin extends Plugin {
     const view = leaf?.view;
     if (!isNativeCanvasView(view)) {
       this.canvasInspection = null;
+      this.metadataStoreProbe = null;
+      this.metadataWriter = null;
+      this.currentCanvasView = null;
       this.updateStatus(false);
       return;
     }
 
+    this.currentCanvasView = view;
     this.canvasInspection = inspectCanvasView(view);
+    this.metadataStoreProbe = createObsidianMetadataStore(view);
+    this.metadataWriter = this.metadataStoreProbe.store
+      ? new MetadataWriter(this.metadataStoreProbe.store)
+      : null;
     this.updateStatus(true);
   };
+
+  private ensureMetadataWriter(): MetadataWriter | null {
+    const view = this.app.workspace.activeLeaf?.view;
+    if (!isNativeCanvasView(view)) {
+      return null;
+    }
+    if (this.currentCanvasView !== view) {
+      this.handleActiveLeafChange(this.app.workspace.activeLeaf);
+      return this.metadataWriter;
+    }
+    if (this.metadataWriter) {
+      return this.metadataWriter;
+    }
+
+    // Canvas internals can finish initializing after active-leaf-change. A
+    // command check may safely retry the read-only capability probe.
+    this.metadataStoreProbe = createObsidianMetadataStore(view);
+    this.metadataWriter = this.metadataStoreProbe.store
+      ? new MetadataWriter(this.metadataStoreProbe.store)
+      : null;
+    this.updateStatus(true);
+    return this.metadataWriter;
+  }
 
   private updateStatus(isCanvas: boolean): void {
     if (!this.statusBarItem) {
@@ -103,9 +159,12 @@ export default class MiroCanvasPlugin extends Plugin {
       return;
     }
 
-    const issueMarker = inspection.diagnostics.length > 0 ? " · ⚠" : "";
+    const diagnosticCount = inspection.diagnostics.length
+      + (this.metadataStoreProbe?.diagnostics.length ?? 0);
+    const issueMarker = diagnosticCount > 0 ? " · ⚠" : "";
+    const writerStatus = this.metadataStoreProbe?.status ?? "unavailable";
     this.statusBarItem.setText(
-      `miro-canvas · Canvas (${inspection.adapter.status}/${inspection.metadata.status})${issueMarker}`,
+      `miro-canvas · Canvas (${inspection.adapter.status}/${inspection.metadata.status}/${writerStatus})${issueMarker}`,
     );
   }
 
@@ -117,12 +176,34 @@ export default class MiroCanvasPlugin extends Plugin {
       return;
     }
 
-    const diagnosticSuffix = inspection.diagnostics.length > 0
-      ? ` ${inspection.diagnostics.length} diagnostic(s) reported.`
+    const diagnosticCount = inspection.diagnostics.length
+      + (this.metadataStoreProbe?.diagnostics.length ?? 0);
+    const diagnosticSuffix = diagnosticCount > 0
+      ? ` ${diagnosticCount} diagnostic(s) reported.`
       : "";
+    const persistenceStatus = this.metadataStoreProbe?.status ?? "unavailable";
     new Notice(
-      `Miro Canvas is loaded offline; adapter ${inspection.adapter.status}, metadata ${inspection.metadata.status}. Advanced Canvas: ${advancedStatus}.${diagnosticSuffix}`,
+      `Miro Canvas is loaded offline; adapter ${inspection.adapter.status}, metadata ${inspection.metadata.status}, persistence ${persistenceStatus}. Advanced Canvas: ${advancedStatus}.${diagnosticSuffix}`,
     );
+  }
+
+  private runMetadataAction(result: MetadataWriteResult): void {
+    if (this.currentCanvasView !== null) {
+      this.canvasInspection = inspectCanvasView(this.currentCanvasView);
+      this.updateStatus(true);
+    }
+
+    if (result.status === "applied") {
+      new Notice(`Miro Canvas: ${result.action} applied.`);
+      return;
+    }
+    if (result.status === "noop") {
+      new Notice(`Miro Canvas: ${result.action} made no changes.`);
+      return;
+    }
+
+    const reason = result.diagnostics[0]?.message ?? "The metadata transaction was rejected.";
+    new Notice(`Miro Canvas: ${reason}`);
   }
 
   private disposeShell(): void {
@@ -132,6 +213,9 @@ export default class MiroCanvasPlugin extends Plugin {
 
     this.shellDisposed = true;
     this.canvasInspection = null;
+    this.metadataStoreProbe = null;
+    this.metadataWriter = null;
+    this.currentCanvasView = null;
     this.advancedInspection = null;
     this.statusBarItem?.remove();
     this.statusBarItem = null;

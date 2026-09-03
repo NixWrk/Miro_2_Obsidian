@@ -1,15 +1,16 @@
 # Obsidian oracle harness
 
-This harness stages converted files for final visual verification in real
-Obsidian.
+This harness stages converted files and deterministic M0 compatibility fixtures
+for final verification in real Obsidian.
 
 The browser renderer is useful for fast diagnostics, but it cannot guarantee
 that Obsidian will render the same result. Real Obsidian is therefore the final
-visual oracle.
+visual oracle. The scripts below prepare files only; they do not claim a real
+Obsidian visual or interaction pass.
 
-## Controlled profile
+## Controlled M0 vault
 
-The local test vault is:
+The configured project-local test vault is:
 
 ```text
 _obsidian_oracle_vault
@@ -21,44 +22,83 @@ Its working folder is:
 _obsidian_oracle_vault\MIRO2OBSIDIAN
 ```
 
-The controlled profile uses Advanced Canvas. Project-local checks can validate
-the manifest and settings, while final screenshots require the real plugin
-runtime files (`main.js` and `styles.css`).
+The oracle configuration and compatibility matrix are committed under
+`tools/obsidian_oracle/`. Every mutating helper accepts only the exact vault
+path from `oracle_config.json` and refuses arbitrary vaults plus symlink/reparse
+paths. The generated vault is ignored by Git.
 
-## Setup and checks
+The four controlled rows are `native-only`, `miro-canvas-only`,
+`advanced-only`, and `both`. The first two require only native Canvas and the
+local miro-canvas fixture/runtime; Advanced Canvas is optional for offline
+checks. Real screenshots require the actual runtime files and a manually opened
+project vault.
 
-Initialize the local vault and validate its configuration:
+## Build, setup, and deploy
+
+From the repository root, build the local plugin and prepare the complete M0
+vault:
 
 ```powershell
-python tools\obsidian_oracle\init_local_vault.py
+cd plugins\miro-canvas
+npm ci
+npm run typecheck
+npm test
+npm run build
+cd ..\..
+python tools\obsidian_oracle\setup_m0_vault.py
 python tools\obsidian_oracle\check_environment.py
 ```
 
-Require a complete plugin runtime:
+`setup_m0_vault.py` initializes `_obsidian_oracle_vault`, stages all four
+fixtures below `MIRO2OBSIDIAN\_oracle\m0-compatibility`, copies only the
+built `manifest.json`, `main.js`, and `styles.css` into the local
+`miro-canvas` plugin directory, and enables it. The runtime install and fixture
+activation are guarded/atomic at their respective boundaries; no source tree is
+linked into the vault.
+
+The setup creates a placeholder Advanced Canvas manifest when no real runtime
+is present. Install or copy a pinned, hash-verified Advanced Canvas runtime
+before a real Advanced profile check:
 
 ```powershell
+python -m tools.obsidian_oracle.install_plugin_runtime advanced-canvas
 python tools\obsidian_oracle\check_environment.py --strict-runtime
 ```
 
-Copy plugin runtime files from an existing vault:
+## M0 compatibility matrix
+
+Activate and validate each real enabled-plugin combination independently:
 
 ```powershell
-python tools\obsidian_oracle\init_local_vault.py --plugin-source "path\to\ObsidianVault\.obsidian\plugins"
+python tools\obsidian_oracle\activate_profile.py native-only
+python tools\obsidian_oracle\check_environment.py --profile native-only --strict-runtime
+
+python tools\obsidian_oracle\activate_profile.py miro-canvas-only
+python tools\obsidian_oracle\check_environment.py --profile miro-canvas-only --strict-runtime
+
+python tools\obsidian_oracle\activate_profile.py advanced-only
+python tools\obsidian_oracle\check_environment.py --profile advanced-only --strict-runtime
+
+python tools\obsidian_oracle\activate_profile.py both
+python tools\obsidian_oracle\check_environment.py --profile both --strict-runtime
 ```
 
-Or install the Advanced Canvas runtime from its GitHub release:
+Profile activation atomically stages the matching `.canvas` file and replaces
+only the controlled `miro-canvas`/`advanced-canvas` entries in
+`community-plugins.json`. A failed activation restores both the Canvas and the
+enabled-plugin list. To retain an unrelated test plugin, name its exact ID with
+the repeatable `--preserve-plugin` option.
 
-```powershell
-python tools\obsidian_oracle\install_plugin_runtime.py advanced-canvas
-python tools\obsidian_oracle\check_environment.py --strict-runtime
-```
+After activation, add `_obsidian_oracle_vault` through Obsidian's vault
+switcher and open the staged file. The scripts cannot register a new vault or
+claim the native undo/redo and interaction gate on their own.
 
 ## Fixture workflow
 
 Convert and stage one fixture:
 
 ```powershell
-python tools\obsidian_oracle\stage_fixture.py basic_text
+python -m tools.obsidian_oracle.stage_fixture basic_text
 ```
 
 The staged Canvas is written below:
@@ -73,19 +113,19 @@ Open it in Obsidian and capture a screenshot for comparison with
 Accept an existing screenshot as the baseline:
 
 ```powershell
-python tools\obsidian_oracle\snapshot_fixture.py app_card_fields --actual path\to\screenshot.png --update-baseline
+python -m tools.obsidian_oracle.snapshot_fixture app_card_fields --actual path\to\screenshot.png --update-baseline
 ```
 
 Compare an existing screenshot:
 
 ```powershell
-python tools\obsidian_oracle\snapshot_fixture.py app_card_fields --actual path\to\screenshot.png
+python -m tools.obsidian_oracle.snapshot_fixture app_card_fields --actual path\to\screenshot.png
 ```
 
 In an interactive desktop session, capture the full screen:
 
 ```powershell
-python tools\obsidian_oracle\snapshot_fixture.py app_card_fields --capture-screen --update-baseline
+python -m tools.obsidian_oracle.snapshot_fixture app_card_fields --capture-screen --update-baseline
 ```
 
 Actual screenshots are written to `tools/obsidian_oracle/.out/` and ignored by

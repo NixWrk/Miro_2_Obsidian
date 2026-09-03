@@ -1,0 +1,205 @@
+import { describe, expect, it, vi } from "vitest";
+
+import { MetadataWriter } from "../src/metadata-writer";
+import {
+	createObsidianMetadataStore,
+	type ObsidianMetadataStoreProbe,
+} from "../src/obsidian-metadata-store";
+
+function nativeRuntime(document: Record<string, unknown>) {
+	return {
+		data: document,
+		requestSave: vi.fn(),
+	};
+}
+
+function readyStore(runtime: unknown): ObsidianMetadataStoreProbe {
+	const probe = createObsidianMetadataStore({ canvas: runtime });
+	expect(probe.status).toBe("ready");
+	expect(probe.store).toBeDefined();
+	return probe;
+}
+
+describe("native Obsidian metadata store", () => {
+	it("rejects view-only persistence because it cannot enter native Canvas history", () => {
+		const runtime = { data: { nodes: [], edges: [] } };
+		const view = { canvas: runtime, requestSave: vi.fn() };
+		const probe = createObsidianMetadataStore(view);
+		expect(probe.status).toBe("incompatible");
+		expect(probe.store).toBeUndefined();
+		expect(view.requestSave).not.toHaveBeenCalled();
+	});
+
+	it("accepts the Obsidian 1.12.7 canvas.data/requestSave shape without saving on probe", () => {
+		const runtime = nativeRuntime({ nodes: [], edges: [] });
+		const probe = readyStore(runtime);
+
+		expect(probe.available).toBe(true);
+		expect(probe.compatible).toBe(true);
+		expect(runtime.requestSave).not.toHaveBeenCalled();
+	});
+
+	it("records one native history snapshot that native undo and redo can replay", () => {
+		const clone = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
+		const initial = { nodes: [], edges: [], keep: { native: true } };
+		const history: Array<Record<string, unknown>> = [clone(initial)];
+		let historyIndex = 0;
+		const runtime = {
+			data: clone(initial) as Record<string, unknown>,
+			requestSave: vi.fn((addHistory?: boolean) => {
+				if (addHistory === true) {
+					history.splice(historyIndex + 1);
+					history.push(clone(runtime.data));
+					historyIndex = history.length - 1;
+				}
+			}),
+			undo: () => {
+				if (historyIndex > 0) {
+					historyIndex -= 1;
+					runtime.data = clone(history[historyIndex]!);
+				}
+			},
+			redo: () => {
+				if (historyIndex < history.length - 1) {
+					historyIndex += 1;
+					runtime.data = clone(history[historyIndex]!);
+				}
+			},
+		};
+		const writer = new MetadataWriter(readyStore(runtime).store!);
+
+		expect(writer.write("initialize", () => undefined).status).toBe("applied");
+		expect(runtime.requestSave).toHaveBeenCalledTimes(1);
+		expect(runtime.requestSave).toHaveBeenCalledWith(true);
+		expect(runtime.data).toHaveProperty("miroCanvas.schemaVersion", 1);
+
+		runtime.undo();
+		expect(runtime.data).toEqual(initial);
+		runtime.redo();
+		expect(runtime.data).toHaveProperty("miroCanvas.schemaVersion", 1);
+		expect(runtime.data.keep).toEqual({ native: true });
+	});
+
+	it("also accepts the unwrapped runtime shape without probing through guessed data APIs", () => {
+		const runtime = nativeRuntime({ nodes: [], edges: [] });
+		const probe = createObsidianMetadataStore(runtime);
+
+		expect(probe.status).toBe("ready");
+		expect(probe.store).toBeDefined();
+		expect(runtime.requestSave).not.toHaveBeenCalled();
+	});
+
+	it("returns detached data and replaces the root for an exact CAS commit", () => {
+		const initial = {
+			nodes: [{ id: "native-1", unknown: { keep: true } }],
+			edges: [],
+			miroSource: { items: [{ id: "source-1" }] },
+		};
+		const runtime = nativeRuntime(initial);
+		const probe = readyStore(runtime);
+		const store = probe.store!;
+		const observed = store.readDocument() as Record<string, unknown>;
+
+		(observed.nodes as Array<Record<string, unknown>>)[0]!.unknown = { keep: false };
+		expect(initial.nodes).toEqual([{ id: "native-1", unknown: { keep: true } }]);
+
+		const next = {
+			...initial,
+			miroCanvas: { schemaVersion: 1, localComments: [] },
+		};
+		const expected = store.readDocument() as Record<string, unknown>;
+		const oldRoot = runtime.data;
+
+		expect(store.commitDocument(next, expected)).toBe(true);
+		expect(runtime.requestSave).toHaveBeenCalledTimes(1);
+		expect(runtime.requestSave).toHaveBeenCalledWith(true);
+		expect(runtime.data).not.toBe(oldRoot);
+		expect(runtime.data).toEqual(next);
+		expect(expected).toEqual(initial);
+		expect(next.miroSource).toEqual(initial.miroSource);
+	});
+
+	it("refuses a stale CAS without replacing data or requesting native history", () => {
+		const runtime = nativeRuntime({ nodes: [], edges: [] });
+		const store = readyStore(runtime).store!;
+		const expected = store.readDocument() as Record<string, unknown>;
+		runtime.data = { nodes: [{ id: "external" }], edges: [] };
+
+		expect(store.commitDocument({ nodes: [], edges: [], miroCanvas: { schemaVersion: 1 } }, expected)).toBe(false);
+		expect(runtime.data).toEqual({ nodes: [{ id: "external" }], edges: [] });
+		expect(runtime.requestSave).not.toHaveBeenCalled();
+	});
+
+	it("restores the previous root when requestSave throws", () => {
+		const initial = { nodes: [], edges: [], keep: { value: true } };
+		const runtime = nativeRuntime(initial);
+		runtime.requestSave.mockImplementation(() => {
+			throw new Error("native save failed");
+		});
+		const store = readyStore(runtime).store!;
+		const expected = store.readDocument() as Record<string, unknown>;
+
+		expect(store.commitDocument({ ...initial, changed: true }, expected)).toBe(false);
+		expect(runtime.data).toEqual(initial);
+		expect(runtime.data).not.toBe(initial);
+		expect(runtime.requestSave).toHaveBeenCalledTimes(1);
+	});
+
+	it("integrates with MetadataWriter while keeping source bytes and native history boundaries", () => {
+		const source = { items: [{ id: "source-1", payload: { keep: true } }] };
+		const runtime = nativeRuntime({ nodes: [], edges: [], miroSource: source });
+		const store = readyStore(runtime).store!;
+		const writer = new MetadataWriter(store);
+
+		const write = writer.write("add-comment", (draft) => {
+			draft.localComments = [{ id: "local-1", text: "offline" }];
+		});
+		const undo = writer.undo();
+		const redo = writer.redo();
+
+		expect(write.status).toBe("applied");
+		expect(undo.status).toBe("applied");
+		expect(redo.status).toBe("applied");
+		expect(runtime.data.miroSource).toEqual(source);
+		expect(runtime.requestSave).toHaveBeenCalledTimes(3);
+	});
+
+	it("fails closed for missing, read-only, accessor, and hostile runtime shapes", () => {
+		const missing = createObsidianMetadataStore({ getViewType: () => "canvas" });
+		expect(missing.status).toBe("unavailable");
+		expect(missing.store).toBeUndefined();
+
+		const readOnlyRuntime = { ...nativeRuntime({ nodes: [], edges: [] }), readonly: true };
+		const readOnly = readyStore(readOnlyRuntime);
+		expect(readOnly.store!.commitDocument({ nodes: [{ id: "blocked" }], edges: [] }, { nodes: [], edges: [] })).toBe(false);
+		expect(readOnlyRuntime.requestSave).not.toHaveBeenCalled();
+
+		const accessorRuntime = {
+			requestSave: vi.fn(),
+		};
+		Object.defineProperty(accessorRuntime, "data", {
+			configurable: true,
+			get: () => ({ nodes: [], edges: [] }),
+		});
+		const accessor = createObsidianMetadataStore({ canvas: accessorRuntime });
+		expect(accessor.status).toBe("incompatible");
+		expect(accessor.diagnostics.map((item) => item.code)).toContain("native-data-accessor-unsupported");
+
+		const hostile = {
+			get canvas(): unknown {
+				throw new Error("private runtime moved");
+			},
+		};
+		const hostileProbe = createObsidianMetadataStore(hostile);
+		expect(hostileProbe.status).toBe("incompatible");
+		expect(hostileProbe.store).toBeUndefined();
+
+		const setDataOnly = {
+			data: { nodes: [], edges: [] },
+			setData: vi.fn(),
+		};
+		const guessed = createObsidianMetadataStore({ canvas: setDataOnly });
+		expect(guessed.status).toBe("incompatible");
+		expect(guessed.diagnostics.map((item) => item.code)).toContain("native-save-missing");
+	});
+});

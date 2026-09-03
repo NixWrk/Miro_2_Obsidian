@@ -6,6 +6,12 @@ import {
 	createAdvancedCanvasAdapter,
 } from "../src/advanced-canvas-adapter";
 
+function revokedProxy<T extends object>(value: T): T {
+	const revocable = Proxy.revocable(value, {});
+	revocable.revoke();
+	return revocable.proxy;
+}
+
 describe("AdvancedCanvasAdapter", () => {
 	it("is quietly absent when the optional plugin is not installed", () => {
 		const adapter = createAdvancedCanvasAdapter({
@@ -141,5 +147,82 @@ describe("AdvancedCanvasAdapter", () => {
 		const probe = AdvancedCanvasAdapter.probe({ plugins: { enabledPlugins } });
 		expect(probe.status).toBe("absent");
 		expect(probe.diagnostics.some((item) => item.code === "advanced-probe-failed")).toBe(true);
+	});
+
+	it("fails closed when enabled-plugin collections are revoked or trap on instanceof", () => {
+		const hostilePrototype = new Proxy({}, {
+			getPrototypeOf: () => {
+				throw new Error("prototype trap");
+			},
+		});
+		const sources = [
+			{ plugins: { enabledPlugins: revokedProxy([]) } },
+			{ plugins: { enabledPlugins: revokedProxy(new Set()) } },
+			{ plugins: { enabledPlugins: hostilePrototype } },
+		];
+
+		for (const source of sources) {
+			let probe: ReturnType<typeof AdvancedCanvasAdapter.probe> | undefined;
+			expect(() => {
+				probe = AdvancedCanvasAdapter.probe(source);
+			}).not.toThrow();
+			expect(probe?.diagnostics.some((item) => item.code === "advanced-probe-failed")).toBe(true);
+		}
+	});
+
+	it("keeps control checks safe for revoked collections and preserves Set/Map behavior", () => {
+		const revokedControls = revokedProxy(new Set(["minimap"]));
+		const revokedAdapter = new AdvancedCanvasAdapter({
+			plugin: { manifest: { id: "advanced-canvas" }, controls: revokedControls },
+		});
+		const setAdapter = new AdvancedCanvasAdapter({
+			plugin: { manifest: { id: "advanced-canvas" }, controls: new Set(["minimap"]) },
+		});
+		const mapAdapter = new AdvancedCanvasAdapter({
+			plugin: { manifest: { id: "advanced-canvas" }, controls: new Map([["minimap", {}]]) },
+		});
+
+		expect(() => revokedAdapter.hasControl("minimap")).not.toThrow();
+		expect(revokedAdapter.hasControl("minimap")).toBe(false);
+		expect(revokedAdapter.diagnostics.some((item) => item.code === "advanced-probe-failed")).toBe(true);
+		expect(setAdapter.hasControl("minimap")).toBe(true);
+		expect(mapAdapter.hasControl("minimap")).toBe(true);
+	});
+
+	it("keeps every public operation safe after the optional plugin is revoked", () => {
+		const plugin = revokedProxy({ manifest: { id: "advanced-canvas" } });
+		const adapter = new AdvancedCanvasAdapter({ plugin });
+		const revokedOptions = revokedProxy({ pluginId: "advanced-canvas", plugin });
+		const optionAdapter = new AdvancedCanvasAdapter({}, revokedOptions);
+
+		expect(() => {
+			adapter.read("missing");
+			adapter.invoke("missing");
+			adapter.readMetadata();
+			adapter.getMetadata();
+			adapter.on("canvas-change", vi.fn());
+			adapter.off("canvas-change", vi.fn());
+			adapter.hasControl("minimap");
+			adapter.registerControl("minimap", {});
+			optionAdapter.readMetadata();
+			optionAdapter.hasControl("minimap");
+		}).not.toThrow();
+		expect(adapter.diagnostics.some((item) => item.code === "advanced-probe-failed")).toBe(true);
+		expect(optionAdapter.diagnostics.some((item) => item.code === "advanced-probe-failed")).toBe(true);
+	});
+
+	it("does not let a hostile thrown Proxy break optional-plugin diagnostics", () => {
+		const thrown = revokedProxy({});
+		const adapter = new AdvancedCanvasAdapter({
+			plugin: {
+				manifest: { id: "advanced-canvas" },
+				registerControl: () => {
+					throw thrown;
+				},
+			},
+		});
+
+		expect(() => adapter.registerControl("minimap", {})).not.toThrow();
+		expect(adapter.diagnostics.some((item) => item.code === "advanced-operation-failed")).toBe(true);
 	});
 });

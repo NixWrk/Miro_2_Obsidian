@@ -83,10 +83,31 @@ function isObject(value: unknown): value is UnknownRecord {
 }
 
 function describeError(error: unknown): string {
-	if (error instanceof Error && error.message) {
-		return error.message;
+	// Error values cross an optional-plugin boundary and may themselves be
+	// revoked/hostile Proxies.  Avoid `instanceof` and guard message reads so a
+	// diagnostic can never become a second exception.
+	try {
+		if (typeof error === "string" && error) {
+			return error;
+		}
+		if (isObject(error)) {
+			const message = Reflect.get(error, "message", error);
+			if (typeof message === "string" && message) {
+				return message;
+			}
+		}
+	} catch {
+		// Fall through to the stable generic message below.
 	}
 	return "unknown error";
+}
+
+function describePropertyKey(key: PropertyKey): string {
+	try {
+		return String(key);
+	} catch {
+		return "<unprintable key>";
+	}
 }
 
 function addDiagnostic(
@@ -116,7 +137,7 @@ function safeRead(
 		addDiagnostic(probe, {
 			code: "advanced-probe-failed",
 			level: "warning" as DiagnosticLevel,
-			message: `Reading Advanced Canvas property "${String(key)}" failed: ${describeError(error)}.`,
+			message: `Reading Advanced Canvas property "${describePropertyKey(key)}" failed: ${describeError(error)}.`,
 			capability,
 		});
 		return undefined;
@@ -140,7 +161,7 @@ function safeCallResult(
 		addDiagnostic(probe, {
 			code: "advanced-operation-failed",
 			level: "warning" as DiagnosticLevel,
-			message: `Calling Advanced Canvas method "${String(method)}" failed: ${describeError(error)}.`,
+			message: `Calling Advanced Canvas method "${describePropertyKey(method)}" failed: ${describeError(error)}.`,
 			capability,
 		});
 		return { ok: false };
@@ -187,6 +208,48 @@ function methodExists(
 	return false;
 }
 
+type SafeBooleanResult =
+	| { readonly ok: true; readonly value: boolean }
+	| { readonly ok: false };
+
+function safeIsArray(
+	value: unknown,
+	probe: MutableProbe,
+	capability?: string,
+): SafeBooleanResult {
+	try {
+		return { ok: true, value: Array.isArray(value) };
+	} catch (error) {
+		addDiagnostic(probe, {
+			code: "advanced-probe-failed",
+			level: "warning" as DiagnosticLevel,
+			message: `Checking whether an Advanced Canvas value is an array failed: ${describeError(error)}.`,
+			capability,
+		});
+		return { ok: false };
+	}
+}
+
+function safeInstanceOf(
+	value: unknown,
+	constructor: Function,
+	constructorName: string,
+	probe: MutableProbe,
+	capability?: string,
+): SafeBooleanResult {
+	try {
+		return { ok: true, value: value instanceof constructor };
+	} catch (error) {
+		addDiagnostic(probe, {
+			code: "advanced-probe-failed",
+			level: "warning" as DiagnosticLevel,
+			message: `Checking whether an Advanced Canvas value is a ${constructorName} failed: ${describeError(error)}.`,
+			capability,
+		});
+		return { ok: false };
+	}
+}
+
 function hasCollectionMember(
 	target: unknown,
 	key: PropertyKey,
@@ -196,7 +259,22 @@ function hasCollectionMember(
 	if (value === undefined || value === null) {
 		return false;
 	}
-	if (Array.isArray(value) || value instanceof Map || value instanceof Set) {
+	const arrayResult = safeIsArray(value, probe);
+	if (!arrayResult.ok) {
+		return false;
+	}
+	if (arrayResult.value) {
+		return true;
+	}
+	const mapResult = safeInstanceOf(value, Map, "Map", probe);
+	if (!mapResult.ok) {
+		return false;
+	}
+	const setResult = safeInstanceOf(value, Set, "Set", probe);
+	if (!setResult.ok) {
+		return false;
+	}
+	if (mapResult.value || setResult.value) {
 		return true;
 	}
 	if (isObject(value)) {
@@ -249,7 +327,11 @@ function containsPluginId(value: unknown, pluginId: string, probe: MutableProbe)
 	if (typeof value === "string") {
 		return value === pluginId;
 	}
-	if (Array.isArray(value)) {
+	const arrayResult = safeIsArray(value, probe);
+	if (!arrayResult.ok) {
+		return false;
+	}
+	if (arrayResult.value) {
 		const beforeLengthRead = probe.diagnostics.length;
 		const length = safeRead(value as unknown as UnknownRecord, "length", probe);
 		if (probe.diagnostics.length !== beforeLengthRead) {
@@ -283,17 +365,17 @@ function containsPluginId(value: unknown, pluginId: string, probe: MutableProbe)
 		}
 		return false;
 	}
-	if (value instanceof Set || value instanceof Map) {
-		try {
-			return value instanceof Set ? value.has(pluginId) : value.has(pluginId);
-		} catch (error) {
-			addDiagnostic(probe, {
-				code: "advanced-probe-failed",
-				level: "warning" as DiagnosticLevel,
-				message: `Inspecting enabled Advanced Canvas plugins failed: ${describeError(error)}.`,
-			});
-			return false;
-		}
+	const setResult = safeInstanceOf(value, Set, "Set", probe);
+	if (!setResult.ok) {
+		return false;
+	}
+	const mapResult = safeInstanceOf(value, Map, "Map", probe);
+	if (!mapResult.ok) {
+		return false;
+	}
+	if (setResult.value || mapResult.value) {
+		const hasResult = safeCallResult(value, "has", [pluginId], probe);
+		return hasResult.ok && hasResult.value === true;
 	}
 	if (isObject(value)) {
 		return safeRead(value, pluginId, probe) !== undefined;
@@ -307,8 +389,9 @@ function locatePlugin(
 	options: AdvancedCanvasAdapterOptions,
 	probe: MutableProbe,
 ): LocatedPlugin {
-	if (options.plugin !== undefined) {
-		return { plugin: options.plugin, lookedUp: true, lookupFailed: false };
+	const pluginOverride = safeRead(options, "plugin", probe);
+	if (pluginOverride !== undefined) {
+		return { plugin: pluginOverride, lookedUp: true, lookupFailed: false };
 	}
 
 	if (!isObject(source)) {
@@ -409,14 +492,17 @@ function versionFromPlugin(plugin: unknown, probe: MutableProbe): string | undef
 function createProbe(
 	source: unknown,
 	options: AdvancedCanvasAdapterOptions = {},
-): AdvancedCanvasProbe & { readonly plugin: unknown } {
-	const pluginId = options.pluginId ?? ADVANCED_CANVAS_PLUGIN_ID;
+): AdvancedCanvasProbe & { readonly plugin: unknown; readonly pluginId: string } {
 	const probe: MutableProbe = {
 		status: "absent",
 		capabilities: new Set<AdvancedCanvasCapability>(),
 		diagnostics: [],
 		diagnosticKeys: new Set<string>(),
 	};
+	const configuredPluginId = safeRead(options, "pluginId", probe);
+	const pluginId = typeof configuredPluginId === "string" && configuredPluginId
+		? configuredPluginId
+		: ADVANCED_CANVAS_PLUGIN_ID;
 
 	const located = locatePlugin(source, pluginId, options, probe);
 	const plugin = located.plugin;
@@ -468,6 +554,7 @@ function createProbe(
 		capabilities: new Set(probe.capabilities),
 		diagnostics: [...probe.diagnostics],
 		plugin,
+		pluginId,
 	};
 }
 
@@ -487,8 +574,8 @@ export class AdvancedCanvasAdapter {
 	private readonly pluginVersion: string | undefined;
 
 	public constructor(source: unknown, options: AdvancedCanvasAdapterOptions = {}) {
-		this.pluginId = options.pluginId ?? ADVANCED_CANVAS_PLUGIN_ID;
 		const result = createProbe(source, options);
+		this.pluginId = result.pluginId;
 		this.plugin = result.plugin;
 		this.capabilitySet = new Set(result.capabilities);
 		this.diagnosticList = [...result.diagnostics];
@@ -699,17 +786,31 @@ export class AdvancedCanvasAdapter {
 			return safeCall(this.plugin, "hasControl", [controlId], probe, ADVANCED_CANVAS_CAPABILITIES.controls) === true;
 		}
 		const controls = safeRead(this.plugin, "controls", probe, ADVANCED_CANVAS_CAPABILITIES.controls);
-		if (controls instanceof Set || controls instanceof Map) {
-			try {
-				return controls.has(controlId);
-			} catch (error) {
-				this.addDiagnostic({
-					code: "advanced-control-read-failed",
-					level: "warning",
-					message: `Reading Advanced Canvas control "${controlId}" failed: ${describeError(error)}.`,
-					capability: ADVANCED_CANVAS_CAPABILITIES.controls,
-				});
+		const setResult = safeInstanceOf(controls, Set, "Set", probe, ADVANCED_CANVAS_CAPABILITIES.controls);
+		if (!setResult.ok) {
+			return false;
+		}
+		const mapResult = safeInstanceOf(controls, Map, "Map", probe, ADVANCED_CANVAS_CAPABILITIES.controls);
+		if (!mapResult.ok) {
+			return false;
+		}
+		if (setResult.value || mapResult.value) {
+			const hasResult = safeCallResult(
+				controls,
+				"has",
+				[controlId],
+				probe,
+				ADVANCED_CANVAS_CAPABILITIES.controls,
+			);
+			if (hasResult.ok) {
+				return hasResult.value === true;
 			}
+			this.addDiagnostic({
+				code: "advanced-control-read-failed",
+				level: "warning",
+				message: `Reading Advanced Canvas control "${describePropertyKey(controlId as PropertyKey)}" failed.`,
+				capability: ADVANCED_CANVAS_CAPABILITIES.controls,
+			});
 		}
 		return false;
 	}

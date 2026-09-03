@@ -1,0 +1,14 @@
+{
+  "nodes": [
+    {
+      "id": "m0-native-note",
+      "type": "text",
+      "text": "M0 native Canvas fixture",
+      "x": 0,
+      "y": 0,
+      "width": 360,
+      "height": 140
+    }
+  ],
+  "edges": []
+}

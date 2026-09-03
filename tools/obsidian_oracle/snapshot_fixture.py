@@ -7,8 +7,12 @@ from pathlib import Path
 
 from PIL import Image, ImageChops, ImageGrab
 
-from common import REPO_ROOT
-from stage_fixture import stage_fixture
+try:
+    from .common import REPO_ROOT
+    from .stage_fixture import stage_fixture
+except ImportError:  # pragma: no cover - direct-script compatibility
+    from common import REPO_ROOT
+    from stage_fixture import stage_fixture
 
 
 FIXTURES_DIR = REPO_ROOT / "tests" / "fixtures"
