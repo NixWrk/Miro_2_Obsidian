@@ -45,6 +45,8 @@ interface PanelRefs {
   readonly status: HTMLElement;
 }
 
+const INPUT_BASELINE_ATTRIBUTE = "data-comment-baseline";
+
 function hasDocument(value: unknown): value is Document {
   return value !== null && typeof value === "object"
     && typeof (value as { createElement?: unknown }).createElement === "function";
@@ -96,6 +98,24 @@ function anchorLabel(anchor: CanvasAnchor | undefined): string {
   return `${anchor.type === "image" ? "Image" : "Node"} ${anchor.nodeId} at (${anchor.u}, ${anchor.v})`;
 }
 
+function threadRenderKey(thread: CommentThread): readonly unknown[] {
+  return [
+    thread.id,
+    thread.origin,
+    thread.text,
+    thread.createdAt ?? null,
+    thread.resolved,
+    thread.immutable === true,
+    thread.author?.name ?? null,
+    anchorLabel(thread.anchor),
+    thread.replies.map((reply) => [
+      reply.id,
+      reply.text,
+      reply.author?.name ?? null,
+    ]),
+  ];
+}
+
 /** A reusable DOM panel for board-wide and selection-filtered local comments. */
 export class CommentsPanel {
   public readonly element: HTMLElement;
@@ -103,6 +123,7 @@ export class CommentsPanel {
   private readonly host: CommentsPanelHost;
   private readonly refs: PanelRefs | undefined;
   private state: CommentsPanelState = { threads: [] };
+  private renderKey: string | undefined;
 
   public constructor(host: CommentsPanelHost, options: CommentsPanelOptions = {}) {
     this.host = host;
@@ -191,6 +212,7 @@ export class CommentsPanel {
     edit.value = thread.text;
     edit.setAttribute("aria-label", `Edit comment ${thread.id}`);
     edit.setAttribute("data-comment-input", `edit-${thread.id}`);
+    edit.setAttribute(INPUT_BASELINE_ATTRIBUTE, thread.text);
     edit.disabled = thread.origin === "imported" || thread.immutable === true;
     append(card, edit);
     const save = button(document, "Save edit", "edit-comment");
@@ -217,6 +239,7 @@ export class CommentsPanel {
     const replyInput = make(document, "textarea");
     replyInput.setAttribute("aria-label", `Reply to ${thread.id}`);
     replyInput.setAttribute("data-comment-input", `reply-${thread.id}`);
+    replyInput.setAttribute(INPUT_BASELINE_ATTRIBUTE, "");
     replyInput.disabled = thread.origin === "imported" || thread.immutable === true;
     append(card, replyInput);
     const replyButton = button(document, "Reply", "reply-comment");
@@ -224,8 +247,8 @@ export class CommentsPanel {
     replyButton.addEventListener("click", () => {
       const text = inputText(replyInput.value);
       if (text.length > 0) {
-        this.host.onReplyComment(thread.id, text);
         replyInput.value = "";
+        this.host.onReplyComment(thread.id, text);
       }
     });
     append(card, replyButton);
@@ -239,6 +262,31 @@ export class CommentsPanel {
       return;
     }
     const scope = state.scope ?? "board";
+    const threads = filterCommentThreads(state.threads, {
+      scope,
+      selectedElementIds: state.selectedElementIds,
+      includeResolved: state.includeResolved,
+    });
+    const nextRenderKey = JSON.stringify([
+      scope,
+      state.reviewMode === true,
+      anchorLabel(state.anchorDraft),
+      state.diagnostics ?? [],
+      state.threads.length,
+      threads.map(threadRenderKey),
+    ]);
+    if (nextRenderKey === this.renderKey) {
+      return;
+    }
+
+    const inputValues = new Map<string, string>();
+    for (const input of Array.from(this.refs.list.querySelectorAll<HTMLTextAreaElement>("textarea[data-comment-input]"))) {
+      const key = input.getAttribute("data-comment-input");
+      const baseline = input.getAttribute(INPUT_BASELINE_ATTRIBUTE) ?? "";
+      if (key !== null && input.value !== baseline) {
+        inputValues.set(key, input.value);
+      }
+    }
     this.refs.scope.value = scope;
     this.refs.add.disabled = false;
     this.refs.draft.disabled = false;
@@ -252,14 +300,16 @@ export class CommentsPanel {
       this.refs.status.textContent += `; ${state.diagnostics.join("; ")}`;
     }
     this.refs.list.textContent = "";
-    const threads = filterCommentThreads(state.threads, {
-      scope,
-      selectedElementIds: state.selectedElementIds,
-      includeResolved: state.includeResolved,
-    });
     for (const thread of threads) {
       append(this.refs.list, this.renderThread(thread));
     }
+    for (const input of Array.from(this.refs.list.querySelectorAll<HTMLTextAreaElement>("textarea[data-comment-input]"))) {
+      const key = input.getAttribute("data-comment-input");
+      if (key !== null && inputValues.has(key)) {
+        input.value = inputValues.get(key)!;
+      }
+    }
+    this.renderKey = nextRenderKey;
   }
 
   public destroy(): void {

@@ -18,6 +18,10 @@ import {
 	parseMiroCanvasMetadata,
 	validateMiroCanvasMetadata,
 } from "./metadata";
+import {
+	updateConnectorEndpoint as buildConnectorEndpointUpdate,
+	type UpdateConnectorEndpointInput,
+} from "./connector-endpoints";
 
 export const CANVAS_SHAPE_KINDS = [
 	"rectangle",
@@ -98,6 +102,13 @@ export interface CanvasShapeResult {
 	readonly status: "applied" | "rejected";
 	readonly node?: Readonly<Record<string, unknown>>;
 	readonly nodeId?: string;
+	readonly document?: Readonly<Record<string, unknown>>;
+	readonly diagnostics: readonly CanvasAuthoringDiagnostic[];
+}
+
+export interface CanvasGraphResult {
+	readonly ok: boolean;
+	readonly status: "applied" | "rejected";
 	readonly document?: Readonly<Record<string, unknown>>;
 	readonly diagnostics: readonly CanvasAuthoringDiagnostic[];
 }
@@ -914,6 +925,19 @@ function restoreGraph(host: NativeHost, before: InternalSnapshot, diagnostics: C
 	return true;
 }
 
+function runtimeAllowsMutation(host: NativeHost, diagnostics: CanvasAuthoringDiagnostic[]): boolean {
+	const readonly = safeRead(host.runtime, "readonly");
+	if (!readonly.ok) {
+		addDiagnostic(diagnostics, "native-readonly-read-failed", "warning", "Native Canvas readonly state could not be read safely; graph mutation was refused.");
+		return false;
+	}
+	if (readonly.value === true) {
+		addDiagnostic(diagnostics, "native-runtime-readonly", "warning", "Native Canvas is readonly; graph mutation was refused.");
+		return false;
+	}
+	return true;
+}
+
 function resultWithDiagnostics(
 	diagnostics: readonly CanvasAuthoringDiagnostic[],
 	ok: boolean,
@@ -1090,34 +1114,91 @@ export class CanvasAuthoring {
 		if (shape === undefined) {
 			return resultWithDiagnostics([...this.diagnosticList, ...diagnostics], false, "rejected");
 		}
-		const beforeSource = optionalValue(before.document, "miroSource");
-		const afterSource = optionalValue(shape.document, "miroSource");
-		if (beforeSource.present !== afterSource.present
-			|| !structurallyEqual(beforeSource.value, afterSource.value)) {
-			addDiagnostic(diagnostics, "miro-source-modified", "error", "Shape transactions must preserve miroSource exactly.");
-			return resultWithDiagnostics([...this.diagnosticList, ...diagnostics], false, "rejected");
-		}
-		if (!invokeMutation(this.host, shape.document, diagnostics, "import")) {
-			restoreGraph(this.host, before, diagnostics);
-			return resultWithDiagnostics([...this.diagnosticList, ...diagnostics], false, "rejected");
-		}
-		const imported = readSnapshotFromHost(this.host, diagnostics);
-		if (imported === undefined || !structurallyEqual(imported.document, shape.document)) {
-			addDiagnostic(diagnostics, "native-import-verification-failed", "error", "The imported Canvas graph did not match the requested document; history was not requested.");
-			restoreGraph(this.host, before, diagnostics);
-			return resultWithDiagnostics([...this.diagnosticList, ...diagnostics], false, "rejected");
-		}
-		if (this.host.mode === "importData" && !invokeMutation(this.host, shape.document, diagnostics, "history")) {
-			restoreGraph(this.host, before, diagnostics);
-			return resultWithDiagnostics([...this.diagnosticList, ...diagnostics], false, "rejected");
-		}
-		const verified = readSnapshotFromHost(this.host, diagnostics);
-		if (verified === undefined || !structurallyEqual(verified.document, shape.document)) {
-			addDiagnostic(diagnostics, "native-history-verification-failed", "error", "The native history/save boundary did not preserve the requested Canvas graph.");
-			restoreGraph(this.host, before, diagnostics);
+		const verified = this.commitDocument(before, shape.document, diagnostics);
+		if (verified === undefined) {
 			return resultWithDiagnostics([...this.diagnosticList, ...diagnostics], false, "rejected");
 		}
 		return resultWithDiagnostics([...this.diagnosticList, ...diagnostics], true, "applied", shape, verified);
+	}
+
+	/** Apply one connector endpoint change through the same guarded native graph transaction. */
+	public updateConnectorEndpoint(
+		input: UpdateConnectorEndpointInput,
+		expected?: CanvasAuthoringExpected,
+	): CanvasGraphResult {
+		if (this.disposed || this.host === undefined) {
+			return { ok: false, status: "rejected", diagnostics: this.diagnostics };
+		}
+		const diagnostics: CanvasAuthoringDiagnostic[] = [];
+		const before = readSnapshotFromHost(this.host, diagnostics);
+		if (before === undefined) {
+			return { ok: false, status: "rejected", diagnostics: [...this.diagnosticList, ...diagnostics] };
+		}
+		if (expected !== undefined) {
+			const expectedDiagnostics: CanvasAuthoringDiagnostic[] = [];
+			const expectedSnapshot = makeSnapshot(extractExpectedDocument(expected), expectedDiagnostics);
+			if (expectedSnapshot === undefined || !structurallyEqual(expectedSnapshot.document, before.document)) {
+				addDiagnostic(diagnostics, "stale-document", "warning", "The Canvas document changed since the supplied expected snapshot; no import was attempted.");
+				return { ok: false, status: "rejected", diagnostics: [...this.diagnosticList, ...diagnostics, ...expectedDiagnostics] };
+			}
+		}
+		const liveDiagnostics: CanvasAuthoringDiagnostic[] = [];
+		const live = readSnapshotFromHost(this.host, liveDiagnostics);
+		if (live === undefined || !structurallyEqual(live.document, before.document)) {
+			addDiagnostic(liveDiagnostics, "stale-document", "warning", "The Canvas document changed before the transaction began; no import was attempted.");
+			return { ok: false, status: "rejected", diagnostics: [...this.diagnosticList, ...diagnostics, ...liveDiagnostics] };
+		}
+		diagnostics.push(...liveDiagnostics);
+		const update = buildConnectorEndpointUpdate(before.document, input);
+		for (const item of update.diagnostics) {
+			addDiagnostic(diagnostics, item.code, update.ok ? "info" : "error", item.message);
+		}
+		if (!update.ok || update.document === undefined) {
+			return { ok: false, status: "rejected", diagnostics: [...this.diagnosticList, ...diagnostics] };
+		}
+		const verified = this.commitDocument(before, update.document, diagnostics);
+		if (verified === undefined) {
+			return { ok: false, status: "rejected", diagnostics: [...this.diagnosticList, ...diagnostics] };
+		}
+		return { ok: true, status: "applied", document: verified.document, diagnostics: [...this.diagnosticList, ...diagnostics] };
+	}
+
+	private commitDocument(
+		before: InternalSnapshot,
+		document: UnknownRecord,
+		diagnostics: CanvasAuthoringDiagnostic[],
+	): InternalSnapshot | undefined {
+		if (this.host === undefined) return undefined;
+		const beforeSource = optionalValue(before.document, "miroSource");
+		const afterSource = optionalValue(document, "miroSource");
+		if (beforeSource.present !== afterSource.present || !structurallyEqual(beforeSource.value, afterSource.value)) {
+			addDiagnostic(diagnostics, "miro-source-modified", "error", "Graph transactions must preserve miroSource exactly.");
+			return undefined;
+		}
+		if (!runtimeAllowsMutation(this.host, diagnostics)) {
+			return undefined;
+		}
+		if (!invokeMutation(this.host, document, diagnostics, "import")) {
+			restoreGraph(this.host, before, diagnostics);
+			return undefined;
+		}
+		const imported = readSnapshotFromHost(this.host, diagnostics);
+		if (imported === undefined || !structurallyEqual(imported.document, document)) {
+			addDiagnostic(diagnostics, "native-import-verification-failed", "error", "The imported Canvas graph did not match the requested document; history was not requested.");
+			restoreGraph(this.host, before, diagnostics);
+			return undefined;
+		}
+		if (this.host.mode === "importData" && !invokeMutation(this.host, document, diagnostics, "history")) {
+			restoreGraph(this.host, before, diagnostics);
+			return undefined;
+		}
+		const verified = readSnapshotFromHost(this.host, diagnostics);
+		if (verified === undefined || !structurallyEqual(verified.document, document)) {
+			addDiagnostic(diagnostics, "native-history-verification-failed", "error", "The native history/save boundary did not preserve the requested Canvas graph.");
+			restoreGraph(this.host, before, diagnostics);
+			return undefined;
+		}
+		return verified;
 	}
 
 	public dispose(): void {

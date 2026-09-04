@@ -14,11 +14,12 @@ not a package or runtime dependency.
 
 The current development checkpoint also includes M1 controls for navigation,
 minimap, typography, themes, colors, locks/review mode, and attachment titles.
-Native zoom remains limited to 6.25%–200%. The command **Local comments,
-anchors and documents** opens the initial M2 tools; select a file node first
-to expose its native document-opening controls. The shape-creation transaction
-model is tested but not connected to the UI. M3 rotation, z-order, and Miro
-renderers remain pending. Automated browser checks use a synthetic host;
+Native zoom remains limited to 6.25%–200%. The command **Local shapes, comments,
+anchors and documents** opens M2 tools: six editable shapes, local comment
+threads, connector endpoints and native document navigation. Select a file node
+first to expose its document controls. Source and unknown metadata survive
+graph edits and native history. M3 rotation, z-order, and Miro renderers remain
+pending. Automated browser checks use a synthetic host;
 real-Obsidian verification is still required.
 
 ## Development

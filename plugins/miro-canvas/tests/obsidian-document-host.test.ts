@@ -31,6 +31,20 @@ describe("native document host", () => {
     expect(await applyNativePdfFit({}, describeLocalDocument("local.md")!)).toBe(true);
   });
 
+  it("reuses a document tab and preserves Markdown heading navigation", async () => {
+    const file = {} as TFile;
+    const leaf = { openFile: vi.fn(), view: { file } };
+    const getLeaf = vi.fn();
+    const app = {
+      vault: { getAbstractFileByPath: () => file },
+      workspace: { getLeavesOfType: vi.fn(() => [leaf]), getLeaf },
+    } as unknown as App;
+    const host = createObsidianDocumentHost(app, vi.fn(), (value): value is TFile => value === file);
+    await host.openFile(describeLocalDocument("note.md", { subpath: "#Heading" })!);
+    expect(leaf.openFile).toHaveBeenCalledWith(file, { active: true, eState: { subpath: "#Heading" } });
+    expect(getLeaf).not.toHaveBeenCalled();
+  });
+
   it("times out a never-ready PDF viewer without writing anything", async () => {
     vi.useFakeTimers();
     try {

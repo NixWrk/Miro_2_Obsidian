@@ -337,3 +337,57 @@
 .miro-canvas-command-modal__item-description {
   color: var(--text-muted);
 }
+
+.miro-canvas-m2-tools {
+  display: grid;
+  gap: 10px;
+  color: var(--text-normal, #202124);
+}
+
+.miro-canvas-m2-tools__section {
+  min-width: 0;
+  margin: 0;
+  padding: 10px;
+  background: var(--background-secondary, rgb(127 127 127 / 8%));
+  border: 1px solid var(--background-modifier-border, #c8ccd4);
+  border-radius: 7px;
+}
+
+.miro-canvas-m2-tools__section > legend {
+  padding: 0 5px;
+  color: var(--text-normal, #202124);
+  font-weight: 600;
+}
+
+.miro-canvas-m2-tools__grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.miro-canvas-m2-tools__field {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  color: var(--text-muted, #62676f);
+}
+
+.miro-canvas-m2-tools__field input,
+.miro-canvas-m2-tools__field select {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  color: var(--text-normal, #202124);
+  background: var(--background-primary, #fff);
+  border: 1px solid var(--background-modifier-border, #c8ccd4);
+}
+
+.miro-canvas-m2-tools__status {
+  margin: 0;
+  padding: 7px 9px;
+  color: var(--text-muted, #62676f);
+  background: var(--background-secondary, rgb(127 127 127 / 8%));
+  border-left: 3px solid var(--interactive-accent, #7c3aed);
+  border-radius: 4px;
+}

@@ -8,6 +8,7 @@ export interface LocalDocument {
   readonly kind: DocumentKind;
   readonly page: number;
   readonly fit: DocumentFit;
+  readonly subpath?: string;
 }
 
 export interface DocumentHost {
@@ -46,17 +47,26 @@ export function describeLocalDocument(
   const kind: DocumentKind = extension === "pdf" ? "pdf"
     : extension === "md" ? "markdown"
       : ["png", "jpg", "jpeg", "gif", "webp", "bmp", "avif"].includes(extension) ? "image" : "file";
-  const subpage = typeof options.subpath === "string"
-    ? /^#page=(\d+)$/u.exec(options.subpath)?.[1] : undefined;
+  const safeSubpath = typeof options.subpath === "string"
+    && options.subpath.length <= 1024
+    && options.subpath === options.subpath.trim()
+    && /^#[^\u0000-\u001f\u007f<>]*$/u.test(options.subpath)
+    ? options.subpath : undefined;
+  const subpage = safeSubpath === undefined ? undefined : /^#page=(\d+)$/u.exec(safeSubpath)?.[1];
   const requested = options.page ?? (subpage ? Number(subpage) : 1);
   const page = kind === "pdf" && Number.isSafeInteger(requested) && requested >= 1
     ? Math.min(requested, 1_000_000) : 1;
-  return Object.freeze({ path, title, kind, page, fit: options.fit === "width" ? "width" : "page" });
+  const subpath = kind === "pdf" ? `#page=${page}` : safeSubpath;
+  return Object.freeze({
+    path, title, kind, page, fit: options.fit === "width" ? "width" : "page",
+    ...(subpath === undefined ? {} : { subpath }),
+  });
 }
 
 export function navigateDocument(document: LocalDocument, delta: number): LocalDocument {
   if (document.kind !== "pdf" || !Number.isSafeInteger(delta)) return document;
-  return Object.freeze({ ...document, page: Math.max(1, Math.min(1_000_000, document.page + delta)) });
+  const page = Math.max(1, Math.min(1_000_000, document.page + delta));
+  return Object.freeze({ ...document, page, subpath: `#page=${page}` });
 }
 
 export async function openLocalDocument(

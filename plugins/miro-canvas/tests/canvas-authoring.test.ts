@@ -63,9 +63,11 @@ class NativeGraph {
 		if (this.throwOnSave) {
 			throw new Error("save failed");
 		}
+		const current = this.getData();
+		this.data = clone(current);
 		if (addHistory === true) {
 			this.history.splice(this.historyIndex + 1);
-			this.history.push(this.getData());
+			this.history.push(clone(current));
 			this.historyIndex = this.history.length - 1;
 		}
 	}
@@ -118,6 +120,26 @@ function initialDocument(): CanvasDocument {
 				existing: { typography: { fontSize: 18 }, futureOverrideField: { keep: true } },
 			},
 			futureMetadataField: ["keep"],
+		},
+	};
+}
+
+function endpointDocument(): CanvasDocument {
+	return {
+		nodes: [
+			{ id: "a", type: "text", x: 0, y: 0, width: 100, height: 80, text: "A", futureNode: { keep: "a" } },
+			{ id: "b", type: "text", x: 200, y: 0, width: 100, height: 80, text: "B" },
+			{ id: "c", type: "text", x: 400, y: 0, width: 100, height: 80, text: "C" },
+		],
+		edges: [
+			{ id: "e1", fromNode: "a", fromSide: "right", toNode: "b", toSide: "left", futureEdge: { keep: true } },
+		],
+		miroSource: { board: "source", nested: { keep: true } },
+		futureRootField: { untouched: true },
+		miroCanvas: {
+			schemaVersion: 1,
+			futureMetadataField: ["keep"],
+			localOverrides: { e1: { futureOverrideField: { keep: true } } },
 		},
 	};
 }
@@ -231,6 +253,124 @@ describe("CanvasAuthoring", () => {
 		expect((runtime.getData().miroCanvas as CanvasDocument).localOverrides).toMatchObject({
 			["new-shape"]: { locked: true, shape: { kind: "diamond" } },
 		});
+	});
+
+	it("refuses native readonly creation and connector edits before import or history mutation", () => {
+		const createRuntime = new NativeGraph(initialDocument());
+		Object.defineProperty(createRuntime, "readonly", { configurable: true, value: true });
+		const createBefore = createRuntime.getData();
+		const createHistoryBefore = clone(createRuntime.history);
+		const createResult = createCanvasAuthoring(createRuntime).createShape(action({ id: "readonly-shape" }));
+
+		expect(createResult.ok).toBe(false);
+		expect(createResult.diagnostics.map((item) => item.code)).toContain("native-runtime-readonly");
+		expect(createRuntime.getData()).toEqual(createBefore);
+		expect(createRuntime.history).toEqual(createHistoryBefore);
+		expect(createRuntime.importDataSpy).not.toHaveBeenCalled();
+		expect(createRuntime.requestSaveSpy).not.toHaveBeenCalled();
+
+		const endpointRuntime = new NativeGraph(endpointDocument());
+		Object.defineProperty(endpointRuntime, "readonly", { configurable: true, value: true });
+		const endpointBefore = endpointRuntime.getData();
+		const endpointHistoryBefore = clone(endpointRuntime.history);
+		const endpointResult = createCanvasAuthoring(endpointRuntime).updateConnectorEndpoint({
+			edgeId: "e1",
+			end: "from",
+			anchor: { type: "free", x: 10, y: 20 },
+		});
+
+		expect(endpointResult.ok).toBe(false);
+		expect(endpointResult.diagnostics.map((item) => item.code)).toContain("native-runtime-readonly");
+		expect(endpointRuntime.getData()).toEqual(endpointBefore);
+		expect(endpointRuntime.history).toEqual(endpointHistoryBefore);
+		expect(endpointRuntime.importDataSpy).not.toHaveBeenCalled();
+		expect(endpointRuntime.requestSaveSpy).not.toHaveBeenCalled();
+	});
+
+	it("fails closed when native readonly state is unreadable", () => {
+		const runtime = new NativeGraph(initialDocument());
+		Object.defineProperty(runtime, "readonly", {
+			configurable: true,
+			get: () => { throw new Error("readonly unavailable"); },
+		});
+		const before = runtime.getData();
+		const result = createCanvasAuthoring(runtime).createShape(action({ id: "unreadable-readonly" }));
+
+		expect(result.ok).toBe(false);
+		expect(result.diagnostics.map((item) => item.code)).toContain("native-readonly-read-failed");
+		expect(runtime.getData()).toEqual(before);
+		expect(runtime.importDataSpy).not.toHaveBeenCalled();
+		expect(runtime.requestSaveSpy).not.toHaveBeenCalled();
+	});
+
+	it("updates a connector endpoint in one native history entry and replays it through undo/redo", () => {
+		const initial = endpointDocument();
+		const runtime = new NativeGraph(initial);
+		const authoring = createCanvasAuthoring(runtime);
+
+		const result = authoring.updateConnectorEndpoint({
+			edgeId: "e1",
+			end: "from",
+			anchor: { type: "node", nodeId: "c", u: 0.9, v: 0.5 },
+		});
+
+		expect(result.ok).toBe(true);
+		expect(runtime.requestSaveSpy).toHaveBeenCalledTimes(1);
+		expect(runtime.requestSaveSpy).toHaveBeenCalledWith(true);
+		expect(runtime.history).toHaveLength(2);
+		const applied = runtime.getData();
+		expect((applied.edges as CanvasDocument[])[0]).toMatchObject({
+			id: "e1", fromNode: "c", fromSide: "right", futureEdge: { keep: true },
+		});
+		expect((applied.nodes as CanvasDocument[])[0]).toMatchObject({ futureNode: { keep: "a" } });
+		expect(applied.futureRootField).toEqual({ untouched: true });
+		expect(applied.miroSource).toEqual(initial.miroSource);
+		expect((applied.miroCanvas as CanvasDocument).futureMetadataField).toEqual(["keep"]);
+		expect(((applied.miroCanvas as CanvasDocument).localOverrides as CanvasDocument).e1).toMatchObject({
+			futureOverrideField: { keep: true },
+			connectorAnchors: { from: { type: "node", nodeId: "c", u: 0.9, v: 0.5 } },
+		});
+
+		runtime.undo();
+		expect(runtime.getData()).toEqual(initial);
+		runtime.redo();
+		expect(runtime.getData()).toEqual(applied);
+	});
+
+	it("rejects stale, review-mode, and locked connector edits before native history mutation", () => {
+		const staleRuntime = new NativeGraph(endpointDocument());
+		const staleAuthoring = createCanvasAuthoring(staleRuntime);
+		const expected = staleAuthoring.readSnapshot();
+		staleRuntime.importData({ ...endpointDocument(), futureExternal: true }, true);
+		const stale = staleAuthoring.updateConnectorEndpoint({
+			edgeId: "e1", end: "from", anchor: { type: "free", x: 10, y: 20 },
+		}, expected);
+		expect(stale.ok).toBe(false);
+		expect(stale.diagnostics.map((item) => item.code)).toContain("stale-document");
+		expect(staleRuntime.importDataSpy).toHaveBeenCalledTimes(1);
+		expect(staleRuntime.requestSaveSpy).not.toHaveBeenCalled();
+
+		const reviewDocument = endpointDocument();
+		(reviewDocument.miroCanvas as CanvasDocument).settings = { reviewMode: true };
+		const reviewRuntime = new NativeGraph(reviewDocument);
+		const review = createCanvasAuthoring(reviewRuntime).updateConnectorEndpoint({
+			edgeId: "e1", end: "from", anchor: { type: "free", x: 10, y: 20 },
+		});
+		expect(review.ok).toBe(false);
+		expect(review.diagnostics.map((item) => item.code)).toContain("reconnect-blocked-review");
+		expect(reviewRuntime.importDataSpy).not.toHaveBeenCalled();
+		expect(reviewRuntime.requestSaveSpy).not.toHaveBeenCalled();
+
+		const lockedDocument = endpointDocument();
+		(((lockedDocument.miroCanvas as CanvasDocument).localOverrides as CanvasDocument).e1 as CanvasDocument).locked = true;
+		const lockedRuntime = new NativeGraph(lockedDocument);
+		const locked = createCanvasAuthoring(lockedRuntime).updateConnectorEndpoint({
+			edgeId: "e1", end: "from", anchor: { type: "free", x: 10, y: 20 },
+		});
+		expect(locked.ok).toBe(false);
+		expect(locked.diagnostics.map((item) => item.code)).toContain("reconnect-blocked-lock");
+		expect(lockedRuntime.importDataSpy).not.toHaveBeenCalled();
+		expect(lockedRuntime.requestSaveSpy).not.toHaveBeenCalled();
 	});
 
 	it("rolls back a graph that partially imports or whose history save throws", () => {

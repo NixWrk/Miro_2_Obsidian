@@ -10,7 +10,7 @@ class FakeElement {
   public readonly attributes = new Map<string, string>();
   public readonly listeners = new Map<string, Array<(event: unknown) => void>>();
   public parentNode: FakeElement | undefined;
-  public textContent = "";
+  private content = "";
   public value = "";
   public disabled = false;
   public type = "";
@@ -18,6 +18,16 @@ class FakeElement {
 
   public constructor(tagName: string) {
     this.tagName = tagName;
+  }
+
+  public get textContent(): string {
+    return this.content;
+  }
+
+  public set textContent(value: string) {
+    this.content = value;
+    for (const child of this.children) child.parentNode = undefined;
+    this.children.splice(0);
   }
 
   public appendChild(child: FakeElement): FakeElement {
@@ -28,6 +38,19 @@ class FakeElement {
 
   public setAttribute(name: string, value: string): void {
     this.attributes.set(name, value);
+  }
+
+  public getAttribute(name: string): string | null {
+    return this.attributes.get(name) ?? null;
+  }
+
+  public querySelectorAll(selector: string): FakeElement[] {
+    if (selector !== "textarea[data-comment-input]") {
+      return [];
+    }
+    return descendants(this).filter(
+      (item) => item.tagName === "textarea" && item.attributes.has("data-comment-input"),
+    );
   }
 
   public addEventListener(name: string, listener: (event: unknown) => void): void {
@@ -135,5 +158,87 @@ describe("comments panel", () => {
     expect(findByAttribute(root, "data-comment-action", "edit-comment").disabled).toBe(true);
     expect(findByAttribute(root, "data-comment-action", "delete-comment").disabled).toBe(true);
     expect(findByAttribute(root, "data-comment-action", "reply-comment").disabled).toBe(true);
+  });
+
+  it("does not rebuild unchanged comment state", () => {
+    const noop = () => undefined;
+    const panel = new CommentsPanel({
+      onAddComment: noop,
+      onEditComment: noop,
+      onDeleteComment: noop,
+      onReplyComment: noop,
+      onResolveComment: noop,
+      onFilterChange: noop,
+    }, { document: new FakeDocument() as unknown as Document });
+    const root = panel.element as unknown as FakeElement;
+    panel.update({ threads: [localThread] });
+    const edit = findByAttribute(root, "data-comment-input", "edit-local-1");
+    edit.value = "Cursor stays here";
+
+    panel.update({ threads: [{ ...localThread }] });
+
+    expect(findByAttribute(root, "data-comment-input", "edit-local-1")).toBe(edit);
+    expect(edit.value).toBe("Cursor stays here");
+  });
+
+  it("preserves dirty drafts on real updates while clean edit fields reflect undo", () => {
+    const noop = () => undefined;
+    const panel = new CommentsPanel({
+      onAddComment: noop,
+      onEditComment: noop,
+      onDeleteComment: noop,
+      onReplyComment: noop,
+      onResolveComment: noop,
+      onFilterChange: noop,
+    }, { document: new FakeDocument() as unknown as Document });
+    const root = panel.element as unknown as FakeElement;
+    panel.update({ threads: [localThread] });
+    findByAttribute(root, "data-comment-input", "edit-local-1").value = "Unsaved edit";
+    findByAttribute(root, "data-comment-input", "reply-local-1").value = "Unsaved reply";
+
+    panel.update({ threads: [{ ...localThread, text: "External edit", resolved: true }] });
+
+    expect(findByAttribute(root, "data-comment-input", "edit-local-1").value).toBe("Unsaved edit");
+    expect(findByAttribute(root, "data-comment-input", "reply-local-1").value).toBe("Unsaved reply");
+
+    findByAttribute(root, "data-comment-input", "edit-local-1").value = "External edit";
+    panel.update({ threads: [{ ...localThread, text: "Undo restored text", resolved: false }] });
+
+    expect(findByAttribute(root, "data-comment-input", "edit-local-1").value).toBe("Undo restored text");
+    expect(findByAttribute(root, "data-comment-input", "reply-local-1").value).toBe("Unsaved reply");
+  });
+
+  it("clears a reply before a synchronous host refresh", () => {
+    const noop = () => undefined;
+    let panel: CommentsPanel;
+    const host = {
+      onAddComment: noop,
+      onEditComment: noop,
+      onDeleteComment: noop,
+      onReplyComment: (_id: string, text: string) => {
+        panel.update({
+          threads: [{
+            ...localThread,
+            replies: [{
+              id: "reply-1",
+              text,
+              origin: "local",
+              createdAt: "2026-01-01T00:00:01Z",
+            }],
+          }],
+        });
+      },
+      onResolveComment: noop,
+      onFilterChange: noop,
+    };
+    panel = new CommentsPanel(host, { document: new FakeDocument() as unknown as Document });
+    const root = panel.element as unknown as FakeElement;
+    panel.update({ threads: [localThread] });
+    findByAttribute(root, "data-comment-input", "reply-local-1").value = "One reply";
+
+    findByAttribute(root, "data-comment-action", "reply-comment").dispatch("click");
+
+    expect(findByAttribute(root, "data-comment-input", "reply-local-1").value).toBe("");
+    expect(findByAttribute(root, "data-comment-reply-id", "reply-1").textContent).toContain("One reply");
   });
 });

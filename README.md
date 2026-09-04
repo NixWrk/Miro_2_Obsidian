@@ -45,10 +45,11 @@ matrix with a project-local test vault. The plugin is not production-ready.
 The real-Obsidian gate is still open: native Ctrl+Z/redo behavior and visual or
 interaction verification in the real application have not been claimed. The
 current development checkpoint adds M1 controls (navigation, minimap,
-typography, themes, colors, locks, attachment titles) and initial M2 local
-comments, anchors, and native document-opening tools. Native zoom currently
-stays within 6.25%–200%. Shape creation has a tested transaction model but is
-not wired into the UI; M3 rotation, z-order, and Miro renderers remain pending.
+typography, themes, colors, locks, attachment titles) and M2 UI for six local
+shapes, comment threads, connector endpoints and native document navigation.
+Graph edits preserve source/unknown metadata and use native undo/redo.
+Native zoom currently stays within 6.25%–200%. M3 rotation, z-order, and Miro
+renderers remain pending.
 
 ## Data flow
 

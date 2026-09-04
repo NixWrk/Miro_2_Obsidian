@@ -32,13 +32,23 @@ title visibility. Native zoom is safely limited to 6.25%–200%; unrestricted zo
 is not implemented. The Chromium DOM smoke covers the M1 controls against a
 synthetic native host, not the real Obsidian runtime.
 
-Initial M2 tools are available through **Local comments, anchors and documents**
-in the command palette: local comment editing/replies/resolution, anchor
-metadata, and opening selected local file nodes in Obsidian. Imported comments
-remain read-only. PDF page/fit controls depend on the detected native viewer;
-unsupported fit APIs produce a diagnostic. Connector endpoint editing, edge
-anchor navigation, and full M2 interaction verification remain pending. Shape
-creation has a tested native graph transaction model but no UI integration yet.
+M2 tools are available through **Local shapes, comments, anchors and documents**
+in the command palette. Create rectangles, rounded rectangles, ellipses,
+triangles, diamonds or stars with editable native text fallbacks. Edit/reply to
+and resolve local comment threads; imported comments remain read-only.
+Choose a target and relative coordinates for node/image anchors, T for edges,
+or board X/Y for free anchors, then save an anchor or set a connector endpoint.
+Node/image connections update native endpoints; free/edge connections retain
+valid native endpoints as an approximate plugin-off fallback with a diagnostic.
+Graph edits reject readonly/review/locked targets, preserve `miroSource` and
+unknown metadata, and record one native history transaction.
+
+Select a local file before opening tools for native document controls. PDF page
+navigation uses the entered page; fit depends on the detected native viewer and
+unsupported fit APIs produce a diagnostic. Markdown subpaths are preserved.
+Active imported HTML never executes inside the plugin. Automated unit and
+Chromium integration checks cover the M2 UI and synthetic native history;
+real Obsidian interaction and hotkeys remain a separate, unconfirmed gate.
 M3 rotation, z-order, and source-backed Miro renderers are not implemented.
 
 To run the plugin checks from the repository root:

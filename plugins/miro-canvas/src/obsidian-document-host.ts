@@ -29,14 +29,21 @@ export function createObsidianDocumentHost(
   diagnostic: (message: string) => void,
   isFile: (value: unknown) => value is TFile,
 ): DocumentHost {
+  let openSequence = 0;
   return {
     hasFile: (path) => isFile(app.vault.getAbstractFileByPath(path)),
     async openFile(document) {
+      const sequence = ++openSequence;
       const file = app.vault.getAbstractFileByPath(document.path);
       if (!isFile(file)) throw new Error("Local file is unavailable.");
-      const leaf = app.workspace.getLeaf("tab");
-      await leaf.openFile(file, { active: true, ...(document.kind === "pdf"
-        ? { eState: { subpath: `#page=${document.page}` } } : {}) });
+      // Reuse a native document tab, never replace the current Canvas leaf.
+      const existing = typeof app.workspace.getLeavesOfType === "function"
+        ? app.workspace.getLeavesOfType(document.kind).find((candidate) => get(candidate.view, "file") === file)
+        : undefined;
+      const leaf = existing ?? app.workspace.getLeaf("tab");
+      await leaf.openFile(file, { active: true, ...(document.subpath
+        ? { eState: { subpath: document.subpath } } : {}) });
+      if (sequence !== openSequence) return;
       if (!await applyNativePdfFit(leaf.view, document)) {
         diagnostic("PDF opened. Automatic fit is unavailable in this Obsidian version; use the native viewer controls.");
       }

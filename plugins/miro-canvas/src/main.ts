@@ -108,7 +108,7 @@ export default class MiroCanvasPlugin extends Plugin {
     });
     this.addCommand({
       id: "local-tools",
-      name: "Local comments, anchors and documents",
+      name: "Local shapes, comments, anchors and documents",
       checkCallback: (checking) => this.runM1Command(checking, (session) => this.openLocalTools(session)),
     });
     this.addCommand({

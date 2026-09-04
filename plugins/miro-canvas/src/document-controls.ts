@@ -4,6 +4,7 @@ import { describeLocalDocument, navigateDocument, openLocalDocument, type Docume
 export class DocumentControls {
   readonly element: HTMLElement;
   private disposed = false;
+  private openSequence = 0;
   private current: LocalDocument | null;
   private readonly status: HTMLElement;
   private readonly pageInput: HTMLInputElement;
@@ -54,22 +55,34 @@ export class DocumentControls {
 
   private step(delta: number): void {
     if (!this.current || this.disposed) return;
-    this.current = navigateDocument(this.current, delta);
+    const requested = this.requestedDocument();
+    if (requested === null) return;
+    this.current = navigateDocument(requested, delta);
     this.pageInput.value = String(this.current.page);
-    void this.open();
+    void this.openCurrent();
   }
 
-  private async open(): Promise<void> {
-    if (!this.current || this.disposed) return;
+  private requestedDocument(): LocalDocument | null {
+    if (!this.current || this.disposed) return null;
     const requestedPage = Number(this.pageInput.value);
     if (!Number.isSafeInteger(requestedPage) || requestedPage < 1 || requestedPage > 1_000_000) {
       this.status.textContent = "Enter a valid positive page number.";
-      return;
+      return null;
     }
-    const result = await openLocalDocument(this.host, this.current.path, {
-      page: requestedPage, fit: this.fitInput.value === "width" ? "width" : "page",
+    return describeLocalDocument(this.current.path, {
+      page: requestedPage,
+      fit: this.fitInput.value === "width" ? "width" : "page",
+      subpath: this.current.subpath,
     });
-    if (this.disposed) return;
+  }
+
+  private async openCurrent(): Promise<void> {
+    if (!this.current || this.disposed) return;
+    const sequence = ++this.openSequence;
+    const result = await openLocalDocument(this.host, this.current.path, {
+      page: this.current.page, fit: this.current.fit, subpath: this.current.subpath,
+    });
+    if (this.disposed || sequence !== this.openSequence) return;
     if (result.ok) {
       this.current = result.document;
       this.status.textContent = "Opened in the native viewer. Its controls handle scrolling and available pages.";
@@ -77,6 +90,13 @@ export class DocumentControls {
       this.status.textContent = result.reason === "missing-file" ? "Local file is missing from this vault."
         : "This document could not be opened safely.";
     }
+  }
+
+  private async open(): Promise<void> {
+    const requested = this.requestedDocument();
+    if (requested === null) return;
+    this.current = requested;
+    await this.openCurrent();
   }
 
   dispose(): void { this.disposed = true; this.element.remove(); }

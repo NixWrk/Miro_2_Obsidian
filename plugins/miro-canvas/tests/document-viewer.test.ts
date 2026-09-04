@@ -12,8 +12,9 @@ describe("local document viewer", () => {
 
   it("classifies documents without inventing previews for unsupported formats", () => {
     expect(describeLocalDocument("file.PDF", { subpath: "#page=4", fit: "width" }))
-      .toMatchObject({ kind: "pdf", page: 4, fit: "width" });
+      .toMatchObject({ kind: "pdf", page: 4, fit: "width", subpath: "#page=4" });
     expect(describeLocalDocument("note.md", { page: 4 })?.page).toBe(1);
+    expect(describeLocalDocument("note.md", { subpath: "#Section 2" })?.subpath).toBe("#Section 2");
     expect(describeLocalDocument("image.png")?.kind).toBe("image");
     for (const file of ["image.svg", "document.docx", "page.html"])
       expect(describeLocalDocument(file)?.kind).toBe("file");
@@ -23,6 +24,7 @@ describe("local document viewer", () => {
     const document = describeLocalDocument("a.pdf")!;
     expect(navigateDocument(document, -10).page).toBe(1);
     expect(navigateDocument(document, 1).page).toBe(2);
+    expect(navigateDocument(document, 1).subpath).toBe("#page=2");
     expect(navigateDocument(document, Infinity)).toBe(document);
     expect(describeLocalDocument("a.pdf", { page: NaN })?.page).toBe(1);
     expect(describeLocalDocument("a.pdf", { page: 5_000_000 })?.page).toBe(1_000_000);
