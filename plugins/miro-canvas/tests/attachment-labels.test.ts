@@ -65,4 +65,3 @@ describe("M1 attachment labels", () => {
 		expect(decideAttachmentLabel(revoked.proxy)).toMatchObject({ visible: false, source: "invalid", valid: false });
 	});
 });
-

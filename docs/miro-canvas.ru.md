@@ -2,8 +2,8 @@
 
 [English](miro-canvas.md) | **Русский**
 
-`miro-canvas` - полностью локальный Obsidian-плагин, реализация M0 которого уже
-началась; он предназначен для расширения любого Obsidian Canvas. На обычной
+`miro-canvas` - полностью локальный Obsidian-плагин в активной разработке;
+он предназначен для расширения любого Obsidian Canvas. На обычной
 доске планируются удобное редактирование, комментарии, защита, темы, цвета,
 формы и продвинутые стрелки. Если локальный файл содержит `miroSource`, плагин
 сможет точнее отображать ранее экспортированный Miro snapshot без связи с Miro,
@@ -23,8 +23,23 @@ migrations, read-only native/Advanced Canvas adapters, explicit metadata writer
 
 M0 пока не production-ready. Real-Obsidian gate остаётся открытым: поведение
 native Ctrl+Z/redo для metadata actions и реальная визуальная/интерактивная
-проверка ещё не заявляются. Navigation/safety M1, authoring M2 и
-geometry/rendering M3 остаются дальнейшей работой.
+проверка ещё не заявляются.
+
+Текущий этап включает интерфейс M1: навигацию, кликабельную minimap,
+типографику, темы доски, цвета, блокировки/review mode и видимость названий
+вложений. Native zoom безопасно ограничен диапазоном 6,25%–200%; снятие этого
+ограничения не реализовано. DOM smoke в Chromium проверяет интерфейс M1 с
+синтетическим native host, а не настоящий runtime Obsidian.
+
+Начальные инструменты M2 доступны через команду **Local comments, anchors and
+documents**: редактирование локальных комментариев, ответы и resolved-статус,
+метаданные anchors и открытие выбранного локального файла в Obsidian.
+Импортированные комментарии доступны только для чтения. Управление страницей
+и fit PDF зависит от найденного native viewer; неподдерживаемый fit API даёт
+диагностику. Редактирование концов стрелок, переход к edge anchor и полная
+интерактивная проверка M2 ещё впереди. Для создания фигур есть протестированная
+модель native graph transaction, но подключения к UI пока нет.
+M3: rotation, z-order и source-backed Miro renderers — не реализованы.
 
 Текущие проверки плагина из корня репозитория:
 
@@ -57,6 +72,13 @@ committed fixtures в `MIRO2OBSIDIAN\_oracle\m0-compatibility` и атомарн
 point отклоняется. Для Advanced Canvas сначала будет создан placeholder
 manifest; настоящий runtime нужно отдельно скопировать или установить, поэтому
 успешная offline matrix check не является real-Obsidian visual pass.
+
+Setup также создаёт `m1-daily.canvas`: локальное вложение, заблокированный
+элемент, настройки текста и удалённый элемент для проверки minimap. Повторный
+setup сохраняет ручные изменения этой доски. Команда
+`python -m tools.obsidian_oracle.smoke_plugin_ui` проверяет настоящий интерфейс
+плагина в DOM Chromium с синтетическим Canvas host; это browser integration
+check, а не проверка совместимости в самом Obsidian.
 
 ### Активация и проверка M0-профилей
 

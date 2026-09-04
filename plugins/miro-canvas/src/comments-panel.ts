@@ -1,0 +1,270 @@
+/**
+ * Small dependency-free comments panel.  It owns only DOM presentation and
+ * emits explicit callbacks; comment persistence is delegated to the host.
+ */
+
+import {
+  filterCommentThreads,
+  type CommentScope,
+  type CommentThread,
+} from "./local-comments";
+import type { CanvasAnchor } from "./anchors";
+
+export interface CommentsPanelState {
+  readonly threads: readonly CommentThread[];
+  readonly scope?: CommentScope;
+  readonly selectedElementIds?: readonly string[];
+  readonly includeResolved?: boolean;
+  readonly reviewMode?: boolean;
+  readonly anchorDraft?: CanvasAnchor;
+  readonly diagnostics?: readonly string[];
+}
+
+export interface CommentsPanelHost {
+  readonly onAddComment: (text: string, anchor?: CanvasAnchor) => void;
+  readonly onEditComment: (id: string, text: string) => void;
+  readonly onDeleteComment: (id: string) => void;
+  readonly onReplyComment: (id: string, text: string) => void;
+  readonly onResolveComment: (id: string, resolved: boolean) => void;
+  readonly onFilterChange: (scope: CommentScope) => void;
+  readonly onPickAnchor?: (kind: "free" | "selection" | "node" | "image" | "edge") => void;
+  readonly onSelectTarget?: (thread: CommentThread) => void;
+}
+
+export interface CommentsPanelOptions {
+  readonly document?: Document;
+  readonly title?: string;
+  readonly className?: string;
+}
+
+interface PanelRefs {
+  readonly scope: HTMLSelectElement;
+  readonly draft: HTMLTextAreaElement;
+  readonly add: HTMLButtonElement;
+  readonly list: HTMLElement;
+  readonly status: HTMLElement;
+}
+
+function hasDocument(value: unknown): value is Document {
+  return value !== null && typeof value === "object"
+    && typeof (value as { createElement?: unknown }).createElement === "function";
+}
+
+function append<T extends Node>(parent: Node, child: T): T {
+  parent.appendChild(child);
+  return child;
+}
+
+function make<K extends keyof HTMLElementTagNameMap>(document: Document, tag: K, text?: unknown): HTMLElementTagNameMap[K] {
+  const element = document.createElement(tag);
+  if (text !== undefined) {
+    element.textContent = typeof text === "string" ? text : String(text);
+  }
+  return element;
+}
+
+function button(document: Document, label: string, action: string): HTMLButtonElement {
+  const element = make(document, "button", label);
+  element.type = "button";
+  element.setAttribute("data-comment-action", action);
+  element.setAttribute("aria-label", label);
+  return element;
+}
+
+function inputText(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function authorLabel(thread: CommentThread): string {
+  const author = thread.author;
+  if (author !== undefined && typeof author.name === "string" && author.name.trim().length > 0) {
+    return author.name.trim();
+  }
+  return thread.origin === "imported" ? "Imported Miro comment" : "Local comment";
+}
+
+function anchorLabel(anchor: CanvasAnchor | undefined): string {
+  if (anchor === undefined) {
+    return "No anchor";
+  }
+  if (anchor.type === "free") {
+    return `Free point (${anchor.x}, ${anchor.y})`;
+  }
+  if (anchor.type === "edge") {
+    return `Edge ${anchor.edgeId} at ${anchor.t}`;
+  }
+  return `${anchor.type === "image" ? "Image" : "Node"} ${anchor.nodeId} at (${anchor.u}, ${anchor.v})`;
+}
+
+/** A reusable DOM panel for board-wide and selection-filtered local comments. */
+export class CommentsPanel {
+  public readonly element: HTMLElement;
+  private readonly document: Document | undefined;
+  private readonly host: CommentsPanelHost;
+  private readonly refs: PanelRefs | undefined;
+  private state: CommentsPanelState = { threads: [] };
+
+  public constructor(host: CommentsPanelHost, options: CommentsPanelOptions = {}) {
+    this.host = host;
+    this.document = options.document ?? (typeof document !== "undefined" ? document : undefined);
+    if (!hasDocument(this.document)) {
+      this.element = {} as HTMLElement;
+      return;
+    }
+    this.element = make(this.document, "section");
+    this.element.className = options.className ?? "miro-canvas-comments-panel";
+    this.element.setAttribute("aria-label", options.title ?? "Comments");
+    this.refs = this.build();
+  }
+
+  private build(): PanelRefs {
+    const document = this.document!;
+    const heading = make(document, "h2", "Comments");
+    append(this.element, heading);
+    const controls = append(this.element, make(document, "div"));
+    controls.setAttribute("data-comment-region", "controls");
+    const scope = make(document, "select");
+    scope.setAttribute("aria-label", "Comment scope");
+    for (const [value, label] of [["board", "Board"], ["selection", "Selection"]] as const) {
+      const option = make(document, "option", label);
+      option.value = value;
+      append(scope, option);
+    }
+    scope.addEventListener("change", () => {
+      this.host.onFilterChange(scope.value === "selection" ? "selection" : "board");
+    });
+    append(controls, scope);
+
+    const anchorButtons = append(controls, make(document, "div"));
+    for (const [kind, label] of [
+      ["free", "Pick coordinates"],
+      ["selection", "Use selection"],
+    ] as const) {
+      const pick = button(document, label, `pick-anchor-${kind}`);
+      pick.addEventListener("click", () => this.host.onPickAnchor?.(kind));
+      append(anchorButtons, pick);
+    }
+    const draft = make(document, "textarea");
+    draft.setAttribute("aria-label", "New comment");
+    draft.setAttribute("data-comment-input", "new");
+    append(controls, draft);
+    const add = button(document, "Add comment", "add-comment");
+    add.addEventListener("click", () => {
+      const text = inputText(draft.value);
+      if (text.length > 0) {
+        this.host.onAddComment(text, this.state.anchorDraft);
+        draft.value = "";
+      }
+    });
+    append(controls, add);
+
+    const status = append(this.element, make(document, "div"));
+    status.setAttribute("role", "status");
+    const list = append(this.element, make(document, "div"));
+    list.setAttribute("data-comment-region", "list");
+    return { scope, draft, add, list, status };
+  }
+
+  private renderThread(thread: CommentThread): HTMLElement {
+    const document = this.document!;
+    const card = make(document, "article");
+    card.setAttribute("data-comment-id", thread.id);
+    card.setAttribute("data-comment-origin", thread.origin);
+    append(card, make(document, "strong", authorLabel(thread)));
+    if (thread.createdAt !== undefined) {
+      append(card, make(document, "time", thread.createdAt));
+    }
+    append(card, make(document, "p", thread.text));
+    append(card, make(document, "small", thread.resolved ? "Resolved" : "Open"));
+    const anchor = thread.anchor;
+    const target = button(document, anchorLabel(anchor), "select-target");
+    target.disabled = this.host.onSelectTarget === undefined;
+    target.addEventListener("click", () => this.host.onSelectTarget?.(thread));
+    append(card, target);
+
+    const resolve = button(document, thread.resolved ? "Reopen" : "Resolve", thread.resolved ? "reopen" : "resolve");
+    resolve.disabled = thread.origin === "imported" || thread.immutable === true;
+    resolve.addEventListener("click", () => this.host.onResolveComment(thread.id, !thread.resolved));
+    append(card, resolve);
+
+    const edit = make(document, "textarea");
+    edit.value = thread.text;
+    edit.setAttribute("aria-label", `Edit comment ${thread.id}`);
+    edit.setAttribute("data-comment-input", `edit-${thread.id}`);
+    edit.disabled = thread.origin === "imported" || thread.immutable === true;
+    append(card, edit);
+    const save = button(document, "Save edit", "edit-comment");
+    save.disabled = edit.disabled;
+    save.addEventListener("click", () => {
+      const text = inputText(edit.value);
+      if (text.length > 0) {
+        this.host.onEditComment(thread.id, text);
+      }
+    });
+    append(card, save);
+    const remove = button(document, "Delete", "delete-comment");
+    remove.disabled = save.disabled;
+    remove.addEventListener("click", () => this.host.onDeleteComment(thread.id));
+    append(card, remove);
+
+    const replies = append(card, make(document, "div"));
+    replies.setAttribute("data-comment-region", "replies");
+    for (const reply of thread.replies) {
+      const row = append(replies, make(document, "p"));
+      row.setAttribute("data-comment-reply-id", reply.id);
+      row.textContent = `${reply.author?.name ?? "Reply"}: ${reply.text}`;
+    }
+    const replyInput = make(document, "textarea");
+    replyInput.setAttribute("aria-label", `Reply to ${thread.id}`);
+    replyInput.setAttribute("data-comment-input", `reply-${thread.id}`);
+    replyInput.disabled = thread.origin === "imported" || thread.immutable === true;
+    append(card, replyInput);
+    const replyButton = button(document, "Reply", "reply-comment");
+    replyButton.disabled = replyInput.disabled;
+    replyButton.addEventListener("click", () => {
+      const text = inputText(replyInput.value);
+      if (text.length > 0) {
+        this.host.onReplyComment(thread.id, text);
+        replyInput.value = "";
+      }
+    });
+    append(card, replyButton);
+    return card;
+  }
+
+  /** Refresh the panel from detached state; review mode never disables comments. */
+  public update(state: CommentsPanelState): void {
+    this.state = state;
+    if (this.refs === undefined || !hasDocument(this.document)) {
+      return;
+    }
+    const scope = state.scope ?? "board";
+    this.refs.scope.value = scope;
+    this.refs.add.disabled = false;
+    this.refs.draft.disabled = false;
+    this.refs.status.textContent = state.reviewMode === true
+      ? `Review mode: comments remain available (${state.threads.length})`
+      : `${state.threads.length} comment thread(s)`;
+    if (state.anchorDraft !== undefined) {
+      this.refs.status.textContent += `; ${anchorLabel(state.anchorDraft)}`;
+    }
+    if (state.diagnostics !== undefined && state.diagnostics.length > 0) {
+      this.refs.status.textContent += `; ${state.diagnostics.join("; ")}`;
+    }
+    this.refs.list.textContent = "";
+    const threads = filterCommentThreads(state.threads, {
+      scope,
+      selectedElementIds: state.selectedElementIds,
+      includeResolved: state.includeResolved,
+    });
+    for (const thread of threads) {
+      append(this.refs.list, this.renderThread(thread));
+    }
+  }
+
+  public destroy(): void {
+    this.element.remove();
+  }
+}
+
+export const LocalCommentsPanel = CommentsPanel;

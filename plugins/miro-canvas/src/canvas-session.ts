@@ -189,7 +189,10 @@ function makeCanvasInspection(
  */
 export function inspectCanvasView(view: unknown): CanvasSessionInspection {
 	try {
-		const adapter = createCanvasAdapter(view);
+		// Inspection is read-only.  In particular it must not install the
+		// optional native camera patch; the active M1 session owns that patch and
+		// releases it when the Canvas leaf is disposed.
+		const adapter = createCanvasAdapter(view, { patchNativeCamera: false });
 		let document: unknown;
 		let documentReadError: AdapterDiagnostic | undefined;
 		try {

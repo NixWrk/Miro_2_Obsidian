@@ -4,6 +4,8 @@ import {
 	CANVAS_CAPABILITIES,
 	CanvasAdapter,
 	createCanvasAdapter,
+	NATIVE_MAX_T_ZOOM,
+	NATIVE_MIN_T_ZOOM,
 } from "../src/canvas-adapter";
 
 function revokedProxy<T extends object>(value: T): T {
@@ -242,6 +244,131 @@ describe("CanvasAdapter", () => {
 
 		expect(adapter.supports(CANVAS_CAPABILITIES.document)).toBe(true);
 		expect(adapter.getDocument()).toBe(document);
+	});
+
+	it("adapts the observed native tx/ty/tZoom camera with a positional call", () => {
+		class NativeCanvas {
+			x = 10;
+			y = -20;
+			tx = 10;
+			ty = -20;
+			tZoom = -2;
+			// Obsidian's native camera stores `zoom` as tZoom (log2); `scale`
+			// is the linear rendering scale.
+			zoom = this.tZoom;
+			scale = 2 ** this.tZoom;
+			zoomCenter: unknown = { x: 0, y: 0 };
+			canvasRect = { width: 800, height: 600 };
+			markViewportChanged = vi.fn();
+			calls: unknown[][] = [];
+			setViewport(tx: number, ty: number, tZoom: number): void {
+				this.calls.push([tx, ty, tZoom]);
+				// This is the exact synchronous native method shape.  The
+				// request-frame path is tested separately as a safe-range limit.
+				this.x = tx;
+				this.y = ty;
+				this.tx = tx;
+				this.ty = ty;
+				this.tZoom = tZoom;
+				this.zoom = tZoom;
+				this.scale = 2 ** tZoom;
+				this.markViewportChanged();
+			}
+		}
+
+		const runtime = new NativeCanvas();
+		const originalSetViewport = NativeCanvas.prototype.setViewport;
+		const adapter = createCanvasAdapter({ canvas: runtime });
+
+		expect(adapter.status).toBe("ready");
+		expect(adapter.camera).toEqual({
+			kind: "native",
+			coordinateMode: "center",
+			zoomMode: "log2",
+			mutation: "positional",
+		});
+		expect(adapter.supports(CANVAS_CAPABILITIES.nativeCamera)).toBe(true);
+		expect(adapter.getViewport()).toMatchObject({
+			x: 10,
+			y: -20,
+			zoom: 2 ** -2,
+			tZoom: -2,
+			width: 800,
+			height: 600,
+			coordinateMode: "center",
+			zoomMode: "log2",
+		});
+
+		expect(adapter.setViewport({ x: 100, y: 200, zoom: 2 ** NATIVE_MIN_T_ZOOM })).toBe(true);
+		expect(runtime.calls).toEqual([[100, 200, -4]]);
+		expect(runtime.tx).toBe(100);
+		expect(runtime.ty).toBe(200);
+		expect(runtime.tZoom).toBe(-4);
+		expect(runtime.zoom).toBe(-4);
+		expect(runtime.scale).toBe(2 ** -4);
+		expect(runtime.markViewportChanged).toHaveBeenCalled();
+		expect(adapter.diagnostics.some((item) => item.code === "native-camera-range-limited")).toBe(true);
+
+		adapter.dispose();
+		// Only the instance shadow is removed; the prototype and other Canvas
+		// instances are never modified.
+		expect(runtime.setViewport).toBe(originalSetViewport);
+		expect(Object.prototype.hasOwnProperty.call(runtime, "setViewport")).toBe(false);
+		expect(adapter.setViewport({ x: 1, y: 1, zoom: 1 })).toBe(false);
+	});
+
+	it("keeps the native patch scoped when two adapters share one Canvas", () => {
+		class NativeCanvas {
+			tx = 0;
+			ty = 0;
+			tZoom = 0;
+			zoom = 0;
+			setViewport(tx: number, ty: number, tZoom: number): void {
+				this.tx = tx;
+				this.ty = ty;
+				this.tZoom = tZoom;
+				this.zoom = tZoom;
+			}
+		}
+		const runtime = new NativeCanvas();
+		const otherRuntime = new NativeCanvas();
+		const original = NativeCanvas.prototype.setViewport;
+		const first = createCanvasAdapter(runtime);
+		const second = createCanvasAdapter(runtime);
+		expect(runtime.setViewport).not.toBe(original);
+		expect(otherRuntime.setViewport).toBe(original);
+		first.dispose();
+		expect(runtime.setViewport).not.toBe(original);
+		expect(otherRuntime.setViewport).toBe(original);
+		second.dispose();
+		expect(runtime.setViewport).toBe(original);
+		expect(Object.prototype.hasOwnProperty.call(runtime, "setViewport")).toBe(false);
+	});
+
+	it("supports an explicit no-patch native adapter for read-only hosts", () => {
+		class NativeCanvas {
+			tx = 0;
+			ty = 0;
+			tZoom = 0;
+			zoom = 0;
+			scale = 1;
+			setViewport(tx: number, ty: number, tZoom: number): void {
+				this.tx = tx;
+				this.ty = ty;
+				this.tZoom = tZoom;
+				this.zoom = tZoom;
+				this.scale = 2 ** tZoom;
+			}
+		}
+		const runtime = new NativeCanvas();
+		const original = NativeCanvas.prototype.setViewport;
+		const adapter = createCanvasAdapter(runtime, { patchNativeCamera: false });
+		expect(runtime.setViewport).toBe(original);
+		expect(adapter.setViewport({ x: 1, y: 2, zoom: 1 / 2 })).toBe(true);
+		expect(runtime.tZoom).toBe(-1);
+		expect(runtime.zoom).toBe(-1);
+		expect(runtime.scale).toBe(1 / 2);
+		adapter.dispose();
 	});
 
 	it("fails closed with a diagnostic when the document getter is missing or throws", () => {

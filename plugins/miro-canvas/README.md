@@ -12,6 +12,15 @@ Ctrl/Cmd+Y history actions are the intended undo/redo path, not a competing
 plugin history UI. Advanced Canvas is an optional integration target and is
 not a package or runtime dependency.
 
+The current development checkpoint also includes M1 controls for navigation,
+minimap, typography, themes, colors, locks/review mode, and attachment titles.
+Native zoom remains limited to 6.25%–200%. The command **Local comments,
+anchors and documents** opens the initial M2 tools; select a file node first
+to expose its native document-opening controls. The shape-creation transaction
+model is tested but not connected to the UI. M3 rotation, z-order, and Miro
+renderers remain pending. Automated browser checks use a synthetic host;
+real-Obsidian verification is still required.
+
 ## Development
 
 Run these commands from this directory after installing the development

@@ -1,0 +1,19 @@
+{
+  "nodes": [
+    {"id":"welcome","type":"text","x":-500,"y":-360,"width":440,"height":240,"text":"# Miro Canvas daily tools\n\nOpen the Miro Canvas controls from the command palette.\n\nTry zoom, fit, minimap navigation, themes and selection styling. Native Markdown stays editable.\n\n[[MIRO2OBSIDIAN/_oracle/m0-compatibility/m1-attachment|Open the local attachment]]"},
+    {"id":"typography","type":"text","x":40,"y":-360,"width":400,"height":240,"text":"## Typography\n\nSelect this node and change its font, size, alignment and colors without editing HTML."},
+    {"id":"locked","type":"text","x":-500,"y":0,"width":440,"height":200,"text":"## Locked example\n\nTry moving, editing or deleting this node. Unlock it explicitly from Miro Canvas controls. Lock is accidental-edit protection, not access control."},
+    {"id":"attachment","type":"file","x":40,"y":0,"width":400,"height":240,"file":"$ASSET/m1-attachment.md"},
+    {"id":"distant","type":"text","x":4000,"y":2800,"width":380,"height":180,"text":"Far-away node: use the minimap or Fit to navigate here."}
+  ],
+  "edges": [{"id":"example-edge","fromNode":"typography","fromSide":"bottom","toNode":"attachment","toSide":"top","toEnd":"arrow","label":"Local attachment"}],
+  "miroCanvas": {
+    "schemaVersion":1,
+    "settings":{"displayTheme":"system","reviewMode":false,"showAttachmentNames":true,"minimapVisible":true},
+    "localOverrides":{
+      "typography":{"typography":{"fontFamily":"Georgia","fontSize":22},"colors":{"text":"#184B7A","fill":"#E5F1FF","border":"#4262FF"}},
+      "locked":{"locked":true},
+      "attachment":{"showAttachmentName":false}
+    }
+  }
+}

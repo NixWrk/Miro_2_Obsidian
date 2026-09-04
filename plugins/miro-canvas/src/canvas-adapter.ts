@@ -37,6 +37,8 @@ export const CANVAS_CAPABILITIES = {
 	rootElement: "rootElement",
 	scene: "scene",
 	viewport: "viewport",
+	/** The private Obsidian Canvas camera (`tx`, `ty`, `tZoom`). */
+	nativeCamera: "nativeCamera",
 	document: "document",
 	selection: "selection",
 	events: "events",
@@ -48,11 +50,33 @@ export const CANVAS_CAPABILITIES = {
 export type CanvasCapability =
 	(typeof CANVAS_CAPABILITIES)[keyof typeof CANVAS_CAPABILITIES];
 
+/** The two camera coordinate contracts understood by the feature modules. */
+export type CanvasCoordinateMode = "transform" | "center";
+
+/** Native Canvas stores the zoom as log2 while JSON-facing code uses scale. */
+export type CanvasZoomMode = "linear" | "log2";
+
+export interface CanvasCameraFeatures {
+	/** `native` is the observed Obsidian private camera; `generic` is an adapter object. */
+	readonly kind: "native" | "generic";
+	readonly coordinateMode: CanvasCoordinateMode;
+	readonly zoomMode: CanvasZoomMode;
+	/** The exact call shape used by `CanvasAdapter.setViewport`. */
+	readonly mutation: "positional" | "object" | "unsupported";
+}
+
 /** A viewport in board coordinates. */
 export interface CanvasViewport {
 	readonly x: number;
 	readonly y: number;
 	readonly zoom: number;
+	/** Native Canvas' logarithmic zoom, when this is a native camera snapshot. */
+	readonly tZoom?: number;
+	/** Native aliases retained as evidence, never used as a generic fallback. */
+	readonly tx?: number;
+	readonly ty?: number;
+	readonly coordinateMode?: CanvasCoordinateMode;
+	readonly zoomMode?: CanvasZoomMode;
 	readonly width?: number;
 	readonly height?: number;
 	readonly [key: string]: unknown;
@@ -69,6 +93,12 @@ export interface CanvasAdapterOptions {
 	 * in a safe state when they are missing; it only reports the missing ones.
 	 */
 	readonly requiredCapabilities?: readonly CanvasCapability[];
+	/**
+	 * Patch the exact native camera method when possible so values below the
+	 * stock Canvas clamp remain usable.  The patch is instance-safe and is
+	 * restored by `dispose`; `false` is useful for read-only integration tests.
+	 */
+	readonly patchNativeCamera?: boolean;
 }
 
 export interface CanvasAdapterProbe {
@@ -76,6 +106,7 @@ export interface CanvasAdapterProbe {
 	readonly available: boolean;
 	readonly compatible: boolean;
 	readonly capabilities: ReadonlySet<CanvasCapability>;
+	readonly camera?: CanvasCameraFeatures;
 	readonly diagnostics: readonly AdapterDiagnostic[];
 }
 
@@ -108,6 +139,53 @@ const VIEWPORT_METHOD_KEYS = ["getViewport", "getViewportTransform", "getViewBox
 const VIEWPORT_VALUE_KEYS = ["viewport", "viewBox", "transform"] as const;
 const SELECTION_KEYS = ["selection", "selectedNodes", "selectedElements", "getSelection"] as const;
 const MAX_COLLECTION_ITEMS = 100_000;
+
+/**
+ * These limits are deliberately expressed in native `tZoom` units.  They
+ * match the local canvas-zoom-unlock reference (2^-12 through 2^8), while
+ * keeping an accidental hostile value from overflowing `2 ** tZoom`.
+ */
+export const NATIVE_MIN_T_ZOOM = -12;
+export const NATIVE_MAX_T_ZOOM = 8;
+
+/**
+ * Bounds enforced by the native Canvas render-frame path.  The old
+ * zoom-unlock workaround toggled `screenshotting` to skip this clamp, but
+ * that flag changes rendering/virtualisation semantics and is deliberately
+ * not touched by this adapter.  Native navigation therefore reports and
+ * honours this narrower safe range; generic adapters may still use the full
+ * controller range.
+ */
+export const NATIVE_SAFE_MIN_T_ZOOM = -4;
+export const NATIVE_SAFE_MAX_T_ZOOM = 1;
+
+const NATIVE_CAMERA_PATCH_KEY = "setViewport" as const;
+
+interface NativeCameraShape {
+	readonly tx: number;
+	readonly ty: number;
+	readonly tZoom: number;
+	readonly setViewport: (...args: readonly unknown[]) => unknown;
+}
+
+interface NativeCameraPatch {
+	/** The one Canvas instance whose method is shadowed. */
+	readonly runtime: UnknownRecord;
+	/** `true` when setViewport was already an own property. */
+	readonly hadOwnMethod: boolean;
+	readonly originalDescriptor?: PropertyDescriptor;
+	/** The method resolved before this scoped instance patch was installed. */
+	readonly originalMethod: (...args: unknown[]) => unknown;
+	patchedMethod: (...args: unknown[]) => unknown;
+	refCount: number;
+}
+
+/**
+ * A patch is scoped to one runtime instance.  Never modify the Canvas
+ * prototype: a vault can have several panes backed by the same class and a
+ * camera workaround must not change another pane's rendering behavior.
+ */
+const nativeCameraPatches = new WeakMap<object, NativeCameraPatch>();
 
 function isObject(value: unknown): value is UnknownRecord {
 	return (typeof value === "object" && value !== null) || typeof value === "function";
@@ -231,6 +309,184 @@ function safeCall(
 ): unknown {
 	const result = safeCallResult(target, method, args, probe, capability);
 	return result.ok ? result.value : undefined;
+}
+
+function safeOwnDescriptor(target: object, key: PropertyKey): PropertyDescriptor | undefined {
+	try {
+		return Object.getOwnPropertyDescriptor(target, key);
+	} catch {
+		return undefined;
+	}
+}
+
+function nativeCameraShape(runtime: unknown, probe?: MutableProbe): NativeCameraShape | undefined {
+	if (!isObject(runtime)) {
+		return undefined;
+	}
+	const read = (key: PropertyKey): unknown => probe === undefined
+		? (() => {
+			try {
+				return Reflect.get(runtime, key, runtime);
+			} catch {
+				return undefined;
+			}
+		})()
+		: safeRead(runtime, key, probe, CANVAS_CAPABILITIES.nativeCamera);
+	const tx = toFiniteNumber(read("tx"));
+	const ty = toFiniteNumber(read("ty"));
+	const tZoom = toFiniteNumber(read("tZoom"));
+	const setViewport = read("setViewport");
+	if (tx === undefined || ty === undefined || tZoom === undefined || typeof setViewport !== "function") {
+		return undefined;
+	}
+	return { tx, ty, tZoom, setViewport: setViewport as (...args: readonly unknown[]) => unknown };
+}
+
+function nativeZoomToScale(tZoom: number): number | undefined {
+	if (!Number.isFinite(tZoom) || tZoom < -1022 || tZoom > 1023) {
+		return undefined;
+	}
+	const zoom = 2 ** tZoom;
+	return Number.isFinite(zoom) && zoom > 0 ? zoom : undefined;
+}
+
+function nativeScaleToZoom(zoom: number): number | undefined {
+	if (!Number.isFinite(zoom) || zoom <= 0) {
+		return undefined;
+	}
+	const tZoom = Math.log2(zoom);
+	return Number.isFinite(tZoom) ? tZoom : undefined;
+}
+
+function clampNativeSafeTZoom(tZoom: number): number {
+	if (!Number.isFinite(tZoom)) {
+		return 0;
+	}
+	return Math.min(NATIVE_SAFE_MAX_T_ZOOM, Math.max(NATIVE_SAFE_MIN_T_ZOOM, tZoom));
+}
+
+function installNativeCameraPatch(
+	runtime: unknown,
+	probe: MutableProbe,
+): (() => void) | undefined {
+	if (!isObject(runtime) || nativeCameraShape(runtime, probe) === undefined) {
+		return undefined;
+	}
+	const instance = runtime as UnknownRecord;
+	const existing = nativeCameraPatches.get(instance);
+	if (existing !== undefined) {
+		existing.refCount += 1;
+		return () => releaseNativeCameraPatch(existing);
+	}
+
+	const current = safeOwnDescriptor(instance, NATIVE_CAMERA_PATCH_KEY);
+	if (current !== undefined && (current.get !== undefined || current.set !== undefined || typeof current.value !== "function")) {
+		addDiagnostic(probe, {
+			code: "native-camera-patch-unavailable",
+			level: "warning",
+			message: "The native Canvas camera was detected, but its instance setViewport method cannot be patched safely.",
+			capability: CANVAS_CAPABILITIES.nativeCamera,
+		});
+		return undefined;
+	}
+	if (current !== undefined && current.writable !== true && current.configurable !== true) {
+		addDiagnostic(probe, {
+			code: "native-camera-patch-unavailable",
+			level: "warning",
+			message: "The native Canvas camera's own setViewport method is not replaceable safely.",
+			capability: CANVAS_CAPABILITIES.nativeCamera,
+		});
+		return undefined;
+	}
+	if (current === undefined) {
+		let extensible = false;
+		try {
+			extensible = Object.isExtensible(instance);
+		} catch {
+			extensible = false;
+		}
+		if (!extensible) {
+			addDiagnostic(probe, {
+				code: "native-camera-patch-unavailable",
+				level: "warning",
+				message: "The native Canvas instance is not extensible, so its camera method cannot be scoped safely.",
+				capability: CANVAS_CAPABILITIES.nativeCamera,
+			});
+			return undefined;
+		}
+	}
+
+	// Preserve the exact own descriptor when present.  For the usual native
+	// class method (inherited from the prototype), create a non-enumerable
+	// instance shadow and remove that shadow on dispose.
+	const original = (current?.value ?? nativeCameraShape(instance, probe)?.setViewport) as
+		((...args: unknown[]) => unknown) | undefined;
+	if (typeof original !== "function") {
+		return undefined;
+	}
+	const state: NativeCameraPatch = {
+		runtime: instance,
+		hadOwnMethod: current !== undefined,
+		...(current === undefined ? {} : { originalDescriptor: current }),
+		originalMethod: original,
+		patchedMethod: (() => undefined) as (...args: unknown[]) => unknown,
+		refCount: 1,
+	};
+	const patchedMethod = function(this: unknown, ...args: unknown[]): unknown {
+		const tx = toFiniteNumber(args[0]);
+		const ty = toFiniteNumber(args[1]);
+		const requestedTZoom = toFiniteNumber(args[2]);
+		const boundedTZoom = requestedTZoom === undefined ? undefined : clampNativeSafeTZoom(requestedTZoom);
+		const callArgs = boundedTZoom === undefined
+			? args
+			: [args[0], args[1], boundedTZoom, ...args.slice(3)];
+		return Reflect.apply(original, this, callArgs);
+	};
+	state.patchedMethod = patchedMethod;
+	try {
+		Object.defineProperty(instance, NATIVE_CAMERA_PATCH_KEY, current === undefined ? {
+			configurable: true,
+			enumerable: false,
+			writable: true,
+			value: patchedMethod,
+		} : {
+			...current,
+			value: patchedMethod,
+		});
+	} catch (error) {
+		addDiagnostic(probe, {
+			code: "native-camera-patch-unavailable",
+			level: "warning",
+			message: `The native Canvas camera could not be patched safely: ${describeError(error)}.`,
+			capability: CANVAS_CAPABILITIES.nativeCamera,
+		});
+		return undefined;
+	}
+	nativeCameraPatches.set(instance, state);
+	return () => releaseNativeCameraPatch(state);
+}
+
+function releaseNativeCameraPatch(state: NativeCameraPatch): void {
+	if (state.refCount <= 0) {
+		return;
+	}
+	state.refCount -= 1;
+	if (state.refCount > 0) {
+		return;
+	}
+	try {
+		const current = safeOwnDescriptor(state.runtime, NATIVE_CAMERA_PATCH_KEY);
+		if (current?.value === state.patchedMethod) {
+			if (state.hadOwnMethod && state.originalDescriptor !== undefined) {
+				Object.defineProperty(state.runtime, NATIVE_CAMERA_PATCH_KEY, state.originalDescriptor);
+			} else {
+				Reflect.deleteProperty(state.runtime, NATIVE_CAMERA_PATCH_KEY);
+			}
+		}
+	} catch {
+		// Another integration may have replaced the method.  Never clobber it.
+	}
+	nativeCameraPatches.delete(state.runtime);
 }
 
 function firstDefined(
@@ -390,9 +646,13 @@ function resolveRuntime(view: unknown, probe: MutableProbe): unknown {
 	return undefined;
 }
 
-function detectCapabilities(runtime: unknown, probe: MutableProbe): void {
+function detectCapabilities(runtime: unknown, probe: MutableProbe): CanvasCameraFeatures | undefined {
 	if (!isObject(runtime)) {
-		return;
+		return undefined;
+	}
+	const nativeCamera = nativeCameraShape(runtime, probe) !== undefined;
+	if (nativeCamera) {
+		probe.capabilities.add(CANVAS_CAPABILITIES.nativeCamera);
 	}
 
 	if (valueExists(runtime, ROOT_KEYS, probe, CANVAS_CAPABILITIES.rootElement)) {
@@ -444,6 +704,12 @@ function detectCapabilities(runtime: unknown, probe: MutableProbe): void {
 	) {
 		probe.capabilities.add(CANVAS_CAPABILITIES.viewportMutation);
 	}
+	if (nativeCamera) {
+		// The exact native `setViewport(tx, ty, tZoom)` method is a stronger
+		// mutation signal than the generic alias list above.
+		probe.capabilities.add(CANVAS_CAPABILITIES.viewport);
+		probe.capabilities.add(CANVAS_CAPABILITIES.viewportMutation);
+	}
 
 	if (methodExists(runtime, ["requestRender", "render", "rerender"], probe, CANVAS_CAPABILITIES.render)) {
 		probe.capabilities.add(CANVAS_CAPABILITIES.render);
@@ -454,6 +720,24 @@ function detectCapabilities(runtime: unknown, probe: MutableProbe): void {
 	) {
 		probe.capabilities.add(CANVAS_CAPABILITIES.persistence);
 	}
+	const hasViewport = probe.capabilities.has(CANVAS_CAPABILITIES.viewport);
+	const hasMutation = probe.capabilities.has(CANVAS_CAPABILITIES.viewportMutation);
+	if (!nativeCamera && !hasViewport && !hasMutation) {
+		return undefined;
+	}
+	return nativeCamera
+		? {
+			kind: "native",
+			coordinateMode: "center",
+			zoomMode: "log2",
+			mutation: "positional",
+		}
+		: {
+			kind: "generic",
+			coordinateMode: "transform",
+			zoomMode: "linear",
+			mutation: hasMutation ? "object" : "unsupported",
+		};
 }
 
 function hasUsableRuntime(runtime: unknown, probe: MutableProbe): boolean {
@@ -463,7 +747,10 @@ function hasUsableRuntime(runtime: unknown, probe: MutableProbe): boolean {
 	return probe.capabilities.size > 0;
 }
 
-function createProbe(view: unknown, options: CanvasAdapterOptions = {}): CanvasAdapterProbe & { readonly runtime: unknown } {
+function createProbe(view: unknown, options: CanvasAdapterOptions = {}): CanvasAdapterProbe & {
+	readonly runtime: unknown;
+	readonly camera?: CanvasCameraFeatures;
+} {
 	const probe: MutableProbe = {
 		status: "unavailable",
 		capabilities: new Set<CanvasCapability>(),
@@ -472,6 +759,7 @@ function createProbe(view: unknown, options: CanvasAdapterOptions = {}): CanvasA
 	};
 
 	const runtime = resolveRuntime(view, probe);
+	let camera: CanvasCameraFeatures | undefined;
 	if (runtime === undefined) {
 		addDiagnostic(probe, {
 			code: "native-canvas-missing",
@@ -486,7 +774,7 @@ function createProbe(view: unknown, options: CanvasAdapterOptions = {}): CanvasA
 			message: "The supplied Canvas view has an unrecognised native runtime shape; native capabilities are disabled.",
 		});
 	} else {
-		detectCapabilities(runtime, probe);
+		camera = detectCapabilities(runtime, probe);
 		if (hasUsableRuntime(runtime, probe)) {
 			probe.status = "ready";
 		} else {
@@ -513,11 +801,15 @@ function createProbe(view: unknown, options: CanvasAdapterOptions = {}): CanvasA
 		capabilities: new Set(probe.capabilities),
 		diagnostics: [...probe.diagnostics],
 		runtime,
+		...(camera === undefined ? {} : { camera }),
 	};
 }
 
 function toFiniteNumber(value: unknown): number | undefined {
-	return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+	if (typeof value !== "number" || !Number.isFinite(value)) {
+		return undefined;
+	}
+	return value === 0 ? 0 : value;
 }
 
 function readNumber(
@@ -573,6 +865,57 @@ function normalizeViewport(raw: unknown, probe: MutableProbe): CanvasViewport | 
 		result.height = height;
 	}
 	return result as CanvasViewport;
+}
+
+function nativeViewportSize(
+	runtime: unknown,
+	probe: MutableProbe,
+): { readonly width?: number; readonly height?: number } {
+	const canvasRect = safeRead(runtime, "canvasRect", probe, CANVAS_CAPABILITIES.nativeCamera);
+	let width = readNumber(canvasRect, ["width"], probe, CANVAS_CAPABILITIES.nativeCamera);
+	let height = readNumber(canvasRect, ["height"], probe, CANVAS_CAPABILITIES.nativeCamera);
+	if (width === undefined || height === undefined) {
+		const root = firstDefined(runtime, ROOT_KEYS, probe, CANVAS_CAPABILITIES.rootElement)?.value;
+		const getBoundingClientRect = safeRead(root, "getBoundingClientRect", probe, CANVAS_CAPABILITIES.rootElement);
+		if (typeof getBoundingClientRect === "function") {
+			const rect = safeCall(root, "getBoundingClientRect", [], probe, CANVAS_CAPABILITIES.rootElement);
+			width ??= readNumber(rect, ["width"], probe, CANVAS_CAPABILITIES.rootElement);
+			height ??= readNumber(rect, ["height"], probe, CANVAS_CAPABILITIES.rootElement);
+		}
+	}
+	return {
+		...(width === undefined || width <= 0 ? {} : { width: Math.min(width, Number.MAX_SAFE_INTEGER) }),
+		...(height === undefined || height <= 0 ? {} : { height: Math.min(height, Number.MAX_SAFE_INTEGER) }),
+	};
+}
+
+function readNativeViewport(runtime: unknown, probe: MutableProbe): CanvasViewport | undefined {
+	const shape = nativeCameraShape(runtime, probe);
+	if (shape === undefined) {
+		return undefined;
+	}
+	const zoom = nativeZoomToScale(shape.tZoom);
+	if (zoom === undefined) {
+		addDiagnostic(probe, {
+			code: "native-viewport-invalid",
+			level: "warning",
+			message: "The native Canvas tZoom is outside the finite log2 camera range.",
+			capability: CANVAS_CAPABILITIES.nativeCamera,
+		});
+		return undefined;
+	}
+	const size = nativeViewportSize(runtime, probe);
+	return {
+		x: shape.tx,
+		y: shape.ty,
+		zoom,
+		tx: shape.tx,
+		ty: shape.ty,
+		tZoom: shape.tZoom,
+		coordinateMode: "center",
+		zoomMode: "log2",
+		...size,
+	};
 }
 
 function collectionReadFailure(
@@ -768,21 +1111,38 @@ export class CanvasAdapter {
 	public readonly kind = "native" as const;
 	public readonly view: unknown;
 	private readonly runtime: unknown;
+	private readonly cameraFeaturesValue: CanvasCameraFeatures | undefined;
+	private readonly releaseCameraPatch: (() => void) | undefined;
 	private readonly capabilitySet: Set<CanvasCapability>;
 	private readonly diagnosticList: AdapterDiagnostic[];
 	private readonly diagnosticKeys = new Set<string>();
 	private currentStatus: AdapterStatus;
+	private disposed = false;
 
 	public constructor(view: unknown, options: CanvasAdapterOptions = {}) {
 		this.view = view;
 		const result = createProbe(view, options);
 		this.runtime = result.runtime;
+		this.cameraFeaturesValue = result.camera;
 		this.capabilitySet = new Set(result.capabilities);
 		this.diagnosticList = [...result.diagnostics];
 		for (const diagnostic of this.diagnosticList) {
 			this.diagnosticKeys.add(`${diagnostic.code}:${diagnostic.capability ?? ""}:${diagnostic.message}`);
 		}
 		this.currentStatus = result.status;
+		const shouldPatch = safeRead(options, "patchNativeCamera", this.probeStateForConstructor()) !== false;
+		this.releaseCameraPatch = shouldPatch && this.cameraFeaturesValue?.kind === "native"
+			? installNativeCameraPatch(this.runtime, this.probeStateForConstructor())
+			: undefined;
+	}
+
+	private probeStateForConstructor(): MutableProbe {
+		return {
+			status: this.currentStatus,
+			capabilities: this.capabilitySet,
+			diagnostics: this.diagnosticList,
+			diagnosticKeys: this.diagnosticKeys,
+		};
 	}
 
 	public static probe(view: unknown, options: CanvasAdapterOptions = {}): CanvasAdapterProbe {
@@ -792,6 +1152,7 @@ export class CanvasAdapter {
 			available: result.available,
 			compatible: result.compatible,
 			capabilities: new Set(result.capabilities),
+			...(result.camera === undefined ? {} : { camera: result.camera }),
 			diagnostics: [...result.diagnostics],
 		};
 	}
@@ -825,6 +1186,31 @@ export class CanvasAdapter {
 		return [...this.diagnosticList];
 	}
 
+	/** Explicit camera semantics discovered at construction time. */
+	public get camera(): CanvasCameraFeatures | undefined {
+		return this.cameraFeaturesValue;
+	}
+
+	public get cameraFeatures(): CanvasCameraFeatures | undefined {
+		return this.cameraFeaturesValue;
+	}
+
+	public get coordinateMode(): CanvasCoordinateMode | undefined {
+		return this.cameraFeaturesValue?.coordinateMode;
+	}
+
+	public get zoomMode(): CanvasZoomMode | undefined {
+		return this.cameraFeaturesValue?.zoomMode;
+	}
+
+	public get cameraSemantics(): CanvasCameraFeatures | undefined {
+		return this.cameraFeaturesValue;
+	}
+
+	public get viewportSemantics(): CanvasCameraFeatures | undefined {
+		return this.cameraFeaturesValue;
+	}
+
 	public supports(capability: CanvasCapability | string): boolean {
 		return this.capabilitySet.has(capability as CanvasCapability);
 	}
@@ -835,6 +1221,16 @@ export class CanvasAdapter {
 
 	public getCapabilities(): readonly CanvasCapability[] {
 		return [...this.capabilitySet];
+	}
+
+	/** Restore any scoped native camera patch.  Safe to call repeatedly. */
+	public dispose(): void {
+		if (this.disposed) {
+			return;
+		}
+		this.disposed = true;
+		this.currentStatus = "unavailable";
+		this.releaseCameraPatch?.();
 	}
 
 	private addDiagnostic(diagnostic: AdapterDiagnostic): void {
@@ -950,6 +1346,18 @@ export class CanvasAdapter {
 
 	public getViewport(): CanvasViewport | undefined {
 		const probe = this.probeState();
+		if (this.disposed) {
+			addDiagnostic(probe, {
+				code: "native-adapter-disposed",
+				level: "info",
+				message: "The native Canvas adapter has been disposed; viewport access is disabled.",
+				capability: CANVAS_CAPABILITIES.viewport,
+			});
+			return undefined;
+		}
+		if (this.cameraFeatures?.kind === "native") {
+			return readNativeViewport(this.runtime, probe);
+		}
 		let raw: unknown;
 		for (const method of VIEWPORT_METHOD_KEYS) {
 			raw = safeCall(this.runtime, method, [], probe, CANVAS_CAPABILITIES.viewport);
@@ -982,6 +1390,78 @@ export class CanvasAdapter {
 
 	public setViewport(viewport: CanvasViewport | unknown): boolean {
 		const probe = this.probeState();
+		if (this.disposed) {
+			addDiagnostic(probe, {
+				code: "native-adapter-disposed",
+				level: "info",
+				message: "The native Canvas adapter has been disposed; viewport mutation is disabled.",
+				capability: CANVAS_CAPABILITIES.viewportMutation,
+			});
+			return false;
+		}
+		if (this.cameraFeatures?.kind === "native") {
+			const x = isObject(viewport)
+				? toFiniteNumber(safeRead(viewport, "x", probe, CANVAS_CAPABILITIES.nativeCamera))
+					?? toFiniteNumber(safeRead(viewport, "tx", probe, CANVAS_CAPABILITIES.nativeCamera))
+				: undefined;
+			const y = isObject(viewport)
+				? toFiniteNumber(safeRead(viewport, "y", probe, CANVAS_CAPABILITIES.nativeCamera))
+					?? toFiniteNumber(safeRead(viewport, "ty", probe, CANVAS_CAPABILITIES.nativeCamera))
+				: undefined;
+			const zoom = isObject(viewport) ? toFiniteNumber(safeRead(viewport, "zoom", probe, CANVAS_CAPABILITIES.nativeCamera)) : undefined;
+			const requestedTZoom = isObject(viewport)
+				? toFiniteNumber(safeRead(viewport, "tZoom", probe, CANVAS_CAPABILITIES.nativeCamera))
+				: undefined;
+		// `zoom` is the stable linear-facing field.  A tZoom-only payload is
+			// accepted for native callers, while an adapter/controller payload that
+			// carries both always derives from its requested linear zoom.
+		const tZoom = zoom === undefined
+				? requestedTZoom
+				: nativeScaleToZoom(zoom);
+		const requestedZoom = zoom ?? (tZoom === undefined ? undefined : nativeZoomToScale(tZoom));
+			if (x === undefined || y === undefined || tZoom === undefined || requestedZoom === undefined) {
+				addDiagnostic(probe, {
+					code: "native-viewport-invalid",
+					level: "warning",
+					message: "The requested native Canvas viewport is invalid; no camera change was made.",
+					capability: CANVAS_CAPABILITIES.nativeCamera,
+				});
+				return false;
+			}
+			const boundedTZoom = clampNativeSafeTZoom(tZoom);
+			if (boundedTZoom !== tZoom) {
+				addDiagnostic(probe, {
+					code: "native-camera-range-limited",
+					level: "warning",
+					message: `Native Canvas rendering safely supports tZoom ${NATIVE_SAFE_MIN_T_ZOOM}..${NATIVE_SAFE_MAX_T_ZOOM}; the requested zoom was limited without changing screenshotting or other render flags.`,
+					capability: CANVAS_CAPABILITIES.nativeCamera,
+				});
+			}
+			const result = safeCallResult(
+				this.runtime,
+				NATIVE_CAMERA_PATCH_KEY,
+				[x, y, boundedTZoom],
+				probe,
+				CANVAS_CAPABILITIES.viewportMutation,
+			);
+			if (!result.ok || result.value === false) {
+				return false;
+			}
+			// Do not write camera fields behind the host's method: native Canvas
+			// keeps `zoom` in log2 units and schedules a render-frame clamp.  A
+			// synchronous mismatch is reported instead of guessing a bypass.
+			const observed = nativeCameraShape(this.runtime, probe);
+			if (observed === undefined || observed.tx !== x || observed.ty !== y || observed.tZoom !== boundedTZoom) {
+				addDiagnostic(probe, {
+					code: "native-camera-range-limited",
+					level: "warning",
+					message: "Native Canvas did not apply the requested camera synchronously; no unsafe field recovery was attempted.",
+					capability: CANVAS_CAPABILITIES.nativeCamera,
+				});
+				return false;
+			}
+			return true;
+		}
 		for (const method of ["setViewport", "setViewportTransform", "setViewBox"] as const) {
 			if (typeof safeRead(this.runtime, method, probe, CANVAS_CAPABILITIES.viewportMutation) !== "function") {
 				continue;

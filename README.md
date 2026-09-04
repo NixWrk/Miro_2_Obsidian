@@ -43,8 +43,12 @@ in-memory migrations, an explicit metadata writer with a guarded atomic
 compare-and-swap (CAS) bridge, and a deterministic four-profile compatibility
 matrix with a project-local test vault. The plugin is not production-ready.
 The real-Obsidian gate is still open: native Ctrl+Z/redo behavior and visual or
-interaction verification in the real application have not been claimed. M1
-navigation/safety, M2 authoring, and M3 geometry/rendering remain on the plan.
+interaction verification in the real application have not been claimed. The
+current development checkpoint adds M1 controls (navigation, minimap,
+typography, themes, colors, locks, attachment titles) and initial M2 local
+comments, anchors, and native document-opening tools. Native zoom currently
+stays within 6.25%–200%. Shape creation has a tested transaction model but is
+not wired into the UI; M3 rotation, z-order, and Miro renderers remain pending.
 
 ## Data flow
 
@@ -89,7 +93,7 @@ python -m pip install -r requirements-dev.txt
 python -m playwright install chromium
 ```
 
-### Develop the `miro-canvas` plugin (M0)
+### Develop the `miro-canvas` plugin
 
 From the repository root:
 

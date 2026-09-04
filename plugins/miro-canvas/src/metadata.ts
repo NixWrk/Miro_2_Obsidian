@@ -14,6 +14,7 @@ import {
   isValidFontSize,
   isValidLineHeight,
 } from "./appearance";
+import { normalizeAnchor } from "./anchors";
 import type {
   AppearanceColor,
   PaletteColor,
@@ -139,14 +140,43 @@ export interface MiroCanvasLocalComment {
   readonly body?: string;
   readonly origin?: string;
   readonly resolved?: boolean;
+  readonly createdAt?: string;
+  readonly updatedAt?: string;
+  readonly resolvedAt?: string | null;
+  readonly immutable?: boolean;
+  readonly author?: Readonly<Record<string, unknown>>;
+  readonly anchor?: Readonly<Record<string, unknown>>;
+  readonly replies?: readonly MiroCanvasLocalCommentReply[];
+  readonly source?: unknown;
+  readonly [key: string]: unknown;
+}
+
+export interface MiroCanvasLocalCommentReply {
+  readonly id?: string;
+  readonly text?: string;
+  readonly body?: string;
+  readonly content?: string;
+  readonly origin?: string;
+  readonly createdAt?: string;
+  readonly updatedAt?: string;
+  readonly immutable?: boolean;
+  readonly author?: Readonly<Record<string, unknown>>;
   readonly [key: string]: unknown;
 }
 
 export interface MiroCanvasFreeAnchor {
+  readonly id?: string;
+  readonly type?: "free" | "node" | "image" | "edge" | string;
+  readonly nodeId?: string;
+  readonly edgeId?: string;
   readonly x?: number;
   readonly y?: number;
   readonly u?: number;
   readonly v?: number;
+  readonly t?: number;
+  readonly createdAt?: string;
+  readonly updatedAt?: string;
+  readonly source?: unknown;
   readonly [key: string]: unknown;
 }
 
@@ -252,8 +282,28 @@ const COMMENT_FIELDS = new Set([
   "sourceId",
   "text",
   "body",
+  "content",
   "origin",
   "resolved",
+  "createdAt",
+  "updatedAt",
+  "resolvedAt",
+  "immutable",
+  "author",
+  "anchor",
+  "replies",
+  "source",
+]);
+const COMMENT_REPLY_FIELDS = new Set([
+  "id",
+  "text",
+  "body",
+  "content",
+  "origin",
+  "createdAt",
+  "updatedAt",
+  "immutable",
+  "author",
 ]);
 
 const ANCHOR_NUMBER_FIELDS = new Set(["x", "y", "u", "v"]);
@@ -542,6 +592,20 @@ function validateStringIfPresent(
   if (property.state === "error") {
     addError(diagnostics, "property-read-failed", pathFor(path, field), "The property could not be read safely.");
   } else if (property.state === "present") {
+    requireNonEmptyString(property.value, pathFor(path, field), diagnostics);
+  }
+}
+
+function validateNullableStringIfPresent(
+  record: UnknownRecord,
+  field: string,
+  path: string,
+  diagnostics: MiroCanvasDiagnostic[],
+): void {
+  const property = readOwn(record, field);
+  if (property.state === "error") {
+    addError(diagnostics, "property-read-failed", pathFor(path, field), "The property could not be read safely.");
+  } else if (property.state === "present" && property.value !== null) {
     requireNonEmptyString(property.value, pathFor(path, field), diagnostics);
   }
 }
@@ -927,6 +991,66 @@ function validateLocalOverrides(
   }
 }
 
+function validateAnchorValue(
+  value: unknown,
+  path: string,
+  diagnostics: MiroCanvasDiagnostic[],
+): void {
+  if (!isRecord(value)) {
+    addError(diagnostics, "object-expected", path, "Anchor must be an object.");
+    return;
+  }
+  const type = readOwn(value, "type");
+  if (type.state === "error") {
+    addError(diagnostics, "property-read-failed", pathFor(path, "type"), "The anchor type could not be read safely.");
+    return;
+  }
+  if (type.state === "absent") {
+    // M0 accepted a coordinate-only free point.  Keep it readable while all
+    // typed M1/M2 anchors use normalizeAnchor's stricter contract.
+    for (const field of ["x", "y"]) {
+      const coordinate = readOwn(value, field);
+      if (coordinate.state === "error") {
+        addError(diagnostics, "property-read-failed", pathFor(path, field), "The anchor coordinate could not be read safely.");
+      } else if (coordinate.state === "present") {
+        requireFiniteNumber(coordinate.value, pathFor(path, field), diagnostics);
+      }
+    }
+    return;
+  }
+  const normalized = normalizeAnchor(value);
+  if (!normalized.valid) {
+    addError(diagnostics, "anchor-invalid", path, "Anchor type, target, or normalized coordinates are invalid.");
+  }
+}
+
+function validateCommentReplies(
+  value: unknown,
+  path: string,
+  diagnostics: MiroCanvasDiagnostic[],
+): void {
+  if (!isArray(value)) {
+    addError(diagnostics, "array-expected", path, "Comment replies must be an array.");
+    return;
+  }
+  forEachArrayIndex(value, path, diagnostics, (reply, index) => {
+    const replyPath = `${path}[${index}]`;
+    if (!isRecord(reply)) {
+      addError(diagnostics, "object-expected", replyPath, "Each comment reply must be an object.");
+      return;
+    }
+    warnUnknownFields(reply, COMMENT_REPLY_FIELDS, replyPath, diagnostics);
+    validateStringIfPresent(reply, "id", replyPath, diagnostics);
+    validateStringIfPresent(reply, "text", replyPath, diagnostics);
+    validateStringIfPresent(reply, "body", replyPath, diagnostics);
+    validateStringIfPresent(reply, "content", replyPath, diagnostics);
+    validateStringIfPresent(reply, "origin", replyPath, diagnostics);
+    validateStringIfPresent(reply, "createdAt", replyPath, diagnostics);
+    validateStringIfPresent(reply, "updatedAt", replyPath, diagnostics);
+    validateBooleanIfPresent(reply, "immutable", replyPath, diagnostics);
+  });
+}
+
 function validateComments(
   value: unknown,
   path: string,
@@ -948,8 +1072,25 @@ function validateComments(
     validateStringIfPresent(comment, "sourceId", commentPath, diagnostics);
     validateStringIfPresent(comment, "text", commentPath, diagnostics);
     validateStringIfPresent(comment, "body", commentPath, diagnostics);
+    validateStringIfPresent(comment, "content", commentPath, diagnostics);
     validateStringIfPresent(comment, "origin", commentPath, diagnostics);
     validateBooleanIfPresent(comment, "resolved", commentPath, diagnostics);
+    validateStringIfPresent(comment, "createdAt", commentPath, diagnostics);
+    validateStringIfPresent(comment, "updatedAt", commentPath, diagnostics);
+    validateNullableStringIfPresent(comment, "resolvedAt", commentPath, diagnostics);
+    validateBooleanIfPresent(comment, "immutable", commentPath, diagnostics);
+    const anchor = readOwn(comment, "anchor");
+    if (anchor.state === "error") {
+      addError(diagnostics, "property-read-failed", pathFor(commentPath, "anchor"), "The comment anchor could not be read safely.");
+    } else if (anchor.state === "present") {
+      validateAnchorValue(anchor.value, pathFor(commentPath, "anchor"), diagnostics);
+    }
+    const replies = readOwn(comment, "replies");
+    if (replies.state === "error") {
+      addError(diagnostics, "property-read-failed", pathFor(commentPath, "replies"), "The comment replies could not be read safely.");
+    } else if (replies.state === "present") {
+      validateCommentReplies(replies.value, pathFor(commentPath, "replies"), diagnostics);
+    }
   });
 }
 
@@ -984,12 +1125,20 @@ function validateFreeAnchors(
       continue;
     }
 
-    for (const field of ANCHOR_NUMBER_FIELDS) {
-      const coordinate = readOwn(property.value, field);
-      if (coordinate.state === "error") {
-        addError(diagnostics, "property-read-failed", pathFor(anchorPath, field), "The property could not be read safely.");
-      } else if (coordinate.state === "present") {
-        requireFiniteNumber(coordinate.value, pathFor(anchorPath, field), diagnostics);
+    const type = readOwn(property.value, "type");
+    if (type.state === "error") {
+      addError(diagnostics, "property-read-failed", pathFor(anchorPath, "type"), "The anchor type could not be read safely.");
+    } else if (type.state === "present") {
+      validateAnchorValue(property.value, anchorPath, diagnostics);
+    } else {
+      // M0 accepted coordinate-only free points; keep those values readable.
+      for (const field of ANCHOR_NUMBER_FIELDS) {
+        const coordinate = readOwn(property.value, field);
+        if (coordinate.state === "error") {
+          addError(diagnostics, "property-read-failed", pathFor(anchorPath, field), "The property could not be read safely.");
+        } else if (coordinate.state === "present") {
+          requireFiniteNumber(coordinate.value, pathFor(anchorPath, field), diagnostics);
+        }
       }
     }
   }

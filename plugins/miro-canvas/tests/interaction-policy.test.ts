@@ -120,4 +120,3 @@ describe("M1 interaction policy", () => {
 		expect(canEdit({ settings: { reviewMode: false } }, { operation: "delete", elementId: "node" })).toBe(true);
 	});
 });
-

@@ -2,8 +2,8 @@
 
 [English] | [Full Russian specification](miro-canvas.ru.md)
 
-`miro-canvas` is an offline Obsidian plugin under active M0 implementation that
-will extend any native Canvas. On an ordinary board it is planned to add richer
+`miro-canvas` is an offline Obsidian plugin under active development that
+extends native Canvas. On an ordinary board it is intended to add richer
 editing, comments, locking, themes, colors, shapes, connector anchors, and a
 clickable minimap. A future implementation is intended to render an imported
 Miro snapshot more faithfully when a local Canvas contains `miroSource`, without
@@ -24,8 +24,22 @@ project-local test vault harness.
 
 M0 is not production-ready yet. The real-Obsidian gate remains open: native
 Ctrl+Z/redo behavior for metadata actions and real visual/interaction
-verification have not been claimed. M1 navigation/safety, M2 authoring, and M3
-geometry/rendering remain future work.
+verification have not been claimed.
+
+The current development checkpoint includes M1 navigation controls, a clickable
+minimap, typography, board themes, colors, locks/review mode, and attachment
+title visibility. Native zoom is safely limited to 6.25%–200%; unrestricted zoom
+is not implemented. The Chromium DOM smoke covers the M1 controls against a
+synthetic native host, not the real Obsidian runtime.
+
+Initial M2 tools are available through **Local comments, anchors and documents**
+in the command palette: local comment editing/replies/resolution, anchor
+metadata, and opening selected local file nodes in Obsidian. Imported comments
+remain read-only. PDF page/fit controls depend on the detected native viewer;
+unsupported fit APIs produce a diagnostic. Connector endpoint editing, edge
+anchor navigation, and full M2 interaction verification remain pending. Shape
+creation has a tested native graph transaction model but no UI integration yet.
+M3 rotation, z-order, and source-backed Miro renderers are not implemented.
 
 To run the plugin checks from the repository root:
 
@@ -57,6 +71,12 @@ only the built `manifest.json`, `main.js`, and `styles.css` into
 and link/reparse-point paths are refused. Advanced Canvas receives a placeholder
 manifest unless its real runtime is copied or installed separately; therefore a
 successful offline matrix check is not a real-Obsidian visual pass.
+
+Setup additionally stages `m1-daily.canvas` with a local attachment, a locked
+item, typography overrides, and a distant minimap target. Repeating setup keeps
+existing daily-board edits. `python -m tools.obsidian_oracle.smoke_plugin_ui`
+checks the actual plugin UI against Chromium DOM and a synthetic Canvas host;
+it is a browser integration check, not a real-Obsidian compatibility pass.
 
 ### M0 profile activation and checks
 
@@ -399,25 +419,25 @@ and covered by automated tests.
 - [ ] Open the project vault in real Obsidian and verify visual/interaction
   behavior, including native Ctrl+Z/Ctrl+Y replay and the final screenshots.
 
-### M1: navigation and safety
+### M1: daily Canvas tools
 
 - Integrate the zoom-unlock behavior.
 - Add the clickable minimap and viewport rectangle.
 - Add element locking and board review mode.
+- Add typography controls, themes, expanded colors, and attachment-name toggles.
 - Verify large-board performance and keyboard accessibility.
 
 ### M2: editing fundamentals
 
-- Add typography controls without inline HTML.
-- Add theme switching and the expanded color picker.
-- Add attachment-name visibility settings.
 - Add local comments and anchors.
+- Add local shape creation with standard Canvas fallbacks.
+- Add safe local document viewing and open-original controls.
 
 ### M3: geometry fidelity
 
 - Add rotation and z-order.
-- Add the shape registry and shape editing.
-- Add rich connector rendering, caps, control points, and free anchors.
+- Add source-backed Miro shape, text, sticky, connector, frame, and media renderers.
+- Use explicit diagnostics whenever source payload cannot support exact rendering.
 
 ### M4: structured content
 

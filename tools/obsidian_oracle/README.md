@@ -56,6 +56,22 @@ built `manifest.json`, `main.js`, and `styles.css` into the local
 activation are guarded/atomic at their respective boundaries; no source tree is
 linked into the vault.
 
+Setup also stages `m1-daily.canvas` and its local Markdown attachment in the
+same directory. This board covers typography, a locked item, attachment labels,
+and a distant item for minimap navigation. Existing daily boards and attachments
+are never overwritten, so manual test edits survive another setup.
+
+For a fast browser DOM integration check, run:
+
+```powershell
+python -m tools.obsidian_oracle.smoke_plugin_ui
+```
+
+It bundles the actual plugin session, mounts it on real Chromium DOM with a
+synthetic native host, checks explicit writes/history/navigation/teardown, and
+writes `.out/m1-browser.png`. It does not load Obsidian or prove private native
+API compatibility; the real-app gate below remains separate.
+
 The setup creates a placeholder Advanced Canvas manifest when no real runtime
 is present. Install or copy a pinned, hash-verified Advanced Canvas runtime
 before a real Advanced profile check:

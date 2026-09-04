@@ -10,11 +10,13 @@ try:  # Direct script execution keeps compatibility with existing oracle tools.
     from .install_miro_canvas_runtime import install_miro_canvas_runtime
     from .stage_compatibility_fixture import stage_all_profiles
     from .open_local_vault import inspect_registration, registration_instructions
+    from .stage_daily_fixture import stage_daily_fixture
 except ImportError:  # pragma: no cover - exercised by ``python path\tool.py``.
     from init_local_vault import initialize_local_vault
     from install_miro_canvas_runtime import install_miro_canvas_runtime
     from stage_compatibility_fixture import stage_all_profiles
     from open_local_vault import inspect_registration, registration_instructions
+    from stage_daily_fixture import stage_daily_fixture
 
 
 def setup_m0_vault(
@@ -29,6 +31,7 @@ def setup_m0_vault(
     if not skip_runtime:
         install_miro_canvas_runtime(vault, source_plugin_dir=source_plugin_dir, logger=print)
     paths = stage_all_profiles(vault)
+    stage_daily_fixture()
     return vault, paths
 
 

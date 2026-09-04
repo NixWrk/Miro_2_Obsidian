@@ -41,8 +41,13 @@ M0: native Canvas adapter, optional Advanced Canvas adapter, версионир�
 atomic compare-and-swap (CAS) bridge, а также детерминированная матрица из
 четырёх профилей и project-local test vault. Плагин пока не production-ready.
 Real-Obsidian gate остаётся открытым: поведение native Ctrl+Z/redo и визуальная
-или интерактивная проверка в настоящем приложении пока не заявляются. В планах
-остаются navigation/safety M1, authoring M2 и geometry/rendering M3.
+или интерактивная проверка в настоящем приложении пока не заявляются. Текущий
+этап разработки добавляет интерфейс M1 (навигация, minimap, типографика, темы,
+цвета, блокировки, названия вложений) и начальные инструменты M2: локальные
+комментарии, anchors и открытие документов штатными средствами Obsidian.
+Native zoom пока ограничен диапазоном 6,25%–200%. Для создания фигур есть
+протестированная модель транзакций, но нет подключения к UI. M3: rotation,
+z-order и Miro renderers — ещё впереди.
 
 ## Схема данных
 
@@ -76,7 +81,7 @@ python -m pip install -r requirements-dev.txt
 python -m playwright install chromium
 ```
 
-### Разработка плагина `miro-canvas` (M0)
+### Разработка плагина `miro-canvas`
 
 Из корня репозитория:
 
