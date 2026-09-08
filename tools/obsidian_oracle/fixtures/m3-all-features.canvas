@@ -1,0 +1,633 @@
+{
+  "nodes": [
+    {
+      "id": "qa-guide",
+      "type": "text",
+      "x": -1180,
+      "y": -820,
+      "width": 720,
+      "height": 680,
+      "text": "# Miro Canvas M1-M3 acceptance board\n\nUse **Fit board** and open **Miro Canvas controls**.\n\n- [ ] Plugin status is `ready/valid/ready/ready`\n- [ ] Six local M2 shapes render distinctly\n- [ ] Comments show unresolved, replies and resolved states\n- [ ] Free/node/image/edge anchors are listed in M2 tools\n- [ ] Local document opens; image stays local\n- [ ] Rotations include local `0`, local negative and source geometry\n- [ ] Overlap reads FRONT over MIDDLE over BACK\n- [ ] Source-backed shape, text, sticky, frame, document, image and connector render\n- [ ] Unknown shape falls back without losing `miroSource`\n- [ ] Review mode is off; locked item is protected\n- [ ] Make one edit, then Undo and Redo; metadata and source remain intact",
+      "futureNodeField": {
+        "sentinel": "keep-guide-node"
+      }
+    },
+    {
+      "id": "local-rectangle",
+      "type": "text",
+      "x": -320,
+      "y": -800,
+      "width": 280,
+      "height": 150,
+      "text": "## Rectangle\nLocal M2 shape"
+    },
+    {
+      "id": "local-round-rectangle",
+      "type": "text",
+      "x": 0,
+      "y": -800,
+      "width": 280,
+      "height": 150,
+      "text": "## Round rectangle\nLocal M2 shape"
+    },
+    {
+      "id": "local-ellipse",
+      "type": "text",
+      "x": 320,
+      "y": -800,
+      "width": 280,
+      "height": 150,
+      "text": "## Ellipse\nLocal M2 shape"
+    },
+    {
+      "id": "local-triangle",
+      "type": "text",
+      "x": 640,
+      "y": -800,
+      "width": 280,
+      "height": 150,
+      "text": "## Triangle\nLocal M2 shape"
+    },
+    {
+      "id": "local-diamond",
+      "type": "text",
+      "x": 960,
+      "y": -800,
+      "width": 280,
+      "height": 150,
+      "text": "## Diamond\nLocal M2 shape"
+    },
+    {
+      "id": "local-star",
+      "type": "text",
+      "x": 1280,
+      "y": -800,
+      "width": 280,
+      "height": 150,
+      "text": "## Star\nLocal rotation: -30°"
+    },
+    {
+      "id": "source-shape-node",
+      "type": "text",
+      "x": -320,
+      "y": -540,
+      "width": 280,
+      "height": 170,
+      "text": "## Source shape\nBound ID; local rotation 0° overrides source 38°"
+    },
+    {
+      "id": "source-text",
+      "type": "text",
+      "x": 0,
+      "y": -540,
+      "width": 280,
+      "height": 170,
+      "text": "## Source text\nGeometry rotation: -18°\nNative Markdown remains editable."
+    },
+    {
+      "id": "source-sticky",
+      "type": "text",
+      "x": 320,
+      "y": -540,
+      "width": 280,
+      "height": 170,
+      "text": "## Source sticky\nTop-level rotation: 12°"
+    },
+    {
+      "id": "source-frame",
+      "type": "group",
+      "x": 640,
+      "y": -560,
+      "width": 280,
+      "height": 210,
+      "label": "Source-backed frame"
+    },
+    {
+      "id": "source-document",
+      "type": "file",
+      "x": 960,
+      "y": -540,
+      "width": 280,
+      "height": 190,
+      "file": "$ASSET/m1-attachment.md"
+    },
+    {
+      "id": "source-image",
+      "type": "file",
+      "x": 1280,
+      "y": -540,
+      "width": 280,
+      "height": 190,
+      "file": "$ASSET/m3-image.svg"
+    },
+    {
+      "id": "source-unknown-shape",
+      "type": "text",
+      "x": 1600,
+      "y": -540,
+      "width": 280,
+      "height": 190,
+      "text": "## Unknown shape\n`future_hexagon` should use a safe fallback"
+    },
+    {
+      "id": "comment-target",
+      "type": "text",
+      "x": 420,
+      "y": -170,
+      "width": 400,
+      "height": 230,
+      "text": "# Comments + anchors\n\nUnresolved comment with replies is anchored here. Resolved and free-point examples are stored too."
+    },
+    {
+      "id": "locked-item",
+      "type": "text",
+      "x": 870,
+      "y": -160,
+      "width": 350,
+      "height": 210,
+      "text": "# Locked item\n\nTry moving, editing or deleting it, then unlock through Miro Canvas controls."
+    },
+    {
+      "id": "z-back",
+      "type": "text",
+      "x": -310,
+      "y": -150,
+      "width": 360,
+      "height": 230,
+      "text": "# BACK\nLowest layer"
+    },
+    {
+      "id": "z-middle",
+      "type": "text",
+      "x": -240,
+      "y": -90,
+      "width": 360,
+      "height": 230,
+      "text": "# MIDDLE\nMiddle layer"
+    },
+    {
+      "id": "z-front",
+      "type": "text",
+      "x": -170,
+      "y": -30,
+      "width": 360,
+      "height": 230,
+      "text": "# FRONT\nHighest layer"
+    },
+    {
+      "id": "undo-check",
+      "type": "text",
+      "x": 1280,
+      "y": -150,
+      "width": 600,
+      "height": 220,
+      "text": "# Undo / redo check\n\nSelect this node. Apply rotation or a color in Miro Canvas controls, press **Ctrl+Z**, then **Ctrl+Y**. The change must disappear and return while source and future metadata remain."
+    }
+  ],
+  "edges": [
+    {
+      "id": "edge-node-anchor",
+      "fromNode": "local-rectangle",
+      "fromSide": "bottom",
+      "toNode": "comment-target",
+      "toSide": "top",
+      "toEnd": "arrow",
+      "label": "node anchor",
+      "futureEdgeField": {
+        "sentinel": "keep-edge"
+      }
+    },
+    {
+      "id": "edge-image-anchor",
+      "fromNode": "comment-target",
+      "fromSide": "right",
+      "toNode": "source-image",
+      "toSide": "bottom",
+      "toEnd": "arrow",
+      "label": "image anchor"
+    },
+    {
+      "id": "source-connector",
+      "fromNode": "source-text",
+      "fromSide": "bottom",
+      "toNode": "source-document",
+      "toSide": "bottom",
+      "toEnd": "arrow",
+      "label": "source-backed connector"
+    }
+  ],
+  "miroCanvas": {
+    "schemaVersion": 1,
+    "settings": {
+      "displayTheme": "system",
+      "reviewMode": false,
+      "showAttachmentNames": true,
+      "minimapVisible": true,
+      "futureSetting": {
+        "sentinel": "keep-setting"
+      }
+    },
+    "bindings": {
+      "source-shape-node": {
+        "sourceId": "miro-shape-01",
+        "role": "item",
+        "futureBindingField": "keep-binding"
+      }
+    },
+    "zOrder": [
+      "qa-guide",
+      "local-rectangle",
+      "local-round-rectangle",
+      "local-ellipse",
+      "local-triangle",
+      "local-diamond",
+      "local-star",
+      "source-shape-node",
+      "source-text",
+      "source-sticky",
+      "source-frame",
+      "source-document",
+      "source-image",
+      "source-unknown-shape",
+      "comment-target",
+      "locked-item",
+      "z-back",
+      "z-middle",
+      "z-front",
+      "undo-check",
+      "edge-node-anchor",
+      "edge-image-anchor",
+      "source-connector"
+    ],
+    "localOverrides": {
+      "local-rectangle": {
+        "shape": {
+          "kind": "rectangle",
+          "fallback": "text",
+          "futureShapeField": "keep-shape"
+        },
+        "colors": {
+          "fill": "#E5F1FF",
+          "border": "#4262FF",
+          "text": "#17365D"
+        },
+        "typography": {
+          "fontFamily": "Georgia",
+          "fontSize": 20,
+          "format": {
+            "bold": true
+          }
+        },
+        "futureOverrideField": {
+          "sentinel": "keep-override"
+        }
+      },
+      "local-round-rectangle": {
+        "shape": {
+          "kind": "round_rectangle",
+          "fallback": "text"
+        },
+        "colors": {
+          "fill": "#FFF3D6",
+          "border": "#FF9D48"
+        }
+      },
+      "local-ellipse": {
+        "shape": {
+          "kind": "ellipse",
+          "fallback": "text"
+        },
+        "colors": {
+          "fill": "#E7F8F0",
+          "border": "#67C6A0"
+        }
+      },
+      "local-triangle": {
+        "shape": {
+          "kind": "triangle",
+          "fallback": "text"
+        },
+        "colors": {
+          "fill": "#F4EAFE",
+          "border": "#9B51E0"
+        }
+      },
+      "local-diamond": {
+        "shape": {
+          "kind": "diamond",
+          "fallback": "text"
+        },
+        "colors": {
+          "fill": "#FFE9E3",
+          "border": "#F24726"
+        }
+      },
+      "local-star": {
+        "shape": {
+          "kind": "star",
+          "fallback": "text"
+        },
+        "rotation": -30,
+        "colors": {
+          "fill": "#FFF8CC",
+          "border": "#D6A900"
+        }
+      },
+      "source-shape-node": {
+        "rotation": 0,
+        "colors": {
+          "fill": "#DDE7FF",
+          "border": "#2948B8"
+        }
+      },
+      "source-document": {
+        "showAttachmentName": false
+      },
+      "source-image": {
+        "showAttachmentName": true
+      },
+      "locked-item": {
+        "locked": true,
+        "colors": {
+          "fill": "#F1F1F1",
+          "border": "#555555"
+        }
+      },
+      "z-back": {
+        "shape": {
+          "kind": "rectangle",
+          "fallback": "text"
+        },
+        "colors": {
+          "fill": "#DDE7FF",
+          "border": "#4262FF"
+        }
+      },
+      "z-middle": {
+        "shape": {
+          "kind": "round_rectangle",
+          "fallback": "text"
+        },
+        "colors": {
+          "fill": "#FFF3D6",
+          "border": "#FF9D48"
+        }
+      },
+      "z-front": {
+        "shape": {
+          "kind": "ellipse",
+          "fallback": "text"
+        },
+        "colors": {
+          "fill": "#E7F8F0",
+          "border": "#2F8A68"
+        }
+      },
+      "edge-node-anchor": {
+        "connectorAnchors": {
+          "from": {
+            "type": "node",
+            "nodeId": "local-rectangle",
+            "u": 0.5,
+            "v": 1,
+            "futureAnchorField": "keep-connector-anchor"
+          },
+          "to": {
+            "type": "edge",
+            "edgeId": "source-connector",
+            "t": 0.5
+          }
+        }
+      },
+      "edge-image-anchor": {
+        "connectorAnchors": {
+          "from": {
+            "type": "free",
+            "x": 840,
+            "y": -40
+          },
+          "to": {
+            "type": "image",
+            "nodeId": "source-image",
+            "u": 0.5,
+            "v": 1
+          }
+        }
+      }
+    },
+    "localComments": [
+      {
+        "id": "comment-open",
+        "text": "Unresolved local comment on the comment target.",
+        "origin": "local",
+        "resolved": false,
+        "createdAt": "2026-09-08T09:00:00.000Z",
+        "anchor": {
+          "type": "node",
+          "nodeId": "comment-target",
+          "u": 0.75,
+          "v": 0.25
+        },
+        "replies": [
+          {
+            "id": "reply-1",
+            "text": "First local reply.",
+            "origin": "local",
+            "createdAt": "2026-09-08T09:05:00.000Z",
+            "futureReplyField": "keep-reply"
+          },
+          {
+            "id": "reply-2",
+            "text": "Second local reply.",
+            "origin": "local",
+            "createdAt": "2026-09-08T09:10:00.000Z"
+          }
+        ],
+        "futureCommentField": {
+          "sentinel": "keep-comment"
+        }
+      },
+      {
+        "id": "comment-resolved",
+        "text": "Resolved comment anchored to an edge.",
+        "origin": "local",
+        "resolved": true,
+        "createdAt": "2026-09-08T10:00:00.000Z",
+        "resolvedAt": "2026-09-08T10:30:00.000Z",
+        "anchor": {
+          "type": "edge",
+          "edgeId": "edge-node-anchor",
+          "t": 0.5
+        },
+        "replies": []
+      },
+      {
+        "id": "comment-free",
+        "text": "Free-position comment.",
+        "origin": "local",
+        "resolved": false,
+        "createdAt": "2026-09-08T11:00:00.000Z",
+        "anchor": {
+          "type": "free",
+          "x": 1510,
+          "y": 130
+        },
+        "replies": []
+      }
+    ],
+    "freeAnchors": {
+      "anchor-free": {
+        "id": "anchor-free",
+        "type": "free",
+        "x": 1510,
+        "y": 130,
+        "futureAnchorField": "keep-free-anchor"
+      },
+      "anchor-node": {
+        "id": "anchor-node",
+        "type": "node",
+        "nodeId": "local-star",
+        "u": 0.5,
+        "v": 0.5
+      },
+      "anchor-image": {
+        "id": "anchor-image",
+        "type": "image",
+        "nodeId": "source-image",
+        "u": 0.25,
+        "v": 0.75
+      },
+      "anchor-edge": {
+        "id": "anchor-edge",
+        "type": "edge",
+        "edgeId": "source-connector",
+        "t": 0.4
+      }
+    },
+    "futureMetadataField": {
+      "sentinel": "keep-metadata"
+    }
+  },
+  "miroSource": {
+    "board": {
+      "id": "offline-acceptance-board",
+      "name": "M1-M3 acceptance fixture"
+    },
+    "items": [
+      {
+        "id": "miro-shape-01",
+        "type": "shape",
+        "subtype": "star",
+        "geometry": {
+          "rotation": 38
+        },
+        "style": {
+          "fillColor": "#DDE7FF",
+          "borderColor": "#2948B8",
+          "borderWidth": "3"
+        },
+        "futureSourceItemField": {
+          "sentinel": "keep-source-shape"
+        }
+      },
+      {
+        "id": "source-text",
+        "type": "text",
+        "geometry": {
+          "rotation": -18
+        },
+        "style": {
+          "color": "#17365D",
+          "fontFamily": "Georgia",
+          "fontSize": "20",
+          "fontWeight": "600"
+        },
+        "futureSourceItemField": "keep-source-text"
+      },
+      {
+        "id": "source-sticky",
+        "type": "sticky_note",
+        "rotation": 12,
+        "style": {
+          "fillColor": "#FFF3D6",
+          "color": "#5A3A00"
+        }
+      },
+      {
+        "id": "source-frame",
+        "type": "frame",
+        "style": {
+          "borderColor": "#9B51E0",
+          "borderWidth": "3"
+        }
+      },
+      {
+        "id": "source-document",
+        "type": "document",
+        "style": {
+          "borderColor": "#4262FF",
+          "borderWidth": "2"
+        }
+      },
+      {
+        "id": "source-image",
+        "type": "image",
+        "style": {
+          "borderColor": "#2F8A68",
+          "borderWidth": "4"
+        }
+      },
+      {
+        "id": "source-unknown-shape",
+        "type": "shape",
+        "subtype": "future_hexagon",
+        "style": {
+          "fillColor": "#F1F1F1",
+          "borderColor": "#777777"
+        },
+        "futureSourceItemField": {
+          "sentinel": "keep-unknown-shape"
+        }
+      }
+    ],
+    "connectors": [
+      {
+        "id": "source-connector",
+        "type": "connector",
+        "shape": "curved",
+        "style": {
+          "strokeColor": "#884422",
+          "strokeWidth": "3",
+          "strokeStyle": "dashed",
+          "endStrokeCap": "arrow"
+        },
+        "futureSourceConnectorField": {
+          "sentinel": "keep-source-connector"
+        }
+      }
+    ],
+    "comments": [
+      {
+        "id": "miro-comment-readonly",
+        "content": "Imported source comment remains immutable evidence.",
+        "futureSourceCommentField": "keep-source-comment"
+      }
+    ],
+    "zOrder": [
+      "miro-shape-01",
+      "source-text",
+      "source-sticky",
+      "source-frame",
+      "source-document",
+      "source-image",
+      "source-unknown-shape",
+      "source-connector"
+    ],
+    "futureSourceField": {
+      "sentinel": "keep-source-root"
+    }
+  },
+  "futureRootField": {
+    "sentinel": "keep-root"
+  }
+}
