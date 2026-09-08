@@ -255,6 +255,8 @@ export default class MiroCanvasPlugin extends Plugin {
     this.toolsModal?.close();
     const modal = new Modal(this.app);
     this.toolsModal = modal;
+    modal.modalEl.classList.add("miro-canvas-local-tools-modal");
+    modal.contentEl.classList.add("miro-canvas-local-tools-modal__content");
     modal.setTitle("Miro Canvas · Local tools");
     const tools = new M2CanvasTools(session, createObsidianDocumentHost(
       this.app, (message) => new Notice(message), (value): value is TFile => value instanceof TFile,

@@ -107,7 +107,7 @@ export class M2CanvasTools {
     this.element.append(this.status);
 
     const shapeFields = document.createElement("fieldset");
-    shapeFields.className = "miro-canvas-m2-tools__section";
+    shapeFields.className = "miro-canvas-m2-tools__section miro-canvas-m2-tools__section--shape";
     const shapeLegend = document.createElement("legend");
     shapeLegend.textContent = "Create shape";
     shapeFields.append(shapeLegend);
@@ -138,6 +138,7 @@ export class M2CanvasTools {
     const createShape = document.createElement("button");
     createShape.type = "button";
     createShape.textContent = "Create shape";
+    createShape.className = "miro-canvas-m2-tools__primary-action";
     createShape.addEventListener("click", () => {
       const readNumber = (input: HTMLInputElement, label: string, positive = false): number | undefined => {
         const raw = input.value.trim();
@@ -177,7 +178,7 @@ export class M2CanvasTools {
     this.element.append(shapeFields);
 
     const anchorFields = document.createElement("fieldset");
-    anchorFields.className = "miro-canvas-m2-tools__section";
+    anchorFields.className = "miro-canvas-m2-tools__section miro-canvas-m2-tools__section--anchor";
     const legend = document.createElement("legend");
     legend.textContent = "Anchor coordinates (board X/Y or relative U/V, edge T)";
     anchorFields.append(legend);
@@ -197,6 +198,7 @@ export class M2CanvasTools {
     const save = document.createElement("button");
     save.textContent = "Save anchor";
     save.type = "button";
+    save.className = "miro-canvas-m2-tools__primary-action";
     save.addEventListener("click", () => {
       if (this.anchorKind === undefined) { this.status.textContent = "Choose an anchor type below first."; return; }
       const current = this.currentAnchor(true);
@@ -207,7 +209,7 @@ export class M2CanvasTools {
     this.element.append(anchorFields);
 
     const connectorFields = document.createElement("fieldset");
-    connectorFields.className = "miro-canvas-m2-tools__section";
+    connectorFields.className = "miro-canvas-m2-tools__section miro-canvas-m2-tools__section--connector";
     const connectorLegend = document.createElement("legend");
     connectorLegend.textContent = "Connector endpoint";
     connectorFields.append(connectorLegend);
@@ -225,6 +227,7 @@ export class M2CanvasTools {
     const setEndpoint = document.createElement("button");
     setEndpoint.type = "button";
     setEndpoint.textContent = "Set connector endpoint";
+    setEndpoint.className = "miro-canvas-m2-tools__primary-action";
     setEndpoint.addEventListener("click", () => {
       if (this.anchorKind === undefined) { this.status.textContent = "Choose an anchor before editing a connector endpoint."; return; }
       if (this.connectorEdge.value.length === 0) { this.status.textContent = "Choose a connector to edit."; return; }
@@ -243,13 +246,15 @@ export class M2CanvasTools {
     this.element.append(connectorFields);
 
     const geometryFields = document.createElement("fieldset");
-    geometryFields.className = "miro-canvas-m2-tools__section";
+    geometryFields.className = "miro-canvas-m2-tools__section miro-canvas-m2-tools__section--geometry";
     const geometryLegend = document.createElement("legend");
     geometryLegend.textContent = "Rotation and layer order";
     geometryFields.append(geometryLegend);
     const geometryGrid = document.createElement("div");
     geometryGrid.className = "miro-canvas-m2-tools__grid";
     geometryFields.append(geometryGrid);
+    const geometryActions = document.createElement("div");
+    geometryActions.className = "miro-canvas-m2-tools__actions";
     const rotation = document.createElement("input");
     rotation.type = "number";
     rotation.step = "any";
@@ -268,7 +273,7 @@ export class M2CanvasTools {
         : result.diagnostics[0]?.message ?? "Rotation was rejected.";
       this.refreshFromNative();
     });
-    geometryFields.append(applyRotation);
+    geometryActions.append(applyRotation);
     const layerActions = [
       ["back", "Send to back"], ["backward", "Move backward"],
       ["forward", "Move forward"], ["front", "Bring to front"],
@@ -285,8 +290,9 @@ export class M2CanvasTools {
           : result.diagnostics[0]?.message ?? "Layer order change was rejected.";
         this.refreshFromNative();
       });
-      geometryFields.append(button);
+      geometryActions.append(button);
     }
+    geometryFields.append(geometryActions);
     this.element.append(geometryFields);
 
     this.comments = new CommentsPanel({
@@ -302,7 +308,7 @@ export class M2CanvasTools {
       onFilterChange: (scope) => { this.scope = scope; this.refresh(); },
       onPickAnchor: (kind) => this.pickAnchor(kind),
       onSelectTarget: (thread) => this.focusComment(thread),
-    }, { document });
+    }, { document, className: "miro-canvas-comments-panel miro-canvas-m2-tools__comments" });
     this.element.append(this.comments.element);
     const selection = new Set(session.snapshot.selectedIds);
     const fileNode = session.adapter.getNodes()?.find((node) => selection.has(readCanvasElementId(node) ?? "") && readCanvasElementFile(node));
@@ -312,6 +318,7 @@ export class M2CanvasTools {
       this.element.append(this.documents.element);
     } else {
       const hint = document.createElement("p");
+      hint.className = "miro-canvas-m2-tools__document-hint";
       hint.textContent = "Select a file node before opening these tools to view a local document.";
       this.element.append(hint);
     }

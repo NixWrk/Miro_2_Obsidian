@@ -93,7 +93,9 @@ Setup additionally stages `m1-daily.canvas` with a local attachment, a locked
 item, typography overrides, and a distant minimap target. Repeating setup keeps
 existing daily-board edits. `python -m tools.obsidian_oracle.smoke_plugin_ui`
 checks the actual plugin UI against Chromium DOM and a synthetic Canvas host;
-it is a browser integration check, not a real-Obsidian compatibility pass.
+it is a browser integration check, not a real-Obsidian compatibility pass. Add
+`--browser edge` to use the installed Microsoft Edge when Playwright Chromium
+is unavailable.
 
 ### M0 profile activation and checks
 

@@ -65,6 +65,8 @@ For a fast browser DOM integration check, run:
 
 ```powershell
 python -m tools.obsidian_oracle.smoke_plugin_ui
+# Use the installed Microsoft Edge when Playwright Chromium is unavailable:
+python -m tools.obsidian_oracle.smoke_plugin_ui --browser edge
 ```
 
 It bundles the actual plugin session, mounts it on real Chromium DOM with a

@@ -93,7 +93,8 @@ Setup также создаёт `m1-daily.canvas`: локальное вложе
 setup сохраняет ручные изменения этой доски. Команда
 `python -m tools.obsidian_oracle.smoke_plugin_ui` проверяет настоящий интерфейс
 плагина в DOM Chromium с синтетическим Canvas host; это browser integration
-check, а не проверка совместимости в самом Obsidian.
+check, а не проверка совместимости в самом Obsidian. Если Playwright Chromium
+не установлен, добавьте `--browser edge`, чтобы использовать Microsoft Edge.
 
 ### Активация и проверка M0-профилей
 

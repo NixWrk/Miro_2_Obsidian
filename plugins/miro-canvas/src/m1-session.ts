@@ -532,7 +532,10 @@ export class M1CanvasSession {
 		}
 		try {
 			this.root.appendChild(this.controls.element);
+			this.root.appendChild(this.controls.minimapElement);
 		} catch {
+			this.controls.minimapElement.remove();
+			this.controls.element.remove();
 			this.addDiagnostic("Native Canvas root rejected the M1 controls panel; controls are disabled.");
 			this.refresh();
 			return false;

@@ -1,6 +1,7 @@
 """Real browser DOM checks against a synthetic native host (not Obsidian QA)."""
 from __future__ import annotations
 
+import argparse
 import subprocess
 import tempfile
 from pathlib import Path
@@ -8,9 +9,14 @@ from pathlib import Path
 from playwright.sync_api import sync_playwright
 
 REPO = Path(__file__).resolve().parents[2]
+EDGE_PATH = Path(r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe")
 
 
 def main() -> int:
+    parser = argparse.ArgumentParser(description="Run the synthetic Miro Canvas browser UI smoke test.")
+    parser.add_argument("--browser", choices=("playwright", "edge"), default="playwright")
+    parser.add_argument("--edge", type=Path, default=EDGE_PATH)
+    args = parser.parse_args()
     with tempfile.TemporaryDirectory(prefix="miro-plugin-ui-") as temporary:
         bundle = Path(temporary) / "fixture.js"
         subprocess.run([
@@ -19,8 +25,13 @@ def main() -> int:
             "--bundle", "--platform=browser", f"--outfile={bundle}",
         ], cwd=REPO, check=True)
         with sync_playwright() as playwright:
-            browser = playwright.chromium.launch(headless=True)
-            page = browser.new_page(viewport={"width": 1300, "height": 900})
+            launch_options: dict[str, object] = {"headless": True}
+            if args.browser == "edge":
+                if not args.edge.is_file():
+                    raise RuntimeError(f"Microsoft Edge executable is missing: {args.edge}")
+                launch_options["executable_path"] = str(args.edge)
+            browser = playwright.chromium.launch(**launch_options)
+            page = browser.new_page(viewport={"width": 1600, "height": 900})
             page.set_default_timeout(5000)
             errors: list[str] = []
             page.on("pageerror", lambda error: errors.append(str(error)))
@@ -29,6 +40,12 @@ def main() -> int:
             page.add_script_tag(path=str(bundle))
             assert page.evaluate("miroBrowser.mounted"), "M1 controls did not mount on real DOM"
             assert page.locator(".miro-canvas-panel").count() == 1
+            assert page.locator(".miro-canvas-minimap").count() == 1
+            assert page.evaluate("document.querySelector('.miro-canvas-minimap').parentElement === miroBrowser.root")
+            assert page.evaluate("!document.querySelector('.miro-canvas-panel').contains(document.querySelector('.miro-canvas-minimap'))")
+            assert page.evaluate("getComputedStyle(document.querySelector('.miro-canvas-minimap')).position") == "absolute"
+            assert page.evaluate("getComputedStyle(document.querySelector('.miro-canvas-minimap')).right") == "14px"
+            assert page.evaluate("getComputedStyle(document.querySelector('.miro-canvas-minimap')).bottom") == "68px"
             assert page.evaluate("miroBrowser.getSaves()") == 0, "Opening a board saved it"
             assert page.evaluate("miroBrowser.node.nodeEl.getAttribute('data-miro-source-kind')") == "text"
             assert page.evaluate("miroBrowser.fileNode.nodeEl.getAttribute('data-miro-source-kind')") == "media"
@@ -89,6 +106,7 @@ def main() -> int:
             comments = m2.locator(".miro-canvas-comments-panel")
             assert m2.count() == 1
             assert comments.count() == 1
+            assert comments.locator(".miro-canvas-comments-panel__composer").count() == 1
 
             history_before_geometry = page.evaluate("miroBrowser.getHistoryLength()")
             m2.get_by_label("Rotation degrees", exact=True).fill("30")
@@ -135,6 +153,7 @@ def main() -> int:
             assert card.count() == 1, "M2 add comment did not render a local thread"
             thread_id = card.get_attribute("data-comment-id")
             assert thread_id
+            card.locator(".miro-canvas-comment-card__edit-toggle").click()
             card.get_by_label(f"Edit comment {thread_id}", exact=True).fill("Edited synthetic M2 comment")
             page.wait_for_timeout(650)
             assert card.get_by_label(f"Edit comment {thread_id}", exact=True).evaluate("element => document.activeElement === element")
@@ -255,6 +274,8 @@ def main() -> int:
 
             page.evaluate("miroBrowser.runtime.selection.clear()")
             page.wait_for_function("miroBrowser.session.snapshot.selectedIds.length === 0")
+            assert page.locator('.miro-canvas-panel[data-miro-canvas-has-selection="false"]').count() == 1
+            assert not page.locator(".miro-canvas-panel__selection-only").first.is_visible()
             output = REPO / "tools/obsidian_oracle/.out/m1-browser.png"
             output.parent.mkdir(parents=True, exist_ok=True)
             m2.evaluate("element => element.scrollTop = 0")
@@ -263,6 +284,7 @@ def main() -> int:
             left_before_dispose = page.evaluate("miroBrowser.node.nodeEl.style.left")
             page.evaluate("miroBrowser.dispose()")
             assert page.locator(".miro-canvas-panel").count() == 0
+            assert page.locator(".miro-canvas-minimap").count() == 0
             assert page.locator(".miro-canvas-m2-tools").count() == 0
             assert not page.evaluate("miroBrowser.runtime.readonly")
             assert page.evaluate("miroBrowser.node.nodeEl.style.left") == left_before_dispose, "Teardown clobbered native geometry"

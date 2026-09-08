@@ -8,7 +8,7 @@ import type { LocalDocument } from "../../../plugins/miro-canvas/src/document-vi
 const clone = <T>(value: T): T => JSON.parse(JSON.stringify(value));
 const root = document.createElement("div");
 root.className = "canvas-wrapper";
-root.style.cssText = "position:relative;width:1200px;height:800px;background:#fafafa";
+root.style.cssText = "position:relative;width:1500px;height:800px;background:#fafafa";
 document.body.append(root);
 
 type RuntimeElement = Record<string, unknown> & {
@@ -207,7 +207,7 @@ const mountM2 = () => {
   if (m2) return true;
   select("file");
   m2 = new M2CanvasTools(session, documentHost, document);
-  m2.element.style.cssText = "position:absolute;right:0;top:0;z-index:100;width:440px;max-height:780px;overflow:auto;background:#fff;color:#24272f;--text-normal:#24272f;--text-muted:#505461;--background-primary:#fff;--background-secondary:#f2f4f8;--background-modifier-border:#bec4cf";
+  m2.element.style.cssText = "position:absolute;right:0;top:0;z-index:100;width:720px;max-height:780px;overflow:auto;background:#fff;color:#24272f;--text-normal:#24272f;--text-muted:#505461;--background-primary:#fff;--background-secondary:#f2f4f8;--background-modifier-border:#bec4cf";
   root.append(m2.element);
   select("n1");
   return true;

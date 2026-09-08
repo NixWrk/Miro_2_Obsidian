@@ -72,6 +72,7 @@ interface ControlRefs {
 	readonly lockSelection: HTMLButtonElement;
 	readonly unlockSelection: HTMLButtonElement;
 	readonly minimap: HTMLButtonElement;
+	readonly minimapDock: HTMLElement;
 	readonly minimapCanvas: HTMLCanvasElement;
 	readonly status: HTMLElement;
 	readonly diagnostics: HTMLElement;
@@ -223,6 +224,7 @@ function selectedTypography(state: M1ControlsState): TypographySettings {
 /** Build and own the M1 panel DOM. */
 export class M1Controls {
 	public readonly element: HTMLElement;
+	public readonly minimapElement: HTMLElement;
 	private readonly document: Document | undefined;
 	private readonly actions: M1ControlsActions;
 	private readonly refs: ControlRefs | undefined;
@@ -241,6 +243,7 @@ export class M1Controls {
 			?? (typeof document !== "undefined" ? document : undefined);
 		if (!hasDocument(this.document)) {
 			this.element = {} as HTMLElement;
+			this.minimapElement = {} as HTMLElement;
 			return;
 		}
 		const root = makeElement(this.document, "section", options.className ?? "miro-canvas-panel");
@@ -248,6 +251,7 @@ export class M1Controls {
 		root.setAttribute("aria-label", options.title ?? "Miro Canvas controls");
 		this.element = root;
 		this.refs = this.build(root);
+		this.minimapElement = this.refs.minimapDock;
 	}
 
 	private listen<T extends EventTarget>(target: T, event: string, handler: EventListener): void {
@@ -290,13 +294,15 @@ export class M1Controls {
 			this.listen(button, "click", () => this.actions.onNavigation(action));
 			append(navigation, button);
 		}
+		const minimapDock = makeElement(document, "aside", "miro-canvas-minimap");
+		minimapDock.setAttribute("aria-label", "Canvas minimap");
 		const minimapCanvas = makeElement(document, "canvas", "miro-canvas-panel__minimap-canvas");
 		minimapCanvas.width = 240;
 		minimapCanvas.height = 160;
 		minimapCanvas.tabIndex = 0;
 		minimapCanvas.setAttribute("role", "img");
 		minimapCanvas.setAttribute("aria-label", "Canvas minimap; use arrow keys to pan");
-		append(navigation, minimapCanvas);
+		append(minimapDock, minimapCanvas);
 
 		const themeGroup = append(root, makeElement(document, "div", "miro-canvas-panel__group"));
 		setText(append(themeGroup, makeElement(document, "span", "miro-canvas-panel__group-title")), "Board theme");
@@ -307,7 +313,7 @@ export class M1Controls {
 			displayTheme: theme.value,
 		}));
 
-		const typographyDetails = append(root, makeElement(document, "details", "miro-canvas-panel__group"));
+		const typographyDetails = append(root, makeElement(document, "details", "miro-canvas-panel__group miro-canvas-panel__selection-only"));
 		typographyDetails.open = true;
 		const typographySummary = append(typographyDetails, makeElement(document, "summary", "miro-canvas-panel__group-title", "Typography"));
 		typographySummary.setAttribute("aria-label", "Typography controls");
@@ -357,7 +363,7 @@ export class M1Controls {
 		}));
 		this.listen(alignment, "change", () => this.actions.onAppearance({ type: APPEARANCE_ACTIONS.setAlignment, alignment: alignment.value }));
 
-		const colors = append(root, makeElement(document, "details", "miro-canvas-panel__group"));
+		const colors = append(root, makeElement(document, "details", "miro-canvas-panel__group miro-canvas-panel__selection-only"));
 		colors.open = true;
 		append(colors, makeElement(document, "summary", "miro-canvas-panel__group-title", "Colors"));
 		const colorGrid = append(colors, makeElement(document, "div", "miro-canvas-panel__grid"));
@@ -458,6 +464,7 @@ export class M1Controls {
 			lockSelection,
 			unlockSelection,
 			minimap,
+			minimapDock,
 			minimapCanvas,
 			status,
 			diagnostics,
@@ -521,6 +528,7 @@ export class M1Controls {
 			return;
 		}
 		const refs = this.refs;
+		this.element.setAttribute("data-miro-canvas-has-selection", state.selectedIds.length > 0 ? "true" : "false");
 		const selectionKey = state.selectedIds.join("\u0000");
 		const selectionChanged = selectionKey !== this.lastSelectionKey;
 		const activeElement = this.document.activeElement;
@@ -550,6 +558,7 @@ export class M1Controls {
 		refs.attachmentGlobal.checked = state.showAttachmentNames;
 		refs.attachmentNode.checked = state.selectedAttachmentNames === true;
 		refs.minimap.textContent = state.minimapVisible ? "Hide map" : "Show map";
+		refs.minimapDock.hidden = !state.minimapVisible;
 		refs.minimapCanvas.hidden = !state.minimapVisible;
 		setText(refs.selectionLabel, state.selectedIds.length === 0
 			? "No selection"
@@ -646,6 +655,7 @@ export class M1Controls {
 			dispose();
 		}
 		this.element.remove();
+		this.minimapElement.remove();
 		this.lastState = undefined;
 		this.lastSelectionKey = "";
 		this.lastPaletteKey = "";

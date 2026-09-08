@@ -141,10 +141,13 @@ export class CommentsPanel {
   private build(): PanelRefs {
     const document = this.document!;
     const heading = make(document, "h2", "Comments");
+    heading.className = "miro-canvas-comments-panel__title";
     append(this.element, heading);
     const controls = append(this.element, make(document, "div"));
+    controls.className = "miro-canvas-comments-panel__composer";
     controls.setAttribute("data-comment-region", "controls");
     const scope = make(document, "select");
+    scope.className = "miro-canvas-comments-panel__scope";
     scope.setAttribute("aria-label", "Comment scope");
     for (const [value, label] of [["board", "Board"], ["selection", "Selection"]] as const) {
       const option = make(document, "option", label);
@@ -157,6 +160,7 @@ export class CommentsPanel {
     append(controls, scope);
 
     const anchorButtons = append(controls, make(document, "div"));
+    anchorButtons.className = "miro-canvas-comments-panel__anchor-actions";
     for (const [kind, label] of [
       ["free", "Pick coordinates"],
       ["selection", "Use selection"],
@@ -166,10 +170,12 @@ export class CommentsPanel {
       append(anchorButtons, pick);
     }
     const draft = make(document, "textarea");
+    draft.className = "miro-canvas-comments-panel__draft";
     draft.setAttribute("aria-label", "New comment");
     draft.setAttribute("data-comment-input", "new");
     append(controls, draft);
     const add = button(document, "Add comment", "add-comment");
+    add.className = "miro-canvas-comments-panel__add";
     add.addEventListener("click", () => {
       const text = inputText(draft.value);
       if (text.length > 0) {
@@ -180,8 +186,10 @@ export class CommentsPanel {
     append(controls, add);
 
     const status = append(this.element, make(document, "div"));
+    status.className = "miro-canvas-comments-panel__status";
     status.setAttribute("role", "status");
     const list = append(this.element, make(document, "div"));
+    list.className = "miro-canvas-comments-panel__list";
     list.setAttribute("data-comment-region", "list");
     return { scope, draft, add, list, status };
   }
@@ -189,32 +197,48 @@ export class CommentsPanel {
   private renderThread(thread: CommentThread): HTMLElement {
     const document = this.document!;
     const card = make(document, "article");
+    card.className = "miro-canvas-comment-card";
     card.setAttribute("data-comment-id", thread.id);
     card.setAttribute("data-comment-origin", thread.origin);
-    append(card, make(document, "strong", authorLabel(thread)));
+    const header = append(card, make(document, "header"));
+    header.className = "miro-canvas-comment-card__header";
+    const author = append(header, make(document, "strong", authorLabel(thread)));
+    author.className = "miro-canvas-comment-card__author";
     if (thread.createdAt !== undefined) {
-      append(card, make(document, "time", thread.createdAt));
+      const time = append(header, make(document, "time", thread.createdAt));
+      time.className = "miro-canvas-comment-card__time";
+      time.setAttribute("datetime", thread.createdAt);
     }
-    append(card, make(document, "p", thread.text));
-    append(card, make(document, "small", thread.resolved ? "Resolved" : "Open"));
+    const body = append(card, make(document, "p", thread.text));
+    body.className = "miro-canvas-comment-card__body";
+    const actions = append(card, make(document, "div"));
+    actions.className = "miro-canvas-comment-card__actions";
+    const state = append(actions, make(document, "small", thread.resolved ? "Resolved" : "Open"));
+    state.className = "miro-canvas-comment-card__state";
     const anchor = thread.anchor;
     const target = button(document, anchorLabel(anchor), "select-target");
+    target.className = "miro-canvas-comment-card__anchor";
     target.disabled = this.host.onSelectTarget === undefined;
     target.addEventListener("click", () => this.host.onSelectTarget?.(thread));
-    append(card, target);
+    append(actions, target);
 
     const resolve = button(document, thread.resolved ? "Reopen" : "Resolve", thread.resolved ? "reopen" : "resolve");
+    resolve.className = "miro-canvas-comment-card__resolve";
     resolve.disabled = thread.origin === "imported" || thread.immutable === true;
     resolve.addEventListener("click", () => this.host.onResolveComment(thread.id, !thread.resolved));
-    append(card, resolve);
+    append(actions, resolve);
 
+    const editor = append(card, make(document, "details"));
+    editor.className = "miro-canvas-comment-card__editor";
+    const editToggle = append(editor, make(document, "summary", "Edit"));
+    editToggle.className = "miro-canvas-comment-card__edit-toggle";
     const edit = make(document, "textarea");
     edit.value = thread.text;
     edit.setAttribute("aria-label", `Edit comment ${thread.id}`);
     edit.setAttribute("data-comment-input", `edit-${thread.id}`);
     edit.setAttribute(INPUT_BASELINE_ATTRIBUTE, thread.text);
     edit.disabled = thread.origin === "imported" || thread.immutable === true;
-    append(card, edit);
+    append(editor, edit);
     const save = button(document, "Save edit", "edit-comment");
     save.disabled = edit.disabled;
     save.addEventListener("click", () => {
@@ -223,25 +247,28 @@ export class CommentsPanel {
         this.host.onEditComment(thread.id, text);
       }
     });
-    append(card, save);
+    append(editor, save);
     const remove = button(document, "Delete", "delete-comment");
     remove.disabled = save.disabled;
     remove.addEventListener("click", () => this.host.onDeleteComment(thread.id));
-    append(card, remove);
+    append(editor, remove);
 
     const replies = append(card, make(document, "div"));
+    replies.className = "miro-canvas-comment-card__replies";
     replies.setAttribute("data-comment-region", "replies");
     for (const reply of thread.replies) {
       const row = append(replies, make(document, "p"));
       row.setAttribute("data-comment-reply-id", reply.id);
       row.textContent = `${reply.author?.name ?? "Reply"}: ${reply.text}`;
     }
+    const replyComposer = append(card, make(document, "div"));
+    replyComposer.className = "miro-canvas-comment-card__reply-composer";
     const replyInput = make(document, "textarea");
     replyInput.setAttribute("aria-label", `Reply to ${thread.id}`);
     replyInput.setAttribute("data-comment-input", `reply-${thread.id}`);
     replyInput.setAttribute(INPUT_BASELINE_ATTRIBUTE, "");
     replyInput.disabled = thread.origin === "imported" || thread.immutable === true;
-    append(card, replyInput);
+    append(replyComposer, replyInput);
     const replyButton = button(document, "Reply", "reply-comment");
     replyButton.disabled = replyInput.disabled;
     replyButton.addEventListener("click", () => {
@@ -251,7 +278,7 @@ export class CommentsPanel {
         this.host.onReplyComment(thread.id, text);
       }
     });
-    append(card, replyButton);
+    append(replyComposer, replyButton);
     return card;
   }
 
