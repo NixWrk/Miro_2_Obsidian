@@ -30,6 +30,11 @@ def main() -> int:
             assert page.evaluate("miroBrowser.mounted"), "M1 controls did not mount on real DOM"
             assert page.locator(".miro-canvas-panel").count() == 1
             assert page.evaluate("miroBrowser.getSaves()") == 0, "Opening a board saved it"
+            assert page.evaluate("miroBrowser.node.nodeEl.getAttribute('data-miro-source-kind')") == "text"
+            assert page.evaluate("miroBrowser.fileNode.nodeEl.getAttribute('data-miro-source-kind')") == "media"
+            assert page.evaluate("miroBrowser.edge.edgeEl.getAttribute('data-miro-source-kind')") == "connector"
+            assert page.evaluate("miroBrowser.edge.edgeEl.getAttribute('data-miro-source-end-cap')") == "arrow"
+            assert page.evaluate("getComputedStyle(miroBrowser.content).fontSize") == "19px"
             page.evaluate("miroBrowser.session.toggleAttachmentNames()")
             assert page.evaluate("getComputedStyle(miroBrowser.fileLabel).display") == "none", "Native attachment title stayed visible"
             page.evaluate("miroBrowser.session.toggleAttachmentNames()")
@@ -84,6 +89,25 @@ def main() -> int:
             comments = m2.locator(".miro-canvas-comments-panel")
             assert m2.count() == 1
             assert comments.count() == 1
+
+            history_before_geometry = page.evaluate("miroBrowser.getHistoryLength()")
+            m2.get_by_label("Rotation degrees", exact=True).fill("30")
+            m2.get_by_role("button", name="Apply rotation", exact=True).click()
+            assert page.evaluate("miroBrowser.runtime.data.miroCanvas.localOverrides.n1.rotation") == 30
+            assert "rotate(30deg)" in page.evaluate("miroBrowser.node.nodeEl.style.transform")
+            assert page.evaluate("miroBrowser.getHistoryLength()") == history_before_geometry + 1
+            page.evaluate("miroBrowser.node.nodeEl.style.transform = 'translate(20px, 0px) rotate(30deg)'; miroBrowser.session.refresh()")
+            assert page.evaluate("(miroBrowser.node.nodeEl.style.transform.match(/rotate\\(30deg\\)/g) || []).length") == 1
+            assert "translate(20px, 0px)" in page.evaluate("miroBrowser.node.nodeEl.style.transform")
+            page.evaluate("miroBrowser.runtime.undo(); miroBrowser.session.refresh(); miroBrowser.m2.refresh()")
+            assert "rotate(30deg)" not in page.evaluate("miroBrowser.node.nodeEl.style.transform")
+            page.evaluate("miroBrowser.runtime.redo(); miroBrowser.session.refresh(); miroBrowser.m2.refresh()")
+            assert "rotate(30deg)" in page.evaluate("miroBrowser.node.nodeEl.style.transform")
+            m2.get_by_role("button", name="Bring to front", exact=True).click()
+            assert page.evaluate("miroBrowser.runtime.data.miroCanvas.zOrder.at(-1)") == "n1"
+            assert page.evaluate("miroBrowser.sourceUnchanged()")
+            page.evaluate("miroBrowser.runtime.undo(); miroBrowser.runtime.undo(); miroBrowser.session.refresh(); miroBrowser.m2.refresh()")
+            assert "rotate(30deg)" not in page.evaluate("miroBrowser.node.nodeEl.style.transform")
 
             node_count = page.evaluate("miroBrowser.runtime.nodes.size")
             m2.get_by_label("Shape kind", exact=True).select_option("diamond")
@@ -243,6 +267,8 @@ def main() -> int:
             assert not page.evaluate("miroBrowser.runtime.readonly")
             assert page.evaluate("miroBrowser.node.nodeEl.style.left") == left_before_dispose, "Teardown clobbered native geometry"
             assert page.evaluate("miroBrowser.node.nodeEl.style.backgroundColor") == "", "Teardown left appearance styles"
+            assert page.evaluate("miroBrowser.node.nodeEl.getAttribute('data-miro-source-kind')") is None
+            assert page.evaluate("miroBrowser.edge.edgeEl.getAttribute('data-miro-source-kind')") is None
             assert page.evaluate("miroBrowser.checkPreexistingReadonly()") == {"preserved": True, "saved": False}
             assert errors == [], errors
             browser.close()

@@ -48,8 +48,9 @@ current development checkpoint adds M1 controls (navigation, minimap,
 typography, themes, colors, locks, attachment titles) and M2 UI for six local
 shapes, comment threads, connector endpoints and native document navigation.
 Graph edits preserve source/unknown metadata and use native undo/redo.
-Native zoom currently stays within 6.25%–200%. M3 rotation, z-order, and Miro
-renderers remain pending.
+Native zoom currently stays within 6.25%–200%. M3 adds local/source rotation,
+layer ordering, rotated anchors, and reversible source-backed decoration for
+Miro shapes, text, sticky notes, connectors, frames, and media.
 
 ## Data flow
 

@@ -111,6 +111,7 @@ export interface MiroCanvasLocalOverride {
   readonly colors?: MiroCanvasColorOverride;
   readonly locked?: boolean;
   readonly showAttachmentName?: boolean;
+  readonly rotation?: number;
   readonly [key: string]: unknown;
 }
 
@@ -263,7 +264,7 @@ const SETTINGS_FIELDS = new Set([
   "palette",
   "recentColors",
 ]);
-const OVERRIDE_FIELDS = new Set(["typography", "colors", "locked", "showAttachmentName"]);
+const OVERRIDE_FIELDS = new Set(["typography", "colors", "locked", "showAttachmentName", "rotation"]);
 const TYPOGRAPHY_FIELDS = new Set([
   "fontFamily",
   "fontSize",
@@ -988,6 +989,12 @@ function validateLocalOverrides(
     }
     validateBooleanIfPresent(property.value, "locked", overridePath, diagnostics);
     validateBooleanIfPresent(property.value, "showAttachmentName", overridePath, diagnostics);
+    const rotation = readOwn(property.value, "rotation");
+    if (rotation.state === "error") {
+      addError(diagnostics, "property-read-failed", pathFor(overridePath, "rotation"), "The rotation could not be read safely.");
+    } else if (rotation.state === "present") {
+      requireFiniteNumber(rotation.value, pathFor(overridePath, "rotation"), diagnostics);
+    }
   }
 }
 

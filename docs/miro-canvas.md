@@ -49,7 +49,14 @@ unsupported fit APIs produce a diagnostic. Markdown subpaths are preserved.
 Active imported HTML never executes inside the plugin. Automated unit and
 Chromium integration checks cover the M2 UI and synthetic native history;
 real Obsidian interaction and hotkeys remain a separate, unconfirmed gate.
-M3 rotation, z-order, and source-backed Miro renderers are not implemented.
+M3 projects canonical `miroSource.items`/`connectors` through explicit bindings.
+Source and local rotation is applied around native node centers, including
+anchor geometry; z-order uses explicit metadata or source ranks. The renderer
+adds reversible, inert decoration to existing native DOM for shapes, text,
+sticky notes, connectors, frames, and media. It never replaces editable native
+content or executes source HTML/URLs. Native node and edge layers can be
+separate stacking contexts, so unsupported cross-layer interleaving and missing
+source fields remain explicit diagnostics.
 
 To run the plugin checks from the repository root:
 
@@ -445,9 +452,11 @@ and covered by automated tests.
 
 ### M3: geometry fidelity
 
-- Add rotation and z-order.
-- Add source-backed Miro shape, text, sticky, connector, frame, and media renderers.
-- Use explicit diagnostics whenever source payload cannot support exact rendering.
+- [x] Add local/source rotation, rotated anchors, and z-order with native history.
+- [x] Add reversible source-backed Miro shape, text, sticky, connector, frame,
+  and media decoration over native Canvas elements.
+- [x] Use explicit diagnostics whenever source payload or native stacking
+  contexts cannot support exact rendering.
 
 ### M4: structured content
 

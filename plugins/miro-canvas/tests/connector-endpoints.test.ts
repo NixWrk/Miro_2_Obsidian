@@ -71,6 +71,15 @@ describe("connector endpoints", () => {
     expect(geometry.edges?.e1?.points).toEqual([{ x: 50, y: 40 }, { x: 250, y: 40 }]);
   });
 
+  it("rotates node and connector anchor geometry around the native node center", () => {
+    const document = baseDocument();
+    document.miroSource = { items: [{ id: "a", type: "shape", geometry: { rotation: 90 }, data: { shape: "rectangle" } }] };
+    const geometry = buildCanvasAnchorGeometry(document);
+    expect(geometry.nodes?.a).toMatchObject({ rotation: 90, rotationCenterX: 50, rotationCenterY: 40 });
+    expect(geometry.edges?.e1?.points?.[0]?.x).toBeCloseTo(50);
+    expect(geometry.edges?.e1?.points?.[0]?.y).toBeCloseTo(90);
+  });
+
   it("stores a node anchor, updates the native node/nearest side, and deep-copies source plus unknown metadata", () => {
     const original = baseDocument();
     const before = JSON.parse(JSON.stringify(original));

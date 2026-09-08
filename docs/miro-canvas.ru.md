@@ -48,7 +48,13 @@ PDF-навигация учитывает введённую страницу, M
 не выполняется внутри плагина. Unit и Chromium integration тесты проверяют UI
 M2 и синтетическую native history. Работа и горячие клавиши в настоящем
 Obsidian остаются отдельной неподтверждённой проверкой.
-M3: rotation, z-order и source-backed Miro renderers — не реализованы.
+M3 проецирует canonical `miroSource.items`/`connectors` через явные bindings.
+Source/local rotation применяется вокруг центра native node и учитывается в
+anchors; z-order берётся из метаданных или source rank. Обратимый renderer
+добавляет inert-оформление существующим native DOM-элементам для фигур, текста,
+sticky notes, connectors, frames и media, не заменяя редактируемое содержимое и
+не выполняя source HTML/URL. Ограничения раздельных native node/edge layers и
+недостающих source-полей выдаются как диагностика.
 
 Текущие проверки плагина из корня репозитория:
 

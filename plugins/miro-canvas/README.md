@@ -18,8 +18,9 @@ Native zoom remains limited to 6.25%–200%. The command **Local shapes, comment
 anchors and documents** opens M2 tools: six editable shapes, local comment
 threads, connector endpoints and native document navigation. Select a file node
 first to expose its document controls. Source and unknown metadata survive
-graph edits and native history. M3 rotation, z-order, and Miro renderers remain
-pending. Automated browser checks use a synthetic host;
+graph edits and native history. M3 adds local/source rotation, layer ordering,
+rotated anchors, and reversible source-backed decoration for Miro shapes, text,
+sticky notes, connectors, frames and media. Automated browser checks use a synthetic host;
 real-Obsidian verification is still required.
 
 ## Development

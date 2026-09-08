@@ -242,6 +242,53 @@ export class M2CanvasTools {
     connectorFields.append(setEndpoint);
     this.element.append(connectorFields);
 
+    const geometryFields = document.createElement("fieldset");
+    geometryFields.className = "miro-canvas-m2-tools__section";
+    const geometryLegend = document.createElement("legend");
+    geometryLegend.textContent = "Rotation and layer order";
+    geometryFields.append(geometryLegend);
+    const geometryGrid = document.createElement("div");
+    geometryGrid.className = "miro-canvas-m2-tools__grid";
+    geometryFields.append(geometryGrid);
+    const rotation = document.createElement("input");
+    rotation.type = "number";
+    rotation.step = "any";
+    rotation.value = "0";
+    appendLabeled(document, geometryGrid, "Rotation degrees", rotation);
+    const applyRotation = document.createElement("button");
+    applyRotation.type = "button";
+    applyRotation.textContent = "Apply rotation";
+    applyRotation.addEventListener("click", () => {
+      const id = this.session.snapshot.selectedIds[0];
+      const value = rotation.value.trim().length > 0 ? Number(rotation.value) : Number.NaN;
+      if (id === undefined) { this.status.textContent = "Select one Canvas element to rotate."; return; }
+      if (!Number.isFinite(value)) { this.status.textContent = "Rotation must be a finite number."; return; }
+      const result = this.authoring.updateRotation({ id, rotation: value });
+      this.status.textContent = result.ok ? "Rotation saved in native Canvas history."
+        : result.diagnostics[0]?.message ?? "Rotation was rejected.";
+      this.refreshFromNative();
+    });
+    geometryFields.append(applyRotation);
+    const layerActions = [
+      ["back", "Send to back"], ["backward", "Move backward"],
+      ["forward", "Move forward"], ["front", "Bring to front"],
+    ] as const;
+    for (const [direction, label] of layerActions) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.textContent = label;
+      button.addEventListener("click", () => {
+        const id = this.session.snapshot.selectedIds[0];
+        if (id === undefined) { this.status.textContent = "Select one Canvas element to reorder."; return; }
+        const result = this.authoring.changeZOrder({ id, direction });
+        this.status.textContent = result.ok ? "Layer order saved in native Canvas history."
+          : result.diagnostics[0]?.message ?? "Layer order change was rejected.";
+        this.refreshFromNative();
+      });
+      geometryFields.append(button);
+    }
+    this.element.append(geometryFields);
+
     this.comments = new CommentsPanel({
       onAddComment: (text) => {
         const current = this.currentAnchor(true);

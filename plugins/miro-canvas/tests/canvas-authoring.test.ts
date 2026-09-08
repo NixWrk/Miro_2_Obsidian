@@ -3,7 +3,9 @@ import { describe, expect, it, vi } from "vitest";
 import {
 	createCanvasAuthoring,
 	probeCanvasAuthoring,
+	type ChangeZOrderInput,
 	type CanvasShapeAction,
+	type UpdateRotationInput,
 } from "../src/canvas-authoring";
 
 type CanvasDocument = Record<string, unknown>;
@@ -140,6 +142,31 @@ function endpointDocument(): CanvasDocument {
 			schemaVersion: 1,
 			futureMetadataField: ["keep"],
 			localOverrides: { e1: { futureOverrideField: { keep: true } } },
+		},
+	};
+}
+
+function layerDocument(): CanvasDocument {
+	return {
+		nodes: [
+			{ id: "a", type: "text", x: 0, y: 0, width: 100, height: 80, text: "A", futureNode: { keep: "a" } },
+			{ id: "b", type: "text", x: 200, y: 0, width: 100, height: 80, text: "B", futureNode: { keep: "b" } },
+			{ id: "c", type: "text", x: 400, y: 0, width: 100, height: 80, text: "C" },
+		],
+		edges: [{ id: "e1", fromNode: "a", toNode: "b", futureEdge: { keep: true } }],
+		miroSource: { board: "source", zOrder: ["source-a", "source-b"], nested: { keep: true } },
+		futureRootField: { untouched: true },
+		miroCanvas: {
+			schemaVersion: 1,
+			bindings: {
+				a: { sourceId: "source-a", role: "item" },
+				b: { sourceId: "source-b", role: "item" },
+			},
+			zOrder: ["a", "b", "c", "e1"],
+			localOverrides: {
+				b: { futureOverrideField: { keep: true } },
+			},
+			futureMetadataField: ["keep"],
 		},
 	};
 }
@@ -402,6 +429,229 @@ describe("CanvasAuthoring", () => {
 		expect(saveResult.ok).toBe(false);
 		expect(saveRuntime.getData()).toEqual(initial);
 		expect(saveRuntime.requestSaveSpy).toHaveBeenCalledTimes(1);
+	});
+
+	it("normalizes finite rotations, preserves metadata, and replays rotation through native undo/redo", () => {
+		const cases = [
+			[0, 0],
+			[360, 0],
+			[180, -180],
+			[-180, -180],
+			[540, -180],
+			[-540, -180],
+			[-190, 170],
+			[190, -170],
+		] as const;
+		for (const [rotation, expected] of cases) {
+			const initial = initialDocument();
+			const runtime = new NativeGraph(initial);
+			const result = createCanvasAuthoring(runtime).updateRotation({ id: "existing", rotation });
+			expect(result.ok).toBe(true);
+			const applied = runtime.getData();
+			const override = (((applied.miroCanvas as CanvasDocument).localOverrides as CanvasDocument).existing as CanvasDocument);
+			expect(override.rotation).toBe(expected);
+			if (expected === 0) {
+				expect(Object.is(override.rotation, -0)).toBe(false);
+			}
+			expect(override).toMatchObject({ typography: { fontSize: 18 }, futureOverrideField: { keep: true } });
+			expect(applied.miroSource).toEqual(initial.miroSource);
+			expect(applied.futureRootField).toEqual(initial.futureRootField);
+			expect(applied.nodes).toEqual(initial.nodes);
+			expect(applied.edges).toEqual(initial.edges);
+			expect(runtime.requestSaveSpy).toHaveBeenCalledTimes(1);
+			expect(runtime.history).toHaveLength(2);
+		}
+
+		const initial = initialDocument();
+		const runtime = new NativeGraph(initial);
+		const result = createCanvasAuthoring(runtime).updateRotation({ id: "existing", rotation: 90 });
+		expect(result.ok).toBe(true);
+		const applied = runtime.getData();
+		runtime.undo();
+		expect(runtime.getData()).toEqual(initial);
+		runtime.redo();
+		expect(runtime.getData()).toEqual(applied);
+	});
+
+	it("rejects invalid or missing rotations and skips native history for a normalized noop", () => {
+		for (const input of [
+			{ id: "existing", rotation: Number.NaN },
+			{ id: "existing", rotation: Number.POSITIVE_INFINITY },
+			{ id: "missing", rotation: 10 },
+		] as UpdateRotationInput[]) {
+			const runtime = new NativeGraph(initialDocument());
+			const result = createCanvasAuthoring(runtime).updateRotation(input);
+			expect(result.ok).toBe(false);
+			expect(runtime.importDataSpy).not.toHaveBeenCalled();
+			expect(runtime.requestSaveSpy).not.toHaveBeenCalled();
+		}
+
+		const document = initialDocument();
+		(((document.miroCanvas as CanvasDocument).localOverrides as CanvasDocument).existing as CanvasDocument).rotation = -170;
+		const runtime = new NativeGraph(document);
+		const result = createCanvasAuthoring(runtime).updateRotation({ id: "existing", rotation: 190 });
+		expect(result.ok).toBe(true);
+		expect(result.diagnostics.map((item) => item.code)).toContain("rotation-noop");
+		expect(runtime.importDataSpy).not.toHaveBeenCalled();
+		expect(runtime.requestSaveSpy).not.toHaveBeenCalled();
+		expect(runtime.history).toHaveLength(1);
+	});
+
+	it("supports every z-order direction and treats front/back bounds as noops", () => {
+		const cases: Array<[ChangeZOrderInput, string[]]> = [
+			[{ id: "b", direction: "front" }, ["a", "c", "e1", "b"]],
+			[{ id: "b", direction: "back" }, ["b", "a", "c", "e1"]],
+			[{ id: "b", direction: "forward" }, ["a", "c", "b", "e1"]],
+			[{ id: "b", direction: "backward" }, ["b", "a", "c", "e1"]],
+		];
+		for (const [input, expected] of cases) {
+			const runtime = new NativeGraph(layerDocument());
+			const result = createCanvasAuthoring(runtime).changeZOrder(input);
+			expect(result.ok).toBe(true);
+			expect((runtime.getData().miroCanvas as CanvasDocument).zOrder).toEqual(expected);
+			expect(runtime.requestSaveSpy).toHaveBeenCalledTimes(1);
+			expect(runtime.history).toHaveLength(2);
+		}
+
+		for (const input of [
+			{ id: "e1", direction: "front" },
+			{ id: "e1", direction: "forward" },
+			{ id: "a", direction: "back" },
+			{ id: "a", direction: "backward" },
+		] as ChangeZOrderInput[]) {
+			const runtime = new NativeGraph(layerDocument());
+			const result = createCanvasAuthoring(runtime).changeZOrder(input);
+			expect(result.ok).toBe(true);
+			expect(result.diagnostics.map((item) => item.code)).toContain("z-order-noop");
+			expect(runtime.importDataSpy).not.toHaveBeenCalled();
+			expect(runtime.requestSaveSpy).not.toHaveBeenCalled();
+			expect(runtime.history).toHaveLength(1);
+		}
+	});
+
+	it("preserves unknown z-order entries and source-ID bindings while using native order for missing graph entries", () => {
+		const initial = layerDocument();
+		(initial.miroCanvas as CanvasDocument).zOrder = [
+			"unknown-left",
+			"a",
+			"source-b",
+			"unknown-mid",
+			"c",
+			"unknown-right",
+		];
+		const sourceBefore = clone(initial.miroSource);
+		const runtime = new NativeGraph(initial);
+		const result = createCanvasAuthoring(runtime).changeZOrder({ id: "b", direction: "front" });
+
+		expect(result.ok).toBe(true);
+		expect(result.diagnostics.map((item) => item.code)).toContain("z-order-source-limited-fallback");
+		const applied = runtime.getData();
+		expect((applied.miroCanvas as CanvasDocument).zOrder).toEqual([
+			"unknown-left",
+			"a",
+			"c",
+			"unknown-mid",
+			"e1",
+			"unknown-right",
+			"source-b",
+		]);
+		expect(applied.miroSource).toEqual(sourceBefore);
+		expect(applied.futureRootField).toEqual(initial.futureRootField);
+		expect(applied.nodes).toEqual(initial.nodes);
+		expect(applied.edges).toEqual(initial.edges);
+		expect((applied.miroCanvas as CanvasDocument).bindings).toEqual((initial.miroCanvas as CanvasDocument).bindings);
+		expect((applied.miroCanvas as CanvasDocument).futureMetadataField).toEqual(["keep"]);
+	});
+
+	it("uses native graph order when no explicit z-order exists and replays the transaction through undo/redo", () => {
+		const initial = layerDocument();
+		delete (initial.miroCanvas as CanvasDocument).zOrder;
+		const runtime = new NativeGraph(initial);
+		const result = createCanvasAuthoring(runtime).changeZOrder({ id: "b", direction: "forward" });
+
+		expect(result.ok).toBe(true);
+		expect(result.diagnostics.map((item) => item.code)).toContain("z-order-source-limited-fallback");
+		const applied = runtime.getData();
+		expect((applied.miroCanvas as CanvasDocument).zOrder).toEqual(["a", "c", "b", "e1"]);
+		expect(runtime.history).toHaveLength(2);
+		runtime.undo();
+		expect(runtime.getData()).toEqual(initial);
+		runtime.redo();
+		expect(runtime.getData()).toEqual(applied);
+	});
+
+	it("applies stale, review, lock, readonly, and source-ID collision guards to M3 graph transactions", () => {
+		const staleRuntime = new NativeGraph(layerDocument());
+		const staleAuthoring = createCanvasAuthoring(staleRuntime);
+		const expected = staleAuthoring.readSnapshot();
+		staleRuntime.importData({ ...layerDocument(), externalEdit: true }, true);
+		const stale = staleAuthoring.updateRotation({ id: "a", rotation: 15 }, expected);
+		expect(stale.ok).toBe(false);
+		expect(stale.diagnostics.map((item) => item.code)).toContain("stale-document");
+		expect(staleRuntime.requestSaveSpy).not.toHaveBeenCalled();
+
+		const reviewDocument = layerDocument();
+		(reviewDocument.miroCanvas as CanvasDocument).settings = { reviewMode: true };
+		for (const run of [
+			(authoring: ReturnType<typeof createCanvasAuthoring>) => authoring.updateRotation({ id: "b", rotation: 15 }),
+			(authoring: ReturnType<typeof createCanvasAuthoring>) => authoring.changeZOrder({ id: "b", direction: "front" }),
+		]) {
+			const runtime = new NativeGraph(reviewDocument);
+			const result = run(createCanvasAuthoring(runtime));
+			expect(result.ok).toBe(false);
+			expect(result.diagnostics.some((item) => item.code.endsWith("blocked-review"))).toBe(true);
+			expect(runtime.importDataSpy).not.toHaveBeenCalled();
+		}
+
+		const lockedDocument = layerDocument();
+		(((lockedDocument.miroCanvas as CanvasDocument).localOverrides as CanvasDocument).b as CanvasDocument).locked = true;
+		for (const run of [
+			(authoring: ReturnType<typeof createCanvasAuthoring>) => authoring.updateRotation({ id: "b", rotation: 15 }),
+			(authoring: ReturnType<typeof createCanvasAuthoring>) => authoring.changeZOrder({ id: "b", direction: "front" }),
+		]) {
+			const runtime = new NativeGraph(lockedDocument);
+			const result = run(createCanvasAuthoring(runtime));
+			expect(result.ok).toBe(false);
+			expect(result.diagnostics.some((item) => item.code.endsWith("blocked-lock"))).toBe(true);
+			expect(runtime.importDataSpy).not.toHaveBeenCalled();
+		}
+
+		for (const run of [
+			(authoring: ReturnType<typeof createCanvasAuthoring>) => authoring.updateRotation({ id: "b", rotation: 15 }),
+			(authoring: ReturnType<typeof createCanvasAuthoring>) => authoring.changeZOrder({ id: "b", direction: "front" }),
+		]) {
+			const runtime = new NativeGraph(layerDocument());
+			Object.defineProperty(runtime, "readonly", { configurable: true, value: true });
+			const result = run(createCanvasAuthoring(runtime));
+			expect(result.ok).toBe(false);
+			expect(result.diagnostics.map((item) => item.code)).toContain("native-runtime-readonly");
+			expect(runtime.importDataSpy).not.toHaveBeenCalled();
+			expect(runtime.requestSaveSpy).not.toHaveBeenCalled();
+		}
+
+		const collisionDocument = layerDocument();
+		(collisionDocument.miroCanvas as CanvasDocument).bindings = {
+			a: { sourceId: "b", role: "item" },
+			b: { sourceId: "source-b", role: "item" },
+		};
+		const collisionRuntime = new NativeGraph(collisionDocument);
+		const collision = createCanvasAuthoring(collisionRuntime).changeZOrder({ id: "a", direction: "front" });
+		expect(collision.ok).toBe(false);
+		expect(collision.diagnostics.map((item) => item.code)).toContain("z-order-id-collision");
+		expect(collisionRuntime.importDataSpy).not.toHaveBeenCalled();
+	});
+
+	it("rolls back a z-order transaction when the native history save fails", () => {
+		const initial = layerDocument();
+		const runtime = new NativeGraph(initial);
+		runtime.throwOnSave = true;
+		const result = createCanvasAuthoring(runtime).changeZOrder({ id: "b", direction: "front" });
+
+		expect(result.ok).toBe(false);
+		expect(result.diagnostics.map((item) => item.code)).toContain("native-history-failed");
+		expect(runtime.getData()).toEqual(initial);
+		expect(runtime.requestSaveSpy).toHaveBeenCalledTimes(1);
+		expect(runtime.history).toHaveLength(1);
 	});
 
 	it("fails closed for malformed documents, unsupported methods, thenables, review mode, and collisions", () => {

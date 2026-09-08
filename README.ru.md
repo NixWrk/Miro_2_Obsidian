@@ -46,8 +46,9 @@ Real-Obsidian gate остаётся открытым: поведение native 
 цвета, блокировки, названия вложений) и UI M2: шесть локальных фигур,
 комментарии, концы стрелок и навигацию по документам средствами Obsidian.
 Изменения графа сохраняют source/неизвестные метаданные и используют native undo/redo.
-Native zoom пока ограничен диапазоном 6,25%–200%. M3: rotation, z-order
-и Miro renderers — ещё впереди.
+Native zoom пока ограничен диапазоном 6,25%–200%. M3 добавляет local/source
+rotation, порядок слоёв, повёрнутые anchors и обратимые source-backed renderers
+для фигур, текста, sticky notes, connectors, frames и media.
 
 ## Схема данных
 

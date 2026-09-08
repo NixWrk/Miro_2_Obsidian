@@ -11,6 +11,7 @@ import type {
   AnchorRect,
   CanvasAnchor,
 } from "./anchors";
+import { buildSourceScene } from "./source-model";
 import { decideInteraction } from "./interaction-policy";
 import {
   MIRO_CANVAS_SCHEMA_VERSION,
@@ -278,12 +279,19 @@ function sidePoint(rect: AnchorRect, side: unknown): AnchorPoint | undefined {
   if (typeof side !== "string" || !SIDES.has(side as NativeSide)) {
     return undefined;
   }
+  let point: AnchorPoint;
   switch (side as NativeSide) {
-    case "top": return { x: rect.x + rect.width / 2, y: rect.y };
-    case "right": return { x: rect.x + rect.width, y: rect.y + rect.height / 2 };
-    case "bottom": return { x: rect.x + rect.width / 2, y: rect.y + rect.height };
-    case "left": return { x: rect.x, y: rect.y + rect.height / 2 };
+    case "top": point = { x: rect.x + rect.width / 2, y: rect.y }; break;
+    case "right": point = { x: rect.x + rect.width, y: rect.y + rect.height / 2 }; break;
+    case "bottom": point = { x: rect.x + rect.width / 2, y: rect.y + rect.height }; break;
+    case "left": point = { x: rect.x, y: rect.y + rect.height / 2 }; break;
   }
+  if (rect.rotation === undefined || rect.rotation === 0) return point;
+  const cx = rect.rotationCenterX ?? rect.x + rect.width / 2;
+  const cy = rect.rotationCenterY ?? rect.y + rect.height / 2;
+  const radians = rect.rotation * Math.PI / 180;
+  const dx = point.x - cx, dy = point.y - cy;
+  return { x: cx + dx * Math.cos(radians) - dy * Math.sin(radians), y: cy + dx * Math.sin(radians) + dy * Math.cos(radians) };
 }
 
 function connectorAnchor(document: UnknownRecord, edgeId: string, end: ConnectorEnd): unknown | typeof ABSENT {
@@ -336,14 +344,26 @@ export function buildCanvasAnchorGeometry(document: unknown): AnchorGeometry {
   }
   const nodes = Object.create(null) as Record<string, AnchorRect>;
   const images = Object.create(null) as Record<string, AnchorRect>;
+  const sourceScene = buildSourceScene(document);
   for (const [id, node] of graph.nodes) {
-    const rect = rectFromNode(node);
+    const base = rectFromNode(node);
+    const rotation = sourceScene.items.get(id)?.rotation ?? 0;
+    const rect = base === undefined ? undefined : rotation === 0 ? base : {
+      ...base, rotation,
+      rotationCenterX: base.x + base.width / 2,
+      rotationCenterY: base.y + base.height / 2,
+    };
     if (rect === undefined) {
       continue;
     }
     nodes[id] = rect;
     if (isImageNode(node)) {
-      images[id] = explicitImageCrop(document, node, id, rect) ?? rect;
+      const crop = explicitImageCrop(document, node, id, rect);
+      images[id] = crop === undefined || rotation === 0 ? crop ?? rect : {
+        ...crop, rotation,
+        rotationCenterX: rect.rotationCenterX,
+        rotationCenterY: rect.rotationCenterY,
+      };
     }
   }
 

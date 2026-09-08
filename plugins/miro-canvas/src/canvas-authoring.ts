@@ -50,6 +50,18 @@ export interface CanvasShapeAction {
 	readonly locked?: unknown;
 }
 
+export interface UpdateRotationInput {
+	readonly id: string;
+	readonly rotation: number;
+}
+
+export type ZOrderDirection = "front" | "back" | "forward" | "backward";
+
+export interface ChangeZOrderInput {
+	readonly id: string;
+	readonly direction: ZOrderDirection;
+}
+
 export interface CanvasAuthoringOptions {
 	/** Prefix for generated IDs.  It is never used when an explicit ID is given. */
 	readonly idPrefix?: string;
@@ -791,6 +803,301 @@ function updateShapeMetadata(
 	return metadata;
 }
 
+function graphElementIds(snapshot: InternalSnapshot): readonly string[] {
+	return [...snapshot.nodes, ...snapshot.edges]
+		.map((item) => readRequiredString(item, "id"))
+		.filter((id): id is string => id !== undefined);
+}
+
+function readGraphActionId(action: unknown, diagnostics: CanvasAuthoringDiagnostic[], code: string): string | undefined {
+	const id = actionProperty(action, "id");
+	if (!id.ok || !isSafeIdentifier(id.value)) {
+		addDiagnostic(diagnostics, `${code}-id-invalid`, "error", "The target Canvas graph ID is missing or invalid.");
+		return undefined;
+	}
+	return id.value;
+}
+
+function hasGraphElement(snapshot: InternalSnapshot, id: string): boolean {
+	return graphElementIds(snapshot).includes(id);
+}
+
+function policyAllowsGraphEdit(
+	document: UnknownRecord,
+	operation: "rotate" | "edit",
+	id: string,
+	code: "rotation" | "z-order",
+	diagnostics: CanvasAuthoringDiagnostic[],
+): boolean {
+	const decision = decideEditOperation(document, operation, id);
+	if (!decision.valid) {
+		addDiagnostic(diagnostics, `${code}-policy-invalid`, "error", "The Canvas interaction policy is invalid; the graph edit was refused.");
+		return false;
+	}
+	if (!decision.allowed) {
+		addDiagnostic(
+			diagnostics,
+			decision.reason === "review-mode" ? `${code}-blocked-review` : `${code}-blocked-lock`,
+			"warning",
+			decision.reason === "review-mode"
+				? "Canvas review mode blocks this graph edit."
+				: "The target Canvas graph element is locked.",
+		);
+		return false;
+	}
+	return true;
+}
+
+function normalizeRotation(rotation: number): number {
+	if (rotation === 0) {
+		return 0;
+	}
+	const normalized = ((rotation + 180) % 360 + 360) % 360 - 180;
+	return Object.is(normalized, -0) ? 0 : normalized;
+}
+
+function buildRotationDocument(
+	snapshot: InternalSnapshot,
+	id: string,
+	rotation: number,
+	diagnostics: CanvasAuthoringDiagnostic[],
+): UnknownRecord | undefined {
+	let document: UnknownRecord;
+	try {
+		document = cloneRecord(snapshot.document);
+	} catch (error) {
+		addDiagnostic(diagnostics, "document-copy-failed", "error", `The Canvas document could not be copied: ${describeError(error)}.`);
+		return undefined;
+	}
+	const metadata = readMetadataForUpdate(document, diagnostics);
+	if (metadata === undefined) {
+		return undefined;
+	}
+	const overridesValue = safeRead(metadata, "localOverrides");
+	if (!overridesValue.ok || (overridesValue.value !== undefined && !isPlainObject(overridesValue.value))) {
+		addDiagnostic(diagnostics, "metadata-overrides-invalid", "error", "Existing localOverrides are not a safe object map.");
+		return undefined;
+	}
+	let overrides: UnknownRecord;
+	try {
+		overrides = overridesValue.value === undefined ? {} : cloneRecord(overridesValue.value);
+	} catch (error) {
+		addDiagnostic(diagnostics, "metadata-overrides-invalid", "error", `Existing localOverrides could not be copied: ${describeError(error)}.`);
+		return undefined;
+	}
+	const existing = safeRead(overrides, id);
+	let override: UnknownRecord;
+	if (existing.ok && existing.value !== undefined) {
+		if (!isPlainObject(existing.value)) {
+			addDiagnostic(diagnostics, "metadata-override-invalid", "error", "The target local override is not an object.");
+			return undefined;
+		}
+		try {
+			override = cloneRecord(existing.value);
+		} catch (error) {
+			addDiagnostic(diagnostics, "metadata-override-invalid", "error", `The target local override could not be copied: ${describeError(error)}.`);
+			return undefined;
+		}
+	} else if (existing.ok) {
+		override = {};
+	} else {
+		addDiagnostic(diagnostics, "metadata-override-invalid", "error", "The target local override could not be read safely.");
+		return undefined;
+	}
+	setOwn(override, "rotation", rotation);
+	setOwn(overrides, id, override);
+	setOwn(metadata, "localOverrides", overrides);
+	const validation = validateMiroCanvasMetadata(metadata);
+	if (!validation.valid) {
+		addDiagnostic(diagnostics, "metadata-validation-failed", "error", "The proposed rotation metadata failed validation; no graph import was attempted.");
+		return undefined;
+	}
+	setOwn(document, "miroCanvas", metadata);
+	return document;
+}
+
+interface ZOrderBuildResult {
+	readonly changed: boolean;
+	readonly document: UnknownRecord;
+}
+
+function buildSourceAliases(
+	metadata: UnknownRecord,
+	graphIds: ReadonlySet<string>,
+	diagnostics: CanvasAuthoringDiagnostic[],
+): Map<string, string> | undefined {
+	const aliases = new Map<string, string>();
+	const bindingsValue = safeRead(metadata, "bindings");
+	if (!bindingsValue.ok) {
+		addDiagnostic(diagnostics, "z-order-bindings-invalid", "error", "miroCanvas.bindings could not be read safely.");
+		return undefined;
+	}
+	if (bindingsValue.value === undefined) {
+		return aliases;
+	}
+	if (!isPlainObject(bindingsValue.value)) {
+		addDiagnostic(diagnostics, "z-order-bindings-invalid", "error", "miroCanvas.bindings must be an object map.");
+		return undefined;
+	}
+	const keys = ownKeys(bindingsValue.value);
+	if (keys === undefined) {
+		addDiagnostic(diagnostics, "z-order-bindings-invalid", "error", "miroCanvas.bindings could not be enumerated safely.");
+		return undefined;
+	}
+	for (const canvasId of keys) {
+		if (!graphIds.has(canvasId)) {
+			continue;
+		}
+		const binding = safeRead(bindingsValue.value, canvasId);
+		if (!binding.ok || !isPlainObject(binding.value)) {
+			addDiagnostic(diagnostics, "z-order-bindings-invalid", "error", "A graph binding could not be read safely.");
+			return undefined;
+		}
+		const sourceIdValue = safeRead(binding.value, "sourceId");
+		if (!sourceIdValue.ok || typeof sourceIdValue.value !== "string" || sourceIdValue.value.length === 0) {
+			addDiagnostic(diagnostics, "z-order-bindings-invalid", "error", "A graph binding has no valid source ID.");
+			return undefined;
+		}
+		const sourceId = sourceIdValue.value;
+		const directGraphId = graphIds.has(sourceId) ? sourceId : undefined;
+		const existing = aliases.get(sourceId);
+		if ((existing !== undefined && existing !== canvasId) || (directGraphId !== undefined && directGraphId !== canvasId)) {
+			addDiagnostic(diagnostics, "z-order-id-collision", "error", "Canvas and source IDs collide, so z-order cannot be resolved unambiguously.");
+			return undefined;
+		}
+		aliases.set(sourceId, canvasId);
+	}
+	return aliases;
+}
+
+function buildZOrderDocument(
+	snapshot: InternalSnapshot,
+	id: string,
+	direction: ZOrderDirection,
+	diagnostics: CanvasAuthoringDiagnostic[],
+): ZOrderBuildResult | undefined {
+	let document: UnknownRecord;
+	try {
+		document = cloneRecord(snapshot.document);
+	} catch (error) {
+		addDiagnostic(diagnostics, "document-copy-failed", "error", `The Canvas document could not be copied: ${describeError(error)}.`);
+		return undefined;
+	}
+	const metadata = readMetadataForUpdate(document, diagnostics);
+	if (metadata === undefined) {
+		return undefined;
+	}
+	const nativeOrder = graphElementIds(snapshot);
+	const graphIds = new Set(nativeOrder);
+	const aliases = buildSourceAliases(metadata, graphIds, diagnostics);
+	if (aliases === undefined) {
+		return undefined;
+	}
+	const resolveToken = (token: string): string | undefined => {
+		const direct = graphIds.has(token) ? token : undefined;
+		const alias = aliases.get(token);
+		if (direct !== undefined && alias !== undefined && direct !== alias) {
+			return undefined;
+		}
+		return direct ?? alias;
+	};
+	const zOrderValue = safeRead(metadata, "zOrder");
+	if (!zOrderValue.ok) {
+		addDiagnostic(diagnostics, "z-order-invalid", "error", "miroCanvas.zOrder could not be read safely.");
+		return undefined;
+	}
+	const hasExplicitOrder = zOrderValue.value !== undefined;
+	if (hasExplicitOrder && !Array.isArray(zOrderValue.value)) {
+		addDiagnostic(diagnostics, "z-order-invalid", "error", "miroCanvas.zOrder must be an array.");
+		return undefined;
+	}
+	const explicitOrder: string[] = [];
+	if (Array.isArray(zOrderValue.value)) {
+		for (const token of zOrderValue.value) {
+			if (typeof token !== "string" || token.length === 0) {
+				addDiagnostic(diagnostics, "z-order-invalid", "error", "miroCanvas.zOrder contains an invalid ID.");
+				return undefined;
+			}
+			explicitOrder.push(token);
+		}
+	}
+	const canonicalBySlot: Array<string | undefined> = [];
+	const preferredTokens = new Map<string, string>();
+	const represented = new Set<string>();
+	for (const token of explicitOrder) {
+		const canonical = resolveToken(token);
+		canonicalBySlot.push(canonical);
+		if (canonical === undefined) {
+			continue;
+		}
+		if (represented.has(canonical)) {
+			addDiagnostic(diagnostics, "z-order-id-collision", "error", "The explicit z-order names one graph element through multiple IDs.");
+			return undefined;
+		}
+		represented.add(canonical);
+		preferredTokens.set(canonical, token);
+	}
+	const canonicalOrder = canonicalBySlot.filter((entry): entry is string => entry !== undefined);
+	const fallbackIds = nativeOrder.filter((graphId) => !represented.has(graphId));
+	canonicalOrder.push(...fallbackIds);
+	if (fallbackIds.length > 0) {
+		addDiagnostic(
+			diagnostics,
+			"z-order-source-limited-fallback",
+			"info",
+			"Explicit source/local layer order is incomplete; native Canvas graph order supplies the unresolved graph entries.",
+		);
+	}
+	const index = canonicalOrder.indexOf(id);
+	if (index < 0) {
+		addDiagnostic(diagnostics, "z-order-id-missing", "error", "The target Canvas graph ID is not present in the native graph.");
+		return undefined;
+	}
+	let destination = index;
+	if (direction === "front") {
+		destination = canonicalOrder.length - 1;
+	} else if (direction === "back") {
+		destination = 0;
+	} else if (direction === "forward") {
+		destination = Math.min(index + 1, canonicalOrder.length - 1);
+	} else {
+		destination = Math.max(index - 1, 0);
+	}
+	if (destination === index) {
+		return { changed: false, document: snapshot.document };
+	}
+	const reordered = [...canonicalOrder];
+	const [moved] = reordered.splice(index, 1);
+	if (moved === undefined) {
+		addDiagnostic(diagnostics, "z-order-invalid", "error", "The target z-order entry could not be moved safely.");
+		return undefined;
+	}
+	reordered.splice(destination, 0, moved);
+	const orderedTokens = reordered.map((graphId) => preferredTokens.get(graphId) ?? graphId);
+	let nextOrder: string[];
+	if (hasExplicitOrder) {
+		nextOrder = [...explicitOrder];
+		let tokenIndex = 0;
+		for (let slot = 0; slot < canonicalBySlot.length; slot += 1) {
+			if (canonicalBySlot[slot] !== undefined) {
+				nextOrder[slot] = orderedTokens[tokenIndex]!;
+				tokenIndex += 1;
+			}
+		}
+		nextOrder.push(...orderedTokens.slice(tokenIndex));
+	} else {
+		nextOrder = orderedTokens;
+	}
+	setOwn(metadata, "zOrder", nextOrder);
+	const validation = validateMiroCanvasMetadata(metadata);
+	if (!validation.valid) {
+		addDiagnostic(diagnostics, "metadata-validation-failed", "error", "The proposed z-order metadata failed validation; no graph import was attempted.");
+		return undefined;
+	}
+	setOwn(document, "miroCanvas", metadata);
+	return { changed: !structurallyEqual(document, snapshot.document), document };
+}
+
 function buildShape(
 	snapshot: InternalSnapshot,
 	action: unknown,
@@ -1155,6 +1462,126 @@ export class CanvasAuthoring {
 		}
 		if (!update.ok || update.document === undefined) {
 			return { ok: false, status: "rejected", diagnostics: [...this.diagnosticList, ...diagnostics] };
+		}
+		const verified = this.commitDocument(before, update.document, diagnostics);
+		if (verified === undefined) {
+			return { ok: false, status: "rejected", diagnostics: [...this.diagnosticList, ...diagnostics] };
+		}
+		return { ok: true, status: "applied", document: verified.document, diagnostics: [...this.diagnosticList, ...diagnostics] };
+	}
+
+	/** Apply a local rotation override through the guarded whole-document transaction. */
+	public updateRotation(input: UpdateRotationInput, expected?: CanvasAuthoringExpected): CanvasGraphResult {
+		if (this.disposed || this.host === undefined) {
+			return { ok: false, status: "rejected", diagnostics: this.diagnostics };
+		}
+		const diagnostics: CanvasAuthoringDiagnostic[] = [];
+		const before = readSnapshotFromHost(this.host, diagnostics);
+		if (before === undefined) {
+			return { ok: false, status: "rejected", diagnostics: [...this.diagnosticList, ...diagnostics] };
+		}
+		if (expected !== undefined) {
+			const expectedDiagnostics: CanvasAuthoringDiagnostic[] = [];
+			const expectedSnapshot = makeSnapshot(extractExpectedDocument(expected), expectedDiagnostics);
+			if (expectedSnapshot === undefined || !structurallyEqual(expectedSnapshot.document, before.document)) {
+				addDiagnostic(diagnostics, "stale-document", "warning", "The Canvas document changed since the supplied expected snapshot; no import was attempted.");
+				return { ok: false, status: "rejected", diagnostics: [...this.diagnosticList, ...diagnostics, ...expectedDiagnostics] };
+			}
+		}
+		const liveDiagnostics: CanvasAuthoringDiagnostic[] = [];
+		const live = readSnapshotFromHost(this.host, liveDiagnostics);
+		if (live === undefined || !structurallyEqual(live.document, before.document)) {
+			addDiagnostic(liveDiagnostics, "stale-document", "warning", "The Canvas document changed before the transaction began; no import was attempted.");
+			return { ok: false, status: "rejected", diagnostics: [...this.diagnosticList, ...diagnostics, ...liveDiagnostics] };
+		}
+		diagnostics.push(...liveDiagnostics);
+		const id = readGraphActionId(input, diagnostics, "rotation");
+		const rotationValue = actionProperty(input, "rotation");
+		if (id === undefined || !rotationValue.ok || !isFiniteNumber(rotationValue.value)) {
+			if (id !== undefined) {
+				addDiagnostic(diagnostics, "rotation-value-invalid", "error", "Rotation must be a finite number.");
+			}
+			return { ok: false, status: "rejected", diagnostics: [...this.diagnosticList, ...diagnostics] };
+		}
+		if (!hasGraphElement(before, id)) {
+			addDiagnostic(diagnostics, "rotation-id-missing", "error", "The target Canvas graph ID does not exist.");
+			return { ok: false, status: "rejected", diagnostics: [...this.diagnosticList, ...diagnostics] };
+		}
+		if (!policyAllowsGraphEdit(before.document, "rotate", id, "rotation", diagnostics)) {
+			return { ok: false, status: "rejected", diagnostics: [...this.diagnosticList, ...diagnostics] };
+		}
+		const document = buildRotationDocument(before, id, normalizeRotation(rotationValue.value), diagnostics);
+		if (document === undefined) {
+			return { ok: false, status: "rejected", diagnostics: [...this.diagnosticList, ...diagnostics] };
+		}
+		if (structurallyEqual(document, before.document)) {
+			if (!runtimeAllowsMutation(this.host, diagnostics)) {
+				return { ok: false, status: "rejected", diagnostics: [...this.diagnosticList, ...diagnostics] };
+			}
+			addDiagnostic(diagnostics, "rotation-noop", "info", "The normalized rotation already matches the local override; no graph history entry was created.");
+			return { ok: true, status: "applied", document: before.document, diagnostics: [...this.diagnosticList, ...diagnostics] };
+		}
+		const verified = this.commitDocument(before, document, diagnostics);
+		if (verified === undefined) {
+			return { ok: false, status: "rejected", diagnostics: [...this.diagnosticList, ...diagnostics] };
+		}
+		return { ok: true, status: "applied", document: verified.document, diagnostics: [...this.diagnosticList, ...diagnostics] };
+	}
+
+	/** Move one graph element in the local back-to-front z-order. */
+	public changeZOrder(input: ChangeZOrderInput, expected?: CanvasAuthoringExpected): CanvasGraphResult {
+		if (this.disposed || this.host === undefined) {
+			return { ok: false, status: "rejected", diagnostics: this.diagnostics };
+		}
+		const diagnostics: CanvasAuthoringDiagnostic[] = [];
+		const before = readSnapshotFromHost(this.host, diagnostics);
+		if (before === undefined) {
+			return { ok: false, status: "rejected", diagnostics: [...this.diagnosticList, ...diagnostics] };
+		}
+		if (expected !== undefined) {
+			const expectedDiagnostics: CanvasAuthoringDiagnostic[] = [];
+			const expectedSnapshot = makeSnapshot(extractExpectedDocument(expected), expectedDiagnostics);
+			if (expectedSnapshot === undefined || !structurallyEqual(expectedSnapshot.document, before.document)) {
+				addDiagnostic(diagnostics, "stale-document", "warning", "The Canvas document changed since the supplied expected snapshot; no import was attempted.");
+				return { ok: false, status: "rejected", diagnostics: [...this.diagnosticList, ...diagnostics, ...expectedDiagnostics] };
+			}
+		}
+		const liveDiagnostics: CanvasAuthoringDiagnostic[] = [];
+		const live = readSnapshotFromHost(this.host, liveDiagnostics);
+		if (live === undefined || !structurallyEqual(live.document, before.document)) {
+			addDiagnostic(liveDiagnostics, "stale-document", "warning", "The Canvas document changed before the transaction began; no import was attempted.");
+			return { ok: false, status: "rejected", diagnostics: [...this.diagnosticList, ...diagnostics, ...liveDiagnostics] };
+		}
+		diagnostics.push(...liveDiagnostics);
+		const id = readGraphActionId(input, diagnostics, "z-order");
+		const directionValue = actionProperty(input, "direction");
+		const direction = directionValue.ok && typeof directionValue.value === "string"
+			&& ["front", "back", "forward", "backward"].includes(directionValue.value)
+			? directionValue.value as ZOrderDirection
+			: undefined;
+		if (id === undefined || direction === undefined) {
+			if (id !== undefined) {
+				addDiagnostic(diagnostics, "z-order-direction-invalid", "error", "Z-order direction must be front, back, forward, or backward.");
+			}
+			return { ok: false, status: "rejected", diagnostics: [...this.diagnosticList, ...diagnostics] };
+		}
+		if (!hasGraphElement(before, id)) {
+			addDiagnostic(diagnostics, "z-order-id-missing", "error", "The target Canvas graph ID does not exist.");
+			return { ok: false, status: "rejected", diagnostics: [...this.diagnosticList, ...diagnostics] };
+		}
+		if (!policyAllowsGraphEdit(before.document, "edit", id, "z-order", diagnostics)) {
+			return { ok: false, status: "rejected", diagnostics: [...this.diagnosticList, ...diagnostics] };
+		}
+		const update = buildZOrderDocument(before, id, direction, diagnostics);
+		if (update === undefined) {
+			return { ok: false, status: "rejected", diagnostics: [...this.diagnosticList, ...diagnostics] };
+		}
+		if (!update.changed) {
+			if (!runtimeAllowsMutation(this.host, diagnostics)) {
+				return { ok: false, status: "rejected", diagnostics: [...this.diagnosticList, ...diagnostics] };
+			}
+			addDiagnostic(diagnostics, "z-order-noop", "info", "The graph element is already at the requested z-order bound; no graph history entry was created.");
+			return { ok: true, status: "applied", document: before.document, diagnostics: [...this.diagnosticList, ...diagnostics] };
 		}
 		const verified = this.commitDocument(before, update.document, diagnostics);
 		if (verified === undefined) {

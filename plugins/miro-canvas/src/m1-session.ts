@@ -62,6 +62,7 @@ import {
 	type M1ControlsState,
 	type M1NavigationAction,
 } from "./m1-controls";
+import { SourceRenderer } from "./source-renderer";
 
 export interface M1SessionOptions {
 	readonly document?: Document;
@@ -387,6 +388,7 @@ export class M1CanvasSession {
 	private writer: MetadataWriter | null;
 	private readonly options: M1SessionOptions;
 	private readonly disposers: Array<() => void> = [];
+	private readonly sourceRenderer: SourceRenderer | undefined;
 	private readonly readonlyOriginal: boolean | undefined;
 	private readonly lockedDom = new Map<HTMLElement, { readonly classPresent: boolean; readonly attrPresent: boolean; readonly attrValue: string | null }>();
 	private readonly appearanceDom = new Map<HTMLElement, AppearanceDomSnapshot>();
@@ -442,6 +444,12 @@ export class M1CanvasSession {
 			: isElement(options.panelHost)
 				? options.panelHost
 				: undefined;
+		const renderDocument = options.document ?? ownerDocument(this.root);
+		this.sourceRenderer = renderDocument === undefined ? undefined : new SourceRenderer({
+			getDocument: () => this.adapter.getDocument(),
+			getNodes: () => this.adapter.getNodes(),
+			getEdges: () => this.adapter.getEdges(),
+		}, renderDocument);
 		this.viewport = new ViewportController(this.adapter, {
 			minZoom: DEFAULT_MIN_ZOOM,
 			maxZoom: DEFAULT_MAX_ZOOM,
@@ -664,6 +672,9 @@ export class M1CanvasSession {
 		this.applyTheme(this.appearance.settings.displayTheme);
 		if (decorationsChanged) {
 			this.refreshDecorations();
+		}
+		for (const diagnostic of this.sourceRenderer?.refresh() ?? []) {
+			diagnostics.push(diagnostic);
 		}
 		const minimapVisible = this.appearance.settings.minimapVisible !== false;
 		const drawSignature = `${this.lastMinimapSignature}|${minimapVisible ? "visible" : "hidden"}`;
@@ -1746,6 +1757,7 @@ export class M1CanvasSession {
 		}
 		this.disposed = true;
 		this.controls.dispose();
+		this.sourceRenderer?.dispose();
 		for (const dispose of this.disposers.splice(0)) {
 			dispose();
 		}

@@ -60,6 +60,9 @@ export interface AnchorPoint {
 export interface AnchorRect extends AnchorPoint {
   readonly width: number;
   readonly height: number;
+  readonly rotation?: number;
+  readonly rotationCenterX?: number;
+  readonly rotationCenterY?: number;
 }
 
 export interface AnchorEdgeGeometry {
@@ -351,10 +354,28 @@ function geometryRect(value: unknown): AnchorRect | undefined {
   const y = readOwn(value, "y");
   const width = readOwn(value, "width");
   const height = readOwn(value, "height");
+  const rotation = readOwn(value, "rotation");
+  const rotationCenterX = readOwn(value, "rotationCenterX");
+  const rotationCenterY = readOwn(value, "rotationCenterY");
   return x !== ABSENT && y !== ABSENT && width !== ABSENT && height !== ABSENT
     && finite(x) && finite(y) && finite(width) && finite(height) && width >= 0 && height >= 0
-    ? { x, y, width, height }
+    && (rotation === ABSENT || finite(rotation))
+    && (rotationCenterX === ABSENT || finite(rotationCenterX))
+    && (rotationCenterY === ABSENT || finite(rotationCenterY))
+    ? { x, y, width, height,
+      ...(rotation === ABSENT ? {} : { rotation }),
+      ...(rotationCenterX === ABSENT ? {} : { rotationCenterX }),
+      ...(rotationCenterY === ABSENT ? {} : { rotationCenterY }) }
     : undefined;
+}
+
+function rotateRectPoint(point: AnchorPoint, rect: AnchorRect): AnchorPoint {
+  if (rect.rotation === undefined || rect.rotation === 0) return point;
+  const cx = rect.rotationCenterX ?? rect.x + rect.width / 2;
+  const cy = rect.rotationCenterY ?? rect.y + rect.height / 2;
+  const radians = rect.rotation * Math.PI / 180;
+  const dx = point.x - cx, dy = point.y - cy;
+  return { x: cx + dx * Math.cos(radians) - dy * Math.sin(radians), y: cy + dx * Math.sin(radians) + dy * Math.cos(radians) };
 }
 
 function mapValue(map: unknown, id: string): unknown | typeof ABSENT {
@@ -427,7 +448,7 @@ export function resolveAnchor(anchorValue: unknown, geometry: AnchorGeometry | u
         diagnostics: [diagnostic("missing-target", "Anchor target geometry is missing or invalid.", anchor.type, anchor.nodeId)],
       };
     }
-    const point = { x: rect.x + rect.width * anchor.u, y: rect.y + rect.height * anchor.v };
+    const point = rotateRectPoint({ x: rect.x + rect.width * anchor.u, y: rect.y + rect.height * anchor.v }, rect);
     return finite(point.x) && finite(point.y)
       ? { valid: true, point: { ...point, anchor }, diagnostics: [] }
       : { valid: false, diagnostics: [diagnostic("geometry-invalid", "Resolved node/image point is not finite.", anchor.type, anchor.nodeId)] };

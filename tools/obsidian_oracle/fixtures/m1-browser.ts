@@ -38,7 +38,16 @@ const edgeData = {
 const initial = {
   nodes: [nodeData, fileData, imageData],
   edges: [edgeData],
-  miroSource: { items: [{ id: "n1", data: { content: "immutable" } }] },
+  miroSource: {
+    items: [
+      { id: "n1", type: "text", geometry: { rotation: 0 }, style: { color: "#17365d", fontSize: "19" }, data: { content: "immutable" }, future: { keep: true } },
+      { id: "file", type: "document", style: { opacity: "1" }, future: { keep: true } },
+      { id: "image", type: "image", style: { borderColor: "#336699", borderWidth: "2" }, future: { keep: true } },
+      { id: "e1", type: "connector", shape: "curved", style: { strokeColor: "#884422", strokeWidth: "3", endStrokeCap: "arrow" }, future: { keep: true } },
+    ],
+    zOrder: ["file", "n1", "image", "e1"],
+    futureSource: { keep: true },
+  },
   unknownRoot: { preserved: ["root", 2] },
 };
 

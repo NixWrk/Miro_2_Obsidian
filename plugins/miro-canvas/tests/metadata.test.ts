@@ -62,6 +62,7 @@ describe("miroCanvas metadata boundary", () => {
           },
           locked: true,
           showAttachmentName: false,
+          rotation: -45,
         },
       },
     });
@@ -69,6 +70,9 @@ describe("miroCanvas metadata boundary", () => {
     expect(result.status).toBe("valid");
     expect(result.diagnostics).toEqual([]);
     expect(result.metadata?.settings?.displayTheme).toBe("dark");
+    expect(result.metadata?.localOverrides?.["node-a"]?.rotation).toBe(-45);
+    expect(validateMiroCanvasMetadata({ schemaVersion: 1, localOverrides: { node: { rotation: Number.NaN } } }).status)
+      .toBe("invalid");
   });
 
   it("accepts the canonical appearance palette, typography, and transparent colors", () => {

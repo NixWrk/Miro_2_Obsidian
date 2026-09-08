@@ -49,6 +49,9 @@ describe("local Canvas anchors", () => {
       x: 10,
       y: 5,
     });
+    expect(resolveAnchor({ type: "node", nodeId: "rotated", u: 1, v: 0.5 }, {
+      nodes: { rotated: { x: 0, y: 0, width: 100, height: 40, rotation: 90 } },
+    }).point).toMatchObject({ x: 50, y: 70 });
     expect(resolveAnchor({ type: "node", nodeId: "missing", u: 0.5, v: 0.5 }, geometry).diagnostics[0]?.code)
       .toBe("missing-target");
     expect(resolveAnchor({ type: "edge", edgeId: "edge", t: 0.5 }, { edges: { edge: { start: { x: 0, y: Infinity }, end: { x: 1, y: 1 } } } }).diagnostics[0]?.code)
