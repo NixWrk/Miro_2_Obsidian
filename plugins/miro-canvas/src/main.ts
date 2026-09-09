@@ -14,6 +14,14 @@ import {
 import { M1CanvasSession } from "./m1-session";
 import { M2CanvasTools } from "./m2-tools";
 import { createObsidianDocumentHost } from "./obsidian-document-host";
+import {
+  DEFAULT_SETTINGS,
+  NAVIGATION_COMMANDS,
+  normalizeSettings,
+  type MiroCanvasSettings,
+  type PanDirection,
+} from "./settings";
+import { MiroCanvasSettingTab } from "./settings-tab";
 
 const NATIVE_CANVAS_VIEW_TYPE = "canvas";
 
@@ -47,9 +55,19 @@ export default class MiroCanvasPlugin extends Plugin {
   private m1Session: M1CanvasSession | null = null;
   private toolsModal: Modal | null = null;
   private initializationRetry: ReturnType<typeof setTimeout> | null = null;
+  public canvasSettings: MiroCanvasSettings = DEFAULT_SETTINGS;
 
   override async onload(): Promise<void> {
+    // eslint-disable-next-line @typescript-eslint/no-this-alias -- the tab host reads settings lazily.
+    const self = this;
     this.shellDisposed = false;
+    // A stored settings file is user-editable and may predate this release,
+    // so it is normalized rather than trusted.
+    this.canvasSettings = normalizeSettings(await this.loadData());
+    this.addSettingTab(new MiroCanvasSettingTab(this.app, this, {
+      get settings(): MiroCanvasSettings { return self.canvasSettings; },
+      saveSettings: (patch) => this.saveCanvasSettings(patch),
+    }));
     // Advanced Canvas is optional.  Its adapter fails closed, so this probe
     // cannot prevent the native Canvas shell from loading.
     this.advancedInspection = inspectAdvancedCanvas(this.app);
@@ -141,6 +159,26 @@ export default class MiroCanvasPlugin extends Plugin {
       name: "Miro Canvas: Unlock selection",
       checkCallback: (checking) => this.runM1Command(checking, (session) => session.unlockSelection()),
     });
+    // Registered without default hotkeys so Obsidian's own editor can bind
+    // them and nothing is taken from the user or another plugin.
+    for (const command of NAVIGATION_COMMANDS) {
+      this.addCommand({
+        id: command.id,
+        name: `Miro Canvas: ${command.name}`,
+        checkCallback: (checking) => this.runM1Command(checking, (session) => {
+          const direction = command.id.startsWith("m1-pan-")
+            ? command.id.slice("m1-pan-".length) as PanDirection
+            : undefined;
+          if (direction !== undefined) {
+            session.pan(direction);
+            return;
+          }
+          session.navigate(command.id.slice("m1-".length) as
+            "zoom-in" | "zoom-out" | "zoom-reset" | "zoom-fit" | "toggle-minimap");
+        }),
+      });
+    }
+
     this.addCommand({
       id: "m1-toggle-attachment-names",
       name: "Miro Canvas: Toggle attachment names",
@@ -221,6 +259,7 @@ export default class MiroCanvasPlugin extends Plugin {
     this.m1Session = new M1CanvasSession(view, this.metadataWriter, {
       onNotice: (message) => new Notice(message),
       onStateChange: () => this.updateStatus(true),
+      settings: this.canvasSettings,
     });
     const mounted = this.m1Session.mount();
     this.updateStatus(true);
@@ -231,6 +270,16 @@ export default class MiroCanvasPlugin extends Plugin {
       }, 250);
     }
   };
+
+  /** Persist a settings change and rebuild the session so it takes effect. */
+  public async saveCanvasSettings(patch: Partial<MiroCanvasSettings>): Promise<void> {
+    this.canvasSettings = normalizeSettings({ ...this.canvasSettings, ...patch });
+    await this.saveData(this.canvasSettings);
+    const leaf = this.app.workspace.activeLeaf;
+    if (this.m1Session !== null && leaf !== null && leaf !== undefined) {
+      this.handleActiveLeafChange(leaf);
+    }
+  }
 
   private activeM1Session(): M1CanvasSession | null {
     const view = this.app.workspace.activeLeaf?.view;

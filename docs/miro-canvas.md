@@ -22,6 +22,25 @@ adapters, an explicit metadata writer with a guarded atomic compare-and-swap
 (CAS) bridge, and a deterministic four-profile compatibility matrix with a
 project-local test vault harness.
 
+Native Canvas rebuilds its document from its own model whenever it saves and
+keeps only the root keys it owns, so `miroCanvas` and `miroSource` would be
+erased by any ordinary native edit. The session installs one instance-scoped
+hook on `getData` that carries across every root key still present in the live
+document but missing from the rebuild — another plugin's data included, because
+dropping it would be as destructive as dropping this plugin's own. `nodes` and
+`edges` are always the host's to rebuild, a value the host produced itself is
+never overwritten, and the hook is removed on dispose.
+
+A document the host produced is read in its JSON form: values that JSON
+serialization drops, such as an absent optional field left as `undefined`, are
+normalized instead of treated as a corrupt document. Anything this plugin
+installs as the new root still goes through the strict plain-JSON clone.
+Because a host cannot be required to return the exact bytes it was given, an
+accepted commit is verified on what the plugin owns: its own root keys must
+survive byte-for-byte and the node and edge id sets must be unchanged. A commit
+the host altered beyond that is refused and rolled back, and a rejected commit
+now names the precondition it failed on.
+
 M0 is not production-ready yet. The real-Obsidian gate remains open: native
 Ctrl+Z/redo behavior for metadata actions and real visual/interaction
 verification have not been claimed.
@@ -31,6 +50,36 @@ minimap, typography, board themes, colors, locks/review mode, and attachment
 title visibility. Native zoom is safely limited to 6.25%–200%; unrestricted zoom
 is not implemented. The Chromium DOM smoke covers the M1 controls against a
 synthetic native host, not the real Obsidian runtime.
+
+A contextual formatting toolbar floats above the current selection whenever the
+native DOM can be measured, and disappears as soon as the selection is cleared.
+Following Miro, it is one compact row of icon buttons: shape, font family, font
+size with a stepper, bold, alignment, one button per color slot, a lock toggle
+and an overflow menu. Long lists never sit in the row itself. The shape button
+opens the common kinds with **More shapes** revealing every supported Miro kind;
+the overflow menu carries the remaining text formats, line height, border style
+and width, and the full connector settings (route, line style, both end caps,
+width). Controls that do not apply to the selection are removed from the row
+rather than shown disabled, and only one popover is open at a time.
+
+Typography and colors continue through the appearance pipeline; shape, border
+and connector settings go through the guarded authoring transaction. Review mode
+and locked elements leave the toolbar visible but inert with an explicit reason,
+except the lock toggle, which stays live so an accidental lock can be undone.
+The side panel keeps the same typography and color groups for now; that
+duplication is removed once the toolbar is verified in the real Obsidian
+runtime.
+
+Zoom, fit and the minimap toggle sit in the navigation dock at the bottom of
+the Canvas, beside the map they navigate, and the dock keeps carrying zoom while
+the map itself is hidden. Panning, zoom, the minimap, review mode and locking
+are registered commands, so Obsidian's own hotkey editor can bind them; the
+plugin ships no default bindings and takes no keys from another plugin. A
+settings tab configures the zoom step and range, whether zoom follows the
+pointer, the wheel modifier, keyboard pan distance and its Shift multiplier, and
+which surfaces are shown. A stored settings file is normalized on load: unknown
+keys are dropped and out-of-range numbers are clamped, so a bad preference can
+never stop a board from opening.
 
 M2 tools are available through **Local shapes, comments, anchors and documents**
 in the command palette. Create rectangles, rounded rectangles, ellipses,

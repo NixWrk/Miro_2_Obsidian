@@ -1,0 +1,84 @@
+import { describe, expect, it } from "vitest";
+
+import {
+  DEFAULT_SETTINGS,
+  NAVIGATION_COMMANDS,
+  SETTING_BOUNDS,
+  normalizeSettings,
+  panDelta,
+  wheelZooms,
+} from "../src/settings";
+
+describe("plugin settings", () => {
+  it("falls back to the defaults for anything that is not a settings object", () => {
+    for (const value of [undefined, null, 0, "settings", [], () => undefined]) {
+      expect(normalizeSettings(value)).toEqual(DEFAULT_SETTINGS);
+    }
+  });
+
+  it("keeps stored values and drops unknown keys", () => {
+    const stored = normalizeSettings({
+      zoomStep: 1.5, panStep: 128, wheelZoomModifier: "shift",
+      zoomToCursor: false, minimapVisible: false, somethingElse: "ignored",
+    });
+    expect(stored.zoomStep).toBe(1.5);
+    expect(stored.panStep).toBe(128);
+    expect(stored.wheelZoomModifier).toBe("shift");
+    expect(stored.zoomToCursor).toBe(false);
+    expect(stored.minimapVisible).toBe(false);
+    expect(stored).not.toHaveProperty("somethingElse");
+    // Untouched keys keep their default.
+    expect(stored.maxZoom).toBe(DEFAULT_SETTINGS.maxZoom);
+  });
+
+  it("clamps out-of-range numbers instead of refusing to open a board", () => {
+    const clamped = normalizeSettings({ zoomStep: 99, panStep: -50, fastPanMultiplier: 0 });
+    expect(clamped.zoomStep).toBe(SETTING_BOUNDS.zoomStep.max);
+    expect(clamped.panStep).toBe(SETTING_BOUNDS.panStep.min);
+    expect(clamped.fastPanMultiplier).toBe(SETTING_BOUNDS.fastPanMultiplier.min);
+    const broken = normalizeSettings({ zoomStep: Number.NaN, panStep: "many", minZoom: Infinity });
+    expect(broken.zoomStep).toBe(DEFAULT_SETTINGS.zoomStep);
+    expect(broken.panStep).toBe(DEFAULT_SETTINGS.panStep);
+    expect(broken.minZoom).toBe(DEFAULT_SETTINGS.minZoom);
+  });
+
+  it("orders an inverted zoom range so some zoom always remains available", () => {
+    const settings = normalizeSettings({ minZoom: 1, maxZoom: 1 });
+    expect(settings.minZoom).toBeLessThanOrEqual(settings.maxZoom);
+    const inverted = normalizeSettings({ minZoom: 0.9, maxZoom: 1 });
+    expect(inverted.minZoom).toBe(0.9);
+    expect(inverted.maxZoom).toBe(1);
+  });
+
+  it("rejects an unsupported wheel modifier", () => {
+    expect(normalizeSettings({ wheelZoomModifier: "meta" }).wheelZoomModifier)
+      .toBe(DEFAULT_SETTINGS.wheelZoomModifier);
+  });
+
+  it("derives pan deltas from the configured step", () => {
+    const settings = normalizeSettings({ panStep: 32, fastPanMultiplier: 3 });
+    expect(panDelta(settings, "left")).toEqual({ x: -32, y: 0 });
+    expect(panDelta(settings, "right")).toEqual({ x: 32, y: 0 });
+    expect(panDelta(settings, "up")).toEqual({ x: 0, y: -32 });
+    expect(panDelta(settings, "down", true)).toEqual({ x: 0, y: 96 });
+  });
+
+  it("decides wheel zoom from the configured modifier", () => {
+    const ctrl = normalizeSettings({ wheelZoomModifier: "ctrl" });
+    expect(wheelZooms(ctrl, { ctrlKey: true })).toBe(true);
+    expect(wheelZooms(ctrl, { metaKey: true })).toBe(true);
+    expect(wheelZooms(ctrl, { shiftKey: true })).toBe(false);
+    expect(wheelZooms(normalizeSettings({ wheelZoomModifier: "none" }), {})).toBe(true);
+    expect(wheelZooms(normalizeSettings({ wheelZoomModifier: "alt" }), { altKey: true })).toBe(true);
+  });
+
+  it("declares navigation commands with unique ids and no default hotkeys", () => {
+    const ids = NAVIGATION_COMMANDS.map((command) => command.id);
+    expect(new Set(ids).size).toBe(ids.length);
+    for (const command of NAVIGATION_COMMANDS) {
+      expect(command.id.startsWith("m1-")).toBe(true);
+      expect(command.name.length).toBeGreaterThan(0);
+      expect(command).not.toHaveProperty("hotkeys");
+    }
+  });
+});
