@@ -483,12 +483,21 @@ export function buildSourceScene(document: unknown): SourceScene {
   const metadata = valueOf(document, "miroCanvas");
   const overrides = valueOf(metadata, "localOverrides");
   if (isRecord(overrides)) {
+    const edgeIds = new Set(edges.map((edge) => valueOf(edge, "id")).filter((id): id is string => typeof id === "string"));
     for (const canvasId of ownNames(overrides)) {
+      if (items.has(canvasId) || edgeIds.has(canvasId)) continue;
       const shape = localShapeKind(document, canvasId);
-      if (shape === undefined || items.has(canvasId)) continue;
       const css: Record<string, string> = {};
       applyLocalCss(css, localOverride(document, canvasId));
-      items.set(canvasId, Object.freeze({ kind: "shape", shape, rotation: effectiveRotationFor(document, canvasId), css: Object.freeze(css) }));
+      const rotation = effectiveRotationFor(document, canvasId);
+      // A node can be rotated or restyled locally without becoming a shape.
+      // Without an entry here it would reach neither the renderer nor the
+      // anchor geometry, so it would stay upright and its connectors would end
+      // on the border it no longer has.
+      if (shape === undefined && rotation === 0 && Object.keys(css).length === 0) continue;
+      items.set(canvasId, Object.freeze(shape === undefined
+        ? { kind: "text", rotation, css: Object.freeze(css) }
+        : { kind: "shape", shape, rotation, css: Object.freeze(css) }));
     }
   }
 

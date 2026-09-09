@@ -196,3 +196,35 @@ describe("source projection model", () => {
     expect(limited.diagnostics.some((item) => item.startsWith("source-order-limited:"))).toBe(true);
   });
 });
+
+describe("local overrides without a shape", () => {
+  const board = (override: Record<string, unknown>) => ({
+    nodes: [{ id: "a", type: "text", x: 0, y: 0, width: 100, height: 80 }],
+    edges: [{ id: "e", fromNode: "a", fromSide: "right", toNode: "a", toSide: "left" }],
+    miroCanvas: { schemaVersion: 1, settings: {}, localOverrides: override },
+  });
+
+  it("projects a node that is only rotated locally", () => {
+    const scene = buildSourceScene(board({ a: { rotation: -18 } }));
+    // Without this the node reaches neither the renderer nor the geometry, so
+    // it stays upright and its connectors end on a border it no longer has.
+    expect(scene.items.get("a")).toMatchObject({ kind: "text", rotation: -18 });
+  });
+
+  it("projects a node that is only restyled locally", () => {
+    const scene = buildSourceScene(board({ a: { colors: { fill: "#123456" } } }));
+    expect(scene.items.get("a")?.kind).toBe("text");
+    expect(scene.items.get("a")?.css["background-color"]).toBe("#123456");
+  });
+
+  it("ignores an override that changes nothing this renderer draws", () => {
+    expect(buildSourceScene(board({ a: { locked: true } })).items.has("a")).toBe(false);
+    expect(buildSourceScene(board({ a: { rotation: 0 } })).items.has("a")).toBe(false);
+  });
+
+  it("never turns an edge override into a node", () => {
+    const scene = buildSourceScene(board({ e: { rotation: 45 } }));
+    expect(scene.items.get("e")?.kind).toBe("connector");
+  });
+});
+

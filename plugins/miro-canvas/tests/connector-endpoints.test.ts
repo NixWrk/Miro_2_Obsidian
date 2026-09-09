@@ -323,3 +323,29 @@ describe("measured node geometry", () => {
   });
 });
 
+describe("connectors on a rotated node", () => {
+  const board = (rotation: number) => ({
+    nodes: [
+      { id: "a", type: "text", x: 0, y: 0, width: 100, height: 80 },
+      { id: "b", type: "text", x: 400, y: 0, width: 100, height: 80 },
+    ],
+    edges: [{ id: "e", fromNode: "b", fromSide: "left", toNode: "a", toSide: "right" }],
+    miroCanvas: { schemaVersion: 1, settings: {}, localOverrides: { a: { rotation } } },
+  });
+
+  it("ends on the border the node actually has after a local rotation", () => {
+    expect(buildCanvasAnchorGeometry(board(0)).edges!.e!.end).toEqual({ x: 100, y: 40 });
+    // The right-hand side turns a quarter turn about the node centre.
+    const turned = buildCanvasAnchorGeometry(board(90)).edges!.e!.end!;
+    expect(turned.x).toBeCloseTo(50);
+    expect(turned.y).toBeCloseTo(90);
+  });
+
+  it("turns the node rect with it so anchors follow too", () => {
+    expect(buildCanvasAnchorGeometry(board(-18)).nodes!.a).toMatchObject({
+      rotation: -18, rotationCenterX: 50, rotationCenterY: 40,
+    });
+  });
+});
+
+
