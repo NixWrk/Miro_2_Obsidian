@@ -114,7 +114,7 @@ function make<K extends keyof HTMLElementTagNameMap>(
 function makeGrip(document: Document, className: string, glyph: string, title: string): HTMLButtonElement {
   const button = make(document, "button", `miro-canvas-handle ${className}`, glyph);
   button.type = "button";
-  button.title = title;
+  // Obsidian renders a tooltip from aria-label; a title would duplicate it.
   button.setAttribute("aria-label", title);
   return button;
 }

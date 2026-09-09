@@ -477,6 +477,7 @@ export class M1CanvasSession {
 		diagnostics: [],
 	};
 	private authoring: CanvasAuthoring | undefined;
+	private interactionBlock: string | undefined;
 	private rotationPreview: {
 		readonly element: HTMLElement;
 		readonly base: string;
@@ -879,7 +880,7 @@ export class M1CanvasSession {
 			}
 		}
 		if (this.writer === null) {
-			diagnostics.push("Metadata persistence is unavailable; explicit appearance and safety writes are disabled.");
+			diagnostics.push("Metadata persistence is unavailable; explicit appearance and safety writes are disabled. Run \"Miro Canvas: Show plugin status\" to see which runtime member is missing.");
 		}
 		const selection = this.adapter.getSelection();
 		this.selectedIds = selection === undefined ? [] : allIds(selection);
@@ -1289,7 +1290,7 @@ export class M1CanvasSession {
 					? "Review mode blocks appearance edits; pan, selection, copy, links, and comments remain available."
 					: decision.reason === "element-locked"
 						? "A locked Canvas element blocks appearance edits. Unlock it explicitly to continue."
-						: "Appearance edit blocked because its capability could not be verified.");
+						: `Appearance edit blocked because its capability could not be verified: ${this.interactionBlock ?? "the interaction policy refused the request"}.`);
 				this.refresh();
 				return;
 			}
@@ -2040,12 +2041,31 @@ export class M1CanvasSession {
 			: parsed.status === "absent" ? { settings: {}, localOverrides: {} } : undefined);
 	}
 
+	/**
+	 * Failing closed is right, but doing it silently is not: a refusal that
+	 * cannot be explained is indistinguishable from a broken plugin, so the
+	 * reason is recorded and reported with the block.
+	 */
 	private readInteractionState(): void {
-		this.policy = this.policyFromDocument(this.adapter.getDocument());
+		this.interactionBlock = undefined;
+		const document = this.adapter.getDocument();
+		this.policy = this.policyFromDocument(document);
 		const selection = this.adapter.getSelection();
 		this.selectedIds = selection === undefined ? [] : allIds(selection);
-		if (selection === undefined || selection.some((item) => allIds([item]).length !== 1)) {
+		if (selection === undefined) {
+			this.interactionBlock = "this Canvas runtime does not report its selection";
 			this.policy = createInteractionPolicy(undefined);
+			return;
+		}
+		const unidentified = selection.filter((item) => allIds([item]).length !== 1).length;
+		if (unidentified > 0) {
+			this.interactionBlock = `${unidentified} of ${selection.length} selected item(s) could not be identified`;
+			this.policy = createInteractionPolicy(undefined);
+			return;
+		}
+		const parsed = parseMiroCanvasMetadata(document);
+		if (parsed.status !== "valid" && parsed.status !== "absent") {
+			this.interactionBlock = `the board metadata is ${parsed.status}`;
 		}
 	}
 
@@ -2243,7 +2263,7 @@ export class M1CanvasSession {
 			? "Review mode blocked a Canvas edit; pan, selection, copy, links, and comments remain available."
 			: decision.reason === "element-locked"
 				? "A locked Canvas element blocked that edit. Unlock it explicitly to continue."
-				: "Canvas edit blocked because its capability could not be verified.");
+				: `Canvas edit blocked because its capability could not be verified: ${this.interactionBlock ?? "the interaction policy refused the request"}.`);
 		return false;
 	}
 

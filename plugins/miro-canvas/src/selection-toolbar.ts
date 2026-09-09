@@ -133,10 +133,13 @@ function make<K extends keyof HTMLElementTagNameMap>(
   return element;
 }
 
+/**
+ * Only `aria-label` is set: Obsidian renders its own tooltip from it, so a
+ * `title` on the same element would show a second, native tooltip beside it.
+ */
 function makeButton(document: Document, label: string, title: string, className = ""): HTMLButtonElement {
   const button = make(document, "button", `miro-canvas-toolbar__button ${className}`.trim(), label);
   button.type = "button";
-  button.title = title;
   button.setAttribute("aria-label", title);
   return button;
 }
@@ -146,7 +149,6 @@ function makeSelect(
   groups?: readonly { readonly label: string; readonly match: (value: string) => boolean }[],
 ): HTMLSelectElement {
   const select = make(document, "select", `miro-canvas-toolbar__select ${className}`.trim());
-  select.title = title;
   select.setAttribute("aria-label", title);
   const addOption = (parent: HTMLElement, value: string): void => {
     const option = make(document, "option", undefined, tokenLabel(value));
@@ -175,7 +177,6 @@ function makeNumber(
   input.min = String(min);
   input.max = String(max);
   input.step = "1";
-  input.title = title;
   input.setAttribute("aria-label", title);
   return input;
 }
@@ -333,7 +334,6 @@ export class SelectionToolbar {
       recent.setAttribute("data-color-recent", slot);
       const input = append(popover.panel, make(document, "input", "miro-canvas-toolbar__swatch"));
       input.type = "color";
-      input.title = label;
       // Distinct from the popover button's own label so assistive technology
       // and tests can address the value control unambiguously.
       input.setAttribute("aria-label", `${label} value`);

@@ -263,7 +263,10 @@ export default class MiroCanvasPlugin extends Plugin {
     });
     const mounted = this.m1Session.mount();
     this.updateStatus(true);
-    if (!mounted && attempt < 20) {
+    // A Canvas leaf can mount before its runtime exposes the data and save
+    // members the metadata store needs.  Mounting alone is therefore not
+    // enough: without persistence every write is refused, so keep probing.
+    if ((!mounted || this.metadataWriter === null) && attempt < 20) {
       this.initializationRetry = setTimeout(() => {
         this.initializationRetry = null;
         if (this.app.workspace.activeLeaf === leaf) this.handleActiveLeafChange(leaf, attempt + 1);

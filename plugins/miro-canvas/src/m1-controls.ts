@@ -133,7 +133,7 @@ function makeElement<K extends keyof HTMLElementTagNameMap>(
 function makeButton(document: Document, label: string, title: string, className = ""): HTMLButtonElement {
 	const button = makeElement(document, "button", `miro-canvas-panel__button ${className}`.trim(), label);
 	button.type = "button";
-	button.title = title;
+	// Obsidian renders a tooltip from aria-label; a title would duplicate it.
 	button.setAttribute("aria-label", title);
 	return button;
 }
