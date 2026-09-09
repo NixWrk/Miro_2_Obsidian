@@ -134,3 +134,25 @@ describe("reversible source geometry DOM", () => {
     expect(f.lineEndGroupEl.style.getPropertyValue("display")).toBe("");
   });
 });
+
+describe("shape text insets", () => {
+  it("reserves room inside a contour so the text stays within the shape", () => {
+    const f = fixture("triangle");
+    f.renderer.refresh();
+    // Top gives up the most room: a triangle has almost no width up there.
+    expect(f.contentEl.style.getPropertyValue("padding")).toBe("45% 22% 6% 22%");
+    expect(f.contentEl.style.getPropertyValue("box-sizing")).toBe("border-box");
+  });
+
+  it("leaves a rectangle alone and restores an inset shape on dispose", () => {
+    const rectangle = fixture("rectangle");
+    rectangle.renderer.refresh();
+    expect(rectangle.contentEl.style.getPropertyValue("padding")).toBe("");
+    const ellipse = fixture("circle");
+    ellipse.renderer.refresh();
+    expect(ellipse.contentEl.style.getPropertyValue("padding")).toBe("15% 15% 15% 15%");
+    ellipse.renderer.dispose();
+    expect(ellipse.contentEl.style.getPropertyValue("padding")).toBe("");
+  });
+});
+

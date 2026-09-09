@@ -108,6 +108,59 @@ const SHAPE_PATHS: Readonly<Record<string, string>> = Object.freeze({
   flow_chart_terminator: "M25 0H75C108 0 108 100 75 100H25C-8 100 -8 0 25 0Z",
 });
 
+/**
+ * Percentage insets that keep a node's text inside its contour.
+ *
+ * Native Canvas lays text out in the node's rectangle, so on a triangle or an
+ * ellipse the words spill outside the drawn shape.  Miro reserves the same
+ * space, and the values below are the fraction of the box each side gives up:
+ * top, right, bottom, left.  A shape that is missing here is close enough to
+ * its rectangle to need nothing.
+ */
+const SHAPE_CONTENT_INSETS: Readonly<Record<string, readonly [number, number, number, number]>> = Object.freeze({
+  circle: [15, 15, 15, 15],
+  ellipse: [15, 15, 15, 15],
+  flow_chart_connector: [15, 15, 15, 15],
+  flow_chart_or: [15, 15, 15, 15],
+  flow_chart_summing_junction: [15, 15, 15, 15],
+  triangle: [45, 22, 6, 22],
+  rhombus: [22, 22, 22, 22],
+  star: [30, 26, 22, 26],
+  cloud: [22, 18, 20, 18],
+  parallelogram: [6, 18, 6, 18],
+  trapezoid: [6, 18, 6, 18],
+  pentagon: [18, 12, 8, 12],
+  hexagon: [8, 16, 8, 16],
+  octagon: [12, 12, 12, 12],
+  right_arrow: [6, 24, 6, 8],
+  left_arrow: [6, 8, 6, 24],
+  left_right_arrow: [6, 20, 6, 20],
+  left_brace: [6, 8, 6, 42],
+  right_brace: [6, 42, 6, 8],
+  can: [18, 6, 10, 6],
+  flow_chart_magnetic_disk: [18, 6, 10, 6],
+  flow_chart_magnetic_drum: [6, 20, 6, 8],
+  flow_chart_online_storage: [6, 12, 6, 16],
+  flow_chart_delay: [6, 20, 6, 6],
+  flow_chart_display: [6, 22, 6, 14],
+  flow_chart_document: [6, 6, 18, 6],
+  flow_chart_multidocuments: [10, 10, 20, 6],
+  flow_chart_decision: [22, 22, 22, 22],
+  flow_chart_input_output: [6, 18, 6, 18],
+  flow_chart_preparation: [6, 18, 6, 18],
+  flow_chart_manual_input: [16, 6, 6, 6],
+  flow_chart_manual_operation: [6, 16, 6, 16],
+  flow_chart_internal_storage: [16, 6, 6, 16],
+  flow_chart_predefined_process: [6, 16, 6, 16],
+  flow_chart_predefined_process_2: [16, 16, 16, 16],
+  flow_chart_offpage_connector: [6, 6, 18, 6],
+  flow_chart_note_square: [6, 14, 6, 14],
+  flow_chart_note_curly_left: [6, 8, 6, 42],
+  flow_chart_note_curly_right: [6, 42, 6, 8],
+  wedge_round_rectangle_callout: [6, 8, 22, 8],
+  cross: [30, 30, 30, 30],
+});
+
 function shapePath(shape: string | undefined): string | undefined {
   if (shape === undefined) return undefined;
   const aliases: Record<string, string> = {
@@ -636,6 +689,14 @@ function applyNode(
     }
   }
 
+  // Reserve the room the contour takes away, so the text stays inside it.
+  if (descriptor.kind === "shape" && descriptor.shape !== undefined && layer !== undefined) {
+    const inset = SHAPE_CONTENT_INSETS[descriptor.shape];
+    if (inset !== undefined) {
+      patchStyle(content, "padding", inset.map((value) => `${value}%`).join(" "), patches);
+      patchStyle(content, "box-sizing", "border-box", patches);
+    }
+  }
   applyNodeCss(descriptor, shell, content, layer, patches);
   if (layer !== undefined && descriptor.kind === "shape") {
     // Remove the native rectangular paint only after a real contour exists.
