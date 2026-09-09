@@ -1,4 +1,4 @@
-import { buildCanvasAnchorGeometry } from "./connector-endpoints";
+import { buildCanvasAnchorGeometry, type NodeMeasurements } from "./connector-endpoints";
 import type { AnchorEdgeGeometry, AnchorPoint } from "./anchors";
 import { readCanvasElementId } from "./canvas-elements";
 import { buildSourceScene, type SourceItemDescriptor, type SourceScene } from "./source-model";
@@ -500,6 +500,67 @@ const CAP_PATHS: Readonly<Record<string, string>> = Object.freeze({
   er_one_or_many: "M-10 -6L0 0L-10 6M-10 0H0M-13 -6V6",
 });
 
+function domSize(element: DomElementLike | undefined): { readonly width: number; readonly height: number } | undefined {
+  const measure = safeGet(element, "getBoundingClientRect");
+  if (typeof measure !== "function") return undefined;
+  try {
+    const rect = Reflect.apply(measure, element, []);
+    const width = safeGet(rect, "width"), height = safeGet(rect, "height");
+    return typeof width === "number" && typeof height === "number"
+      && Number.isFinite(width) && Number.isFinite(height) && width > 0 && height > 0
+      ? { width, height }
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Report the boxes the host actually drew, in board units.
+ *
+ * A collapsed group is the case that matters: its state is not in the file, so
+ * only the live DOM knows it shrank.  The board scale is derived from the
+ * nodes that agree with the document, and a rotated node is never measured
+ * because its DOM box is the inflated axis-aligned bounds, not its own size.
+ */
+function measureNodes(document: unknown, runtimeNodes: readonly unknown[], scene: SourceScene): NodeMeasurements {
+  const declared = new Map<string, { readonly width: number; readonly height: number }>();
+  const nodes = safeGet(document, "nodes");
+  if (!Array.isArray(nodes)) return {};
+  for (const node of nodes) {
+    const id = safeGet(node, "id");
+    const width = safeGet(node, "width"), height = safeGet(node, "height");
+    if (typeof id === "string" && typeof width === "number" && typeof height === "number" && width > 0 && height > 0) {
+      declared.set(id, { width, height });
+    }
+  }
+  const observed = new Map<string, { readonly width: number; readonly height: number }>();
+  const ratios: number[] = [];
+  for (const runtime of runtimeNodes) {
+    const id = readCanvasElementId(runtime);
+    const size = domSize(elementFor(runtime, ["nodeEl", "containerEl", "el"]));
+    const declaredSize = id === undefined ? undefined : declared.get(id);
+    if (id === undefined || size === undefined || declaredSize === undefined) continue;
+    observed.set(id, size);
+    if ((scene.items.get(id)?.rotation ?? 0) === 0) ratios.push(size.width / declaredSize.width);
+  }
+  if (ratios.length === 0) return {};
+  ratios.sort((left, right) => left - right);
+  const scale = ratios[Math.floor(ratios.length / 2)]!;
+  if (!Number.isFinite(scale) || scale <= 0) return {};
+  const measurements: Record<string, { width: number; height: number }> = Object.create(null);
+  for (const [id, size] of observed) {
+    if ((scene.items.get(id)?.rotation ?? 0) !== 0) continue;
+    const declaredSize = declared.get(id)!;
+    const width = size.width / scale, height = size.height / scale;
+    // Only a real disagreement is reported; rounding noise is not a measurement.
+    if (Math.abs(width - declaredSize.width) > 1 || Math.abs(height - declaredSize.height) > 1) {
+      measurements[id] = { width, height };
+    }
+  }
+  return measurements;
+}
+
 function queryAll(element: DomElementLike, selector: string): DomElementLike[] {
   const values = safeCall(element, "querySelectorAll", [selector]);
   if (!isObject(values)) return [];
@@ -832,8 +893,11 @@ export class SourceRenderer {
       return this.diagnosticList;
     }
 
-    const geometry = buildCanvasAnchorGeometry(sourceDocument);
-    const nodes = itemById(readCollection(this.host, "getNodes", diagnostics));
+    const runtimeNodes = readCollection(this.host, "getNodes", diagnostics);
+    // A connector must end on what the host drew, not on what the file says a
+    // collapsed group would occupy if it were open.
+    const geometry = buildCanvasAnchorGeometry(sourceDocument, measureNodes(sourceDocument, runtimeNodes, scene));
+    const nodes = itemById(runtimeNodes);
     const edges = itemById(readCollection(this.host, "getEdges", diagnostics));
     const nextPatches: RestorePatch[] = [];
     const rendered: RenderedItem[] = [];

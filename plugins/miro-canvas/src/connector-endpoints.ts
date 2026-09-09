@@ -334,7 +334,34 @@ function indexGraph(document: UnknownRecord): GraphIndex | undefined {
 }
 
 /** Build only geometry that is explicitly recoverable from the Canvas document. */
-export function buildCanvasAnchorGeometry(document: unknown): AnchorGeometry {
+/**
+ * A node box observed from the live runtime, in board units.
+ *
+ * The `.canvas` file has no place to record that a group is collapsed, so a
+ * document-only model necessarily aims a connector at the box the group would
+ * occupy when open.  A host that can measure supplies what it actually drew;
+ * anything it cannot measure keeps the document geometry.
+ */
+export interface MeasuredNodeRect {
+  readonly width?: number;
+  readonly height?: number;
+  readonly rotation?: number;
+}
+
+export type NodeMeasurements = Readonly<Record<string, MeasuredNodeRect>>;
+
+function measuredRect(rect: AnchorRect, measured: MeasuredNodeRect | undefined): AnchorRect {
+  if (measured === undefined) {
+    return rect;
+  }
+  const width = finite(measured.width) && measured.width >= 0 ? measured.width : rect.width;
+  const height = finite(measured.height) && measured.height >= 0 ? measured.height : rect.height;
+  // A collapsed group keeps its top-left and loses height downwards, which is
+  // also how a host reports any box it shrank in place.
+  return { ...rect, width, height };
+}
+
+export function buildCanvasAnchorGeometry(document: unknown, measurements?: NodeMeasurements): AnchorGeometry {
   if (!isRecord(document)) {
     return {};
   }
@@ -346,8 +373,13 @@ export function buildCanvasAnchorGeometry(document: unknown): AnchorGeometry {
   const images = Object.create(null) as Record<string, AnchorRect>;
   const sourceScene = buildSourceScene(document);
   for (const [id, node] of graph.nodes) {
-    const base = rectFromNode(node);
-    const rotation = sourceScene.items.get(id)?.rotation ?? 0;
+    const measured = measurements === undefined ? undefined : readOwn(measurements, id);
+    const observed = isRecord(measured) ? measured as MeasuredNodeRect : undefined;
+    const documentRect = rectFromNode(node);
+    const base = documentRect === undefined ? undefined : measuredRect(documentRect, observed);
+    const rotation = finite(observed?.rotation)
+      ? observed!.rotation!
+      : sourceScene.items.get(id)?.rotation ?? 0;
     const rect = base === undefined ? undefined : rotation === 0 ? base : {
       ...base, rotation,
       rotationCenterX: base.x + base.width / 2,

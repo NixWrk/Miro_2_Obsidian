@@ -291,3 +291,35 @@ describe("connector endpoints", () => {
     });
   });
 });
+
+describe("measured node geometry", () => {
+  const board = () => ({
+    nodes: [
+      { id: "group", type: "group", x: 0, y: 0, width: 280, height: 210 },
+      { id: "b", type: "text", x: 600, y: 0, width: 100, height: 80 },
+    ],
+    edges: [{ id: "e", fromNode: "b", fromSide: "left", toNode: "group", toSide: "bottom" }],
+  });
+
+  it("aims at the box the host drew when a group is collapsed", () => {
+    const open = buildCanvasAnchorGeometry(board());
+    // The file cannot say a group is collapsed, so the document box wins alone.
+    expect(open.edges!.e!.end).toEqual({ x: 140, y: 210 });
+    const collapsed = buildCanvasAnchorGeometry(board(), { group: { width: 280, height: 32 } });
+    expect(collapsed.edges!.e!.end).toEqual({ x: 140, y: 32 });
+    expect(collapsed.nodes!.group).toMatchObject({ x: 0, y: 0, width: 280, height: 32 });
+  });
+
+  it("keeps the document box for anything unmeasured or malformed", () => {
+    for (const measurement of [undefined, {}, { group: {} }, { group: { height: -5 } }, { group: { height: Number.NaN } }]) {
+      const geometry = buildCanvasAnchorGeometry(board(), measurement as never);
+      expect(geometry.nodes!.group).toMatchObject({ width: 280, height: 210 });
+    }
+  });
+
+  it("lets a measured rotation override the projected one", () => {
+    const geometry = buildCanvasAnchorGeometry(board(), { group: { rotation: 90 } });
+    expect(geometry.nodes!.group).toMatchObject({ rotation: 90, rotationCenterX: 140, rotationCenterY: 105 });
+  });
+});
+
