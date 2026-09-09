@@ -22,15 +22,13 @@ import {
 	updateConnectorEndpoint as buildConnectorEndpointUpdate,
 	type UpdateConnectorEndpointInput,
 } from "./connector-endpoints";
+import { isSafeColor, normalizeColor } from "./appearance";
+import {
+	LOCAL_SHAPE_KINDS, CONNECTOR_CAPS, CONNECTOR_ROUTES, CONNECTOR_STROKES,
+	buildSourceScene, type LocalConnectorSettings,
+} from "./source-model";
 
-export const CANVAS_SHAPE_KINDS = [
-	"rectangle",
-	"round_rectangle",
-	"ellipse",
-	"triangle",
-	"diamond",
-	"star",
-] as const;
+export const CANVAS_SHAPE_KINDS = LOCAL_SHAPE_KINDS;
 
 export type CanvasShapeKind = (typeof CANVAS_SHAPE_KINDS)[number];
 
@@ -48,6 +46,21 @@ export interface CanvasShapeAction {
 	readonly height?: unknown;
 	readonly id?: unknown;
 	readonly locked?: unknown;
+	readonly colors?: unknown;
+	readonly typography?: unknown;
+	readonly borderStyle?: unknown;
+	readonly borderWidth?: unknown;
+}
+
+/** ID is supplied by the caller's selection; absent fields retain their source/local values. */
+export interface UpdateElementStyleInput {
+	readonly id: string;
+	readonly shape?: CanvasShapeKind;
+	readonly colors?: Readonly<Record<string, unknown>>;
+	readonly typography?: Readonly<Record<string, unknown>>;
+	readonly borderStyle?: "solid" | "dashed" | "dotted" | "none";
+	readonly borderWidth?: number;
+	readonly connector?: LocalConnectorSettings;
 }
 
 export interface UpdateRotationInput {
@@ -611,6 +624,88 @@ function actionProperty(action: unknown, key: string): ReadResult {
 	return safeRead(action, key);
 }
 
+/** Copy untrusted action data without evaluating accessors or retaining references. */
+function copyStyleData(value: unknown, depth = 0): unknown {
+	if (depth > 8) throw new SnapshotError("style nesting limit");
+	if (value === null || typeof value !== "object") return cloneJson(value);
+	if (!isPlainObject(value)) throw new SnapshotError("style object expected");
+	const keys = ownKeys(value);
+	if (keys === undefined || keys.length > 64) throw new SnapshotError("style field limit");
+	const result: UnknownRecord = {};
+	for (const key of keys) {
+		if (DANGEROUS_IDENTIFIER_NAMES.has(key)) throw new SnapshotError("unsafe style key");
+		const descriptor = Object.getOwnPropertyDescriptor(value, key);
+		if (descriptor === undefined || !("value" in descriptor)) throw new SnapshotError("style accessor refused");
+		setOwn(result, key, copyStyleData(descriptor.value, depth + 1));
+	}
+	return result;
+}
+
+function readStylePatch(action: unknown, diagnostics: CanvasAuthoringDiagnostic[], allowConnector = false): UnknownRecord | undefined {
+	const patch: UnknownRecord = {};
+	try {
+		if (!isPlainObject(action)) throw new SnapshotError("style action expected");
+		for (const key of ["colors", "typography", "borderStyle", "borderWidth", "connector"]) {
+			const property = Object.getOwnPropertyDescriptor(action, key);
+			if (property === undefined) continue;
+			if (!("value" in property)) throw new SnapshotError("style accessor refused");
+			if (property.value === undefined) continue;
+			if (key === "connector" && !allowConnector) throw new SnapshotError("connector settings on shape creation");
+			patch[key] = copyStyleData(property.value);
+		}
+		const only = (value: unknown, keys: readonly string[]): UnknownRecord => {
+			if (!isPlainObject(value) || Object.keys(value).some((key) => !keys.includes(key))) throw new SnapshotError("unsupported style field");
+			return value as UnknownRecord;
+		};
+		if (patch.colors !== undefined) {
+			const colors = only(patch.colors, ["text", "fill", "border", "edge"]);
+			for (const key of Object.keys(colors)) {
+				if (!isSafeColor(colors[key])) throw new SnapshotError("unsafe color");
+				colors[key] = normalizeColor(colors[key]);
+			}
+		}
+		if (patch.typography !== undefined) {
+			const typography = only(patch.typography, ["fontFamily", "fontSize", "fontWeight", "fontStyle", "format", "alignment", "textAlign", "textDecoration", "lineHeight", "verticalAlign"]);
+			if (typography.format !== undefined) {
+				const format = only(typography.format, ["bold", "italic", "underline", "strike"]);
+				if (Object.values(format).some((value) => typeof value !== "boolean")) throw new SnapshotError("invalid format flag");
+			}
+		}
+		if (patch.borderStyle !== undefined && !["solid", "dashed", "dotted", "none"].includes(patch.borderStyle as string)) throw new SnapshotError("invalid border style");
+		if (patch.borderWidth !== undefined && (!isFiniteNumber(patch.borderWidth) || patch.borderWidth < 0 || patch.borderWidth > 100)) throw new SnapshotError("invalid border width");
+		if (patch.connector !== undefined) {
+			const connector = only(patch.connector, ["route", "strokeStyle", "startCap", "endCap", "width", "color"]);
+			for (const [key, values] of [["route", CONNECTOR_ROUTES], ["strokeStyle", CONNECTOR_STROKES], ["startCap", CONNECTOR_CAPS], ["endCap", CONNECTOR_CAPS]] as const) {
+				if (connector[key] !== undefined && !(values as readonly unknown[]).includes(connector[key])) throw new SnapshotError("invalid connector enum");
+			}
+			if (connector.width !== undefined && (!isFiniteNumber(connector.width) || connector.width <= 0 || connector.width > 100)) throw new SnapshotError("invalid connector width");
+			if (hasOwn(connector, "color")) {
+				if (!isSafeColor(connector.color)) throw new SnapshotError("unsafe connector color");
+				connector.color = normalizeColor(connector.color);
+			}
+		}
+		if (!validateMiroCanvasMetadata({ schemaVersion: MIRO_CANVAS_SCHEMA_VERSION, localOverrides: { target: patch } }).valid) throw new SnapshotError("invalid appearance settings");
+		return patch;
+	} catch {
+		addDiagnostic(diagnostics, "element-style-invalid", "error", "Style settings contain unsupported, unsafe, or out-of-range values.");
+		return undefined;
+	}
+}
+
+/** Merge only explicitly supplied leaves; preserve future fields at every edited level. */
+function mergeStylePatch(existing: UnknownRecord, patch: UnknownRecord): UnknownRecord {
+	const merged = cloneRecord(existing);
+	for (const key of Object.keys(patch)) {
+		const value = patch[key];
+		if (isPlainObject(value)) {
+			const prior = merged[key];
+			if (prior !== undefined && !isPlainObject(prior)) throw new SnapshotError("existing style object is malformed");
+			setOwn(merged, key, mergeStylePatch((prior ?? {}) as UnknownRecord, value as UnknownRecord));
+		} else setOwn(merged, key, value);
+	}
+	return merged;
+}
+
 function readShapeAction(action: unknown, diagnostics: CanvasAuthoringDiagnostic[]): {
 	readonly text: string;
 	readonly shape: CanvasShapeKind;
@@ -620,6 +715,10 @@ function readShapeAction(action: unknown, diagnostics: CanvasAuthoringDiagnostic
 	readonly height: number;
 	readonly id?: string;
 	readonly locked?: boolean;
+	readonly colors?: unknown;
+	readonly typography?: unknown;
+	readonly borderStyle?: unknown;
+	readonly borderWidth?: unknown;
 } | undefined {
 	if (!isPlainObject(action)) {
 		addDiagnostic(diagnostics, "shape-action-invalid", "error", "A shape action must be a plain object.");
@@ -666,7 +765,10 @@ function readShapeAction(action: unknown, diagnostics: CanvasAuthoringDiagnostic
 		}
 		locked = lockedValue.value;
 	}
+	const style = readStylePatch(action, diagnostics);
+	if (style === undefined) return undefined;
 	return {
+		...style,
 		text,
 		shape: shape.value as CanvasShapeKind,
 		x,
@@ -826,7 +928,7 @@ function policyAllowsGraphEdit(
 	document: UnknownRecord,
 	operation: "rotate" | "edit",
 	id: string,
-	code: "rotation" | "z-order",
+	code: "rotation" | "z-order" | "element-style",
 	diagnostics: CanvasAuthoringDiagnostic[],
 ): boolean {
 	const decision = decideEditOperation(document, operation, id);
@@ -1144,6 +1246,10 @@ function buildShape(
 	if (metadata === undefined) {
 		return undefined;
 	}
+	const style = readStylePatch(parsed, diagnostics);
+	if (style === undefined) return undefined;
+	const overrides = metadata.localOverrides as UnknownRecord;
+	setOwn(overrides, allocated.id, mergeStylePatch(overrides[allocated.id] as UnknownRecord, style));
 	setOwn(document, "miroCanvas", metadata);
 	return { id: allocated.id, node, document };
 }
@@ -1468,6 +1574,90 @@ export class CanvasAuthoring {
 			return { ok: false, status: "rejected", diagnostics: [...this.diagnosticList, ...diagnostics] };
 		}
 		return { ok: true, status: "applied", document: verified.document, diagnostics: [...this.diagnosticList, ...diagnostics] };
+	}
+
+	/**
+	 * Configure a selected shape or edge using its exact Canvas ID. Settings go
+	 * only to localOverrides; native graph/history import preserves source evidence.
+	 * Connector color takes precedence over colors.edge when both are present.
+	 */
+	public updateElementStyle(input: UpdateElementStyleInput, expected?: CanvasAuthoringExpected): CanvasGraphResult {
+		const diagnostics: CanvasAuthoringDiagnostic[] = [];
+		const reject = (): CanvasGraphResult => ({ ok: false, status: "rejected", diagnostics: [...this.diagnosticList, ...diagnostics] });
+		if (this.disposed || this.host === undefined) return reject();
+		const before = readSnapshotFromHost(this.host, diagnostics);
+		if (before === undefined) return reject();
+		if (expected !== undefined) {
+			const snapshot = makeSnapshot(extractExpectedDocument(expected), diagnostics);
+			if (snapshot === undefined || !structurallyEqual(snapshot.document, before.document)) {
+				addDiagnostic(diagnostics, "stale-document", "warning", "The Canvas document changed since the supplied expected snapshot.");
+				return reject();
+			}
+		}
+		let action: UnknownRecord;
+		try {
+			action = copyStyleData(input) as UnknownRecord;
+			if (!isPlainObject(action) || Object.keys(action).some((key) => !["id", "shape", "colors", "typography", "borderStyle", "borderWidth", "connector"].includes(key))) throw new SnapshotError("invalid action");
+		} catch {
+			addDiagnostic(diagnostics, "element-style-invalid", "error", "The style action must contain safe plain data and supported fields.");
+			return reject();
+		}
+		const id = readGraphActionId(action, diagnostics, "element-style");
+		if (id === undefined) return reject();
+		const node = before.nodes.find((item) => item.id === id);
+		const edge = before.edges.find((item) => item.id === id);
+		const sourceKind = node === undefined ? undefined : buildSourceScene(before.document).items.get(id)?.kind;
+		if (edge === undefined && (node === undefined || (sourceKind !== undefined ? sourceKind !== "shape" : node.type !== "text"))) {
+			addDiagnostic(diagnostics, "element-style-target-invalid", "error", "The target must be an existing Canvas shape, text node, or connector.");
+			return reject();
+		}
+		if (!policyAllowsGraphEdit(before.document, "edit", id, "element-style", diagnostics)) return reject();
+		const patch = readStylePatch(action, diagnostics, edge !== undefined);
+		if (patch === undefined) return reject();
+		if (hasOwn(action, "shape")) {
+			if (edge !== undefined || typeof action.shape !== "string" || !(CANVAS_SHAPE_KINDS as readonly string[]).includes(action.shape)) {
+				addDiagnostic(diagnostics, "shape-kind-invalid", "error", "A supported shape kind can only be applied to a shape node.");
+				return reject();
+			}
+			patch.shape = { kind: action.shape, fallback: "text" };
+		}
+		if (edge !== undefined && (hasOwn(patch, "borderStyle") || hasOwn(patch, "borderWidth"))) {
+			addDiagnostic(diagnostics, "element-style-invalid", "error", "Use connector settings for an edge stroke.");
+			return reject();
+		}
+		let document: UnknownRecord;
+		try {
+			document = cloneRecord(before.document);
+			const metadata = readMetadataForUpdate(document, diagnostics);
+			if (metadata === undefined) return reject();
+			const overrides = metadata.localOverrides ?? {};
+			if (!isPlainObject(overrides)) throw new SnapshotError("invalid overrides");
+			const previous = hasOwn(overrides, id) ? overrides[id] : {};
+			if (!isPlainObject(previous)) throw new SnapshotError("invalid target override");
+			const merged = mergeStylePatch(previous as UnknownRecord, patch);
+			// Empty patches do not add an empty metadata object to ordinary Canvas.
+			if (structurallyEqual(previous, merged)) document = before.document;
+			else {
+				setOwn(overrides as UnknownRecord, id, merged);
+				setOwn(metadata, "localOverrides", overrides);
+				if (!validateMiroCanvasMetadata(metadata).valid) throw new SnapshotError("invalid merged metadata");
+				setOwn(document, "miroCanvas", metadata);
+			}
+		} catch {
+			addDiagnostic(diagnostics, "element-style-invalid", "error", "The existing metadata cannot be safely merged with these settings.");
+			return reject();
+		}
+		const live = readSnapshotFromHost(this.host, diagnostics);
+		if (live === undefined || !structurallyEqual(live.document, before.document)) {
+			addDiagnostic(diagnostics, "stale-document", "warning", "The Canvas document changed before the style transaction began.");
+			return reject();
+		}
+		if (structurallyEqual(document, before.document)) {
+			if (!runtimeAllowsMutation(this.host, diagnostics)) return reject();
+			return { ok: true, status: "applied", document: before.document, diagnostics: [...this.diagnosticList, ...diagnostics] };
+		}
+		const verified = this.commitDocument(before, document, diagnostics);
+		return verified === undefined ? reject() : { ok: true, status: "applied", document: verified.document, diagnostics: [...this.diagnosticList, ...diagnostics] };
 	}
 
 	/** Apply a local rotation override through the guarded whole-document transaction. */

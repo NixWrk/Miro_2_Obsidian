@@ -69,16 +69,26 @@ def main() -> int:
             assert page.evaluate("miroBrowser.runtime.readonly"), "Review mode did not guard native editor"
             page.evaluate("miroBrowser.session.toggleReviewMode()")
             assert not page.evaluate("miroBrowser.runtime.readonly"), "Review mode did not unlock"
-            size = page.get_by_label("Size", exact=True)
+            # Typography and colors now live in the floating selection toolbar.
+            assert page.locator(".miro-canvas-toolbar").count() == 1
+            assert not page.evaluate("document.querySelector('.miro-canvas-toolbar').hidden"), (
+                "Selection toolbar stayed hidden for a selected node"
+            )
+            size = page.get_by_label("Font size", exact=True)
             size.fill("28")
             size.dispatch_event("change")
             assert page.evaluate("miroBrowser.runtime.data.miroCanvas.localOverrides.n1.typography.fontSize") == 28
             assert page.evaluate("getComputedStyle(miroBrowser.content).fontSize") == "28px"
-            page.get_by_label("Target", exact=True).select_option("fill")
-            color = page.get_by_label("HEX", exact=True)
+            page.get_by_label("Fill color", exact=True).click()
+            color = page.get_by_label("Fill color value", exact=True)
             color.fill("#abcdef")
             color.dispatch_event("change")
             assert page.evaluate("getComputedStyle(miroBrowser.node.nodeEl).backgroundColor") == "rgb(171, 205, 239)"
+            page.evaluate("miroBrowser.runtime.selection.clear(); miroBrowser.session.refresh()")
+            assert page.evaluate("document.querySelector('.miro-canvas-toolbar').hidden"), (
+                "Selection toolbar stayed visible after the selection was cleared"
+            )
+            page.evaluate("miroBrowser.runtime.selection.add(miroBrowser.node); miroBrowser.session.refresh()")
             page.evaluate("miroBrowser.session.lockSelection()")
             assert page.evaluate("miroBrowser.runtime.data.miroCanvas.localOverrides.n1.locked")
             assert page.evaluate("""() => {

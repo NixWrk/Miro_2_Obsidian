@@ -7,19 +7,17 @@ import {
 } from "./local-comments";
 import { readCanvasElementFile, readCanvasElementId, readCanvasElementType } from "./canvas-elements";
 import { createCanvasAuthoring, type CanvasAuthoring } from "./canvas-authoring";
+import { LOCAL_SHAPE_KINDS } from "./source-model";
 import { buildCanvasAnchorGeometry } from "./connector-endpoints";
 import { DocumentControls } from "./document-controls";
 import type { DocumentHost } from "./document-viewer";
 
 const IMAGE_EXTENSIONS = new Set(["png", "jpg", "jpeg", "gif", "webp", "bmp", "avif"]);
-const SHAPE_OPTIONS = [
-  ["rectangle", "Rectangle"],
-  ["round_rectangle", "Rounded rectangle"],
-  ["ellipse", "Ellipse"],
-  ["triangle", "Triangle"],
-  ["diamond", "Diamond"],
-  ["star", "Star"],
-] as const;
+/** Every kind the renderer can draw, labelled from its own token. */
+const SHAPE_OPTIONS: readonly (readonly [string, string])[] = LOCAL_SHAPE_KINDS.map((kind) => {
+  const words = kind.replace(/_/gu, " ");
+  return [kind, words.charAt(0).toUpperCase() + words.slice(1)] as const;
+});
 
 type AnchorPickKind = "free" | "selection" | "node" | "image" | "edge";
 

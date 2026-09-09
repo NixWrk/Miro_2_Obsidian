@@ -58,14 +58,6 @@ export interface M1ControlsOptions {
 
 interface ControlRefs {
 	readonly theme: HTMLSelectElement;
-	readonly fontFamily: HTMLSelectElement;
-	readonly fontSize: HTMLInputElement;
-	readonly lineHeight: HTMLInputElement;
-	readonly verticalAlign: HTMLSelectElement;
-	readonly alignment: HTMLSelectElement;
-	readonly colorSlot: HTMLSelectElement;
-	readonly colorHex: HTMLInputElement;
-	readonly clearColor: HTMLButtonElement;
 	readonly review: HTMLInputElement;
 	readonly attachmentGlobal: HTMLInputElement;
 	readonly attachmentNode: HTMLInputElement;
@@ -77,14 +69,9 @@ interface ControlRefs {
 	readonly status: HTMLElement;
 	readonly diagnostics: HTMLElement;
 	readonly selectionLabel: HTMLElement;
-	readonly formatButtons: Readonly<Record<"bold" | "italic" | "underline" | "strike", HTMLButtonElement>>;
-	readonly colorSwatches: HTMLElement;
-	readonly recentSwatches: HTMLElement;
 }
 
-const FONT_FAMILIES = ["Inter", "system-ui", "Arial", "Noto Sans", "sans-serif"] as const;
 const THEME_VALUES: readonly DisplayTheme[] = ["system", "light", "dark"];
-const COLOR_SLOTS: readonly ColorSlot[] = ["text", "fill", "border", "edge"];
 const VERTICAL_VALUES = ["top", "center", "bottom"] as const;
 const ALIGNMENT_VALUES = ["left", "center", "right", "justify"] as const;
 
@@ -142,15 +129,6 @@ function makeElement<K extends keyof HTMLElementTagNameMap>(
 	return element;
 }
 
-function makeLabel(document: Document, caption: string, control: HTMLElement): HTMLLabelElement {
-	const label = makeElement(document, "label", "miro-canvas-panel__label");
-	// Explicitly name the control so native select option text cannot become
-	// part of an ambiguous accessible label in browser/Obsidian DOMs.
-	control.setAttribute("aria-label", caption);
-	append(label, makeElement(document, "span", "miro-canvas-panel__label-text", caption));
-	append(label, control);
-	return label;
-}
 
 function makeButton(document: Document, label: string, title: string, className = ""): HTMLButtonElement {
 	const button = makeElement(document, "button", `miro-canvas-panel__button ${className}`.trim(), label);
@@ -176,50 +154,8 @@ function makeSelect<T extends string>(
 	return select;
 }
 
-function normalizedColor(value: unknown): string | undefined {
-	if (typeof value !== "string") {
-		return undefined;
-	}
-	const candidate = value.trim().toLowerCase();
-	if (/^#[0-9a-f]{6}(?:[0-9a-f]{2})?$/u.test(candidate)) {
-		return candidate.slice(0, 7);
-	}
-	if (/^#[0-9a-f]{3}$/u.test(candidate)) {
-		return `#${candidate[1]}${candidate[1]}${candidate[2]}${candidate[2]}${candidate[3]}${candidate[3]}`;
-	}
-	return undefined;
-}
 
-function selectedColor(state: M1ControlsState, slot: ColorSlot = "text"): string | undefined {
-	const id = state.selectedIds[0];
-	if (id === undefined) {
-		return undefined;
-	}
-	const colors = state.appearance.localOverrides[id]?.colors;
-	if (colors === undefined) {
-		return undefined;
-	}
-	const value = colors[slot];
-	return normalizedColor(value ?? undefined);
-}
 
-function selectedTypography(state: M1ControlsState): TypographySettings {
-	const id = state.selectedIds[0];
-	if (id === undefined) {
-		return {
-			fontFamily: "Inter",
-			fontSize: 16,
-			format: { bold: false, italic: false, underline: false, strike: false },
-			alignment: "left",
-		};
-	}
-	return state.appearance.localOverrides[id]?.typography ?? {
-			fontFamily: "Inter",
-			fontSize: 16,
-			format: { bold: false, italic: false, underline: false, strike: false },
-			alignment: "left",
-		};
-}
 
 /** Build and own the M1 panel DOM. */
 export class M1Controls {
@@ -233,8 +169,6 @@ export class M1Controls {
 	private modal: HTMLElement | null = null;
 	private lastState: M1ControlsState | undefined;
 	private lastSelectionKey = "";
-	private lastPaletteKey = "";
-	private lastRecentKey = "";
 	private lastDiagnosticsKey = "";
 
 	public constructor(actions: M1ControlsActions, options: M1ControlsOptions = {}) {
@@ -276,8 +210,20 @@ export class M1Controls {
 		status.setAttribute("role", "status");
 		const selectionLabel = append(root, makeElement(document, "div", "miro-canvas-panel__selection", "No selection"));
 
-		const navigation = append(root, makeElement(document, "div", "miro-canvas-panel__group miro-canvas-panel__navigation"));
-		setText(append(navigation, makeElement(document, "span", "miro-canvas-panel__group-title")), "Navigation");
+		// Zoom lives with the map it navigates, at the bottom of the Canvas,
+		// rather than in the settings panel at the opposite corner.
+		const minimapDock = makeElement(document, "aside", "miro-canvas-minimap");
+		minimapDock.setAttribute("aria-label", "Canvas navigation");
+		const minimapCanvas = makeElement(document, "canvas", "miro-canvas-panel__minimap-canvas");
+		minimapCanvas.width = 240;
+		minimapCanvas.height = 160;
+		minimapCanvas.tabIndex = 0;
+		minimapCanvas.setAttribute("role", "img");
+		minimapCanvas.setAttribute("aria-label", "Canvas minimap; use arrow keys to pan");
+		append(minimapDock, minimapCanvas);
+		const navigation = append(minimapDock, makeElement(document, "div", "miro-canvas-minimap__navigation"));
+		navigation.setAttribute("role", "toolbar");
+		navigation.setAttribute("aria-label", "Canvas navigation");
 		const navButtons: Array<[M1NavigationAction, string, string]> = [
 			["zoom-out", "−", "Zoom out"],
 			["zoom-reset", "100%", "Reset zoom"],
@@ -285,7 +231,7 @@ export class M1Controls {
 			["zoom-fit", "Fit", "Fit board to viewport"],
 			["toggle-minimap", "Map", "Show or hide minimap"],
 		];
-		const minimap = makeButton(document, "Map", "Show or hide minimap");
+		const minimap = makeButton(document, "Map", "Show or hide minimap", "miro-canvas-minimap__toggle");
 		for (const [action, label, title] of navButtons) {
 			const button = action === "toggle-minimap" ? minimap : makeButton(document, label, title);
 			if (action !== "toggle-minimap") {
@@ -294,15 +240,6 @@ export class M1Controls {
 			this.listen(button, "click", () => this.actions.onNavigation(action));
 			append(navigation, button);
 		}
-		const minimapDock = makeElement(document, "aside", "miro-canvas-minimap");
-		minimapDock.setAttribute("aria-label", "Canvas minimap");
-		const minimapCanvas = makeElement(document, "canvas", "miro-canvas-panel__minimap-canvas");
-		minimapCanvas.width = 240;
-		minimapCanvas.height = 160;
-		minimapCanvas.tabIndex = 0;
-		minimapCanvas.setAttribute("role", "img");
-		minimapCanvas.setAttribute("aria-label", "Canvas minimap; use arrow keys to pan");
-		append(minimapDock, minimapCanvas);
 
 		const themeGroup = append(root, makeElement(document, "div", "miro-canvas-panel__group"));
 		setText(append(themeGroup, makeElement(document, "span", "miro-canvas-panel__group-title")), "Board theme");
@@ -313,104 +250,6 @@ export class M1Controls {
 			displayTheme: theme.value,
 		}));
 
-		const typographyDetails = append(root, makeElement(document, "details", "miro-canvas-panel__group miro-canvas-panel__selection-only"));
-		typographyDetails.open = true;
-		const typographySummary = append(typographyDetails, makeElement(document, "summary", "miro-canvas-panel__group-title", "Typography"));
-		typographySummary.setAttribute("aria-label", "Typography controls");
-		const typographyGrid = append(typographyDetails, makeElement(document, "div", "miro-canvas-panel__grid"));
-		const fontFamily = makeSelect(document, FONT_FAMILIES, Object.fromEntries(FONT_FAMILIES.map((item) => [item, item])) as Record<typeof FONT_FAMILIES[number], string>);
-		append(typographyGrid, makeLabel(document, "Font", fontFamily));
-		const fontSize = makeElement(document, "input");
-		fontSize.type = "number";
-		fontSize.min = "6";
-		fontSize.max = "256";
-		fontSize.step = "1";
-		append(typographyGrid, makeLabel(document, "Size", fontSize));
-		const lineHeight = makeElement(document, "input");
-		lineHeight.type = "number";
-		lineHeight.min = "0.5";
-		lineHeight.max = "4";
-		lineHeight.step = "0.05";
-		append(typographyGrid, makeLabel(document, "Line height", lineHeight));
-		const verticalAlign = makeSelect(document, VERTICAL_VALUES, { top: "Top", center: "Center", bottom: "Bottom" });
-		append(typographyGrid, makeLabel(document, "Vertical", verticalAlign));
-		const alignment = makeSelect(document, ALIGNMENT_VALUES, { left: "Left", center: "Center", right: "Right", justify: "Justify" });
-		append(typographyGrid, makeLabel(document, "Align", alignment));
-		const formatButtons = {} as Record<"bold" | "italic" | "underline" | "strike", HTMLButtonElement>;
-		const formatRow = append(typographyDetails, makeElement(document, "div", "miro-canvas-panel__row"));
-		for (const [format, label, title] of [["bold", "B", "Bold"], ["italic", "I", "Italic"], ["underline", "U", "Underline"], ["strike", "S", "Strikethrough"]] as const) {
-			const button = makeButton(document, label, title, `miro-canvas-panel__format miro-canvas-panel__format--${format}`);
-			button.setAttribute("aria-pressed", "false");
-			formatButtons[format] = button;
-			this.listen(button, "click", () => {
-				const current = this.lastState === undefined ? false : selectedTypography(this.lastState).format[format];
-				this.actions.onAppearance({
-					type: APPEARANCE_ACTIONS.setFormat,
-					format: { ...selectedTypography(this.lastState ?? this.emptyState()).format, [format]: !current },
-				});
-			});
-			append(formatRow, button);
-		}
-		this.listen(fontFamily, "change", () => this.actions.onAppearance({ type: APPEARANCE_ACTIONS.setFontFamily, fontFamily: fontFamily.value }));
-		this.listen(fontSize, "change", () => this.actions.onAppearance({ type: APPEARANCE_ACTIONS.setFontSize, fontSize: Number(fontSize.value) }));
-		this.listen(lineHeight, "change", () => this.actions.onAppearance({
-			type: APPEARANCE_ACTIONS.setTypography,
-			typography: { lineHeight: Number(lineHeight.value) },
-		}));
-		this.listen(verticalAlign, "change", () => this.actions.onAppearance({
-			type: APPEARANCE_ACTIONS.setTypography,
-			typography: { verticalAlign: verticalAlign.value },
-		}));
-		this.listen(alignment, "change", () => this.actions.onAppearance({ type: APPEARANCE_ACTIONS.setAlignment, alignment: alignment.value }));
-
-		const colors = append(root, makeElement(document, "details", "miro-canvas-panel__group miro-canvas-panel__selection-only"));
-		colors.open = true;
-		append(colors, makeElement(document, "summary", "miro-canvas-panel__group-title", "Colors"));
-		const colorGrid = append(colors, makeElement(document, "div", "miro-canvas-panel__grid"));
-		const colorSlot = makeSelect(document, COLOR_SLOTS, { text: "Text", fill: "Fill", border: "Border", edge: "Edge" });
-		append(colorGrid, makeLabel(document, "Target", colorSlot));
-		const colorHex = makeElement(document, "input");
-		colorHex.type = "text";
-		colorHex.inputMode = "text";
-		colorHex.maxLength = 9;
-		colorHex.placeholder = "#RRGGBB";
-		append(colorGrid, makeLabel(document, "HEX", colorHex));
-		const nativeColor = makeElement(document, "input");
-		nativeColor.type = "color";
-		nativeColor.setAttribute("aria-label", "Pick a color");
-		append(colorGrid, nativeColor);
-		const clearColor = makeButton(document, "Clear", "Clear color (transparent)");
-		append(colorGrid, clearColor);
-		const swatches = append(colors, makeElement(document, "div", "miro-canvas-panel__swatches"));
-		const recentSwatches = append(colors, makeElement(document, "div", "miro-canvas-panel__swatches miro-canvas-panel__swatches--recent"));
-		this.listen(colorHex, "change", () => this.emitColor(colorHex.value));
-		this.listen(nativeColor, "change", () => this.emitColor(nativeColor.value));
-		this.listen(clearColor, "click", () => this.emitColor(null));
-		this.listen(colorSlot, "change", () => {
-			if (this.lastState !== undefined) {
-				this.update(this.lastState);
-			}
-		});
-		const swatchClick = (event: Event): void => {
-			let target: unknown = event.target;
-			if (!isDomElement(target)) {
-				return;
-			}
-			try {
-				const closest = target.closest("[data-miro-canvas-color]");
-				if (!isDomElement(closest)) {
-					return;
-				}
-				const value = closest.getAttribute("data-miro-canvas-color");
-				if (value !== null) {
-					this.emitColor(value);
-				}
-			} catch {
-				// A detached swatch cannot produce a color action.
-			}
-		};
-		this.listen(swatches, "click", swatchClick);
-		this.listen(recentSwatches, "click", swatchClick);
 
 		const safety = append(root, makeElement(document, "div", "miro-canvas-panel__group"));
 		setText(append(safety, makeElement(document, "span", "miro-canvas-panel__group-title")), "Safety");
@@ -450,14 +289,6 @@ export class M1Controls {
 
 		return {
 			theme,
-			fontFamily,
-			fontSize,
-			lineHeight,
-			verticalAlign,
-			alignment,
-			colorSlot,
-			colorHex,
-			clearColor,
 			review,
 			attachmentGlobal,
 			attachmentNode,
@@ -469,9 +300,6 @@ export class M1Controls {
 			status,
 			diagnostics,
 			selectionLabel,
-			formatButtons,
-			colorSwatches: swatches,
-			recentSwatches,
 		};
 	}
 
@@ -490,36 +318,8 @@ export class M1Controls {
 		};
 	}
 
-	private emitColor(value: unknown): void {
-		const slot = this.refs?.colorSlot.value;
-		if (slot !== "text" && slot !== "fill" && slot !== "border" && slot !== "edge") {
-			return;
-		}
-		if (value !== null && normalizedColor(value) === undefined) {
-			return;
-		}
-		this.actions.onAppearance({ type: APPEARANCE_ACTIONS.setColor, slot, color: value });
-	}
 
-	private renderSwatches(container: HTMLElement, colors: readonly PaletteColor[] | readonly string[], recent: boolean): void {
-		while (container.firstChild !== null) {
-			container.removeChild(container.firstChild);
-		}
-		if (colors.length === 0) {
-			setText(append(container, makeElement(this.document!, "span", "miro-canvas-panel__muted")), recent ? "No recent colors" : "No palette colors");
-			return;
-		}
-		for (const item of colors) {
-			const paletteItem: PaletteColor = typeof item === "string"
-				? { id: `recent-${item.slice(1)}`, label: item, color: item, source: "custom" }
-				: item;
-			const button = makeButton(this.document!, "", `${paletteItem.label}: ${paletteItem.color}`, "miro-canvas-panel__swatch");
-			button.style.setProperty("--miro-canvas-swatch", paletteItem.color);
-			button.dataset.miroCanvasColor = paletteItem.color;
-			button.dataset.miroCanvasColorSource = paletteItem.source;
-			append(container, button);
-		}
-	}
+
 
 	/** Refresh labels and control values without rebuilding native Canvas DOM. */
 	public update(state: M1ControlsState): void {
@@ -530,36 +330,18 @@ export class M1Controls {
 		const refs = this.refs;
 		this.element.setAttribute("data-miro-canvas-has-selection", state.selectedIds.length > 0 ? "true" : "false");
 		const selectionKey = state.selectedIds.join("\u0000");
-		const selectionChanged = selectionKey !== this.lastSelectionKey;
-		const activeElement = this.document.activeElement;
-		const editingControl = activeElement === refs.fontFamily
-			|| activeElement === refs.fontSize
-			|| activeElement === refs.lineHeight
-			|| activeElement === refs.verticalAlign
-			|| activeElement === refs.alignment
-			|| activeElement === refs.colorHex;
+		// Typography and colors belong to the floating selection toolbar; this
+		// panel keeps only the board-wide settings so one selection never opens
+		// two menus at once.
 		refs.theme.value = state.appearance.settings.displayTheme;
-		const typography = selectedTypography(state);
-		if (!editingControl || selectionChanged) {
-			refs.fontFamily.value = typography.fontFamily;
-			refs.fontSize.value = text(typography.fontSize);
-			refs.lineHeight.value = text(typography.lineHeight ?? 1.2);
-			refs.verticalAlign.value = typography.verticalAlign ?? "top";
-			refs.alignment.value = typography.alignment;
-			const slot = COLOR_SLOTS.includes(refs.colorSlot.value as ColorSlot)
-				? refs.colorSlot.value as ColorSlot
-				: "text";
-			refs.colorHex.value = selectedColor(state, slot) ?? "";
-		}
-		for (const format of ["bold", "italic", "underline", "strike"] as const) {
-			refs.formatButtons[format].setAttribute("aria-pressed", typography.format[format] ? "true" : "false");
-		}
 		refs.review.checked = state.reviewMode;
 		refs.attachmentGlobal.checked = state.showAttachmentNames;
 		refs.attachmentNode.checked = state.selectedAttachmentNames === true;
 		refs.minimap.textContent = state.minimapVisible ? "Hide map" : "Show map";
-		refs.minimapDock.hidden = !state.minimapVisible;
+		refs.minimap.setAttribute("aria-pressed", state.minimapVisible ? "true" : "false");
+		// The dock also carries zoom, so only the map itself is hidden.
 		refs.minimapCanvas.hidden = !state.minimapVisible;
+		refs.minimapDock.setAttribute("data-miro-canvas-minimap", state.minimapVisible ? "visible" : "hidden");
 		setText(refs.selectionLabel, state.selectedIds.length === 0
 			? "No selection"
 			: `${state.selectedIds.length} selected`);
@@ -567,18 +349,6 @@ export class M1Controls {
 		setDisabled(refs.lockSelection, state.selectedIds.length === 0 || state.reviewMode);
 		setDisabled(refs.unlockSelection, state.selectedIds.length === 0 || state.reviewMode);
 		setDisabled(refs.attachmentNode, state.selectedIds.length === 0);
-		const paletteKey = state.appearance.settings.palette
-			.map((item) => `${item.id}|${item.label}|${item.color}|${item.source}`)
-			.join("\u0000");
-		if (paletteKey !== this.lastPaletteKey) {
-			this.renderSwatches(refs.colorSwatches, state.appearance.settings.palette, false);
-			this.lastPaletteKey = paletteKey;
-		}
-		const recentKey = state.appearance.settings.recentColors.join("\u0000");
-		if (recentKey !== this.lastRecentKey) {
-			this.renderSwatches(refs.recentSwatches, state.appearance.settings.recentColors, true);
-			this.lastRecentKey = recentKey;
-		}
 		const diagnosticsKey = state.diagnostics.join("\u0000");
 		if (diagnosticsKey !== this.lastDiagnosticsKey) {
 			while (refs.diagnostics.firstChild !== null) {
@@ -658,8 +428,6 @@ export class M1Controls {
 		this.minimapElement.remove();
 		this.lastState = undefined;
 		this.lastSelectionKey = "";
-		this.lastPaletteKey = "";
-		this.lastRecentKey = "";
 		this.lastDiagnosticsKey = "";
 	}
 }

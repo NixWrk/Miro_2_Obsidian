@@ -19,9 +19,9 @@
   top: 10px;
   right: 10px;
   z-index: 100;
-  width: min(286px, calc(100vw - 20px));
+  width: min(238px, calc(100vw - 20px));
   max-height: calc(100vh - 20px);
-  overflow: auto;
+  overflow: visible;
   box-sizing: border-box;
   padding: 8px;
   color: var(--miro-canvas-panel-fg);
@@ -122,6 +122,55 @@
   display: none;
 }
 
+.miro-canvas-panel[data-miro-canvas-has-selection="false"] .miro-canvas-panel__selection-toolbar {
+  display: none;
+}
+
+.miro-canvas-panel__selection-toolbar {
+  position: absolute;
+  top: 0;
+  right: calc(100% + 8px);
+  display: flex;
+  gap: 8px;
+  width: min(720px, calc(100vw - 276px));
+  box-sizing: border-box;
+  padding: 7px;
+  background: color-mix(in srgb, var(--miro-canvas-panel-bg) 96%, transparent);
+  border: 1px solid var(--miro-canvas-panel-border);
+  border-radius: var(--radius-m, 10px);
+  box-shadow: var(--shadow-s, 0 4px 18px rgb(0 0 0 / 16%));
+  backdrop-filter: blur(10px);
+}
+
+.miro-canvas-panel__selection-toolbar > .miro-canvas-panel__group {
+  align-content: start;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.miro-canvas-panel__selection-toolbar > .miro-canvas-panel__group + .miro-canvas-panel__group {
+  padding-left: 8px;
+  border-left: 1px solid var(--miro-canvas-panel-border);
+}
+
+.miro-canvas-panel__typography {
+  flex: 1 1 430px;
+}
+
+.miro-canvas-panel__colors {
+  flex: 0 1 260px;
+}
+
+.miro-canvas-panel__selection-toolbar .miro-canvas-panel__grid {
+  grid-template-columns: 1.35fr 1.05fr .8fr .9fr .9fr;
+}
+
+.miro-canvas-panel__selection-toolbar .miro-canvas-panel__colors .miro-canvas-panel__grid {
+  grid-template-columns: minmax(76px, .9fr) minmax(86px, 1fr) 30px auto;
+  align-items: end;
+}
+
 .miro-canvas-panel__button:disabled {
   cursor: not-allowed;
   opacity: .5;
@@ -155,6 +204,37 @@
   background: var(--background-primary-alt, rgb(127 127 127 / 7%));
   border: 1px solid var(--miro-canvas-panel-border);
   border-radius: 4px;
+}
+
+.miro-canvas-panel__stepper {
+  display: grid;
+  grid-template-columns: 25px minmax(38px, 1fr) 25px;
+  align-items: stretch;
+}
+
+.miro-canvas-panel__stepper .miro-canvas-panel__button {
+  min-height: 26px;
+  padding: 0;
+  border-radius: 4px 0 0 4px;
+}
+
+.miro-canvas-panel__stepper .miro-canvas-panel__button:last-child {
+  border-radius: 0 4px 4px 0;
+}
+
+.miro-canvas-panel__stepper input {
+  border-right: 0;
+  border-left: 0;
+  border-radius: 0;
+  text-align: center;
+}
+
+.miro-canvas-panel__native-color {
+  width: 30px;
+  height: 28px;
+  padding: 2px !important;
+  border-radius: 50% !important;
+  cursor: pointer;
 }
 
 .miro-canvas-panel__format {
@@ -659,4 +739,250 @@
     width: 180px;
     height: 120px;
   }
+}
+
+/* Contextual formatting toolbar.  One compact row of icon buttons floats over
+   the Canvas root at a host-resolved placement; everything else lives in a
+   popover.  Every selector is namespaced, so an ordinary Canvas without an
+   active session is never restyled. */
+.miro-canvas-toolbar {
+  --miro-canvas-toolbar-bg: var(--background-primary);
+  --miro-canvas-toolbar-border: var(--background-modifier-border);
+  position: absolute;
+  z-index: 101;
+  /* The host reports the top-center of the selection; the toolbar sits above it. */
+  transform: translate(-50%, calc(-100% - 12px));
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  box-sizing: border-box;
+  padding: 4px;
+  color: var(--text-normal);
+  background: var(--miro-canvas-toolbar-bg);
+  border: 1px solid var(--miro-canvas-toolbar-border);
+  border-radius: var(--radius-m, 10px);
+  box-shadow: var(--shadow-s, 0 6px 22px rgb(0 0 0 / 22%));
+  font-size: var(--font-ui-smaller, 11px);
+}
+
+/* Author `display` rules outrank the browser's `[hidden]` rule, so the plugin
+   must restore it explicitly or a hidden control would still be painted. */
+.miro-canvas-toolbar[hidden],
+.miro-canvas-toolbar [hidden] {
+  display: none !important;
+}
+
+.miro-canvas-toolbar__bar {
+  display: flex;
+  gap: 2px;
+  align-items: center;
+  white-space: nowrap;
+}
+
+.miro-canvas-toolbar__group,
+.miro-canvas-toolbar__stepper,
+.miro-canvas-toolbar__popover {
+  display: inline-flex;
+  gap: 2px;
+  align-items: center;
+}
+
+.miro-canvas-toolbar__popover {
+  position: relative;
+}
+
+.miro-canvas-toolbar__group + .miro-canvas-toolbar__popover::before,
+.miro-canvas-toolbar__popover + .miro-canvas-toolbar__group::before {
+  content: "";
+  width: 1px;
+  height: 18px;
+  margin: 0 4px;
+  background: var(--miro-canvas-toolbar-border);
+}
+
+.miro-canvas-toolbar__button,
+.miro-canvas-toolbar__select,
+.miro-canvas-toolbar__number {
+  min-height: 28px;
+  padding: 2px 6px;
+  color: inherit;
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+  font-size: inherit;
+}
+
+.miro-canvas-toolbar__button {
+  min-width: 28px;
+  cursor: pointer;
+  line-height: 1;
+}
+
+.miro-canvas-toolbar__button:hover:not(:disabled),
+.miro-canvas-toolbar__select:hover:not(:disabled) {
+  background: var(--background-modifier-hover);
+}
+
+.miro-canvas-toolbar__button[aria-expanded="true"] {
+  background: var(--background-modifier-active-hover, var(--background-modifier-hover));
+}
+
+.miro-canvas-toolbar__button[aria-pressed="true"] {
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
+}
+
+.miro-canvas-toolbar__button--bold { font-weight: 700; }
+.miro-canvas-toolbar__button--italic { font-style: italic; }
+.miro-canvas-toolbar__button--underline { text-decoration: underline; }
+.miro-canvas-toolbar__button--strike { text-decoration: line-through; }
+.miro-canvas-toolbar__button--shape { font-size: 15px; }
+
+/* A color button carries its current value as an underline, like Miro. */
+.miro-canvas-toolbar__button--color-text,
+.miro-canvas-toolbar__button--color-fill,
+.miro-canvas-toolbar__button--color-border,
+.miro-canvas-toolbar__button--color-edge {
+  border-bottom: 3px solid var(--miro-canvas-swatch, transparent);
+  border-radius: 6px 6px 2px 2px;
+}
+
+.miro-canvas-toolbar__button[data-color-unset="true"] {
+  border-bottom-color: var(--background-modifier-border);
+}
+
+.miro-canvas-toolbar__stepper {
+  gap: 0;
+}
+
+.miro-canvas-toolbar__stepper-buttons {
+  display: inline-flex;
+  flex-direction: column;
+}
+
+.miro-canvas-toolbar__button--step {
+  min-width: 16px;
+  min-height: 13px;
+  padding: 0;
+  font-size: 9px;
+}
+
+.miro-canvas-toolbar__number {
+  width: 46px;
+  text-align: center;
+}
+
+/* Popover panels are the only place a long list is allowed to appear. */
+.miro-canvas-toolbar__panel {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 168px;
+  max-width: 260px;
+  max-height: 320px;
+  overflow-y: auto;
+  padding: 6px;
+  background: var(--miro-canvas-toolbar-bg);
+  border: 1px solid var(--miro-canvas-toolbar-border);
+  border-radius: var(--radius-m, 10px);
+  box-shadow: var(--shadow-s, 0 6px 22px rgb(0 0 0 / 22%));
+  white-space: normal;
+}
+
+.miro-canvas-toolbar__panel .miro-canvas-toolbar__select,
+.miro-canvas-toolbar__panel .miro-canvas-toolbar__number {
+  width: 100%;
+  background: var(--background-secondary);
+  border: 1px solid var(--miro-canvas-toolbar-border);
+}
+
+.miro-canvas-toolbar__grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 2px;
+}
+
+.miro-canvas-toolbar__button--shape-option {
+  font-size: 16px;
+}
+
+.miro-canvas-toolbar__button--wide {
+  grid-column: 1 / -1;
+  min-height: 26px;
+  text-align: left;
+}
+
+.miro-canvas-toolbar__swatch {
+  width: 100%;
+  height: 30px;
+  padding: 2px;
+  background: var(--background-secondary);
+  border: 1px solid var(--miro-canvas-toolbar-border);
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.miro-canvas-toolbar__button:disabled,
+.miro-canvas-toolbar__select:disabled,
+.miro-canvas-toolbar__number:disabled,
+.miro-canvas-toolbar__swatch:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.miro-canvas-toolbar__status {
+  margin: 0;
+  padding: 0 4px 2px;
+  color: var(--text-muted);
+  white-space: normal;
+}
+
+.miro-canvas-toolbar__palette {
+  grid-template-columns: repeat(8, 1fr);
+}
+
+.miro-canvas-toolbar__palette--recent:empty {
+  display: none;
+}
+
+.miro-canvas-toolbar__button--swatch {
+  min-width: 18px;
+  min-height: 18px;
+  padding: 0;
+  background: var(--miro-canvas-swatch, transparent);
+  border: 1px solid var(--miro-canvas-toolbar-border);
+  border-radius: 4px;
+}
+
+/* Zoom and the minimap toggle sit in the dock beside the map they navigate. */
+.miro-canvas-minimap__navigation {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: center;
+  justify-content: center;
+  margin-top: 6px;
+}
+
+.miro-canvas-minimap[data-miro-canvas-minimap="hidden"] .miro-canvas-minimap__navigation {
+  margin-top: 0;
+}
+
+.miro-canvas-minimap__navigation .miro-canvas-panel__button {
+  min-width: 30px;
+  min-height: 26px;
+  padding: 2px 6px;
+}
+
+.miro-canvas-minimap__toggle[aria-pressed="false"] {
+  opacity: 0.75;
+}
+
+/* The canvas is hidden on its own so the dock keeps carrying zoom. */
+.miro-canvas-panel__minimap-canvas[hidden] {
+  display: none;
 }
