@@ -45,8 +45,8 @@ const MAX_ORDER_ENTRIES = 200_000;
 const MAX_BINDINGS = 100_000;
 const SAFE_TOKEN = /^[a-z0-9][a-z0-9_-]{0,63}$/iu;
 const NUMERIC_STRING = /^-?(?:\d+(?:\.\d*)?|\.\d+)$/u;
-const LOCAL_SHAPES = new Set(["rectangle", "round_rectangle", "ellipse", "triangle", "diamond", "star"]);
-const KNOWN_MIRO_SHAPES = new Set([
+/** Subtypes already recognized from Miro source; keep legacy local aliases too. */
+export const MIRO_SHAPE_KINDS = [
   "rectangle", "round_rectangle", "circle", "triangle", "rhombus", "parallelogram", "trapezoid", "pentagon",
   "hexagon", "octagon", "wedge_round_rectangle_callout", "star", "cloud", "cross", "can", "right_arrow",
   "left_arrow", "left_right_arrow", "left_brace", "right_brace", "flow_chart_connector", "flow_chart_magnetic_disk",
@@ -56,7 +56,27 @@ const KNOWN_MIRO_SHAPES = new Set([
   "flow_chart_note_square", "flow_chart_offpage_connector", "flow_chart_or", "flow_chart_predefined_process",
   "flow_chart_predefined_process_2", "flow_chart_preparation", "flow_chart_process", "flow_chart_online_storage",
   "flow_chart_summing_junction", "flow_chart_terminator",
-]);
+] as const;
+export const LOCAL_SHAPE_KINDS = [...MIRO_SHAPE_KINDS, "ellipse", "diamond"] as const;
+const LOCAL_SHAPES = new Set<string>(LOCAL_SHAPE_KINDS);
+const KNOWN_MIRO_SHAPES = new Set<string>(MIRO_SHAPE_KINDS);
+export const CONNECTOR_ROUTES = ["straight", "elbowed", "curved"] as const;
+export const CONNECTOR_STROKES = ["solid", "dashed", "dotted"] as const;
+export const CONNECTOR_CAPS = [
+  "none", "stealth", "rounded_stealth", "arrow", "filled_triangle", "triangle", "filled_diamond",
+  "diamond", "filled_oval", "oval", "erd_one", "erd_many", "erd_one_or_many", "erd_only_one",
+  "erd_zero_or_many", "erd_zero_or_one",
+] as const;
+
+/** Local settings are partial: absent fields continue to use source/native values. */
+export interface LocalConnectorSettings {
+  readonly route?: (typeof CONNECTOR_ROUTES)[number];
+  readonly strokeStyle?: (typeof CONNECTOR_STROKES)[number];
+  readonly startCap?: (typeof CONNECTOR_CAPS)[number];
+  readonly endCap?: (typeof CONNECTOR_CAPS)[number];
+  readonly width?: number;
+  readonly color?: string | null;
+}
 const STICKY_COLORS: Readonly<Record<string, string>> = Object.freeze({
   light_yellow: "#fff59d", yellow: "#ffd54f", orange: "#ff8a65", red: "#ff0000", light_pink: "#f48fb1",
   pink: "#f06292", light_blue: "#7986cb", violet: "#9fa8da", blue: "#4fc3f7", dark_blue: "#42a5f5",
@@ -213,6 +233,10 @@ function sourceCss(item: UnknownRecord, kind: SourceItemKind): Record<string, st
 
 function applyLocalCss(css: Record<string, string>, override: UnknownRecord | undefined): void {
   if (override === undefined) return;
+  const borderStyle = valueOf(override, "borderStyle");
+  if (typeof borderStyle === "string" && ["solid", "dashed", "dotted", "none"].includes(borderStyle)) css["border-style"] = borderStyle;
+  const borderWidth = finiteNumber(valueOf(override, "borderWidth"));
+  if (borderWidth !== undefined && borderWidth >= 0 && borderWidth <= 100) css["border-width"] = `${borderWidth}px`;
   const colors = valueOf(override, "colors");
   if (isRecord(colors)) {
     for (const [slot, cssKey] of [["text", "color"], ["fill", "background-color"], ["border", "border-color"], ["edge", "stroke"]] as const) {
@@ -237,14 +261,45 @@ function applyLocalCss(css: Record<string, string>, override: UnknownRecord | un
   const lineHeight = finiteNumber(valueOf(typography, "lineHeight"));
   if (lineHeight !== undefined && lineHeight > 0 && lineHeight <= 10) css["line-height"] = String(lineHeight);
   const format = valueOf(typography, "format");
+  const verticalAlign = valueOf(typography, "verticalAlign");
+  if (typeof verticalAlign === "string" && ["top", "center", "middle", "bottom"].includes(verticalAlign)) css["vertical-align"] = verticalAlign === "center" ? "middle" : verticalAlign;
+  const textDecoration = valueOf(typography, "textDecoration");
+  if (typeof textDecoration === "string" && ["none", "underline", "line-through", "underline line-through", "line-through underline"].includes(textDecoration)) css["text-decoration"] = textDecoration;
   if (isRecord(format)) {
-    if (valueOf(format, "bold") === true) css["font-weight"] = "bold";
-    if (valueOf(format, "italic") === true) css["font-style"] = "italic";
-    const decoration: string[] = [];
-    if (valueOf(format, "underline") === true) decoration.push("underline");
-    if (valueOf(format, "strike") === true) decoration.push("line-through");
-    if (decoration.length > 0) css["text-decoration"] = decoration.join(" ");
+    const bold = valueOf(format, "bold");
+    const italic = valueOf(format, "italic");
+    if (typeof bold === "boolean") css["font-weight"] = bold ? "bold" : "normal";
+    if (typeof italic === "boolean") css["font-style"] = italic ? "italic" : "normal";
+    const decoration = new Set((css["text-decoration"] ?? "").split(" ").filter((token) => token && token !== "none"));
+    let changed = false;
+    for (const [key, token] of [["underline", "underline"], ["strike", "line-through"]] as const) {
+      const flag = valueOf(format, key);
+      if (typeof flag !== "boolean") continue;
+      changed = true;
+      if (flag) decoration.add(token); else decoration.delete(token);
+    }
+    if (changed) css["text-decoration"] = [...decoration].join(" ") || "none";
   }
+}
+
+function applyLocalConnector(
+  base: SourceConnectorStyle | undefined, override: UnknownRecord | undefined, css: Record<string, string>,
+): SourceConnectorStyle {
+  const local = valueOf(override, "connector");
+  const result = { ...base };
+  const route = valueOf(local, "route");
+  if (typeof route === "string" && (CONNECTOR_ROUTES as readonly string[]).includes(route)) result.shape = route as LocalConnectorSettings["route"];
+  const stroke = valueOf(local, "strokeStyle");
+  if (typeof stroke === "string" && (CONNECTOR_STROKES as readonly string[]).includes(stroke)) result.strokeStyle = stroke as LocalConnectorSettings["strokeStyle"];
+  for (const key of ["startCap", "endCap"] as const) {
+    const cap = valueOf(local, key);
+    if (typeof cap === "string" && (CONNECTOR_CAPS as readonly string[]).includes(cap)) result[key] = cap;
+  }
+  const width = finiteNumber(valueOf(local, "width"));
+  if (width !== undefined && width > 0 && width <= 100) css["stroke-width"] = String(width);
+  const color = readOwn(local, "color");
+  if (color.state === "present" && isSafeColor(color.value)) css.stroke = normalizeColor(color.value) ?? "transparent";
+  return Object.freeze(result);
 }
 
 function connectorStyle(item: UnknownRecord, diagnostics: string[], sourceId: string): SourceConnectorStyle | undefined {
@@ -353,6 +408,7 @@ function descriptorFor(document: unknown, canvasId: string, sourceId: string, so
   if (kind === "shape" && localShape !== undefined) shape = localShape;
   const css = sourceCss(source, kind);
   applyLocalCss(css, localOverride(document, canvasId));
+  const connector = kind === "connector" ? applyLocalConnector(connectorStyle(source, diagnostics, sourceId), localOverride(document, canvasId), css) : undefined;
   const zIndex = finiteNumber(valueOf(source, "zIndex"));
   return Object.freeze({
     sourceId,
@@ -361,7 +417,7 @@ function descriptorFor(document: unknown, canvasId: string, sourceId: string, so
     rotation: effectiveRotationFor(document, canvasId, source),
     ...(zIndex === undefined ? {} : { zIndex }),
     css: Object.freeze(css),
-    ...(kind === "connector" ? { connector: connectorStyle(source, diagnostics, sourceId) } : {}),
+    ...(connector === undefined ? {} : { connector }),
   });
 }
 
@@ -406,6 +462,23 @@ export function buildSourceScene(document: unknown): SourceScene {
       if (items.has(canvasId)) diagnostics.push(`canvas-id-duplicate: ${canvasId}.`);
       else items.set(canvasId, descriptor);
     }
+  }
+  // Ordinary Canvas edges have native style defaults even without source evidence.
+  const edges = arrayValue(valueOf(document, "edges")) ?? [];
+  for (const edge of edges.slice(0, MAX_SOURCE_ITEMS)) {
+    const id = valueOf(edge, "id");
+    if (typeof id !== "string" || !id || items.has(id)) continue;
+    const css: Record<string, string> = {};
+    const color = safeColor(valueOf(edge, "color"));
+    if (color !== undefined) css.stroke = color;
+    const override = localOverride(document, id);
+    applyLocalCss(css, override);
+    const connector = applyLocalConnector({
+      shape: "curved", strokeStyle: "solid",
+      startCap: valueOf(edge, "fromEnd") === "arrow" ? "arrow" : "none",
+      endCap: valueOf(edge, "toEnd") === "none" ? "none" : "arrow",
+    }, override, css);
+    items.set(id, Object.freeze({ kind: "connector", rotation: effectiveRotationFor(document, id), css: Object.freeze(css), connector }));
   }
   const metadata = valueOf(document, "miroCanvas");
   const overrides = valueOf(metadata, "localOverrides");

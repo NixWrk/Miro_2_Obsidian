@@ -1,3 +1,5 @@
+import { buildCanvasAnchorGeometry } from "./connector-endpoints";
+import type { AnchorEdgeGeometry, AnchorPoint } from "./anchors";
 import { readCanvasElementId } from "./canvas-elements";
 import { buildSourceScene, type SourceItemDescriptor, type SourceScene } from "./source-model";
 
@@ -78,17 +80,57 @@ const SHAPE_CLIP_PATHS: Readonly<Record<string, string>> = Object.freeze({
   flow_chart_preparation: "polygon(20% 0%, 80% 0%, 100% 50%, 80% 100%, 20% 100%, 0% 50%)",
 });
 
-const ROUNDED_SHAPES = new Set([
-  "round_rectangle",
-  "wedge_round_rectangle_callout",
-  "flow_chart_terminator",
-  "can",
-  "flow_chart_magnetic_disk",
-  "flow_chart_magnetic_drum",
-  "flow_chart_online_storage",
-]);
+const SVG_NS = "http://www.w3.org/2000/svg";
+let markerSequence = 0;
 
-const ELLIPSE_SHAPES = new Set(["ellipse", "circle", "flow_chart_connector", "flow_chart_or", "flow_chart_summing_junction"]);
+// Normalized contours; inner strokes are separate subpaths, never a clipped
+// rectangular border. Unknown shapes deliberately retain native rendering.
+const SHAPE_PATHS: Readonly<Record<string, string>> = Object.freeze({
+  rectangle: "M0 0H100V100H0Z",
+  round_rectangle: "M12 0H88Q100 0 100 12V88Q100 100 88 100H12Q0 100 0 88V12Q0 0 12 0Z",
+  circle: "M50 0A50 50 0 1 1 50 100A50 50 0 1 1 50 0Z",
+  ellipse: "M50 0A50 50 0 1 1 50 100A50 50 0 1 1 50 0Z",
+  cloud: "M15 75C-5 75 -5 45 12 42C0 20 25 5 40 18C50 -8 82 -3 85 22C110 20 113 55 94 62C110 90 75 110 61 91C42 111 17 100 15 75Z",
+  can: "M0 15C0 -5 100 -5 100 15V85C100 105 0 105 0 85ZM0 15C0 35 100 35 100 15",
+  wedge_round_rectangle_callout: "M12 0H88Q100 0 100 12V68Q100 80 88 80H45L25 100V80H12Q0 80 0 68V12Q0 0 12 0Z",
+  left_brace: "M80 0Q40 0 40 25V35Q40 50 10 50Q40 50 40 65V75Q40 100 80 100",
+  right_brace: "M20 0Q60 0 60 25V35Q60 50 90 50Q60 50 60 65V75Q60 100 20 100",
+  flow_chart_delay: "M0 0H50A50 50 0 0 1 50 100H0Z",
+  flow_chart_display: "M20 0H75Q125 50 75 100H20L0 50Z",
+  flow_chart_document: "M0 0H100V85C65 60 35 110 0 85Z",
+  flow_chart_multidocuments: "M15 0H100V72M8 8H92V80M0 16H84V85C55 65 30 110 0 85Z",
+  flow_chart_internal_storage: "M0 0H100V100H0ZM15 0V100M0 15H100",
+  flow_chart_note_square: "M80 0H15V100H80",
+  flow_chart_predefined_process: "M0 0H100V100H0ZM15 0V100M85 0V100",
+  flow_chart_predefined_process_2: "M0 0H100V100H0ZM15 0V100M85 0V100M0 15H100M0 85H100",
+  flow_chart_online_storage: "M15 0H100C80 15 80 85 100 100H15C-5 85 -5 15 15 0Z",
+  flow_chart_magnetic_drum: "M15 0H85C105 0 105 100 85 100H15C-5 100 -5 0 15 0ZM85 0C65 0 65 100 85 100",
+  flow_chart_terminator: "M25 0H75C108 0 108 100 75 100H25C-8 100 -8 0 25 0Z",
+});
+
+function shapePath(shape: string | undefined): string | undefined {
+  if (shape === undefined) return undefined;
+  const aliases: Record<string, string> = {
+    flow_chart_process: "rectangle", flow_chart_connector: "circle",
+    flow_chart_note_curly_left: "left_brace", flow_chart_note_curly_right: "right_brace",
+    flow_chart_magnetic_disk: "can",
+  };
+  const base = aliases[shape] ?? shape;
+  if (base === "flow_chart_or" || base === "flow_chart_summing_junction") {
+    return SHAPE_PATHS.circle + (base === "flow_chart_or" ? "M0 50H100M50 0V100" : "M15 15L85 85M85 15L15 85");
+  }
+  const polygon = SHAPE_CLIP_PATHS[base];
+  if (polygon !== undefined) {
+    const points = polygon.match(/[\d.]+/g)!;
+    return `M${points[0]} ${points[1]}` + points.slice(2).reduce((text, n, i) => text + (i % 2 === 0 ? `L${n}` : ` ${n}`), "") + "Z";
+  }
+  return SHAPE_PATHS[base];
+}
+
+function createSvg(document: Document | undefined, tag: string): DomElementLike | undefined {
+  const element = safeCall(document, "createElementNS", [SVG_NS, tag]);
+  return isElement(element) ? element : undefined;
+}
 
 function isObject(value: unknown): value is UnknownRecord {
   return value !== null && (typeof value === "object" || typeof value === "function");
@@ -301,28 +343,31 @@ function addOwnedElementClass(element: DomElementLike, className: string): void 
   if (isObject(classList)) safeCall(classList, "add", [className]);
 }
 
-function decorateShape(layer: DomElementLike, descriptor: SourceItemDescriptor, diagnostics: string[], id: string): void {
-  const shape = descriptor.shape;
-  if (shape === undefined) {
-    addOwnedElementClass(layer, "miro-source-shape-generic");
-    diagnostics.push(`shape-renderer-fallback: ${id}.`);
-    return;
+function decorateShape(document: Document | undefined, layer: DomElementLike, descriptor: SourceItemDescriptor): boolean {
+  const d = shapePath(descriptor.shape);
+  if (d === undefined) return false;
+  const svg = createSvg(document, "svg"), path = createSvg(document, "path");
+  if (svg === undefined || path === undefined) return false;
+  for (const [name, value] of Object.entries({ viewBox: "0 0 100 100", preserveAspectRatio: "none", width: "100%", height: "100%" })) {
+    setOwnedElementAttribute(svg, name, value);
   }
-  addOwnedElementClass(layer, `miro-source-shape-${shape}`);
-  setOwnedElementAttribute(layer, "data-miro-source-shape", shape);
-  const clipPath = SHAPE_CLIP_PATHS[shape];
-  if (clipPath !== undefined) {
-    setOwnedElementStyle(layer, "clip-path", clipPath);
-  } else if (ELLIPSE_SHAPES.has(shape)) {
-    setOwnedElementStyle(layer, "border-radius", "50%");
-  } else if (ROUNDED_SHAPES.has(shape)) {
-    setOwnedElementStyle(layer, "border-radius", shape === "flow_chart_terminator" ? "9999px" : "12px");
-  } else if (shape === "rectangle" || shape.startsWith("flow_chart_") || shape === "cloud" || shape === "left_brace" || shape === "right_brace") {
-    setOwnedElementStyle(layer, "clip-path", "inset(0)");
-  } else {
-    addOwnedElementClass(layer, "miro-source-shape-generic");
-    diagnostics.push(`shape-renderer-fallback: ${id} (${shape}).`);
-  }
+  setOwnedElementStyle(svg, "overflow", "visible");
+  setOwnedElementStyle(svg, "position", "absolute");
+  setOwnedElementStyle(svg, "inset", "0");
+  const css = descriptor.css;
+  const open = /brace|note_curly|note_square/.test(descriptor.shape ?? "");
+  for (const [name, value] of Object.entries({
+    d, fill: open ? "none" : css["background-color"] ?? "var(--canvas-background, var(--background-primary))",
+    stroke: css["border-color"] ?? "var(--canvas-border, var(--text-normal))",
+    "stroke-width": css["border-width"]?.replace(/px$/, "") ?? "1",
+    "fill-opacity": css["--miro-fill-opacity"] ?? "1", "stroke-opacity": css["--miro-border-opacity"] ?? "1",
+    "stroke-dasharray": css["border-style"] === "dashed" ? "8 6" : css["border-style"] === "dotted" ? "2 5" : "none",
+    "vector-effect": "non-scaling-stroke", "stroke-linejoin": "round",
+  })) setOwnedElementAttribute(path, name, value);
+  if (css["border-style"] === "none") setOwnedElementAttribute(path, "stroke", "none");
+  safeCall(svg, "appendChild", [path]);
+  safeCall(layer, "appendChild", [svg]);
+  return safeGet(svg, "parentNode") === layer && safeGet(path, "parentNode") === svg;
 }
 
 function applyNodeCss(
@@ -336,7 +381,9 @@ function applyNodeCss(
     if (TYPOGRAPHY_CSS.has(property)) {
       patchStyle(content, property, value, patches);
     } else if (BOX_CSS.has(property)) {
-      if (layer !== undefined) setOwnedElementStyle(layer, property, value);
+      if (layer !== undefined) {
+        if (descriptor.kind !== "shape" || property === "opacity") setOwnedElementStyle(layer, property, value);
+      }
       else patchStyle(shell, property, value, patches);
     }
   }
@@ -381,7 +428,120 @@ function normalizedZIndex(value: number | undefined): string | undefined {
   return String(integer);
 }
 
+const CAP_PATHS: Readonly<Record<string, string>> = Object.freeze({
+  rounded_stealth: "M-10 -5Q-2 -2 0 0Q-2 2 -10 5L-7 0Z",
+  filled_oval: "M-5 -5A5 5 0 1 1 -5 5A5 5 0 1 1 -5 -5Z",
+  erd_one: "M-5 -6V6",
+  erd_many: "M-10 -6L0 0L-10 6M-10 0H0",
+  erd_one_or_many: "M-10 -6L0 0L-10 6M-10 0H0M-13 -6V6",
+  erd_only_one: "M-5 -6V6M-10 -6V6",
+  erd_zero_or_many: "M-8 -6L0 0L-8 6M-8 0H0M-12 -3A3 3 0 1 1 -12 3A3 3 0 1 1 -12 -3Z",
+  erd_zero_or_one: "M-5 -6V6M-11 -3A3 3 0 1 1 -11 3A3 3 0 1 1 -11 -3Z",
+  arrow: "M-10 -5L0 0L-10 5", triangle: "M-10 -5L0 0L-10 5Z",
+  stealth: "M-10 -5L0 0L-10 5L-7 0Z", diamond: "M-12 0L-6 -5L0 0L-6 5Z",
+  circle: "M-5 -5A5 5 0 1 1 -5 5A5 5 0 1 1 -5 -5Z",
+  oval: "M-5 -5A5 5 0 1 1 -5 5A5 5 0 1 1 -5 -5Z",
+  filled_triangle: "M-10 -5L0 0L-10 5Z", filled_diamond: "M-12 0L-6 -5L0 0L-6 5Z",
+  filled_circle: "M-5 -5A5 5 0 1 1 -5 5A5 5 0 1 1 -5 -5Z",
+  er_one: "M-5 -6V6", er_many: "M-10 -6L0 0L-10 6M-10 0H0",
+  er_one_or_many: "M-10 -6L0 0L-10 6M-10 0H0M-13 -6V6",
+});
+
+function queryAll(element: DomElementLike, selector: string): DomElementLike[] {
+  const values = safeCall(element, "querySelectorAll", [selector]);
+  if (!isObject(values)) return [];
+  const length = safeGet(values, "length");
+  if (typeof length !== "number" || length > 10000) return [];
+  const result: DomElementLike[] = [];
+  for (let i = 0; i < length; i++) {
+    const value = safeGet(values, i);
+    if (isElement(value)) result.push(value);
+  }
+  return result;
+}
+
+function marker(document: Document | undefined, cap: string, color: string, patches: RestorePatch[], parent: DomElementLike): string | undefined {
+  if (cap === "none") return "none";
+  const d = CAP_PATHS[cap];
+  if (d === undefined) return undefined;
+  const defs = createSvg(document, "defs"), mark = createSvg(document, "marker"), path = createSvg(document, "path");
+  if (defs === undefined || mark === undefined || path === undefined) return undefined;
+  const id = `miro-cap-${++markerSequence}`;
+  for (const [key, value] of Object.entries({ id, viewBox: "-16 -8 18 16", refX: "0", refY: "0", markerWidth: "18", markerHeight: "16", markerUnits: "strokeWidth", orient: "auto-start-reverse" })) {
+    setOwnedElementAttribute(mark, key, value);
+  }
+  const filled = cap.startsWith("filled_") || cap === "stealth" || cap === "rounded_stealth";
+  for (const [key, value] of Object.entries({ d, fill: filled ? color : "none", stroke: color, "stroke-width": "1", "stroke-linejoin": "round" })) setOwnedElementAttribute(path, key, value);
+  safeCall(mark, "appendChild", [path]);
+  safeCall(defs, "appendChild", [mark]);
+  return appendOwnedChild(parent, defs, patches) ? `url(#${id})` : undefined;
+}
+
+/** Map board coordinates into a native path's SVG user space, preserving local transforms. */
+function localRoute(path: DomElementLike, geometry: AnchorEdgeGeometry): string | undefined {
+  const start = geometry.start, end = geometry.end;
+  if (start === undefined || end === undefined) return undefined;
+  let map = (point: AnchorPoint): AnchorPoint => point;
+  const svg = safeGet(path, "ownerSVGElement");
+  const local = safeCall(path, "getCTM"), board = safeCall(svg, "getCTM");
+  if (local !== undefined && local !== null && board !== undefined && board !== null) {
+    const inverse = safeCall(local, "inverse");
+    const matrix = safeCall(inverse, "multiply", [board]);
+    const values = ["a", "b", "c", "d", "e", "f"].map(key => safeGet(matrix, key));
+    if (!values.every(value => typeof value === "number" && Number.isFinite(value))) return undefined;
+    const [a, b, c, d, e, f] = values as number[];
+    map = point => ({ x: a! * point.x + c! * point.y + e!, y: b! * point.x + d! * point.y + f! });
+  }
+  const p = (point: AnchorPoint): string => { const q = map(point); return `${q.x} ${q.y}`; };
+  const controls = geometry.controls;
+  if (Array.isArray(controls) && controls.length === 2) return `M ${p(start)} C ${p(controls[0])} ${p(controls[1])} ${p(end)}`;
+  return `M ${p(start)}` + (geometry.points ?? [start, end]).slice(1).map(point => ` L ${p(point)}`).join("");
+}
+
+function renderConnectorGeometry(document: Document | undefined, runtime: unknown, descriptor: SourceItemDescriptor,
+  geometry: AnchorEdgeGeometry | undefined, native: unknown, patches: RestorePatch[], diagnostics: string[], id: string): void {
+  const group = elementFor(runtime, ["lineGroupEl", "edgeEl", "el"]);
+  const direct = elementFor(runtime, ["pathEl", "lineEl"]);
+  const paths = group === undefined ? [] : queryAll(group, "path").filter(path => !safeCall(path, "closest", ["defs, marker"]));
+  if (direct !== undefined && !paths.includes(direct)) paths.push(direct);
+  const routes = geometry === undefined ? [] : paths.map(path => ({ path, d: localRoute(path, geometry) }));
+  if (group === undefined || routes.length === 0 || routes.some(route => route.d === undefined)) {
+    diagnostics.push(`connector-geometry-fallback: ${id}.`);
+    return;
+  }
+  const caps = [descriptor.connector?.startCap ?? (safeGet(native, "fromEnd") === "arrow" ? "arrow" : "none"),
+    descriptor.connector?.endCap ?? (safeGet(native, "toEnd") === "none" ? "none" : "arrow")];
+  if (caps.some(cap => cap !== "none" && CAP_PATHS[cap] === undefined)) {
+    diagnostics.push(`connector-endcap-fallback: ${id}.`);
+    return;
+  }
+  const color = descriptor.css.stroke ?? "var(--canvas-color, currentColor)";
+  const startMarker = marker(document, caps[0]!, color, patches, group);
+  const endMarker = marker(document, caps[1]!, color, patches, group);
+  if (startMarker === undefined || endMarker === undefined) {
+    diagnostics.push(`connector-marker-fallback: ${id}.`);
+    return;
+  }
+  for (const { path, d } of routes) {
+    patchAttribute(path, "d", d!, patches);
+    // Native hit paths follow the visible route but keep their generous hit width.
+    if (safeCall(safeGet(path, "classList"), "contains", ["canvas-interaction-path"]) === true) continue;
+    const values = { fill: "none", stroke: color, "stroke-width": descriptor.css["stroke-width"] ?? "2",
+      "stroke-opacity": descriptor.css["stroke-opacity"] ?? "1",
+      "stroke-dasharray": descriptor.connector?.strokeStyle === "dashed" ? "8 6" : descriptor.connector?.strokeStyle === "dotted" ? "2 5" : "none",
+      "stroke-linecap": descriptor.connector?.strokeStyle === "dotted" ? "round" : "butt",
+      "marker-start": startMarker, "marker-end": endMarker };
+    for (const [key, value] of Object.entries(values)) {
+      patchAttribute(path, key, value, patches);
+      patchStyle(path, key, value, patches);
+    }
+  }
+  const ends = elementFor(runtime, ["lineEndGroupEl"]);
+  if (ends !== undefined && ends !== group && !isContained(ends, group)) patchStyle(ends, "display", "none", patches);
+}
+
 function applyConnector(
+  document: Document | undefined, geometry: AnchorEdgeGeometry | undefined, native: unknown,
   runtime: unknown,
   id: string,
   descriptor: SourceItemDescriptor,
@@ -418,6 +578,7 @@ function applyConnector(
       if (TYPOGRAPHY_CSS.has(property)) patchAttribute(target, `data-miro-source-label-${property}`, value, patches);
     }
   }
+  renderConnectorGeometry(document, runtime, descriptor, geometry, native, patches, diagnostics, id);
   return { id, kind: "edge", element: primary, descriptor };
 }
 
@@ -459,8 +620,9 @@ function applyNode(
       setOwnedElementStyle(created, "box-sizing", "border-box");
       setOwnedElementStyle(created, "pointer-events", "none");
       setOwnedElementStyle(created, "z-index", "0");
-      if (descriptor.kind === "shape") decorateShape(created, descriptor, diagnostics, id);
-      if (appendOwnedChild(shell, created, patches)) layer = created;
+      const drawable = descriptor.kind !== "shape" || decorateShape(document, created, descriptor);
+      if (!drawable) diagnostics.push(`shape-renderer-fallback: ${id} (${descriptor.shape ?? "unknown"}).`);
+      if (drawable && appendOwnedChild(shell, created, patches)) layer = created;
     }
     if (layer === undefined) diagnostics.push(`decoration-dom-inaccessible: ${id}.`);
   }
@@ -475,6 +637,29 @@ function applyNode(
   }
 
   applyNodeCss(descriptor, shell, content, layer, patches);
+  if (layer !== undefined && descriptor.kind === "shape") {
+    // Remove the native rectangular paint only after a real contour exists.
+    // The node shell is not the only painted surface: native Canvas fills and
+    // borders its inner container, which is a later sibling of the decoration
+    // layer and would otherwise cover the contour completely.
+    const painted = [shell, containerEl, contentEl, content].filter(
+      (element, index, all): element is DomElementLike => element !== undefined && all.indexOf(element) === index,
+    );
+    for (const element of painted) {
+      patchStyle(element, "background-color", "transparent", patches);
+      patchStyle(element, "border-color", "transparent", patches);
+      patchStyle(element, "box-shadow", "none", patches);
+    }
+  }
+  // Rotation is applied to the inner container because native Canvas owns the
+  // shell's own transform and rewrites it while panning.  The shell therefore
+  // stays axis-aligned, so its paint would show as an unrotated rectangle
+  // behind the rotated node unless it steps aside.
+  if (Number.isFinite(descriptor.rotation) && descriptor.rotation !== 0 && primary !== shell) {
+    patchStyle(shell, "background-color", "transparent", patches);
+    patchStyle(shell, "border-color", "transparent", patches);
+    patchStyle(shell, "box-shadow", "none", patches);
+  }
   applyRotation(runtime, primary, descriptor.rotation, patches, diagnostics, id);
   return { id, kind: "node", element: primary, descriptor };
 }
@@ -566,24 +751,40 @@ export class SourceRenderer {
       return this.diagnosticList;
     }
     diagnostics.push(...scene.diagnostics);
-    if (scene.items.size === 0) {
+    // Local connector anchors also need rendering when no Miro source exists.
+    const descriptors = new Map(scene.items);
+    const overrides = safeGet(safeGet(sourceDocument, "miroCanvas"), "localOverrides");
+    for (const [id, descriptor] of descriptors) {
+      const override = safeGet(overrides, id);
+      if (descriptor.kind === "connector" && descriptor.sourceId === undefined
+        && !isObject(safeGet(override, "connectorAnchors")) && !isObject(safeGet(override, "connector"))) descriptors.delete(id);
+    }
+    const rawEdges = safeGet(sourceDocument, "edges");
+    const nativeEdges = Array.isArray(rawEdges) ? itemById(rawEdges) : new Map<string, unknown>();
+    for (const id of nativeEdges.keys()) {
+      if (!descriptors.has(id) && isObject(safeGet(safeGet(overrides, id), "connectorAnchors"))) {
+        descriptors.set(id, { kind: "connector", rotation: 0, css: {} });
+      }
+    }
+    if (descriptors.size === 0) {
       this.diagnosticList = Object.freeze(diagnostics);
       return this.diagnosticList;
     }
 
+    const geometry = buildCanvasAnchorGeometry(sourceDocument);
     const nodes = itemById(readCollection(this.host, "getNodes", diagnostics));
     const edges = itemById(readCollection(this.host, "getEdges", diagnostics));
     const nextPatches: RestorePatch[] = [];
     const rendered: RenderedItem[] = [];
     try {
-      for (const [id, descriptor] of scene.items) {
+      for (const [id, descriptor] of descriptors) {
         if (descriptor.kind === "connector") {
           const runtime = edges.get(id);
           if (runtime === undefined) {
             diagnostics.push(`connector-runtime-missing: ${id}.`);
             continue;
           }
-          const item = applyConnector(runtime, id, descriptor, nextPatches, diagnostics);
+          const item = applyConnector(this.document, geometry.edges?.[id], nativeEdges.get(id), runtime, id, descriptor, nextPatches, diagnostics);
           if (item !== undefined) rendered.push(item);
         } else {
           const runtime = nodes.get(id);

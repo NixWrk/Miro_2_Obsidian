@@ -416,7 +416,11 @@ export function buildCanvasAnchorGeometry(document: unknown): AnchorGeometry {
     if (start === undefined || end === undefined) {
       return undefined;
     }
-    const geometry: AnchorEdgeGeometry = { start, end, points: [start, end] };
+    const descriptor = sourceScene.items.get(edgeId);
+    const override = metadataOverride(document, edgeId);
+    const localRoute = override === undefined ? undefined : readOwn(override, "connector");
+    const routing = descriptor?.sourceId !== undefined || isRecord(localRoute) ? descriptor?.connector?.shape : undefined;
+    const geometry = routeConnector(start, end, routing);
     edges[edgeId] = geometry;
     return geometry;
   };
@@ -424,6 +428,29 @@ export function buildCanvasAnchorGeometry(document: unknown): AnchorGeometry {
     resolveEdge(edgeId);
   }
   return { nodes, images, edges };
+}
+
+/** One read-only route for the SVG renderer and edge-relative anchors. */
+export function routeConnector(
+  start: AnchorPoint, end: AnchorPoint, routing: "straight" | "elbowed" | "curved" = "straight",
+): AnchorEdgeGeometry & { readonly path: string } {
+  const p = (point: AnchorPoint): string => `${point.x} ${point.y}`;
+  const horizontal = Math.abs(end.x - start.x) >= Math.abs(end.y - start.y);
+  const c1 = horizontal ? { x: (start.x + end.x) / 2, y: start.y } : { x: start.x, y: (start.y + end.y) / 2 };
+  const c2 = horizontal ? { x: c1.x, y: end.y } : { x: end.x, y: c1.y };
+  if (routing === "elbowed") {
+    return { start, end, points: [start, c1, c2, end], path: `M ${p(start)} L ${p(c1)} L ${p(c2)} L ${p(end)}` };
+  }
+  if (routing === "curved") {
+    // Bounded arc-length sampling keeps anchors on the same cubic used by SVG.
+    const points = Array.from({ length: 129 }, (_, i) => {
+      const t = i / 128, s = 1 - t;
+      return { x: s ** 3 * start.x + 3 * s * s * t * c1.x + 3 * s * t * t * c2.x + t ** 3 * end.x,
+        y: s ** 3 * start.y + 3 * s * s * t * c1.y + 3 * s * t * t * c2.y + t ** 3 * end.y };
+    });
+    return { start, end, points, controls: [c1, c2], path: `M ${p(start)} C ${p(c1)} ${p(c2)} ${p(end)}` };
+  }
+  return { start, end, points: [start, end], path: `M ${p(start)} L ${p(end)}` };
 }
 
 function nearestSide(anchor: CanvasAnchor): NativeSide | undefined {
