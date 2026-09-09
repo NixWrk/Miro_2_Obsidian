@@ -28,6 +28,15 @@ import {
 	type CanvasAdapter,
 	type CanvasScene,
 } from "./canvas-adapter";
+import { CANVAS_SHAPE_KINDS, createCanvasAuthoring, type CanvasAuthoring } from "./canvas-authoring";
+import {
+	SelectionToolbar,
+	type SelectionKind,
+	type SelectionStylePatch,
+	type SelectionToolbarStyle,
+	type SelectionToolbarPlacement,
+	type SelectionToolbarState,
+} from "./selection-toolbar";
 import {
 	collectCanvasElementIds,
 	readCanvasElementDom,
@@ -48,7 +57,8 @@ import {
 	type MinimapRect,
 } from "./minimap-model";
 import { MetadataWriter, type MetadataWriteResult } from "./metadata-writer";
-import { parseMiroCanvasMetadata, type MiroCanvasMetadata } from "./metadata";
+import { PLUGIN_ROOT_KEYS, parseMiroCanvasMetadata, type MiroCanvasMetadata } from "./metadata";
+import { DEFAULT_SETTINGS, panDelta, type MiroCanvasSettings, type PanDirection } from "./settings";
 import {
 	DEFAULT_MAX_ZOOM,
 	DEFAULT_MIN_ZOOM,
@@ -69,6 +79,8 @@ export interface M1SessionOptions {
 	readonly panelHost?: HTMLElement;
 	readonly onNotice?: (message: string) => void;
 	readonly onStateChange?: (state: M1ControlsState) => void;
+	/** User preferences; defaults apply when the host supplies none. */
+	readonly settings?: MiroCanvasSettings;
 }
 
 export type M1SessionStatus = "ready" | "unavailable" | "incompatible";
@@ -85,8 +97,9 @@ export interface M1SessionSnapshot {
 
 type UnknownRecord = Record<string, unknown>;
 
-const PANEL_SELECTOR = ".miro-canvas-panel";
-const EDITABLE_EVENT_TYPES = new Set(["insertText", "insertLineBreak", "insertParagraph", "deleteContentBackward", "deleteContentForward", "formatBold", "formatItalic", "formatUnderline"]);
+const PANEL_SELECTOR = ".miro-canvas-panel, .miro-canvas-toolbar";
+const DEFAULT_TOOLBAR_FONT = "Inter";
+const DEFAULT_TOOLBAR_FONT_SIZE = 16;
 const REFRESH_INTERVAL_MS = 750;
 const APPEARANCE_ATTRIBUTE = "data-miro-canvas-appearance";
 const VERTICAL_ALIGN_ATTRIBUTE = "data-miro-canvas-vertical-align";
@@ -167,6 +180,23 @@ function clientSize(root: HTMLElement | undefined): { readonly width: number; re
 	const width = finite(readRuntime(root, "clientWidth")) ?? finite(readRuntime(root, "offsetWidth")) ?? 800;
 	const height = finite(readRuntime(root, "clientHeight")) ?? finite(readRuntime(root, "offsetHeight")) ?? 600;
 	return { width: Math.max(1, width), height: Math.max(1, height) };
+}
+
+/** A host that cannot measure yields no placement, and the toolbar stays hidden. */
+function boundingRect(value: unknown): { readonly left: number; readonly top: number; readonly right: number } | undefined {
+	const measure = readRuntime(value, "getBoundingClientRect");
+	if (typeof measure !== "function") {
+		return undefined;
+	}
+	try {
+		const rect = Reflect.apply(measure, value, []);
+		const left = finite(readRuntime(rect, "left"));
+		const top = finite(readRuntime(rect, "top"));
+		const right = finite(readRuntime(rect, "right"));
+		return left === undefined || top === undefined || right === undefined ? undefined : { left, top, right };
+	} catch {
+		return undefined;
+	}
 }
 
 function sceneFromDocument(document: unknown): CanvasScene | undefined {
@@ -384,9 +414,11 @@ export class M1CanvasSession {
 	public readonly adapter: CanvasAdapter;
 	public readonly viewport: ViewportController;
 	public readonly controls: M1Controls;
+	public readonly toolbar: SelectionToolbar;
 
 	private writer: MetadataWriter | null;
 	private readonly options: M1SessionOptions;
+	private readonly settings: MiroCanvasSettings;
 	private readonly disposers: Array<() => void> = [];
 	private readonly sourceRenderer: SourceRenderer | undefined;
 	private readonly readonlyOriginal: boolean | undefined;
@@ -419,10 +451,15 @@ export class M1CanvasSession {
 		minimapVisible: true,
 		diagnostics: [],
 	};
+	private authoring: CanvasAuthoring | undefined;
+	private lastToolbarSignature = "";
 	private minimapDragStart: MinimapPoint | undefined;
 	private minimapDragViewport: ViewportTransform | undefined;
 	private refreshTimer: ReturnType<typeof setInterval> | undefined;
 	private spacePanHeld = false;
+	private pointerEditIds: readonly string[] | undefined;
+	private nativeHistoryDepth = 0;
+	private readonly guardedMethods = new WeakMap<object, Set<string>>();
 	private nextDomIdentity = 1;
 	private lastSceneSignature = "";
 	private lastAppearanceSignature = "";
@@ -450,9 +487,13 @@ export class M1CanvasSession {
 			getNodes: () => this.adapter.getNodes(),
 			getEdges: () => this.adapter.getEdges(),
 		}, renderDocument);
+		const settings = options.settings ?? DEFAULT_SETTINGS;
+		this.settings = settings;
 		this.viewport = new ViewportController(this.adapter, {
-			minZoom: DEFAULT_MIN_ZOOM,
-			maxZoom: DEFAULT_MAX_ZOOM,
+			// A user preference narrows the safe range; it never widens it.
+			minZoom: Math.max(DEFAULT_MIN_ZOOM, settings.minZoom),
+			maxZoom: Math.min(DEFAULT_MAX_ZOOM, settings.maxZoom),
+			zoomStep: settings.zoomStep,
 			getViewportSize: () => clientSize(this.root),
 		});
 		const actions: M1ControlsActions = {
@@ -462,7 +503,41 @@ export class M1CanvasSession {
 			onNavigation: (action) => this.applyNavigation(action),
 			openCommandModal: () => this.openCommandModal(),
 		};
-		this.controls = new M1Controls(actions, { document: options.document ?? ownerDocument(this.root) });
+		const controlDocument = options.document ?? ownerDocument(this.root);
+		this.controls = new M1Controls(actions, { document: controlDocument });
+		this.toolbar = new SelectionToolbar({
+			onAppearance: (action) => this.applyAppearance(action),
+			onStyle: (patch) => this.applyElementStyle(patch),
+			onLock: (locked) => (locked ? this.lockSelection() : this.unlockSelection()),
+		}, { document: controlDocument });
+	}
+
+	/**
+	 * Shape, border and connector settings are the one appearance family the
+	 * metadata writer cannot express, so they go through the guarded authoring
+	 * transaction instead.  Every selected element is patched separately; the
+	 * first rejection stops the batch so a partial style is never committed.
+	 */
+	private applyElementStyle(patch: SelectionStylePatch): void {
+		if (this.selectedIds.length === 0) {
+			this.addDiagnostic("Select a Canvas element before changing its shape, border or connector settings.");
+			return;
+		}
+		this.readInteractionState();
+		if (!this.editAllowed("restyle", this.selectedIds)) {
+			return;
+		}
+		this.authoring ??= createCanvasAuthoring(this.view);
+		for (const id of this.selectedIds) {
+			const result = this.authoring.updateElementStyle({ id, ...patch });
+			if (result.ok) {
+				continue;
+			}
+			const reason = result.diagnostics.find((diagnostic) => diagnostic.level === "error")?.message;
+			this.addDiagnostic(reason ?? `Canvas rejected the style change for ${id}.`);
+			break;
+		}
+		this.refresh();
 	}
 
 	public get status(): M1SessionStatus {
@@ -504,10 +579,12 @@ export class M1CanvasSession {
 	}
 
 	public lockSelection(): void {
+		this.readInteractionState();
 		this.applyInteraction({ type: "set-locks", elementIds: this.selectedIds, locked: true });
 	}
 
 	public unlockSelection(): void {
+		this.readInteractionState();
 		this.applyInteraction({ type: "set-locks", elementIds: this.selectedIds, locked: false });
 	}
 
@@ -520,6 +597,13 @@ export class M1CanvasSession {
 	}
 
 	/** Mount once; all reads here are observational and do not write metadata. */
+	/** Keyboard panning honors the configured step and the Shift multiplier. */
+	public pan(direction: PanDirection, fast = false): void {
+		const delta = panDelta(this.settings, direction, fast);
+		this.viewport.panBy(delta.x, delta.y, "board");
+		this.refresh();
+	}
+
 	public mount(): boolean {
 		if (this.mounted || this.disposed) {
 			return this.mounted;
@@ -533,7 +617,11 @@ export class M1CanvasSession {
 		try {
 			this.root.appendChild(this.controls.element);
 			this.root.appendChild(this.controls.minimapElement);
+			if (isElement(this.toolbar.element)) {
+				this.root.appendChild(this.toolbar.element);
+			}
 		} catch {
+			this.toolbar.dispose();
 			this.controls.minimapElement.remove();
 			this.controls.element.remove();
 			this.addDiagnostic("Native Canvas root rejected the M1 controls panel; controls are disabled.");
@@ -617,10 +705,8 @@ export class M1CanvasSession {
 		const selection = this.adapter.getSelection();
 		this.selectedIds = selection === undefined ? [] : allIds(selection);
 		this.scene = this.adapter.getScene() ?? sceneFromDocument(this.currentRawDocument) ?? { nodes: [], edges: [] };
-		this.policy = createInteractionPolicy(this.currentMetadata ?? {
-			settings: this.appearance.settings,
-			localOverrides: this.appearance.localOverrides,
-		});
+		this.policy = this.policyFromDocument(this.currentRawDocument);
+		this.attachNativeGuards();
 		const sceneSignature = this.sceneSignature(this.scene);
 		const appearanceSignature = safeSignature(this.appearance);
 		const policySignature = safeSignature({
@@ -654,9 +740,6 @@ export class M1CanvasSession {
 		if (!this.adapter.supports(CANVAS_CAPABILITIES.viewport)
 			|| !this.adapter.supports(CANVAS_CAPABILITIES.viewportMutation)) {
 			diagnostics.push("Canvas viewport mutation is unavailable; zoom and minimap navigation are disabled.");
-		}
-		if (this.policy.lockedElementIds.length > 0 && this.appearance.settings.reviewMode !== true) {
-			diagnostics.push("Canvas selection locks use scoped policy and DOM guards; native actions outside this Canvas root may remain available.");
 		}
 		for (const diagnostic of this.minimap.diagnostics) {
 			diagnostics.push(diagnostic.message);
@@ -722,6 +805,112 @@ export class M1CanvasSession {
 			this.controls.update(state);
 			this.options.onStateChange?.(state);
 		}
+		// The toolbar follows the selection on screen, so it also refreshes on a
+		// pan or zoom that leaves the control signature unchanged.
+		const toolbarState = this.toolbarState(state, lockedSelection);
+		const toolbarSignature = safeSignature(toolbarState);
+		if (toolbarSignature !== this.lastToolbarSignature) {
+			this.lastToolbarSignature = toolbarSignature;
+			this.toolbar.update(toolbarState);
+		}
+	}
+
+	private toolbarState(state: M1ControlsState, lockedSelection: boolean): SelectionToolbarState {
+		const id = this.selectedIds[0];
+		const override = id === undefined ? undefined : this.appearance.localOverrides[id];
+		const style = this.styleOverrideFor(id);
+		const placement = this.selectionPlacement();
+		return {
+			selectedIds: this.selectedIds,
+			kinds: this.selectionKinds(),
+			editable: !state.reviewMode && !lockedSelection,
+			locked: lockedSelection,
+			reviewMode: state.reviewMode,
+			...(state.reviewMode
+				? { blockedReason: "Review mode is on; formatting is disabled." }
+				: lockedSelection
+					? { blockedReason: "This selection is locked. Unlock it to change formatting." }
+					: {}),
+			typography: override?.typography ?? {
+				fontFamily: DEFAULT_TOOLBAR_FONT,
+				fontSize: DEFAULT_TOOLBAR_FONT_SIZE,
+				format: { bold: false, italic: false, underline: false, strike: false },
+				alignment: "left",
+			},
+			colors: override?.colors ?? {},
+			palette: this.appearance.settings.palette,
+			recentColors: this.appearance.settings.recentColors,
+			...style,
+			...(placement === undefined ? {} : { placement }),
+		};
+	}
+
+	private selectionKinds(): readonly SelectionKind[] {
+		const edgeIds = new Set(collectCanvasElementIds(this.adapter.getEdges() ?? []));
+		const kinds = new Set<SelectionKind>();
+		for (const id of this.selectedIds) {
+			kinds.add(edgeIds.has(id) ? "edge" : "shape");
+		}
+		return [...kinds];
+	}
+
+	/** Style fields live beside appearance in the same local override record. */
+	private styleOverrideFor(id: string | undefined): SelectionToolbarStyle {
+		if (id === undefined) {
+			return {};
+		}
+		const metadata = readRuntime(this.currentRawDocument, "miroCanvas");
+		const override = readRuntime(readRuntime(metadata, "localOverrides"), id);
+		if (!isObject(override)) {
+			return {};
+		}
+		const shapeValue = readRuntime(readRuntime(override, "shape"), "kind") ?? readRuntime(override, "shape");
+		const shape = typeof shapeValue === "string" && (CANVAS_SHAPE_KINDS as readonly string[]).includes(shapeValue)
+			? shapeValue as SelectionToolbarStyle["shape"]
+			: undefined;
+		const borderStyle = readRuntime(override, "borderStyle");
+		const borderWidth = readRuntime(override, "borderWidth");
+		const connector = readRuntime(override, "connector");
+		return {
+			...(shape === undefined ? {} : { shape }),
+			...(borderStyle === "solid" || borderStyle === "dashed" || borderStyle === "dotted" || borderStyle === "none"
+				? { borderStyle }
+				: {}),
+			...(typeof borderWidth === "number" && Number.isFinite(borderWidth) ? { borderWidth } : {}),
+			...(isObject(connector) ? { connector: connector as SelectionToolbarStyle["connector"] } : {}),
+		};
+	}
+
+	/** Screen placement comes from native DOM, so it stays correct under any
+	 * coordinate mode, rotation, or Advanced Canvas transform. */
+	private selectionPlacement(): SelectionToolbarPlacement | undefined {
+		if (this.root === undefined || this.selectedIds.length === 0) {
+			return undefined;
+		}
+		const rootRect = boundingRect(this.root);
+		if (rootRect === undefined) {
+			return undefined;
+		}
+		let left = Number.POSITIVE_INFINITY;
+		let top = Number.POSITIVE_INFINITY;
+		let right = Number.NEGATIVE_INFINITY;
+		for (const element of [...(this.adapter.getNodes() ?? []), ...(this.adapter.getEdges() ?? [])]) {
+			const id = readCanvasElementId(element);
+			if (id === undefined || !this.selectedIds.includes(id)) {
+				continue;
+			}
+			const rect = boundingRect(readCanvasElementDom(element));
+			if (rect === undefined) {
+				continue;
+			}
+			left = Math.min(left, rect.left);
+			top = Math.min(top, rect.top);
+			right = Math.max(right, rect.right);
+		}
+		if (!Number.isFinite(left) || !Number.isFinite(top) || !Number.isFinite(right)) {
+			return undefined;
+		}
+		return { x: (left + right) / 2 - rootRect.left, y: top - rootRect.top };
 	}
 
 	private addDiagnostic(message: string): void {
@@ -838,6 +1027,11 @@ export class M1CanvasSession {
 			return undefined;
 		}
 		if (result.status === "applied") {
+			// An accepted-but-altered commit is reported in the panel rather than
+			// as a notice, so host behavior stays visible without interrupting.
+			for (const diagnostic of result.diagnostics) {
+				this.addDiagnostic(diagnostic.message);
+			}
 			this.notice(`Miro Canvas: ${action} applied.`);
 		} else if (result.status === "rejected") {
 			const diagnostic = result.diagnostics[0]?.message ?? "The metadata transaction was rejected.";
@@ -849,6 +1043,7 @@ export class M1CanvasSession {
 	}
 
 	private applyAppearance(action: AppearanceAction): void {
+		this.readInteractionState();
 		const type = typeof action.type === "string" ? action.type : "appearance";
 		const isGlobal = type === APPEARANCE_ACTIONS.setDisplayTheme || type === "set-theme" || type === "set-display-theme";
 		if (!isGlobal && this.selectedIds.length === 0) {
@@ -883,6 +1078,7 @@ export class M1CanvasSession {
 	}
 
 	private applyInteraction(action: Record<string, unknown>): void {
+		this.readInteractionState();
 		const type = typeof action.type === "string" ? action.type : "interaction";
 		if ((type === "set-locks" || type === "lock" || type === "unlock")
 			&& this.selectedIds.length === 0 && action.elementId === undefined && action.elementIds === undefined) {
@@ -1096,7 +1292,7 @@ export class M1CanvasSession {
 		}
 		try {
 			const matches = Reflect.apply(querySelectorAll, element, [
-				".canvas-node-content, .markdown-preview-view, .canvas-node-content-container",
+				".canvas-node-container, .canvas-node-content, .markdown-preview-view, .canvas-node-content-container",
 			]);
 			const length = finite(readRuntime(matches, "length")) ?? 0;
 			for (let index = 0; index < length; index += 1) {
@@ -1123,10 +1319,11 @@ export class M1CanvasSession {
 			const override = this.appearance.localOverrides[id];
 			this.applyElementAppearance(dom, override?.typography, override?.colors, false);
 			for (const content of this.appearanceContentTargets(dom).slice(1)) {
-				// Native Canvas content often has an explicit font rule, so apply
-				// typography to the content shell as well as the outer node.  Fill
-				// and border remain owned by the outer shell.
-				this.applyElementAppearance(content, override?.typography, undefined, false);
+				// Native Canvas paints its own fill and border on an inner
+				// container that covers the outer node, and it carries explicit
+				// font rules there too.  Decorating only the shell is therefore
+				// invisible; every painted surface gets the same values.
+				this.applyElementAppearance(content, override?.typography, override?.colors, false);
 			}
 		}
 		for (const edge of this.scene.edges) {
@@ -1432,10 +1629,13 @@ export class M1CanvasSession {
 
 	private listen(target: EventTarget, eventName: string, handler: EventListener, capture = false): void {
 		try {
-			target.addEventListener(eventName, handler, capture);
+			// Options object, not a boolean: a plain EventTarget host reads the
+			// capture flag off the object only, so a boolean would leak the
+			// listener past dispose.
+			target.addEventListener(eventName, handler, { capture });
 			this.disposers.push(() => {
 				try {
-					target.removeEventListener(eventName, handler, capture);
+					target.removeEventListener(eventName, handler, { capture });
 				} catch {
 					// Host elements can disappear during pane close; no further action.
 				}
@@ -1601,15 +1801,158 @@ export class M1CanvasSession {
 		this.themeRootSnapshot = undefined;
 	}
 
+	private policyFromDocument(document: unknown): InteractionPolicy {
+		const parsed = parseMiroCanvasMetadata(document);
+		// A missing extension is an ordinary Canvas. Invalid/unsupported data
+		// must never be normalized into an unlocked default policy.
+		return createInteractionPolicy(parsed.status === "valid" ? parsed.metadata
+			: parsed.status === "absent" ? { settings: {}, localOverrides: {} } : undefined);
+	}
+
+	private readInteractionState(): void {
+		this.policy = this.policyFromDocument(this.adapter.getDocument());
+		const selection = this.adapter.getSelection();
+		this.selectedIds = selection === undefined ? [] : allIds(selection);
+		if (selection === undefined || selection.some((item) => allIds([item]).length !== 1)) {
+			this.policy = createInteractionPolicy(undefined);
+		}
+	}
+
+	/** Instance-only hooks also protect edits from native menus outside the root.
+	 * Never patch prototypes or persistence/history snapshots. Restore only our
+	 * own wrappers so another plugin's later hook is not overwritten. */
+	private guardNativeMethod(target: unknown, key: string, run: (original: Function, receiver: unknown, args: unknown[]) => unknown): void {
+		if (!isObject(target) || this.guardedMethods.get(target)?.has(key)) return;
+		const original = readRuntime(target, key);
+		if (typeof original !== "function") return;
+		try {
+			const descriptor = Object.getOwnPropertyDescriptor(target, key);
+			const session = this;
+			const wrapper = function(this: unknown, ...args: unknown[]): unknown {
+				return session.disposed ? Reflect.apply(original, this, args) : run(original, this, args);
+			};
+			Object.defineProperty(target, key, { configurable: true, writable: true, enumerable: descriptor?.enumerable ?? false, value: wrapper });
+			const keys = this.guardedMethods.get(target) ?? new Set<string>();
+			keys.add(key);
+			this.guardedMethods.set(target, keys);
+			this.disposers.push(() => {
+				if (readRuntime(target, key) !== wrapper) return;
+				try {
+					if (descriptor) Object.defineProperty(target, key, descriptor);
+					else Reflect.deleteProperty(target, key);
+				} catch { /* The host may have disposed/frozen the runtime. */ }
+			});
+		} catch {
+			this.addDiagnostic(`Native Canvas guard for ${key} is unavailable; scoped input guards remain active.`);
+		}
+	}
+
+	private nativeEditAllowed(operation: string, ids: readonly string[]): boolean {
+		if (this.nativeHistoryDepth > 0) return true;
+		this.readInteractionState();
+		return this.editAllowed(operation, ids);
+	}
+
+	private attachNativeGuards(): void {
+		// Use the adapter's observed runtime methods to verify the owner before
+		// installing the narrowly scoped hooks required for native menu actions.
+		// The adapter accepts several runtime shapes, so probe the same keys it
+		// does instead of assuming `view.canvas`; a silent miss would leave
+		// native menus unguarded on a locked element.
+		const observed = this.adapter.read("getData");
+		const canvas = [this.view, ...["canvas", "_canvas", "canvasView", "canvasRuntime"]
+			.map((key) => readRuntime(this.view, key))]
+			.find((candidate) => isObject(candidate) && observed !== undefined && readRuntime(candidate, "getData") === observed);
+		if (!isObject(canvas)) {
+			this.addDiagnostic("Native Canvas guards are unavailable; scoped input guards remain active.");
+			return;
+		}
+		for (const owner of [canvas, readRuntime(canvas, "history")]) {
+			for (const key of ["undo", "redo"]) {
+				this.guardNativeMethod(owner, key, (original, receiver, args) => {
+					this.nativeHistoryDepth += 1;
+					try { return Reflect.apply(original, receiver, args); }
+					finally {
+						this.nativeHistoryDepth -= 1;
+						this.pointerEditIds = undefined;
+						if (this.nativeHistoryDepth === 0) {
+							this.readInteractionState();
+							this.attachNativeGuards();
+						}
+					}
+				});
+			}
+		}
+		// Native `getData` rebuilds the document from the Canvas model and keeps
+		// only the keys it owns, so a plain native save would silently erase this
+		// plugin's metadata and the imported source snapshot.  Carry across every
+		// root key that survived in the live document but is missing from the
+		// rebuild: a value only exists here because something put it there, and
+		// dropping another plugin's data would be as destructive as dropping our
+		// own.  A value the host produced itself is never overwritten.
+		this.guardNativeMethod(canvas, "getData", (original, receiver, args) => {
+			const data = Reflect.apply(original, receiver, args);
+			if (!isObject(data)) {
+				return data;
+			}
+			const live = readRuntime(receiver, "data");
+			if (!isObject(live)) {
+				return data;
+			}
+			let keys: readonly string[];
+			try {
+				keys = Object.keys(live);
+			} catch {
+				keys = PLUGIN_ROOT_KEYS;
+			}
+			for (const key of keys) {
+				// `nodes` and `edges` are the host's to rebuild, never ours to restore.
+				if (key === "nodes" || key === "edges" || readRuntime(data, key) !== undefined) {
+					continue;
+				}
+				const preserved = readRuntime(live, key);
+				if (preserved === undefined) {
+					continue;
+				}
+				try {
+					Reflect.set(data, key, preserved);
+				} catch {
+					this.addDiagnostic(`Canvas rebuilt its document and "${key}" could not be carried across; that value is the host's to keep.`);
+				}
+			}
+			return data;
+		});
+		for (const key of ["removeNode", "removeEdge", "removeSelection", "deleteSelection"]) {
+			this.guardNativeMethod(canvas, key, (original, receiver, args) => {
+				this.readInteractionState();
+				const ids = key.endsWith("Selection") ? this.selectedIds : allIds([args[0]]);
+				return this.nativeEditAllowed("delete", ids) ? Reflect.apply(original, receiver, args) : undefined;
+			});
+		}
+		const operations: Record<string, string> = {
+			moveTo: "move", moveAndResize: "resize", resize: "resize",
+			setText: "edit-text", startEditing: "edit-text", setColor: "restyle", setData: "restyle",
+		};
+		for (const element of [...(this.adapter.getNodes() ?? []), ...(this.adapter.getEdges() ?? [])]) {
+			for (const [key, operation] of Object.entries(operations)) {
+				this.guardNativeMethod(element, key, (original, receiver, args) => {
+					const ids = allIds([element]);
+					return this.nativeEditAllowed(operation, ids) ? Reflect.apply(original, receiver, args) : undefined;
+				});
+			}
+		}
+	}
+
 	private eventElementId(target: unknown): string | undefined {
+		if (readRuntime(target, "nodeType") === 3) target = readRuntime(target, "parentElement");
 		if (!isObject(target)) {
 			return undefined;
 		}
 		const closest = readRuntime(target, "closest");
 		if (typeof closest === "function") {
 			try {
-				const element = Reflect.apply(closest, target, ["[data-miro-canvas-id], [data-node-id], [data-id]"]);
-				for (const key of ["data-miro-canvas-id", "data-node-id", "data-id"] as const) {
+				const element = Reflect.apply(closest, target, ["[data-miro-canvas-id], [data-node-id], [data-edge-id], [data-id]"]);
+				for (const key of ["data-miro-canvas-id", "data-node-id", "data-edge-id", "data-id"] as const) {
 					const value = readRuntime(element, "getAttribute");
 					if (typeof value === "function") {
 						const id = Reflect.apply(value, element, [key]);
@@ -1622,15 +1965,31 @@ export class M1CanvasSession {
 				return undefined;
 			}
 		}
+		// Native Canvas nodes do not consistently expose a data-id attribute.
+		for (const item of [...(this.adapter.getNodes() ?? []), ...(this.adapter.getEdges() ?? [])]) {
+			for (const key of ["nodeEl", "edgeEl", "containerEl", "contentEl", "el"]) {
+				const element = readRuntime(item, key);
+				const contains = readRuntime(element, "contains");
+				try {
+					if (element === target || (typeof contains === "function" && Reflect.apply(contains, element, [target]))) {
+						return readCanvasElementId(item);
+					}
+				} catch { /* A detached host node cannot identify a target. */ }
+			}
+		}
 		return undefined;
 	}
 
 	private eventIds(event: Event): readonly string[] {
 		const id = this.eventElementId(eventTarget(event));
-		return id === undefined ? this.selectedIds : [id];
+		return id === undefined ? this.selectedIds : [...new Set([id, ...this.selectedIds])];
 	}
 
 	private inControls(event: Event): boolean {
+		return this.closestTarget(event, PANEL_SELECTOR);
+	}
+
+	private closestTarget(event: Event, selector: string): boolean {
 		const target = eventTarget(event);
 		if (!isObject(target)) {
 			return false;
@@ -1640,34 +1999,38 @@ export class M1CanvasSession {
 			return false;
 		}
 		try {
-			return Reflect.apply(closest, target, [PANEL_SELECTOR]) !== null;
+			return Reflect.apply(closest, target, [selector]) != null;
 		} catch {
 			return false;
 		}
 	}
 
-	private blockIfNeeded(event: Event, operation: string, ids: readonly string[]): void {
-		if (this.inControls(event)) {
-			return;
-		}
+	private editAllowed(operation: string, ids: readonly string[]): boolean {
 		const decision = decideInteraction(this.policy, { operation, elementIds: ids });
-		if (decision.valid && decision.allowed) {
-			return;
+		if (decision.allowed) return true;
+		this.addDiagnostic(decision.reason === "review-mode"
+			? "Review mode blocked a Canvas edit; pan, selection, copy, links, and comments remain available."
+			: decision.reason === "element-locked"
+				? "A locked Canvas element blocked that edit. Unlock it explicitly to continue."
+				: "Canvas edit blocked because its capability could not be verified.");
+		return false;
+	}
+
+	private blockIfNeeded(event: Event, operation: string, ids: readonly string[]): boolean {
+		if (this.inControls(event)) {
+			return false;
 		}
-		if (!decision.valid || decision.blocked) {
-			try {
-				event.preventDefault();
-				event.stopImmediatePropagation();
-				event.stopPropagation();
-			} catch {
-				// A test double may only implement preventDefault; policy still fails closed.
-			}
-			this.addDiagnostic(decision.reason === "review-mode"
-				? "Review mode blocked a Canvas edit; pan, selection, copy, links, and comments remain available."
-				: decision.reason === "element-locked"
-					? "A locked Canvas element blocked that edit. Unlock it explicitly to continue."
-					: "Canvas edit blocked because its capability could not be verified.");
+		if (this.editAllowed(operation, ids)) {
+			return false;
 		}
+		try {
+			event.preventDefault();
+			event.stopImmediatePropagation();
+			event.stopPropagation();
+		} catch {
+			// A test double may only implement preventDefault; policy still fails closed.
+		}
+		return true;
 	}
 
 	private isSpacePanHeld(): boolean {
@@ -1685,10 +2048,17 @@ export class M1CanvasSession {
 		if (this.root === undefined) {
 			return;
 		}
-		this.listen(this.root, "keydown", (event) => {
+		const listen = (type: string, handler: EventListener): void => {
+			this.listen(this.root!, type, (event) => {
+				if (this.inControls(event)) return;
+				this.readInteractionState();
+				handler(event);
+			}, true);
+		};
+		listen("keydown", (event) => {
 			const keyboard = event as KeyboardEvent;
 			const key = keyboard.key;
-			if (key === " " || key === "Space") {
+			if ((key === " " || key === "Space") && !this.closestTarget(event, "input, textarea, [contenteditable=true]")) {
 				this.spacePanHeld = true;
 				return;
 			}
@@ -1718,39 +2088,71 @@ export class M1CanvasSession {
 				this.blockIfNeeded(event, "delete", this.eventIds(event));
 				return;
 			}
-			if (key === "Enter" || keyIsPrintable(key)) {
+			if (["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(key)) {
+				this.blockIfNeeded(event, "move", this.eventIds(event));
+				return;
+			}
+			if (key === "Enter" || (typeof key === "string" && keyIsPrintable(key))) {
 				this.blockIfNeeded(event, "edit-text", this.eventIds(event));
 			}
-		}, true);
-		this.listen(this.root, "keyup", (event) => {
+		});
+		listen("keyup", (event) => {
 			const key = (event as KeyboardEvent).key;
 			if (key === " " || key === "Space") {
 				this.spacePanHeld = false;
 			}
-		}, true);
-		this.listen(this.root, "beforeinput", (event) => {
-			const input = readRuntime(event, "inputType");
-			if (typeof input === "string" && EDITABLE_EVENT_TYPES.has(input)) {
-				this.blockIfNeeded(event, input.startsWith("format") ? "restyle" : "edit-text", this.eventIds(event));
-			}
-		}, true);
-		this.listen(this.root, "dragstart", (event) => this.blockIfNeeded(event, "drag-drop", this.eventIds(event)), true);
-		this.listen(this.root, "drop", (event) => this.blockIfNeeded(event, "drag-drop", this.eventIds(event)), true);
-		this.listen(this.root, "paste", (event) => this.blockIfNeeded(event, "paste", this.eventIds(event)), true);
-		this.listen(this.root, "cut", (event) => this.blockIfNeeded(event, "delete", this.eventIds(event)), true);
-		this.listen(this.root, "pointermove", (event) => {
+		});
+		for (const type of ["beforeinput", "input", "change"]) {
+			listen(type, (event) => {
+				const input = readRuntime(event, "inputType");
+				if (input === "historyUndo" || input === "historyRedo") return;
+				this.blockIfNeeded(event, typeof input === "string" && input.startsWith("format") ? "restyle" : "edit-text", this.eventIds(event));
+			});
+		}
+		listen("dblclick", (event) => {
+			const id = this.eventElementId(eventTarget(event));
+			this.blockIfNeeded(event, id === undefined ? "create" : "edit-text", id === undefined ? [] : this.eventIds(event));
+		});
+		for (const type of ["pointerdown", "mousedown"]) {
+			listen(type, (event) => {
+				this.pointerEditIds = undefined;
+				if (readRuntime(event, "button") === 1 || readRuntime(event, "button") === 2 || this.isSpacePanHeld()) return;
+				const id = this.eventElementId(eventTarget(event));
+				if (id === undefined && !this.closestTarget(event, ".canvas-node, .canvas-edge, .canvas-selection, .canvas-node-resizer")) return;
+				this.pointerEditIds = this.eventIds(event);
+				if (this.blockIfNeeded(event, "move", this.pointerEditIds) && id !== undefined) {
+					// Selection must remain possible for the explicit Unlock action,
+					// without handing the press to native drag/resize initialization.
+					const element = [...(this.adapter.getNodes() ?? []), ...(this.adapter.getEdges() ?? [])].find((item) => readCanvasElementId(item) === id);
+					if (element !== undefined && !this.selectedIds.includes(id)) {
+						this.adapter.invoke(readRuntime(event, "shiftKey") === true ? "select" : "selectOnly", element);
+						this.readInteractionState();
+					}
+				}
+			});
+		}
+		const clearGesture = (): void => { this.pointerEditIds = undefined; };
+		for (const type of ["pointerup", "pointercancel", "mouseup"]) {
+			this.listen(ownerDocument(this.root) ?? this.root, type, clearGesture, true);
+		}
+		const window = readRuntime(ownerDocument(this.root), "defaultView");
+		if (isObject(window)) this.listen(window as unknown as EventTarget, "blur", () => {
+			clearGesture();
+			this.spacePanHeld = false;
+		});
+		listen("dragstart", (event) => this.blockIfNeeded(event, "drag-drop", this.eventIds(event)));
+		listen("drop", (event) => this.blockIfNeeded(event, "drag-drop", this.eventIds(event)));
+		listen("paste", (event) => this.blockIfNeeded(event, "paste", this.eventIds(event)));
+		listen("cut", (event) => this.blockIfNeeded(event, "delete", this.eventIds(event)));
+		listen("pointermove", (event) => {
 			const buttons = readRuntime(event, "buttons");
 			if (buttons === 0 || (typeof buttons === "number" && (buttons & 4) !== 0) || this.isSpacePanHeld()) {
 				return;
 			}
-			// A blank-canvas drag is native pan and remains available in review
-			// mode.  Only a pointer whose target resolves to a Canvas element is
-			// an element move subject to lock/review policy.
 			const id = this.eventElementId(eventTarget(event));
-			if (id !== undefined) {
-				this.blockIfNeeded(event, "move", [id]);
-			}
-		}, true);
+			const ids = this.pointerEditIds ?? (id === undefined ? undefined : this.eventIds(event));
+			if (ids !== undefined) this.blockIfNeeded(event, "move", [...new Set([...ids, ...this.selectedIds])]);
+		});
 	}
 
 	/** Restore native readonly state, DOM decorations, listeners, and panel. */
@@ -1760,6 +2162,9 @@ export class M1CanvasSession {
 		}
 		this.disposed = true;
 		this.controls.dispose();
+		this.toolbar.dispose();
+		this.authoring?.dispose();
+		this.authoring = undefined;
 		this.sourceRenderer?.dispose();
 		for (const dispose of this.disposers.splice(0)) {
 			dispose();
