@@ -199,10 +199,23 @@ describe("selection handles", () => {
     expect(handles.gestureActive).toBe(false);
   });
 
-  it("creates a connected node from the quick arrow", () => {
-    const { root, creates } = build();
-    byLabel(root, "Create a connected node").dispatch("click");
-    expect(creates).toEqual(["right"]);
+  it("treats a click on a connection point as creating a connected node", () => {
+    const { root, creates, connects, handles } = build();
+    bySide(root, "top").dispatch("pointerdown", { clientX: 200, clientY: 100, pointerId: 6 });
+    // Released where it started: a click, not a drag.
+    handles.handlePointerUp({ clientX: 201, clientY: 101 });
+    expect(creates).toEqual(["top"]);
+    expect(connects).toEqual([]);
+  });
+
+  it("offers one affordance per side, arrowed away from the node", () => {
+    const { root } = build();
+    expect(bySide(root, "top").textContent).toBe("↑");
+    expect(bySide(root, "right").textContent).toBe("→");
+    expect(bySide(root, "bottom").textContent).toBe("↓");
+    expect(bySide(root, "left").textContent).toBe("←");
+    // The separate quick-create button is gone; the point is the arrow.
+    expect(descendants(root).filter((item) => item.className.includes("--create"))).toHaveLength(0);
   });
 
   it("offers no rotation or connection on a connector or a locked selection", () => {
@@ -230,7 +243,8 @@ describe("selection handles", () => {
   it("removes its listeners on dispose", () => {
     const { root, creates, handles } = build();
     handles.dispose();
-    byLabel(root, "Create a connected node").dispatch("click");
+    bySide(root, "right").dispatch("pointerdown", { clientX: 300, clientY: 150, pointerId: 7 });
+    handles.handlePointerUp({ clientX: 300, clientY: 150 });
     expect(creates).toEqual([]);
   });
 });

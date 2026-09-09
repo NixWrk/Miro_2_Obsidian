@@ -1022,12 +1022,24 @@
   line-height: 1;
 }
 
-/* Connection points sit on the middle of each side, like Miro. */
+/* One affordance per side: a small point that becomes an outward arrow on
+   hover, so a click adds a connected node and a drag pulls a connection. */
 .miro-canvas-handle--connect {
   width: 10px;
   height: 10px;
   border-width: 1px;
+  font-size: 0;
   cursor: crosshair;
+  transition: width 90ms ease, height 90ms ease, margin 90ms ease, font-size 90ms ease;
+}
+
+.miro-canvas-handle--connect:hover,
+.miro-canvas-handle--connect:focus-visible {
+  width: 22px;
+  height: 22px;
+  margin: -6px;
+  border-width: 2px;
+  font-size: 12px;
 }
 
 .miro-canvas-handle--top { top: -5px; left: calc(50% - 5px); }
@@ -1051,13 +1063,6 @@
   cursor: grabbing;
 }
 
-.miro-canvas-handle--create {
-  width: 22px;
-  height: 22px;
-  right: -34px;
-  top: calc(50% - 11px);
-  font-size: 13px;
-}
 
 .miro-canvas-handles[data-miro-canvas-editable="false"] .miro-canvas-handle {
   display: none;

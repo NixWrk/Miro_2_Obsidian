@@ -35,7 +35,7 @@ export interface SelectionHandlesActions {
   readonly onRotate: (degrees: number, commit: boolean) => void;
   /** A connection was pulled from `side` and released at a viewport point. */
   readonly onConnect: (side: HandleSide, point: { readonly x: number; readonly y: number }) => void;
-  /** The quick-create arrow was released; the host places the new node. */
+  /** A connection point was clicked rather than dragged. */
   readonly onCreateConnected: (side: HandleSide) => void;
 }
 
@@ -44,10 +44,17 @@ export interface SelectionHandlesOptions {
   readonly className?: string;
   /** Rotation snaps to this many degrees while Shift is held. */
   readonly snapDegrees?: number;
+  /** Movement under this many pixels counts as a click, not a drag. */
+  readonly dragThreshold?: number;
 }
 
 const SIDES: readonly HandleSide[] = ["top", "right", "bottom", "left"];
 const DEFAULT_SNAP = 15;
+const DEFAULT_DRAG_THRESHOLD = 4;
+/** Each connection point becomes an arrow pointing away from the node. */
+const SIDE_ARROWS: Readonly<Record<HandleSide, string>> = Object.freeze({
+  top: "↑", right: "→", bottom: "↓", left: "←",
+});
 
 /** Center of one side of a rectangle, in the rectangle's own space. */
 export function sideAnchor(rect: HandleRect, side: HandleSide): { readonly x: number; readonly y: number } {
@@ -122,7 +129,6 @@ function pointOf(event: unknown): { readonly x: number; readonly y: number } | u
 interface HandleRefs {
   readonly frame: HTMLElement;
   readonly rotate: HTMLButtonElement;
-  readonly create: HTMLButtonElement;
   readonly connectors: Readonly<Record<HandleSide, HTMLButtonElement>>;
 }
 
@@ -131,6 +137,7 @@ export class SelectionHandles {
   private readonly document: Document | undefined;
   private readonly actions: SelectionHandlesActions;
   private readonly snapDegrees: number;
+  private readonly dragThreshold: number;
   private readonly listeners: Array<() => void> = [];
   private readonly refs: HandleRefs | undefined;
   private state: SelectionHandlesState = { rotation: 0, editable: false, isEdge: false, selectedIds: [] };
@@ -138,10 +145,12 @@ export class SelectionHandles {
   /** Difference between the pointer angle and the rotation when the drag began. */
   private rotationOffset = 0;
   private dragSide: HandleSide | undefined;
+  private dragOrigin: { readonly x: number; readonly y: number } | undefined;
 
   public constructor(actions: SelectionHandlesActions, options: SelectionHandlesOptions = {}) {
     this.actions = actions;
     this.snapDegrees = options.snapDegrees ?? DEFAULT_SNAP;
+    this.dragThreshold = options.dragThreshold ?? DEFAULT_DRAG_THRESHOLD;
     this.document = options.document ?? (typeof document !== "undefined" ? document : undefined);
     if (!hasDocument(this.document)) {
       this.element = {} as HTMLElement;
@@ -159,18 +168,21 @@ export class SelectionHandles {
     const frame = root.appendChild(make(document, "div", "miro-canvas-handles__frame"));
     const connectors = {} as Record<HandleSide, HTMLButtonElement>;
     for (const side of SIDES) {
-      const dot = frame.appendChild(makeGrip(document, `miro-canvas-handle--connect miro-canvas-handle--${side}`, "", `Drag a connection from the ${side}`));
+      // One affordance, as in Miro: the point becomes an arrow on hover, a
+      // click creates a connected node and a drag pulls a connection.
+      const dot = frame.appendChild(makeGrip(
+        document,
+        `miro-canvas-handle--connect miro-canvas-handle--${side}`,
+        SIDE_ARROWS[side],
+        `Click to add a connected node ${side}, or drag to connect`,
+      ));
       dot.setAttribute("data-handle-side", side);
       this.listen(dot, "pointerdown", (event) => this.beginConnect(side, event));
       connectors[side] = dot;
     }
     const rotate = frame.appendChild(makeGrip(document, "miro-canvas-handle--rotate", "↻", "Rotate"));
     this.listen(rotate, "pointerdown", (event) => this.beginRotate(event));
-    const create = frame.appendChild(makeGrip(document, "miro-canvas-handle--create", "→", "Create a connected node"));
-    this.listen(create, "click", () => {
-      if (this.state.editable) this.actions.onCreateConnected("right");
-    });
-    return { frame, rotate, create, connectors };
+    return { frame, rotate, connectors };
   }
 
   private listen(target: EventTarget, type: string, handler: EventListener): void {
@@ -207,6 +219,7 @@ export class SelectionHandles {
     (event as Event).preventDefault?.();
     this.capture(event);
     this.dragSide = side;
+    this.dragOrigin = pointOf(event);
     this.element.setAttribute("data-miro-canvas-connecting", side);
   }
 
@@ -233,7 +246,12 @@ export class SelectionHandles {
     }
     if (this.dragSide !== undefined) {
       const point = pointOf(event);
-      if (point !== undefined) this.actions.onConnect(this.dragSide, point);
+      const origin = this.dragOrigin;
+      const moved = point === undefined || origin === undefined
+        ? 0
+        : Math.hypot(point.x - origin.x, point.y - origin.y);
+      if (moved < this.dragThreshold) this.actions.onCreateConnected(this.dragSide);
+      else if (point !== undefined) this.actions.onConnect(this.dragSide, point);
     }
     this.cancelGesture();
   }
@@ -245,6 +263,7 @@ export class SelectionHandles {
     }
     this.rotating = false;
     this.dragSide = undefined;
+    this.dragOrigin = undefined;
     this.element.removeAttribute?.("data-miro-canvas-rotating");
     this.element.removeAttribute?.("data-miro-canvas-connecting");
   }
@@ -271,7 +290,6 @@ export class SelectionHandles {
     style.transform = state.rotation === 0 ? "none" : `rotate(${state.rotation}deg)`;
     this.element.setAttribute("data-miro-canvas-editable", state.editable ? "true" : "false");
     refs.rotate.hidden = state.isEdge || !state.editable;
-    refs.create.hidden = state.isEdge || !state.editable;
     for (const side of SIDES) {
       refs.connectors[side].hidden = state.isEdge || !state.editable;
     }

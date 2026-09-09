@@ -188,6 +188,21 @@ function clientSize(root: HTMLElement | undefined): { readonly width: number; re
 	return { width: Math.max(1, width), height: Math.max(1, height) };
 }
 
+/**
+ * The element the source renderer rotates.  Native Canvas owns the shell's own
+ * transform and rewrites it while panning, so the inner container is the only
+ * safe place to compose a rotation.
+ */
+function rotationTarget(value: unknown): HTMLElement | undefined {
+	for (const key of ["containerEl", "nodeEl", "contentEl", "el"] as const) {
+		const candidate = readRuntime(value, key);
+		if (isElement(candidate)) {
+			return candidate;
+		}
+	}
+	return undefined;
+}
+
 /** A host that cannot measure yields no placement, and the toolbar stays hidden. */
 function boundingRect(value: unknown): { readonly left: number; readonly top: number; readonly right: number; readonly bottom: number } | undefined {
 	const measure = readRuntime(value, "getBoundingClientRect");
@@ -462,6 +477,11 @@ export class M1CanvasSession {
 		diagnostics: [],
 	};
 	private authoring: CanvasAuthoring | undefined;
+	private rotationPreview: {
+		readonly element: HTMLElement;
+		readonly base: string;
+		readonly committed: number;
+	} | undefined;
 	private lastToolbarSignature = "";
 	private minimapDragStart: MinimapPoint | undefined;
 	private minimapDragViewport: ViewportTransform | undefined;
@@ -546,6 +566,7 @@ export class M1CanvasSession {
 			this.previewRotation(id, degrees);
 			return;
 		}
+		this.rotationPreview = undefined;
 		this.readInteractionState();
 		if (!this.editAllowed("restyle", [id])) {
 			this.refresh();
@@ -560,15 +581,33 @@ export class M1CanvasSession {
 		this.refresh();
 	}
 
+	/**
+	 * Preview by composing a delta onto the element the renderer already
+	 * rotates, never by replacing a transform.  The node shell carries the
+	 * translation native Canvas uses to place it, so overwriting that would
+	 * move the node instead of turning it, and turning it about the wrong
+	 * point.  Rotations about the same origin add, so the base captured at the
+	 * start of the gesture plus the delta is the previewed angle.
+	 */
 	private previewRotation(id: string, degrees: number): void {
 		const element = [...(this.adapter.getNodes() ?? [])].find((item) => readCanvasElementId(item) === id);
-		const dom = readCanvasElementDom(element);
+		const dom = rotationTarget(element);
 		if (dom === undefined) {
 			return;
 		}
-		this.captureAppearanceDom(dom);
+		if (this.rotationPreview?.element !== dom) {
+			this.captureAppearanceDom(dom);
+			const base = readRuntime(readRuntime(dom, "style"), "transform");
+			this.rotationPreview = {
+				element: dom,
+				base: typeof base === "string" && base.trim() !== "none" ? base.trim() : "",
+				committed: this.rotationFor(id),
+			};
+		}
+		const preview = this.rotationPreview;
+		const delta = degrees - preview.committed;
 		this.setAppearanceStyle(dom, "transform-origin", "50% 50%");
-		this.setAppearanceStyle(dom, "transform", `rotate(${degrees}deg)`);
+		this.setAppearanceStyle(dom, "transform", `${preview.base} rotate(${delta}deg)`.trim());
 	}
 
 	/** A connection released over another node becomes a native edge. */
