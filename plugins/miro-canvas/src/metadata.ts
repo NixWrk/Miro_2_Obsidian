@@ -25,6 +25,14 @@ import type {
 
 export const MIRO_CANVAS_SCHEMA_VERSION = 1 as const;
 
+/**
+ * Root keys this plugin owns.  Native Canvas rebuilds the document from its own
+ * model when it saves and keeps only the keys it knows, so these two have to be
+ * carried across a rebuild explicitly or an ordinary native edit would erase
+ * local metadata and the imported source snapshot.
+ */
+export const PLUGIN_ROOT_KEYS = ["miroCanvas", "miroSource"] as const;
+
 export type MiroCanvasSchemaVersion = typeof MIRO_CANVAS_SCHEMA_VERSION;
 
 export type MiroCanvasMetadataStatus =

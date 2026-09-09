@@ -39,6 +39,42 @@ describe("native Obsidian metadata store", () => {
 		expect(runtime.requestSave).not.toHaveBeenCalled();
 	});
 
+	it("names the precondition a rejected commit failed on", () => {
+		const cases: readonly (readonly [string, Record<string, unknown>])[] = [
+			["canvas-readonly", { data: { nodes: [], edges: [] }, readonly: true, requestSave: vi.fn() }],
+			["request-save-asynchronous", { data: { nodes: [], edges: [] }, requestSave: vi.fn(() => Promise.resolve()) }],
+			["request-save-refused", { data: { nodes: [], edges: [] }, requestSave: vi.fn(() => false) }],
+			["request-save-threw", {
+				data: { nodes: [], edges: [] },
+				requestSave: vi.fn(() => { throw new Error("host busy"); }),
+			}],
+		];
+		for (const [reason, runtime] of cases) {
+			const store = readyStore(runtime).store!;
+			const before = { nodes: [], edges: [] };
+			expect(store.commitDocument({ ...before, miroCanvas: { schemaVersion: 1 } }, before)).toBe(false);
+			expect(store.describeLastCommitFailure?.()).toContain(reason);
+			// A refused save must leave the live root exactly as it was found.
+			expect(runtime.data).toEqual(before);
+		}
+	});
+
+	it("reports a stale expected document instead of overwriting a changed root", () => {
+		const runtime = nativeRuntime({ nodes: [], edges: [], changed: true });
+		const store = readyStore(runtime).store!;
+		expect(store.commitDocument({ nodes: [], edges: [], next: true }, { nodes: [], edges: [] })).toBe(false);
+		expect(store.describeLastCommitFailure?.()).toBe("document-changed-since-read");
+		expect(runtime.requestSave).not.toHaveBeenCalled();
+	});
+
+	it("surfaces the store's refusal reason through the writer diagnostic", () => {
+		const runtime = { data: { nodes: [], edges: [] }, readonly: true, requestSave: vi.fn() };
+		const writer = new MetadataWriter(readyStore(runtime).store!);
+		const result = writer.write("appearance", (draft) => ({ ...draft, miroCanvas: { schemaVersion: 1 } }));
+		expect(result.status).toBe("rejected");
+		expect(result.diagnostics.some((item) => item.message.includes("canvas-readonly"))).toBe(true);
+	});
+
 	it("records one native history snapshot that native undo and redo can replay", () => {
 		const clone = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
 		const initial = { nodes: [], edges: [], keep: { native: true } };

@@ -22,6 +22,15 @@ export interface MetadataDocumentStore {
 		nextDocument: Readonly<Record<string, unknown>>,
 		expectedDocument: Readonly<Record<string, unknown>>,
 	): boolean;
+	/**
+	 * Optional: which precondition a host rejected the last commit on.  A store
+	 * that cannot distinguish its refusals simply omits this.
+	 */
+	describeLastCommitFailure?(): string | undefined;
+	/** Optional: how a host altered an accepted commit, such as its own rebuild. */
+	describeLastCommitNotice?(): string | undefined;
+	/** Optional: the document the host actually left behind after an accepted commit. */
+	readLastCommittedDocument?(): Record<string, unknown> | undefined;
 }
 
 /** Alias that makes the intended role clearer to host integrations. */
@@ -64,6 +73,8 @@ interface InternalWriteResult {
 	readonly ok: boolean;
 	readonly status: MetadataWriteStatus;
 	readonly diagnostics: readonly MetadataWriterDiagnostic[];
+	/** Present when the host left behind a document of its own making. */
+	readonly observed?: Snapshot;
 }
 
 class SnapshotError extends Error {}
@@ -332,6 +343,21 @@ function snapshotDocument(value: unknown): Snapshot {
 	};
 }
 
+/** Identity of the graph only: which nodes and edges the document still holds. */
+function graphIsUnchanged(observed: Record<string, unknown>, written: Record<string, unknown>): boolean {
+	for (const key of ["nodes", "edges"] as const) {
+		const ids = (value: unknown): string[] => (Array.isArray(value)
+			? value.map((item) => (isRecord(item) ? item.id : undefined))
+				.filter((id): id is string => typeof id === "string")
+				.sort()
+			: []);
+		if (!structurallyEqual(ids(observed[key]), ids(written[key]))) {
+			return false;
+		}
+	}
+	return true;
+}
+
 function sourceIsUnchanged(before: Snapshot, after: Snapshot): boolean {
 	if (before.sourcePresent !== after.sourcePresent) {
 		return false;
@@ -537,7 +563,9 @@ export class MetadataWriter {
 				return result(action, "rejected", commit.diagnostics, this.undoStack.length, this.redoStack.length);
 			}
 
-			this.undoStack.push({ action, before, after });
+			// Record what the host actually kept, so a later undo compares against
+			// the live document rather than the document this writer proposed.
+			this.undoStack.push({ action, before, after: commit.observed ?? after });
 			// A divergent explicit edit starts a new branch and invalidates redo.
 			this.redoStack.length = 0;
 			return result(action, "applied", commit.diagnostics, this.undoStack.length, this.redoStack.length);
@@ -648,11 +676,19 @@ export class MetadataWriter {
 		}
 
 		if (!commitAccepted) {
+			let reason: string | undefined;
+			try {
+				reason = this.store.describeLastCommitFailure?.();
+			} catch {
+				// A store that throws while explaining itself still fails closed.
+			}
 			addDiagnostic(
 				diagnostics,
 				"commit",
 				"host-commit-rejected",
-				"The host did not accept the whole-document Canvas transaction.",
+				reason === undefined
+					? "The host did not accept the whole-document Canvas transaction."
+					: `The host did not accept the whole-document Canvas transaction (${reason}).`,
 			);
 			const observedAfterFailure = this.readSnapshot();
 			if (observedAfterFailure === undefined) {
@@ -672,8 +708,30 @@ export class MetadataWriter {
 		}
 
 		const observed = this.readSnapshot();
-		if (observed !== undefined && structurallyEqual(observed.document, after.document) && sourceIsUnchanged(before, observed)) {
-			return { ok: true, status: "applied", diagnostics };
+		if (observed !== undefined && sourceIsUnchanged(before, observed)) {
+			if (structurallyEqual(observed.document, after.document)) {
+				return { ok: true, status: "applied", diagnostics };
+			}
+			// A host that rebuilds the document from its own model while saving
+			// cannot be required to hand back the exact bytes it was given.  Accept
+			// that only when the metadata this writer produced survived and the
+			// graph is still the one that was written, and never accept it quietly.
+			if (structurallyEqual(observed.document.miroCanvas, after.document.miroCanvas)
+				&& graphIsUnchanged(observed.document, after.document)) {
+				let notice: string | undefined;
+				try {
+					notice = this.store.describeLastCommitNotice?.();
+				} catch {
+					// A store that throws while explaining itself still committed.
+				}
+				addDiagnostic(
+					diagnostics,
+					"commit",
+					"host-rebuilt-document",
+					notice ?? "The host rebuilt the Canvas document while saving; metadata and the graph were verified unchanged.",
+				);
+				return { ok: true, status: "applied", diagnostics, observed };
+			}
 		}
 
 		addDiagnostic(

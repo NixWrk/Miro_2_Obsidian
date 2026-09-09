@@ -1,3 +1,4 @@
+import { PLUGIN_ROOT_KEYS } from "./metadata";
 import type { MetadataDocumentStore } from "./metadata-writer";
 
 /**
@@ -81,6 +82,9 @@ function isArrayIndexKey(key: string, length: number): boolean {
 	return Number.isSafeInteger(index) && index >= 0 && index < length && String(index) === key;
 }
 
+/** Marker for a property JSON serialization would omit entirely. */
+const OMIT = Symbol("omit");
+
 function assertPrimitive(value: unknown, path: string): void {
 	if (
 		value === undefined ||
@@ -128,6 +132,7 @@ function cloneJsonValue(
 	path = "document",
 	depth = 0,
 	state: { items: number } = { items: 0 },
+	lenient = false,
 ): unknown {
 	state.items += 1;
 	if (state.items > MAX_DOCUMENT_ITEMS) {
@@ -138,8 +143,19 @@ function cloneJsonValue(
 	}
 
 	if (value === null || typeof value !== "object") {
-		assertPrimitive(value, path);
-		return value;
+		if (!lenient) {
+			assertPrimitive(value, path);
+			return value;
+		}
+		// Match JSON serialization: a value the host cannot serialize is omitted
+		// or nulled rather than treated as a corrupt document.
+		if (value === undefined || typeof value === "function" || typeof value === "symbol") {
+			return OMIT;
+		}
+		if (typeof value === "bigint") {
+			throw new NativeShapeError(`The Canvas document contains a bigint at ${path}.`);
+		}
+		return typeof value === "number" && !Number.isFinite(value) ? null : value;
 	}
 
 	if (seen.has(value)) {
@@ -172,13 +188,18 @@ function cloneJsonValue(
 		for (let index = 0; index < length; index += 1) {
 			const key = String(index);
 			if (!hasOwn(value, key)) {
-				throw new NativeShapeError(`The Canvas array contains a sparse item at ${path}[${index}].`);
+				if (!lenient) {
+					throw new NativeShapeError(`The Canvas array contains a sparse item at ${path}[${index}].`);
+				}
+				result.push(null);
+				continue;
 			}
 			const item = safeGet(value, index);
 			if (!item.ok) {
 				throw new NativeShapeError(`The Canvas array item could not be read at ${path}[${index}].`);
 			}
-			result.push(cloneJsonValue(item.value, seen, `${path}[${index}]`, depth + 1, state));
+			const cloned = cloneJsonValue(item.value, seen, `${path}[${index}]`, depth + 1, state, lenient);
+			result.push(cloned === OMIT ? null : cloned);
 		}
 
 		let keys: string[];
@@ -188,11 +209,13 @@ function cloneJsonValue(
 			throw new NativeShapeError(`The Canvas array fields could not be enumerated at ${path}: ${describeError(error)}.`);
 		}
 		for (const key of keys) {
-			if (key !== "length" && !isArrayIndexKey(key, length)) {
+			if (key !== "length" && !isArrayIndexKey(key, length) && !lenient) {
 				throw new NativeShapeError(`The Canvas array contains a non-index field at ${path}.${key}.`);
 			}
 		}
-		assertNoEnumerableSymbols(value, path);
+		if (!lenient) {
+			assertNoEnumerableSymbols(value, path);
+		}
 		seen.delete(value);
 		return result;
 	}
@@ -203,7 +226,7 @@ function cloneJsonValue(
 	} catch (error) {
 		throw new NativeShapeError(`The Canvas object prototype could not be read at ${path}: ${describeError(error)}.`);
 	}
-	if (prototype !== Object.prototype && prototype !== null) {
+	if (prototype !== Object.prototype && prototype !== null && !lenient) {
 		throw new NativeShapeError(`The Canvas document contains a non-plain object at ${path}.`);
 	}
 
@@ -214,16 +237,22 @@ function cloneJsonValue(
 	} catch (error) {
 		throw new NativeShapeError(`The Canvas object fields could not be enumerated at ${path}: ${describeError(error)}.`);
 	}
-	assertNoEnumerableSymbols(value, path);
+	if (!lenient) {
+		assertNoEnumerableSymbols(value, path);
+	}
 	for (const key of keys) {
 		const item = safeGet(value, key);
 		if (!item.ok) {
 			throw new NativeShapeError(`The Canvas property could not be read at ${path}.${key}.`);
 		}
+		const cloned = cloneJsonValue(item.value, seen, `${path}.${key}`, depth + 1, state, lenient);
+		if (cloned === OMIT) {
+			continue;
+		}
 		Object.defineProperty(result, key, {
 			configurable: true,
 			enumerable: true,
-			value: cloneJsonValue(item.value, seen, `${path}.${key}`, depth + 1, state),
+			value: cloned,
 			writable: true,
 		});
 	}
@@ -237,6 +266,42 @@ function cloneDocument(value: unknown): Record<string, unknown> {
 		throw new NativeShapeError("The Canvas document root must be a plain object.");
 	}
 	return clone as Record<string, unknown>;
+}
+
+/**
+ * The JSON form of a document the host produced.  A host rebuild legitimately
+ * carries values that JSON serialization drops, such as an absent optional
+ * field left as `undefined`.  Reading is therefore normalized the way the file
+ * would be written, while anything this plugin installs as the new root still
+ * goes through the strict clone above.
+ */
+function normalizeDocument(value: unknown): Record<string, unknown> {
+	const clone = cloneJsonValue(value, new Set<object>(), "document", 0, { items: 0 }, true);
+	if (clone === null || clone === OMIT || typeof clone !== "object" || Array.isArray(clone)) {
+		throw new NativeShapeError("The Canvas document root must be a plain object.");
+	}
+	return clone as Record<string, unknown>;
+}
+
+/** Compare only the identity of the graph: which nodes and edges exist. */
+function graphDrift(observed: Record<string, unknown>, written: Record<string, unknown>): string | undefined {
+	for (const key of ["nodes", "edges"] as const) {
+		const ids = (value: unknown): string[] => {
+			if (!Array.isArray(value)) {
+				return [];
+			}
+			return value
+				.map((item) => (isObject(item) ? item.id : undefined))
+				.filter((id): id is string => typeof id === "string")
+				.sort();
+		};
+		const left = ids(observed[key]);
+		const right = ids(written[key]);
+		if (!equalJson(left, right)) {
+			return key;
+		}
+	}
+	return undefined;
 }
 
 function equalJson(left: unknown, right: unknown): boolean {
@@ -400,7 +465,35 @@ function resolveRuntime(
 }
 
 class ObsidianRootMetadataStore implements MetadataDocumentStore {
+	private lastFailure: string | undefined;
+	private lastNotice: string | undefined;
+	private lastCommit: Record<string, unknown> | undefined;
+
 	public constructor(private readonly runtime: UnknownRecord) {}
+
+	/** The document the host actually left behind, which may be its own rebuild. */
+	public readLastCommittedDocument(): Record<string, unknown> | undefined {
+		return this.lastCommit;
+	}
+
+	/** A commit the host accepted only after rebuilding the document. */
+	public describeLastCommitNotice(): string | undefined {
+		return this.lastNotice;
+	}
+
+	/**
+	 * A rejected commit has eight distinct causes and the host reports none of
+	 * them.  Recording which precondition failed is the only way a user can act
+	 * on the refusal instead of seeing one opaque notice.
+	 */
+	public describeLastCommitFailure(): string | undefined {
+		return this.lastFailure;
+	}
+
+	private fail(reason: string): false {
+		this.lastFailure = reason;
+		return false;
+	}
 
 	public readDocument(): unknown {
 		const raw = this.readRawData();
@@ -408,7 +501,7 @@ class ObsidianRootMetadataStore implements MetadataDocumentStore {
 			return undefined;
 		}
 		try {
-			return cloneDocument(raw.value);
+			return normalizeDocument(raw.value);
 		} catch {
 			return undefined;
 		}
@@ -425,42 +518,48 @@ class ObsidianRootMetadataStore implements MetadataDocumentStore {
 		nextDocument: Readonly<Record<string, unknown>>,
 		expectedDocument: Readonly<Record<string, unknown>>,
 	): boolean {
+		this.lastFailure = undefined;
+		this.lastNotice = undefined;
+		this.lastCommit = undefined;
 		const current = this.readRawData();
 		if (!current.ok) {
-			return false;
+			return this.fail("canvas-data-unreadable");
 		}
 
 		let currentSnapshot: Record<string, unknown>;
 		let expectedSnapshot: Record<string, unknown>;
 		let replacement: Record<string, unknown>;
 		try {
-			currentSnapshot = cloneDocument(current.value);
+			currentSnapshot = normalizeDocument(current.value);
 			expectedSnapshot = cloneDocument(expectedDocument);
 			replacement = cloneDocument(nextDocument);
-		} catch {
-			return false;
+		} catch (error) {
+			return this.fail(`document-not-json-cloneable: ${describeError(error)}`);
 		}
 		if (!equalJson(currentSnapshot, expectedSnapshot)) {
-			return false;
+			return this.fail("document-changed-since-read");
 		}
 
 		const readonly = safeGet(this.runtime, "readonly");
-		if (!readonly.ok || readonly.value === true) {
-			return false;
+		if (!readonly.ok) {
+			return this.fail("readonly-flag-unreadable");
+		}
+		if (readonly.value === true) {
+			return this.fail("canvas-readonly");
 		}
 		const save = safeGet(this.runtime, "requestSave");
 		if (!save.ok || typeof save.value !== "function") {
-			return false;
+			return this.fail("request-save-unavailable");
 		}
 
 		if (!this.replaceRoot(replacement, current.value)) {
-			return false;
+			return this.fail("root-replace-rejected");
 		}
 
 		const replaced = this.readRawData();
 		if (!replaced.ok || replaced.value === current.value || !this.equalsRaw(replaced.value, replacement)) {
 			this.restoreRoot(currentSnapshot);
-			return false;
+			return this.fail("root-replace-not-observed");
 		}
 
 		try {
@@ -472,18 +571,47 @@ class ObsidianRootMetadataStore implements MetadataDocumentStore {
 			// rejected instead of pretending that an async save is atomic.
 			if (saveResult === false || isThenable(saveResult)) {
 				this.restoreRoot(currentSnapshot);
-				return false;
+				return this.fail(saveResult === false ? "request-save-refused" : "request-save-asynchronous");
 			}
-		} catch {
+		} catch (error) {
 			this.restoreRoot(currentSnapshot);
-			return false;
+			return this.fail(`request-save-threw: ${describeError(error)}`);
 		}
 
 		const observed = this.readRawData();
-		if (!observed.ok || observed.value === current.value || !this.equalsRaw(observed.value, replacement)) {
+		if (!observed.ok) {
 			this.restoreRoot(currentSnapshot);
-			return false;
+			return this.fail("post-save-root-unreadable");
 		}
+		let observedSnapshot: Record<string, unknown>;
+		try {
+			observedSnapshot = normalizeDocument(observed.value);
+		} catch (error) {
+			this.restoreRoot(currentSnapshot);
+			return this.fail(`post-save-root-not-readable: ${describeError(error)}`);
+		}
+		if (equalJson(observedSnapshot, replacement)) {
+			this.lastCommit = replacement;
+			return true;
+		}
+		// The host rebuilds the document from its own model when it saves, so an
+		// exact match is not something it can be required to produce.  Verify the
+		// invariants this plugin actually owns instead of accepting silently:
+		// its own root keys must survive byte-for-byte and the graph must be the
+		// one that was written.
+		for (const key of PLUGIN_ROOT_KEYS) {
+			if (!equalJson(observedSnapshot[key], replacement[key])) {
+				this.restoreRoot(currentSnapshot);
+				return this.fail(`post-save-metadata-lost: ${key}`);
+			}
+		}
+		const drift = graphDrift(observedSnapshot, replacement);
+		if (drift !== undefined) {
+			this.restoreRoot(currentSnapshot);
+			return this.fail(`post-save-graph-changed: ${drift}`);
+		}
+		this.lastCommit = observedSnapshot;
+		this.lastNotice = "The host rebuilt the Canvas document while saving; plugin metadata and the graph were verified unchanged.";
 		return true;
 	}
 
@@ -493,7 +621,7 @@ class ObsidianRootMetadataStore implements MetadataDocumentStore {
 
 	private equalsRaw(value: unknown, expected: Record<string, unknown>): boolean {
 		try {
-			return equalJson(cloneDocument(value), expected);
+			return equalJson(normalizeDocument(value), expected);
 		} catch {
 			return false;
 		}
