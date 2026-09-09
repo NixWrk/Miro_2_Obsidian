@@ -693,3 +693,70 @@ describe("CanvasAuthoring", () => {
 		expect(collisionResult.diagnostics.map((item) => item.code)).toContain("shape-id-collision");
 	});
 });
+
+describe("connector creation", () => {
+	function host(document: Record<string, unknown>) {
+		const graph = new NativeGraph(document);
+		return { graph, authoring: createCanvasAuthoring({ canvas: graph }) };
+	}
+	const board = () => ({
+		nodes: [
+			{ id: "a", type: "text", text: "a", x: 0, y: 0, width: 100, height: 80 },
+			{ id: "b", type: "text", text: "b", x: 300, y: 0, width: 100, height: 80 },
+		],
+		edges: [],
+	});
+
+	it("adds one native edge between two nodes", () => {
+		const { graph, authoring } = host(board());
+		const result = authoring.createConnector({ fromNode: "a", toNode: "b" });
+		expect(result.status).toBe("applied");
+		expect(result.edgeId).toBeTruthy();
+		expect(graph.getData().edges).toEqual([
+			{ id: result.edgeId, fromNode: "a", fromSide: "right", toNode: "b", toSide: "left", toEnd: "arrow" },
+		]);
+		// The edge is native data only; no plugin metadata is invented for it.
+		expect(graph.getData()).not.toHaveProperty("miroCanvas");
+	});
+
+	it("honors explicit sides and rejects an unsupported one", () => {
+		const { graph, authoring } = host(board());
+		expect(authoring.createConnector({ fromNode: "a", toNode: "b", fromSide: "bottom", toSide: "top" }).status).toBe("applied");
+		expect((graph.getData().edges as Record<string, unknown>[])[0]).toMatchObject({ fromSide: "bottom", toSide: "top" });
+		const rejected = authoring.createConnector({ fromNode: "a", toNode: "b", fromSide: "middle" as never });
+		expect(rejected.status).toBe("rejected");
+		expect(rejected.diagnostics.some((item) => item.code === "connector-side-invalid")).toBe(true);
+	});
+
+	it("refuses a missing, repeated or self-referencing endpoint", () => {
+		const { graph, authoring } = host(board());
+		for (const input of [
+			{ fromNode: "a", toNode: "a" },
+			{ fromNode: "a", toNode: "missing" },
+			{ fromNode: "", toNode: "b" },
+		]) {
+			expect(authoring.createConnector(input).status).toBe("rejected");
+		}
+		expect(graph.getData().edges).toEqual([]);
+	});
+
+	it("refuses to connect a locked node or to write in review mode", () => {
+		const locked = { ...board(), miroCanvas: { schemaVersion: 1, settings: {}, localOverrides: { b: { locked: true } } } };
+		expect(host(locked).authoring.createConnector({ fromNode: "a", toNode: "b" }).status).toBe("rejected");
+		const review = { ...board(), miroCanvas: { schemaVersion: 1, settings: { reviewMode: true }, localOverrides: {} } };
+		expect(host(review).authoring.createConnector({ fromNode: "a", toNode: "b" }).status).toBe("rejected");
+	});
+
+	it("preserves miroSource and unknown document fields", () => {
+		const { graph, authoring } = host({
+			...board(),
+			miroSource: { items: [{ id: "a" }] },
+			futureRoot: { keep: true },
+		});
+		expect(authoring.createConnector({ fromNode: "a", toNode: "b" }).status).toBe("applied");
+		const data = graph.getData();
+		expect(data.miroSource).toEqual({ items: [{ id: "a" }] });
+		expect(data.futureRoot).toEqual({ keep: true });
+	});
+});
+

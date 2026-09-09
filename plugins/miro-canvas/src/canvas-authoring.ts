@@ -53,6 +53,21 @@ export interface CanvasShapeAction {
 }
 
 /** ID is supplied by the caller's selection; absent fields retain their source/local values. */
+export const CONNECTOR_SIDES = ["top", "right", "bottom", "left"] as const;
+export type ConnectorSide = (typeof CONNECTOR_SIDES)[number];
+
+export interface CreateConnectorInput {
+	readonly fromNode: string;
+	readonly toNode: string;
+	readonly fromSide?: ConnectorSide;
+	readonly toSide?: ConnectorSide;
+	readonly id?: string;
+}
+
+export interface CreateConnectorResult extends CanvasGraphResult {
+	readonly edgeId?: string;
+}
+
 export interface UpdateElementStyleInput {
 	readonly id: string;
 	readonly shape?: CanvasShapeKind;
@@ -1532,6 +1547,80 @@ export class CanvasAuthoring {
 			return resultWithDiagnostics([...this.diagnosticList, ...diagnostics], false, "rejected");
 		}
 		return resultWithDiagnostics([...this.diagnosticList, ...diagnostics], true, "applied", shape, verified);
+	}
+
+	/**
+	 * Add one connector between two existing nodes.
+	 *
+	 * Native Canvas owns the edge list, so the edge is written in its own shape
+	 * and nothing is recorded in plugin metadata.  Both endpoints are checked
+	 * against the interaction policy: a locked node does not grow new
+	 * connections behind the user's back.
+	 */
+	public createConnector(input: CreateConnectorInput, expected?: CanvasAuthoringExpected): CreateConnectorResult {
+		const diagnostics: CanvasAuthoringDiagnostic[] = [];
+		const reject = (): CreateConnectorResult => ({ ok: false, status: "rejected", diagnostics: [...this.diagnosticList, ...diagnostics] });
+		if (this.disposed || this.host === undefined) return reject();
+		const before = readSnapshotFromHost(this.host, diagnostics);
+		if (before === undefined) return reject();
+		if (expected !== undefined) {
+			const snapshot = makeSnapshot(extractExpectedDocument(expected), diagnostics);
+			if (snapshot === undefined || !structurallyEqual(snapshot.document, before.document)) {
+				addDiagnostic(diagnostics, "stale-document", "warning", "The Canvas document changed since the supplied expected snapshot.");
+				return reject();
+			}
+		}
+		const fromNode = typeof input?.fromNode === "string" ? input.fromNode : undefined;
+		const toNode = typeof input?.toNode === "string" ? input.toNode : undefined;
+		if (fromNode === undefined || toNode === undefined || fromNode === toNode) {
+			addDiagnostic(diagnostics, "connector-endpoints-invalid", "error", "A connector needs two different existing Canvas nodes.");
+			return reject();
+		}
+		for (const id of [fromNode, toNode]) {
+			if (before.nodes.some((node) => node.id === id)) continue;
+			addDiagnostic(diagnostics, "connector-endpoint-missing", "error", `Canvas node ${id} does not exist.`);
+			return reject();
+		}
+		const side = (value: unknown, fallback: ConnectorSide): ConnectorSide | undefined => {
+			if (value === undefined) return fallback;
+			return (CONNECTOR_SIDES as readonly string[]).includes(value as string) ? value as ConnectorSide : undefined;
+		};
+		const fromSide = side(input.fromSide, "right");
+		const toSide = side(input.toSide, "left");
+		if (fromSide === undefined || toSide === undefined) {
+			addDiagnostic(diagnostics, "connector-side-invalid", "error", "A connector side must be top, right, bottom or left.");
+			return reject();
+		}
+		if (policyAllowsCreate(before.document, diagnostics) === undefined) return reject();
+		for (const id of [fromNode, toNode]) {
+			if (!policyAllowsGraphEdit(before.document, "edit", id, "element-style", diagnostics)) return reject();
+		}
+		const allocation = allocateId(input.id, collectDocumentIds(before), this.idPrefix, this.idCounter);
+		if (allocation.id === undefined) {
+			addDiagnostic(diagnostics, input.id === undefined ? "connector-id-generation-failed" : "connector-id-collision", "error",
+				input.id === undefined ? "A collision-free Canvas edge ID could not be generated." : "The explicit Canvas edge ID is already in use.");
+			return reject();
+		}
+		this.idCounter = allocation.nextCounter;
+		let document: UnknownRecord;
+		try {
+			document = cloneRecord(before.document);
+		} catch (error) {
+			addDiagnostic(diagnostics, "document-copy-failed", "error", `The Canvas document could not be copied: ${describeError(error)}.`);
+			return reject();
+		}
+		const edgesValue = safeRead(document, "edges");
+		const edges = edgesValue.ok && Array.isArray(edgesValue.value) ? edgesValue.value : undefined;
+		if (edges === undefined) {
+			addDiagnostic(diagnostics, "canvas-document-invalid", "error", "The target Canvas edges array is unavailable.");
+			return reject();
+		}
+		setOwn(document, "edges", [...edges, {
+			id: allocation.id, fromNode, fromSide, toNode, toSide, toEnd: "arrow",
+		}]);
+		const verified = this.commitDocument(before, document, diagnostics);
+		if (verified === undefined) return reject();
+		return { ok: true, status: "applied", edgeId: allocation.id, document: verified.document, diagnostics: [...this.diagnosticList, ...diagnostics] };
 	}
 
 	/** Apply one connector endpoint change through the same guarded native graph transaction. */
