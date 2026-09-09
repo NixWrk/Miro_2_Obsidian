@@ -4,7 +4,11 @@
  */
 
 import {
+  commentAuthorLabel,
+  commentTimeLabel,
   filterCommentThreads,
+  type CommentDisplayOptions,
+  type CommentReply,
   type CommentScope,
   type CommentThread,
 } from "./local-comments";
@@ -31,7 +35,7 @@ export interface CommentsPanelHost {
   readonly onSelectTarget?: (thread: CommentThread) => void;
 }
 
-export interface CommentsPanelOptions {
+export interface CommentsPanelOptions extends CommentDisplayOptions {
   readonly document?: Document;
   readonly title?: string;
   readonly className?: string;
@@ -77,14 +81,6 @@ function inputText(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
 }
 
-function authorLabel(thread: CommentThread): string {
-  const author = thread.author;
-  if (author !== undefined && typeof author.name === "string" && author.name.trim().length > 0) {
-    return author.name.trim();
-  }
-  return thread.origin === "imported" ? "Imported Miro comment" : "Local comment";
-}
-
 function anchorLabel(anchor: CanvasAnchor | undefined): string {
   if (anchor === undefined) {
     return "No anchor";
@@ -104,14 +100,17 @@ function threadRenderKey(thread: CommentThread): readonly unknown[] {
     thread.origin,
     thread.text,
     thread.createdAt ?? null,
+    thread.updatedAt ?? null,
     thread.resolved,
     thread.immutable === true,
-    thread.author?.name ?? null,
+    commentAuthorLabel(thread),
     anchorLabel(thread.anchor),
     thread.replies.map((reply) => [
       reply.id,
       reply.text,
-      reply.author?.name ?? null,
+      commentAuthorLabel(reply),
+      reply.createdAt,
+      reply.updatedAt ?? null,
     ]),
   ];
 }
@@ -121,12 +120,14 @@ export class CommentsPanel {
   public readonly element: HTMLElement;
   private readonly document: Document | undefined;
   private readonly host: CommentsPanelHost;
+  private readonly displayOptions: CommentDisplayOptions;
   private readonly refs: PanelRefs | undefined;
   private state: CommentsPanelState = { threads: [] };
   private renderKey: string | undefined;
 
   public constructor(host: CommentsPanelHost, options: CommentsPanelOptions = {}) {
     this.host = host;
+    this.displayOptions = options;
     this.document = options.document ?? (typeof document !== "undefined" ? document : undefined);
     if (!hasDocument(this.document)) {
       this.element = {} as HTMLElement;
@@ -194,21 +195,33 @@ export class CommentsPanel {
     return { scope, draft, add, list, status };
   }
 
+  private renderMessageHeader(message: CommentThread | CommentReply): HTMLElement {
+    const document = this.document!;
+    const header = make(document, "header");
+    header.className = "miro-canvas-comment-card__header";
+    const author = append(header, make(document, "strong", commentAuthorLabel(message)));
+    author.className = "miro-canvas-comment-card__author";
+    for (const [kind, value] of [["created", message.createdAt], ["updated", message.updatedAt]] as const) {
+      if (kind === "updated" && (!value || value === message.createdAt)) continue;
+      const label = commentTimeLabel(value, this.displayOptions);
+      const time = append(header, make(document, "time", kind === "updated" ? `Updated ${label}` : label));
+      time.className = "miro-canvas-comment-card__time";
+      time.setAttribute("data-comment-time", kind);
+      if (typeof value === "string" && value) {
+        time.setAttribute("title", value);
+        if (Number.isFinite(new Date(value).getTime())) time.setAttribute("datetime", value);
+      }
+    }
+    return header;
+  }
+
   private renderThread(thread: CommentThread): HTMLElement {
     const document = this.document!;
     const card = make(document, "article");
     card.className = "miro-canvas-comment-card";
     card.setAttribute("data-comment-id", thread.id);
     card.setAttribute("data-comment-origin", thread.origin);
-    const header = append(card, make(document, "header"));
-    header.className = "miro-canvas-comment-card__header";
-    const author = append(header, make(document, "strong", authorLabel(thread)));
-    author.className = "miro-canvas-comment-card__author";
-    if (thread.createdAt !== undefined) {
-      const time = append(header, make(document, "time", thread.createdAt));
-      time.className = "miro-canvas-comment-card__time";
-      time.setAttribute("datetime", thread.createdAt);
-    }
+    append(card, this.renderMessageHeader(thread));
     const body = append(card, make(document, "p", thread.text));
     body.className = "miro-canvas-comment-card__body";
     const actions = append(card, make(document, "div"));
@@ -257,9 +270,12 @@ export class CommentsPanel {
     replies.className = "miro-canvas-comment-card__replies";
     replies.setAttribute("data-comment-region", "replies");
     for (const reply of thread.replies) {
-      const row = append(replies, make(document, "p"));
+      const row = append(replies, make(document, "article"));
+      row.className = "miro-canvas-comment-card__reply";
       row.setAttribute("data-comment-reply-id", reply.id);
-      row.textContent = `${reply.author?.name ?? "Reply"}: ${reply.text}`;
+      append(row, this.renderMessageHeader(reply));
+      const body = append(row, make(document, "p", reply.text));
+      body.className = "miro-canvas-comment-card__body";
     }
     const replyComposer = append(card, make(document, "div"));
     replyComposer.className = "miro-canvas-comment-card__reply-composer";

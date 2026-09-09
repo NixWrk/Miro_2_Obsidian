@@ -239,6 +239,56 @@ describe("comments panel", () => {
     findByAttribute(root, "data-comment-action", "reply-comment").dispatch("click");
 
     expect(findByAttribute(root, "data-comment-input", "reply-local-1").value).toBe("");
-    expect(findByAttribute(root, "data-comment-reply-id", "reply-1").textContent).toContain("One reply");
+    expect(descendants(findByAttribute(root, "data-comment-reply-id", "reply-1")).map((item) => item.textContent)).toContain("One reply");
+  });
+
+  it("shows readable author/time headers for every message and refreshes timestamp-only changes", () => {
+    const noop = () => undefined;
+    const panel = new CommentsPanel({
+      onAddComment: noop, onEditComment: noop, onDeleteComment: noop,
+      onReplyComment: noop, onResolveComment: noop, onFilterChange: noop,
+    }, { document: new FakeDocument() as unknown as Document, locale: "en-GB", timeZone: "UTC" });
+    const thread: CommentThread = {
+      ...localThread, author: { name: "Alice" },
+      replies: [{ id: "r", text: "<script>plain text</script>", origin: "local",
+        author: { displayName: "Bob" }, createdAt: "2026-09-09T13:42:00Z" }],
+    };
+    const before = JSON.stringify(thread);
+    panel.update({ threads: [thread] });
+    const root = panel.element as unknown as FakeElement;
+    const authors = descendants(root).filter((item) => item.tagName === "strong");
+    expect(authors.map((item) => item.textContent)).toEqual(["Alice", "Bob"]);
+    const reply = findByAttribute(root, "data-comment-reply-id", "r");
+    const time = findByAttribute(reply, "data-comment-time", "created");
+    expect(time.getAttribute("datetime")).toBe("2026-09-09T13:42:00Z");
+    expect(time.textContent).toContain("9 Sept 2026");
+    expect(time.textContent).toContain("13:42");
+    expect(descendants(reply).some((item) => item.tagName === "script")).toBe(false);
+    findByAttribute(root, "data-comment-input", "reply-local-1").value = "Keep draft";
+    panel.update({ threads: [{ ...thread, replies: [{ ...thread.replies[0],
+      createdAt: "2026-09-09T14:45:00Z", updatedAt: "2026-09-10T15:46:00Z" }] }] });
+    const refreshed = findByAttribute(root, "data-comment-reply-id", "r");
+    expect(findByAttribute(refreshed, "data-comment-time", "created").textContent).toContain("14:45");
+    expect(findByAttribute(refreshed, "data-comment-time", "updated").textContent).toContain("Updated");
+    expect(findByAttribute(root, "data-comment-input", "reply-local-1").value).toBe("Keep draft");
+    expect(JSON.stringify(thread)).toBe(before);
+  });
+
+  it("renders explicit missing author/time labels without inventing dates", () => {
+    const noop = () => undefined;
+    const panel = new CommentsPanel({
+      onAddComment: noop, onEditComment: noop, onDeleteComment: noop,
+      onReplyComment: noop, onResolveComment: noop, onFilterChange: noop,
+    }, { document: new FakeDocument() as unknown as Document });
+    panel.update({ threads: [{ ...localThread, createdAt: undefined, replies: [{
+      id: "r", origin: "imported", text: "Source", author: { name: "  " }, createdAt: "invalid source time",
+    }] }] });
+    const root = panel.element as unknown as FakeElement;
+    expect(descendants(root).filter((item) => item.tagName === "strong").map((item) => item.textContent))
+      .toEqual(["Unknown author", "Unknown author"]);
+    const times = descendants(root).filter((item) => item.tagName === "time");
+    expect(times.map((item) => item.textContent)).toEqual(["Time unavailable", "Time unavailable"]);
+    expect(times.every((item) => item.getAttribute("datetime") === null)).toBe(true);
+    expect(times[1].getAttribute("title")).toBe("invalid source time");
   });
 });

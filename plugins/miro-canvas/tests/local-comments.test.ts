@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest";
 import {
   addLocalComment,
   addReply,
+  commentAuthorLabel,
+  commentTimeLabel,
   deleteLocalComment,
   editLocalComment,
   listCommentThreads,
@@ -17,6 +19,52 @@ const options = {
 };
 
 describe("offline local comments", () => {
+  it("formats presentation without modifying raw author or timestamp evidence", () => {
+    const author = { name: "  Alice  ", displayName: "Other", future: { keep: true } };
+    expect(commentAuthorLabel({ author })).toBe("Alice");
+    expect(commentAuthorLabel({ author: { displayName: "Bob" } })).toBe("Bob");
+    expect(commentAuthorLabel({ author: { id: "user-3" } })).toBe("user-3");
+    expect(commentAuthorLabel({})).toBe("Unknown author");
+    expect(commentTimeLabel("2026-09-09T13:42:00Z", { locale: "en-GB", timeZone: "UTC" })).toContain("13:42");
+    expect(commentTimeLabel("2026-09-09T13:42:00Z", { locale: "en-GB", timeZone: "Europe/Moscow" })).toContain("16:42");
+    for (const value of [undefined, null, "", "bad date", 0]) expect(commentTimeLabel(value)).toBe("Time unavailable");
+    expect(author).toEqual({ name: "  Alice  ", displayName: "Other", future: { keep: true } });
+  });
+
+  it("preserves imported messages and local timestamp history across mutations and reads", () => {
+    const imported = { id: "source", content: "Original", createdAt: "2025-12-01T10:00:00Z",
+      createdBy: { name: "Source author", future: [1] }, future: { keep: true },
+      messages: [{ id: "source-reply", content: "Reply", createdAt: "2025-12-02T11:00:00Z",
+        updatedAt: "2025-12-02T12:00:00Z", createdBy: { name: "Reply author" }, history: ["original"] }] };
+    const metadata = { schemaVersion: 1, miroSource: { comments: [imported], future: [2] },
+      future: { keep: true }, localComments: [] };
+    const before = JSON.stringify(metadata);
+    const added = addLocalComment(metadata, { text: "Local", history: ["existing"] }, options);
+    const replied = addReply(added.metadata, "local-1", { text: "Reply", history: ["reply evidence"] }, {
+      ...options, now: () => "2026-01-02T00:00:00Z",
+    });
+    const edited = editLocalComment(replied.metadata, "local-1", "Edited", {
+      ...options, now: () => "2026-01-03T00:00:00Z",
+    });
+    const threads = listCommentThreads(edited.metadata);
+    expect(threads[0]).toMatchObject({ immutable: true, author: imported.createdBy, source: imported });
+    expect(threads[0].replies[0]).toMatchObject({ immutable: true,
+      createdAt: imported.messages[0].createdAt, updatedAt: imported.messages[0].updatedAt,
+      history: ["original"], author: { name: "Reply author" } });
+    expect(threads[1]).toMatchObject({ createdAt: options.now(), updatedAt: "2026-01-03T00:00:00Z", history: ["existing"] });
+    expect(threads[1].replies[0]).toMatchObject({ createdAt: "2026-01-02T00:00:00Z",
+      updatedAt: "2026-01-02T00:00:00Z", history: ["reply evidence"] });
+    for (const result of [editLocalComment(edited.metadata, "source", "No"),
+      addReply(edited.metadata, "source", "No"), deleteLocalComment(edited.metadata, "source"),
+      resolveComment(edited.metadata, "source"), reopenComment(edited.metadata, "source")]) {
+      expect(result.ok).toBe(false);
+      expect(result.diagnostics[0].code).toBe("comment-immutable");
+      expect(result.metadata).toEqual(edited.metadata);
+    }
+    expect(edited.metadata?.miroSource).toEqual(metadata.miroSource);
+    expect(edited.metadata?.future).toEqual(metadata.future);
+    expect(JSON.stringify(metadata)).toBe(before);
+  });
   it("combines immutable imported threads with local threads and filters by target", () => {
     const source = {
       comments: [{

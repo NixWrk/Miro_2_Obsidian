@@ -52,6 +52,30 @@ export interface CommentListOptions {
   readonly includeResolved?: boolean;
 }
 
+export interface CommentDisplayOptions {
+  readonly locale?: string;
+  readonly timeZone?: string;
+}
+
+/** Presentation only: never replace stored author or timestamp evidence. */
+export function commentAuthorLabel(message: { readonly author?: CommentAuthor }): string {
+  for (const value of [message.author?.name, message.author?.displayName, message.author?.id]) {
+    if (typeof value === "string" && value.trim()) return value.trim();
+  }
+  return "Unknown author";
+}
+
+export function commentTimeLabel(value: unknown, options: CommentDisplayOptions = {}): string {
+  if (typeof value !== "string" || !value.trim()) return "Time unavailable";
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) return "Time unavailable";
+  return new Intl.DateTimeFormat(options.locale, {
+    year: "numeric", month: "short", day: "numeric",
+    hour: "2-digit", minute: "2-digit", timeZoneName: "short",
+    timeZone: options.timeZone,
+  }).format(date);
+}
+
 export interface CommentMutationOptions {
   readonly idFactory?: (kind: "comment" | "reply") => string;
   readonly createId?: (kind: "comment" | "reply") => string;
