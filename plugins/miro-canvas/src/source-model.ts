@@ -11,8 +11,16 @@ export interface SourceCodeDescriptor {
   readonly text?: string;
 }
 
+export interface SourceAppCardDescriptor {
+  readonly kind: "app_card";
+  readonly hasTitle: boolean;
+  readonly hasDescription: boolean;
+  readonly fieldCount: number;
+}
+
 export interface SourceStructuredDescriptor {
   readonly code?: SourceCodeDescriptor;
+  readonly appCard?: SourceAppCardDescriptor;
 }
 
 export interface SourceConnectorStyle {
@@ -58,6 +66,7 @@ const MAX_BINDINGS = 100_000;
 const MAX_CODE_TITLE_LENGTH = 256;
 const MAX_CODE_LANGUAGE_LENGTH = 64;
 const MAX_CODE_TEXT_LENGTH = 100_000;
+const MAX_APP_CARD_FIELDS = 64;
 const SAFE_TOKEN = /^[a-z0-9][a-z0-9_-]{0,63}$/iu;
 const NUMERIC_STRING = /^-?(?:\d+(?:\.\d*)?|\.\d+)$/u;
 /** Subtypes already recognized from Miro source; keep legacy local aliases too. */
@@ -192,6 +201,22 @@ function sourceCodeDescriptor(source: UnknownRecord, diagnostics: string[], sour
   });
 }
 
+function sourceAppCardDescriptor(source: UnknownRecord, diagnostics: string[], sourceId: string): SourceAppCardDescriptor {
+  const data = valueOf(source, "data");
+  const fields = isRecord(data) ? arrayValue(valueOf(data, "fields")) : undefined;
+  const fieldCount = Math.min(fields?.length ?? 0, MAX_APP_CARD_FIELDS);
+  if (fields !== undefined && fields.length > MAX_APP_CARD_FIELDS) {
+    diagnostics.push(`source-app-card-fields-truncated: ${sourceId}.data.fields.`);
+  }
+  const hasText = (value: unknown): boolean => typeof value === "string" && value.trim().length > 0;
+  return Object.freeze({
+    kind: "app_card",
+    hasTitle: isRecord(data) && hasText(valueOf(data, "title")),
+    hasDescription: isRecord(data) && hasText(valueOf(data, "description")),
+    fieldCount,
+  });
+}
+
 function sourceKind(item: UnknownRecord, forcedConnector: boolean): SourceItemKind | undefined {
   if (forcedConnector) return "connector";
   const raw = valueOf(item, "type");
@@ -204,6 +229,7 @@ function sourceKind(item: UnknownRecord, forcedConnector: boolean): SourceItemKi
     case "frame": return "frame";
     case "image": case "document": case "doc_format": case "embed": case "preview": return "media";
     case "code": return "code";
+    case "app_card": return "text";
     default: return undefined;
   }
 }
@@ -249,6 +275,7 @@ function sourceCss(item: UnknownRecord, kind: SourceItemKind): Record<string, st
   if (css.color === undefined) setColor("color", "textColor");
   setColor("background-color", "fillColor", kind === "sticky");
   if (css["background-color"] === undefined) setColor("background-color", "backgroundColor", kind === "sticky");
+  if (css["background-color"] === undefined) setColor("background-color", "cardTheme");
   setColor("border-color", "borderColor");
   setColor("stroke", "strokeColor");
   const lengthFields: readonly [string, string][] = [["border-width", "borderWidth"], ["font-size", "fontSize"]];
@@ -455,7 +482,12 @@ function descriptorFor(document: unknown, canvasId: string, sourceId: string, so
   const css = sourceCss(source, kind);
   applyLocalCss(css, localOverride(document, canvasId));
   const connector = kind === "connector" ? applyLocalConnector(connectorStyle(source, diagnostics, sourceId), localOverride(document, canvasId), css) : undefined;
-  const structured = kind === "code" ? Object.freeze({ code: sourceCodeDescriptor(source, diagnostics, sourceId) }) : undefined;
+  const sourceType = valueOf(source, "type");
+  const structured = kind === "code"
+    ? Object.freeze({ code: sourceCodeDescriptor(source, diagnostics, sourceId) })
+    : typeof sourceType === "string" && sourceType.toLowerCase() === "app_card"
+      ? Object.freeze({ appCard: sourceAppCardDescriptor(source, diagnostics, sourceId) })
+      : undefined;
   const zIndex = finiteNumber(valueOf(source, "zIndex"));
   return Object.freeze({
     sourceId,

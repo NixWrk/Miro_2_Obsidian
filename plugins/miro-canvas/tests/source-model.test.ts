@@ -239,6 +239,48 @@ describe("source projection model", () => {
     expect(JSON.stringify([...scene.items.values()])).not.toContain("cell");
   });
 
+  it("projects bounded app-card state without copying fields, HTML, URLs or icons", () => {
+    const scene = buildSourceScene({ miroSource: { items: [{
+      id: "app-card-1",
+      type: "app_card",
+      data: {
+        title: "Integration task",
+        description: "Track the export",
+        url: "javascript:alert(1)",
+        fields: [
+          { label: "Status", value: "In Progress", iconUrl: "https://example.invalid/icon.png" },
+          { label: "Owner", value: { name: "Ada" }, html: "<script>unsafe</script>" },
+        ],
+      },
+      style: { cardTheme: "#2d9bf0" },
+    }] } });
+    expect(scene.items.get("app-card-1")).toMatchObject({
+      kind: "text",
+      css: { "background-color": "#2d9bf0" },
+      structured: { appCard: {
+        kind: "app_card",
+        hasTitle: true,
+        hasDescription: true,
+        fieldCount: 2,
+      } },
+    });
+    const projected = JSON.stringify(scene.items.get("app-card-1"));
+    expect(projected).not.toContain("javascript:");
+    expect(projected).not.toContain("example.invalid");
+    expect(projected).not.toContain("unsafe");
+    expect(projected).not.toContain("In Progress");
+  });
+
+  it("caps app-card field projection without enumerating oversized payloads", () => {
+    const scene = buildSourceScene({ miroSource: { items: [{
+      id: "app-card-large",
+      type: "app_card",
+      data: { fields: Array.from({ length: 100 }, (_, index) => ({ value: String(index) })) },
+    }] } });
+    expect(scene.items.get("app-card-large")?.structured?.appCard?.fieldCount).toBe(64);
+    expect(scene.diagnostics).toContain("source-app-card-fields-truncated: app-card-large.data.fields.");
+  });
+
   it("prefers Canvas zOrder, maps source IDs through bindings, and keeps dangling entries", () => {
     const scene = buildSourceScene({
       miroSource: { items: [{ id: "s1", type: "text" }, { id: "s2", type: "text" }, { id: "s3", type: "text" }], zOrder: ["s3", "s2"] },

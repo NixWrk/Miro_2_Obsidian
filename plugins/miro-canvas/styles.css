@@ -1103,6 +1103,28 @@
   font-family: var(--font-monospace);
 }
 
+/* App-card fields stay native editable text; this layer only restores the
+   compact rounded card silhouette and its left status accent. */
+[data-miro-source-card-kind="app_card"] {
+  border-radius: 10px;
+}
+
+[data-miro-source-card-kind="app_card"] > .miro-source-decoration-app-card {
+  overflow: hidden;
+  background: var(--background-primary-alt, var(--background-primary));
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 10px;
+  box-shadow: var(--shadow-s, 0 2px 8px rgb(0 0 0 / 12%));
+}
+
+[data-miro-source-card-kind="app_card"] > .miro-source-decoration-app-card::before {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 4px;
+  content: "";
+  background: var(--interactive-accent);
+}
+
 .miro-canvas-comment-card[data-comment-active="true"] {
   border-color: var(--interactive-accent);
   box-shadow: 0 0 0 1px var(--interactive-accent);

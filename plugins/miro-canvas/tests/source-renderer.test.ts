@@ -237,4 +237,57 @@ describe("source-backed code rendering", () => {
   });
 });
 
+describe("source-backed app-card rendering", () => {
+  it("adds reversible card chrome without copying source fields into the DOM", () => {
+    const nativeText = "<p><strong>Status:</strong> In Progress</p>";
+    const data: any = {
+      nodes: [{ id: "app-card-1", type: "text", text: nativeText, x: 0, y: 0, width: 360, height: 260 }],
+      edges: [],
+      miroSource: { items: [{
+        id: "app-card-1",
+        type: "app_card",
+        data: {
+          title: "Task",
+          description: "Track export",
+          url: "javascript:alert(1)",
+          fields: [{ label: "Status", value: "In Progress", html: "<script>unsafe</script>" }],
+        },
+        style: { cardTheme: "#2d9bf0" },
+        future: { keep: true },
+      }] },
+    };
+    const before = JSON.stringify(data);
+    const nodeEl = new Element("div"), contentEl = new Element("div");
+    (contentEl as any).textContent = nativeText;
+    nodeEl.appendChild(contentEl);
+    const renderer = new SourceRenderer({
+      getDocument: () => data,
+      getNodes: () => [{ id: "app-card-1", nodeEl, contentEl }],
+      getEdges: () => [],
+    }, dom);
+
+    renderer.refresh();
+    expect(nodeEl.classList.contains("miro-source-app-card")).toBe(true);
+    expect(nodeEl.getAttribute("data-miro-source-card-kind")).toBe("app_card");
+    expect(nodeEl.getAttribute("data-miro-source-card-fields")).toBe("1");
+    expect(nodeEl.getAttribute("data-miro-source-card-title")).toBe("true");
+    expect(nodeEl.getAttribute("data-miro-source-card-description")).toBe("true");
+    const decoration = nodeEl.children.find((child) => child.classList.contains("miro-source-decoration-app-card"));
+    expect(decoration).toBeDefined();
+    expect(decoration?.style.getPropertyValue("background-color")).toBe("#2d9bf0");
+    expect((contentEl as any).textContent).toBe(nativeText);
+    expect(JSON.stringify(data)).toBe(before);
+
+    renderer.refresh();
+    expect(nodeEl.children.filter((child) => child.classList.contains("miro-source-decoration-app-card"))).toHaveLength(1);
+    renderer.dispose();
+    expect(nodeEl.classList.contains("miro-source-app-card")).toBe(false);
+    expect(nodeEl.getAttribute("data-miro-source-card-kind")).toBeNull();
+    expect(nodeEl.getAttribute("data-miro-source-card-fields")).toBeNull();
+    expect(nodeEl.children.filter((child) => child.classList.contains("miro-source-decoration-app-card"))).toHaveLength(0);
+    expect((contentEl as any).textContent).toBe(nativeText);
+    expect(data.miroSource.items[0].future).toEqual({ keep: true });
+  });
+});
+
 

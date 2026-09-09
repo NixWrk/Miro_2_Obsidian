@@ -649,20 +649,29 @@ function applyNode(
   else patchAttribute(shell, "data-miro-local-source", "true", patches);
   if (descriptor.shape !== undefined) patchAttribute(shell, "data-miro-source-shape", descriptor.shape, patches);
   const sourceCode = descriptor.structured?.code;
+  const sourceAppCard = descriptor.structured?.appCard;
   if (sourceCode?.title !== undefined) patchAttribute(shell, "data-miro-source-code-title", sourceCode.title, patches);
   if (sourceCode?.language !== undefined) patchAttribute(shell, "data-miro-source-code-language", sourceCode.language, patches);
   if (sourceCode?.lineNumbersVisible !== undefined) {
     patchAttribute(shell, "data-miro-source-code-line-numbers", String(sourceCode.lineNumbersVisible), patches);
   }
+  if (sourceAppCard !== undefined) {
+    patchClass(shell, "miro-source-app-card", patches);
+    patchAttribute(shell, "data-miro-source-card-kind", sourceAppCard.kind, patches);
+    patchAttribute(shell, "data-miro-source-card-fields", String(sourceAppCard.fieldCount), patches);
+    patchAttribute(shell, "data-miro-source-card-title", String(sourceAppCard.hasTitle), patches);
+    patchAttribute(shell, "data-miro-source-card-description", String(sourceAppCard.hasDescription), patches);
+  }
 
   let layer: DomElementLike | undefined;
-  if (descriptor.kind === "shape" || descriptor.kind === "sticky" || descriptor.kind === "frame" || descriptor.kind === "media" || descriptor.kind === "code") {
+  if (descriptor.kind === "shape" || descriptor.kind === "sticky" || descriptor.kind === "frame" || descriptor.kind === "media" || descriptor.kind === "code" || sourceAppCard !== undefined) {
     const created = document === undefined ? undefined : createElement(document, "div");
     if (created !== undefined) {
+      const decorationKind = sourceAppCard === undefined ? descriptor.kind : "app-card";
       addOwnedElementClass(created, DECORATION_CLASS);
-      addOwnedElementClass(created, `miro-source-decoration-${descriptor.kind}`);
+      addOwnedElementClass(created, `miro-source-decoration-${decorationKind}`);
       setOwnedElementAttribute(created, "aria-hidden", "true");
-      setOwnedElementAttribute(created, "data-miro-source-decoration", descriptor.kind);
+      setOwnedElementAttribute(created, "data-miro-source-decoration", decorationKind);
       setOwnedElementStyle(created, "position", "absolute");
       setOwnedElementStyle(created, "inset", "0");
       setOwnedElementStyle(created, "box-sizing", "border-box");

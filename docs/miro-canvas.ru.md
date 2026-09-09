@@ -123,6 +123,9 @@ sticky notes, connectors, frames и media, не заменяя редактир�
 ограниченные по размеру title/language/line-number/code поля и добавляет
 обратимое оформление code card вокруг редактируемого Canvas text. Raw HTML,
 URL и неизвестные source-поля остаются неактивными внутри `miroSource`.
+Следующий срез распознаёт подтверждённые `app_card.fields[]` и card theme.
+Плагин добавляет обратимое оформление и ограниченное состояние card, а title,
+description и fields остаются редактируемым native Canvas text конвертера.
 
 Текущие проверки плагина из корня репозитория:
 
@@ -780,7 +783,7 @@ node с тем же ID, что и Miro item, связывается без за�
 
 - [ ] `CARD-001` `P1 P` Рендерить card title, description, URL, due date,
   assignee, color и доступные metadata fields.
-- [ ] `CARD-002` `P1 P` Рендерить все meaningful `app_card.fields[]`, сохраняя
+- [x] `CARD-002` `P1 P` Рендерить все meaningful `app_card.fields[]`, сохраняя
   label, display value и порядок.
 - [ ] `CARD-003` `P1 P` Сохранять card padding, wrapping и отсутствие внутренних
   scrollbars.

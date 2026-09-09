@@ -125,6 +125,9 @@ The first M4 slice recognizes proven Miro code payloads, projects only bounded
 title/language/line-number/code fields, and adds reversible code-card styling
 around the existing editable Canvas text. Raw HTML, URLs, and unknown source
 fields stay inert in `miroSource`.
+The next slice recognizes proven `app_card` field collections and card themes.
+It adds reversible card chrome and bounded state only; the converter's native
+editable text remains the visible title, description, and field content.
 
 To run the plugin checks from the repository root:
 
@@ -532,6 +535,8 @@ and covered by automated tests.
 
 - [x] Add a source-backed code renderer without replacing editable Canvas text
   or executing source payloads.
+- [x] Add bounded source-backed `app_card` state and reversible card styling
+  without copying field payloads into plugin DOM.
 - Add slide, document, image, preview, card, tag, and mind-map renderers where
   source data is available.
 - For mind-map editing, evaluate the MIT-licensed

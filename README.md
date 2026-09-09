@@ -52,7 +52,8 @@ Native zoom currently stays within 6.25%–200%. M3 adds local/source rotation,
 layer ordering, rotated anchors, and reversible source-backed decoration for
 Miro shapes, text, sticky notes, connectors, frames, and media. M4 has started
 with bounded, inert code-block projection and code-card styling that leaves
-native Canvas text editable.
+native Canvas text editable. Proven `app_card` field collections also receive
+reversible source-backed card styling while their content remains native text.
 
 ## Data flow
 
