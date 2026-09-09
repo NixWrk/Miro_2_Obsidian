@@ -7,6 +7,7 @@ import {
   pointerAngle,
   sideAnchor,
   type HandleSide,
+  type HandlePosition,
   type SelectionHandlesState,
 } from "../src/selection-handles";
 
@@ -73,8 +74,9 @@ function descendants(root: FakeElement): FakeElement[] {
   return [root, ...root.children.flatMap((child) => descendants(child))];
 }
 
-function bySide(root: FakeElement, side: HandleSide): FakeElement {
-  return descendants(root).find((item) => item.attributes.get("data-handle-side") === side)!;
+function bySide(root: FakeElement, side: HandleSide, position: HandlePosition = 0.5): FakeElement {
+  return descendants(root).find((item) => item.attributes.get("data-handle-side") === side
+    && item.attributes.get("data-handle-position") === String(position))!;
 }
 
 function byLabel(root: FakeElement, label: string): FakeElement {
@@ -85,12 +87,12 @@ const RECT = { left: 100, top: 100, width: 200, height: 100 };
 
 function build(overrides: Partial<SelectionHandlesState> = {}) {
   const rotations: Array<{ degrees: number; commit: boolean }> = [];
-  const connects: Array<{ side: HandleSide; point: { x: number; y: number } }> = [];
-  const creates: HandleSide[] = [];
+  const connects: Array<{ side: HandleSide; position: HandlePosition; point: { x: number; y: number } }> = [];
+  const creates: Array<{ side: HandleSide; position: HandlePosition }> = [];
   const handles = new SelectionHandles({
     onRotate: (degrees, commit) => { rotations.push({ degrees, commit }); },
-    onConnect: (side, point) => { connects.push({ side, point: { x: point.x, y: point.y } }); },
-    onCreateConnected: (side) => { creates.push(side); },
+    onConnect: (side, position, point) => { connects.push({ side, position, point: { x: point.x, y: point.y } }); },
+    onCreateConnected: (side, position) => { creates.push({ side, position }); },
   }, { document: new FakeDocument() as unknown as Document });
   const base: SelectionHandlesState = {
     rect: RECT, rotation: 0, editable: true, isEdge: false, selectedIds: ["n1"], ...overrides,
@@ -101,11 +103,13 @@ function build(overrides: Partial<SelectionHandlesState> = {}) {
 }
 
 describe("selection handle geometry", () => {
-  it("places one anchor at the middle of each side", () => {
+  it("places anchors at arbitrary positions along each side", () => {
     expect(sideAnchor(RECT, "top")).toEqual({ x: 200, y: 100 });
     expect(sideAnchor(RECT, "right")).toEqual({ x: 300, y: 150 });
     expect(sideAnchor(RECT, "bottom")).toEqual({ x: 200, y: 200 });
     expect(sideAnchor(RECT, "left")).toEqual({ x: 100, y: 150 });
+    expect(sideAnchor(RECT, "top", 0.25)).toEqual({ x: 150, y: 100 });
+    expect(sideAnchor(RECT, "right", 0.75)).toEqual({ x: 300, y: 175 });
   });
 
   it("picks the side a point lies towards", () => {
@@ -192,10 +196,10 @@ describe("selection handles", () => {
 
   it("reports a connection pulled from a side to its release point", () => {
     const { root, connects, handles } = build();
-    bySide(root, "right").dispatch("pointerdown", { clientX: 300, clientY: 150, pointerId: 2 });
+    bySide(root, "right", 0.25).dispatch("pointerdown", { clientX: 300, clientY: 125, pointerId: 2 });
     expect(root.getAttribute("data-miro-canvas-connecting")).toBe("right");
     handles.handlePointerUp({ clientX: 640, clientY: 155 });
-    expect(connects).toEqual([{ side: "right", point: { x: 640, y: 155 } }]);
+    expect(connects).toEqual([{ side: "right", position: 0.25, point: { x: 640, y: 155 } }]);
     expect(handles.gestureActive).toBe(false);
   });
 
@@ -204,16 +208,18 @@ describe("selection handles", () => {
     bySide(root, "top").dispatch("pointerdown", { clientX: 200, clientY: 100, pointerId: 6 });
     // Released where it started: a click, not a drag.
     handles.handlePointerUp({ clientX: 201, clientY: 101 });
-    expect(creates).toEqual(["top"]);
+    expect(creates).toEqual([{ side: "top", position: 0.5 }]);
     expect(connects).toEqual([]);
   });
 
-  it("offers one affordance per side, arrowed away from the node", () => {
+  it("offers three affordances per side, arrowed away from the node", () => {
     const { root } = build();
     expect(bySide(root, "top").textContent).toBe("↑");
     expect(bySide(root, "right").textContent).toBe("→");
     expect(bySide(root, "bottom").textContent).toBe("↓");
     expect(bySide(root, "left").textContent).toBe("←");
+    expect(descendants(root).filter((item) => item.className.includes("--connect"))).toHaveLength(12);
+    expect(bySide(root, "right", 0.25).getAttribute("data-handle-position")).toBe("0.25");
     // The separate quick-create button is gone; the point is the arrow.
     expect(descendants(root).filter((item) => item.className.includes("--create"))).toHaveLength(0);
   });

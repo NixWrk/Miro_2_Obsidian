@@ -44,6 +44,10 @@ class FakeElement {
     return this.attributes.get(name) ?? null;
   }
 
+  public removeAttribute(name: string): void {
+    this.attributes.delete(name);
+  }
+
   public querySelectorAll(selector: string): FakeElement[] {
     if (selector !== "textarea[data-comment-input]") {
       return [];
@@ -179,6 +183,22 @@ describe("comments panel", () => {
 
     expect(findByAttribute(root, "data-comment-input", "edit-local-1")).toBe(edit);
     expect(edit.value).toBe("Cursor stays here");
+  });
+
+  it("focuses a thread opened from its Canvas marker", () => {
+    const noop = () => undefined;
+    const panel = new CommentsPanel({
+      onAddComment: noop, onEditComment: noop, onDeleteComment: noop,
+      onReplyComment: noop, onResolveComment: noop, onFilterChange: noop,
+    }, { document: new FakeDocument() as unknown as Document });
+    const root = panel.element as unknown as FakeElement;
+    const imported: CommentThread = { ...localThread, id: "same", origin: "imported", immutable: true };
+    panel.update({ threads: [{ ...localThread, id: "same" }, imported] });
+
+    expect(panel.focusThread("same", "imported")).toBe(true);
+    expect(findByAttribute(root, "data-comment-origin", "imported").getAttribute("data-comment-active")).toBe("true");
+    expect(findByAttribute(root, "data-comment-origin", "local").getAttribute("data-comment-active")).toBeNull();
+    expect(panel.focusThread("missing", "local")).toBe(false);
   });
 
   it("preserves dirty drafts on real updates while clean edit fields reflect undo", () => {

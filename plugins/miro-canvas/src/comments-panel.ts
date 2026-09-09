@@ -355,6 +355,29 @@ export class CommentsPanel {
     this.renderKey = nextRenderKey;
   }
 
+  /** Bring a marker-selected thread into view without changing stored data. */
+  public focusThread(threadId: string, origin: CommentThread["origin"]): boolean {
+    const list = this.refs?.list;
+    if (list === undefined) return false;
+    let match: HTMLElement | undefined;
+    for (const child of Array.from(list.children ?? [])) {
+      const element = child as HTMLElement;
+      if (element.getAttribute?.("data-comment-id") === threadId
+        && element.getAttribute?.("data-comment-origin") === origin) {
+        match = element;
+        break;
+      }
+    }
+    if (match === undefined) return false;
+    for (const child of Array.from(list.children ?? [])) {
+      (child as HTMLElement).removeAttribute?.("data-comment-active");
+    }
+    match.setAttribute("data-comment-active", "true");
+    match.scrollIntoView?.({ block: "nearest" });
+    (match.querySelector?.("button") as HTMLButtonElement | null)?.focus?.();
+    return true;
+  }
+
   public destroy(): void {
     this.element.remove();
   }

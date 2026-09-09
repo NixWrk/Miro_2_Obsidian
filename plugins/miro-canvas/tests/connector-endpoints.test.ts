@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import {
   buildCanvasAnchorGeometry,
+  nodeBoundaryAnchor,
+  nodeBoundaryAnchorAtSide,
   updateConnectorEndpoint,
 } from "../src/connector-endpoints";
 
@@ -34,6 +36,33 @@ function baseDocument(): Record<string, unknown> {
 }
 
 describe("connector endpoints", () => {
+  it("projects arbitrary pointer positions onto a node silhouette", () => {
+    const document = baseDocument();
+    expect(nodeBoundaryAnchor(document, "a", { x: 150, y: 20 })).toEqual({
+      type: "node", nodeId: "a", u: 1, v: 0.375,
+    });
+    (document.miroCanvas as Record<string, unknown>).localOverrides = {
+      a: { shape: { kind: "triangle", fallback: "text" } },
+    };
+    const triangle = nodeBoundaryAnchor(document, "a", { x: 150, y: 20 });
+    expect(triangle?.type).toBe("node");
+    expect((triangle as { u: number }).u).toBeLessThan(1);
+    expect((triangle as { v: number }).v).toBeCloseTo(0.444, 2);
+  });
+
+  it("projects an off-centre dragged handle onto the selected shape silhouette", () => {
+    const document = baseDocument();
+    expect(nodeBoundaryAnchorAtSide(document, "a", "left", 0.25)).toEqual({
+      type: "node", nodeId: "a", u: 0, v: 0.25,
+    });
+    (document.miroCanvas as Record<string, unknown>).localOverrides = {
+      a: { shape: { kind: "triangle", fallback: "text" } },
+    };
+    const triangle = nodeBoundaryAnchorAtSide(document, "a", "right", 0.25);
+    expect(triangle?.type).toBe("node");
+    expect((triangle as { u: number }).u).toBeLessThan(1);
+    expect((triangle as { v: number }).v).toBeGreaterThan(0.25);
+  });
   it("builds bounded node/image geometry and straight edge polylines from explicit endpoints", () => {
     const document = baseDocument();
     const metadata = document.miroCanvas as Record<string, unknown>;

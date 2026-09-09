@@ -79,6 +79,16 @@ import {
 	type M1NavigationAction,
 } from "./m1-controls";
 import { SourceRenderer } from "./source-renderer";
+import {
+	buildSourceScene,
+	CONNECTOR_CAPS,
+	CONNECTOR_ROUTES,
+	CONNECTOR_STROKES,
+} from "./source-model";
+import { CommentMarkers } from "./comment-markers";
+import { listCommentThreads, type CommentOrigin } from "./local-comments";
+import { buildCanvasAnchorGeometry, nodeBoundaryAnchor, nodeBoundaryAnchorAtSide } from "./connector-endpoints";
+import type { CanvasAnchor } from "./anchors";
 
 export interface M1SessionOptions {
 	readonly document?: Document;
@@ -87,6 +97,7 @@ export interface M1SessionOptions {
 	readonly onStateChange?: (state: M1ControlsState) => void;
 	/** User preferences; defaults apply when the host supplies none. */
 	readonly settings?: MiroCanvasSettings;
+	readonly onOpenCommentThread?: (threadId: string, origin: CommentOrigin) => void;
 }
 
 export type M1SessionStatus = "ready" | "unavailable" | "incompatible";
@@ -103,7 +114,7 @@ export interface M1SessionSnapshot {
 
 type UnknownRecord = Record<string, unknown>;
 
-const PANEL_SELECTOR = ".miro-canvas-panel, .miro-canvas-toolbar";
+const PANEL_SELECTOR = ".miro-canvas-panel, .miro-canvas-toolbar, .miro-canvas-comment-markers";
 const DEFAULT_TOOLBAR_FONT = "Inter";
 const DEFAULT_TOOLBAR_FONT_SIZE = 16;
 const REFRESH_INTERVAL_MS = 750;
@@ -152,6 +163,86 @@ function readRuntime(value: unknown, key: PropertyKey): unknown {
 
 function finite(value: unknown): number | undefined {
 	return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function cssNumber(value: string | undefined): number | undefined {
+	if (value === undefined) return undefined;
+	const parsed = Number(value.trim().replace(/px$/u, ""));
+	return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+/** Effective source + local style shown by the toolbar for one Canvas ID. */
+export function resolveSelectionToolbarPresentation(
+	document: unknown,
+	id: string | undefined,
+): Pick<SelectionToolbarState, "typography" | "colors"> & { readonly style: SelectionToolbarStyle } {
+	const descriptor = id === undefined ? undefined : buildSourceScene(document).items.get(id);
+	const css = descriptor?.css ?? {};
+	const fontSize = cssNumber(css["font-size"]);
+	const lineHeight = cssNumber(css["line-height"]);
+	const weight = css["font-weight"];
+	const decoration = new Set((css["text-decoration"] ?? "").split(/\s+/u));
+	const alignmentValue = css["text-align"];
+	const alignment = alignmentValue === "center" || alignmentValue === "right" || alignmentValue === "justify"
+		? alignmentValue
+		: alignmentValue === "end" ? "right" : "left";
+	const verticalValue = css["vertical-align"];
+	const verticalAlign = verticalValue === "middle" || verticalValue === "center" ? "center"
+		: verticalValue === "bottom" ? "bottom" : "top";
+	const typography: TypographySettings = {
+		fontFamily: css["font-family"] ?? DEFAULT_TOOLBAR_FONT,
+		fontSize: fontSize !== undefined && fontSize > 0 ? fontSize : DEFAULT_TOOLBAR_FONT_SIZE,
+		format: {
+			bold: weight === "bold" || (cssNumber(weight) ?? 0) >= 600,
+			italic: css["font-style"] === "italic",
+			underline: decoration.has("underline"),
+			strike: decoration.has("line-through"),
+		},
+		alignment,
+		...(lineHeight !== undefined && lineHeight > 0 ? { lineHeight } : {}),
+		verticalAlign,
+	};
+	const colors: Record<string, string | null> = {};
+	for (const [slot, property] of [
+		["text", "color"], ["fill", "background-color"], ["border", "border-color"], ["edge", "stroke"],
+	] as const) {
+		const color = css[property];
+		if (color !== undefined) colors[slot] = color === "transparent" ? null : color;
+	}
+	const shape = descriptor?.shape !== undefined && (CANVAS_SHAPE_KINDS as readonly string[]).includes(descriptor.shape)
+		? descriptor.shape as SelectionToolbarStyle["shape"]
+		: undefined;
+	const borderStyle = css["border-style"];
+	const borderWidth = cssNumber(css["border-width"]);
+	const connector = descriptor?.connector;
+	const route = connector?.shape !== undefined && (CONNECTOR_ROUTES as readonly string[]).includes(connector.shape)
+		? connector.shape : undefined;
+	const strokeStyle = connector?.strokeStyle !== undefined && (CONNECTOR_STROKES as readonly string[]).includes(connector.strokeStyle)
+		? connector.strokeStyle : undefined;
+	const startCap = connector?.startCap !== undefined && (CONNECTOR_CAPS as readonly string[]).includes(connector.startCap)
+		? connector.startCap as NonNullable<SelectionToolbarStyle["connector"]>["startCap"] : undefined;
+	const endCap = connector?.endCap !== undefined && (CONNECTOR_CAPS as readonly string[]).includes(connector.endCap)
+		? connector.endCap as NonNullable<SelectionToolbarStyle["connector"]>["endCap"] : undefined;
+	const width = cssNumber(css["stroke-width"]);
+	const connectorStyle: NonNullable<SelectionToolbarStyle["connector"]> = {
+		...(route === undefined ? {} : { route }),
+		...(strokeStyle === undefined ? {} : { strokeStyle }),
+		...(startCap === undefined ? {} : { startCap }),
+		...(endCap === undefined ? {} : { endCap }),
+		...(width !== undefined && width > 0 ? { width } : {}),
+		...(css.stroke === undefined ? {} : { color: css.stroke === "transparent" ? null : css.stroke }),
+	};
+	return {
+		typography,
+		colors,
+		style: {
+			...(shape === undefined ? {} : { shape }),
+			...(borderStyle === "solid" || borderStyle === "dashed" || borderStyle === "dotted" || borderStyle === "none"
+				? { borderStyle } : {}),
+			...(borderWidth !== undefined && borderWidth >= 0 ? { borderWidth } : {}),
+			...(Object.keys(connectorStyle).length === 0 ? {} : { connector: connectorStyle }),
+		},
+	};
 }
 
 function safeText(value: unknown): string {
@@ -440,6 +531,7 @@ export class M1CanvasSession {
 	public readonly controls: M1Controls;
 	public readonly toolbar: SelectionToolbar;
 	public readonly handles: SelectionHandles;
+	public readonly commentMarkers: CommentMarkers | undefined;
 
 	private writer: MetadataWriter | null;
 	private readonly options: M1SessionOptions;
@@ -543,16 +635,18 @@ export class M1CanvasSession {
 		}, { document: controlDocument });
 		this.handles = new SelectionHandles({
 			onRotate: (degrees, commit) => this.applyHandleRotation(degrees, commit),
-			onConnect: (side, point) => this.applyHandleConnection(side, point),
-			onCreateConnected: (side) => this.createConnectedNode(side),
+			onConnect: (side, position, point) => this.applyHandleConnection(side, position, point),
+			onCreateConnected: (side, position) => this.createConnectedNode(side, position),
+		}, { document: controlDocument });
+		this.commentMarkers = controlDocument === undefined ? undefined : new CommentMarkers({
+			onOpenThread: (threadId, origin) => this.options.onOpenCommentThread?.(threadId, origin),
 		}, { document: controlDocument });
 	}
 
 	/**
 	 * Shape, border and connector settings are the one appearance family the
 	 * metadata writer cannot express, so they go through the guarded authoring
-	 * transaction instead.  Every selected element is patched separately; the
-	 * first rejection stops the batch so a partial style is never committed.
+	 * transaction instead. Every selected element is patched in one graph commit.
 	 */
 	/**
 	 * A drag previews by rotating the decoration in place; only the release
@@ -612,24 +706,48 @@ export class M1CanvasSession {
 	}
 
 	/** A connection released over another node becomes a native edge. */
-	private applyHandleConnection(side: HandleSide, point: { readonly x: number; readonly y: number }): void {
+	private applyHandleConnection(
+		side: HandleSide,
+		position: number,
+		point: { readonly x: number; readonly y: number },
+	): void {
 		const fromNode = this.selectedIds[0];
 		const toNode = this.nodeAtPoint(point, fromNode);
 		if (fromNode === undefined || toNode === undefined) {
 			this.addDiagnostic("Release a connection over another Canvas node to connect it.");
 			return;
 		}
-		this.createEdge(fromNode, toNode, side);
+		this.createEdge(fromNode, toNode, side, position, point);
 	}
 
-	private createEdge(fromNode: string, toNode: string, side: HandleSide): void {
+	private createEdge(
+		fromNode: string,
+		toNode: string,
+		side: HandleSide,
+		position: number = 0.5,
+		dropPoint?: { readonly x: number; readonly y: number },
+	): void {
 		this.readInteractionState();
 		this.authoring ??= createCanvasAuthoring(this.view);
 		const opposite: Readonly<Record<HandleSide, HandleSide>> = {
 			top: "bottom", bottom: "top", left: "right", right: "left",
 		};
+		const geometry = buildCanvasAnchorGeometry(this.currentRawDocument);
+		const center = (id: string): { readonly x: number; readonly y: number } | undefined => {
+			const rect = geometry.nodes?.[id];
+			return rect === undefined ? undefined : { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 };
+		};
+		const rootRect = boundingRect(this.root);
+		const droppedOnBoard = dropPoint === undefined ? undefined : this.viewport.screenToBoard({
+			x: dropPoint.x - (rootRect?.left ?? 0),
+			y: dropPoint.y - (rootRect?.top ?? 0),
+		});
+		const fromAnchor = nodeBoundaryAnchorAtSide(this.currentRawDocument, fromNode, side, position);
+		const toAnchor = nodeBoundaryAnchor(this.currentRawDocument, toNode, droppedOnBoard ?? center(fromNode) ?? { x: 0, y: 0 });
 		const result = this.authoring.createConnector({
 			fromNode, toNode, fromSide: side as ConnectorSide, toSide: opposite[side] as ConnectorSide,
+			...(fromAnchor === undefined ? {} : { fromAnchor }),
+			...(toAnchor === undefined ? {} : { toAnchor }),
 		});
 		if (!result.ok) {
 			this.addDiagnostic(result.diagnostics.find((item) => item.level === "error")?.message
@@ -656,7 +774,7 @@ export class M1CanvasSession {
 	}
 
 	/** Place a node beside the selection and connect it, in that order. */
-	private createConnectedNode(side: HandleSide): void {
+	private createConnectedNode(side: HandleSide, position: number = 0.5): void {
 		const fromNode = this.selectedIds[0];
 		if (fromNode === undefined) {
 			return;
@@ -691,7 +809,7 @@ export class M1CanvasSession {
 			this.refresh();
 			return;
 		}
-		this.createEdge(fromNode, created.nodeId, side);
+		this.createEdge(fromNode, created.nodeId, side, position);
 	}
 
 	private applyElementStyle(patch: SelectionStylePatch): void {
@@ -704,14 +822,10 @@ export class M1CanvasSession {
 			return;
 		}
 		this.authoring ??= createCanvasAuthoring(this.view);
-		for (const id of this.selectedIds) {
-			const result = this.authoring.updateElementStyle({ id, ...patch });
-			if (result.ok) {
-				continue;
-			}
+		const result = this.authoring.updateElementStyles(this.selectedIds.map((id) => ({ id, ...patch })));
+		if (!result.ok) {
 			const reason = result.diagnostics.find((diagnostic) => diagnostic.level === "error")?.message;
-			this.addDiagnostic(reason ?? `Canvas rejected the style change for ${id}.`);
-			break;
+			this.addDiagnostic(reason ?? "Canvas rejected the style change.");
 		}
 		this.refresh();
 	}
@@ -772,6 +886,20 @@ export class M1CanvasSession {
 		this.applyNavigation(action);
 	}
 
+	/** Give every new comment a stable Canvas location even without an explicit picker. */
+	public defaultCommentAnchor(): CanvasAnchor | undefined {
+		const id = this.selectedIds[0];
+		if (id !== undefined) {
+			const edgeIds = new Set(collectCanvasElementIds(this.adapter.getEdges() ?? []));
+			return edgeIds.has(id)
+				? { type: "edge", edgeId: id, t: 0.5 }
+				: { type: "node", nodeId: id, u: 0.5, v: 0.5 };
+		}
+		const size = clientSize(this.root);
+		const point = this.viewport.screenToBoard({ x: size.width / 2, y: size.height / 2 });
+		return point === undefined ? undefined : { type: "free", x: point.x, y: point.y };
+	}
+
 	/** Mount once; all reads here are observational and do not write metadata. */
 	/** Keyboard panning honors the configured step and the Shift multiplier. */
 	public pan(direction: PanDirection, fast = false): void {
@@ -799,7 +927,11 @@ export class M1CanvasSession {
 			if (isElement(this.handles.element)) {
 				this.root.appendChild(this.handles.element);
 			}
+			if (isElement(this.commentMarkers?.element)) {
+				this.root.appendChild(this.commentMarkers.element);
+			}
 		} catch {
+			this.commentMarkers?.destroy();
 			this.handles.dispose();
 			this.toolbar.dispose();
 			this.controls.minimapElement.remove();
@@ -942,6 +1074,15 @@ export class M1CanvasSession {
 		for (const diagnostic of this.sourceRenderer?.refresh() ?? []) {
 			diagnostics.push(diagnostic);
 		}
+		const markerModel = this.commentMarkers?.update({
+			threads: listCommentThreads(this.currentRawDocument, { includeResolved: true }),
+			includeResolved: true,
+			geometry: buildCanvasAnchorGeometry(this.currentRawDocument),
+			boardToViewport: (point) => this.viewport.boardToScreen(point) ?? point,
+		});
+		for (const diagnostic of markerModel?.diagnostics ?? []) {
+			diagnostics.push(`Comment ${diagnostic.threadId}: ${diagnostic.message}`);
+		}
 		const minimapVisible = this.appearance.settings.minimapVisible !== false;
 		const drawSignature = `${this.lastMinimapSignature}|${minimapVisible ? "visible" : "hidden"}`;
 		if (drawSignature !== this.lastDrawSignature || minimapChanged) {
@@ -1049,8 +1190,7 @@ export class M1CanvasSession {
 
 	private toolbarState(state: M1ControlsState, lockedSelection: boolean): SelectionToolbarState {
 		const id = this.selectedIds[0];
-		const override = id === undefined ? undefined : this.appearance.localOverrides[id];
-		const style = this.styleOverrideFor(id);
+		const presentation = resolveSelectionToolbarPresentation(this.currentRawDocument, id);
 		const placement = this.selectionPlacement();
 		return {
 			selectedIds: this.selectedIds,
@@ -1063,54 +1203,36 @@ export class M1CanvasSession {
 				: lockedSelection
 					? { blockedReason: "This selection is locked. Unlock it to change formatting." }
 					: {}),
-			typography: override?.typography ?? {
-				fontFamily: DEFAULT_TOOLBAR_FONT,
-				fontSize: DEFAULT_TOOLBAR_FONT_SIZE,
-				format: { bold: false, italic: false, underline: false, strike: false },
-				alignment: "left",
-			},
-			colors: override?.colors ?? {},
+			typography: presentation.typography,
+			colors: presentation.colors,
 			palette: this.appearance.settings.palette,
 			recentColors: this.appearance.settings.recentColors,
-			...style,
+			...presentation.style,
 			...(placement === undefined ? {} : { placement }),
 		};
 	}
 
 	private selectionKinds(): readonly SelectionKind[] {
 		const edgeIds = new Set(collectCanvasElementIds(this.adapter.getEdges() ?? []));
+		const source = buildSourceScene(this.currentRawDocument);
+		const nodes = readRuntime(this.currentRawDocument, "nodes");
 		const kinds = new Set<SelectionKind>();
 		for (const id of this.selectedIds) {
-			kinds.add(edgeIds.has(id) ? "edge" : "shape");
+			if (edgeIds.has(id)) {
+				kinds.add("edge");
+				continue;
+			}
+			const kind = source.items.get(id)?.kind;
+			if (kind !== undefined) {
+				kinds.add(kind === "connector" ? "edge" : kind);
+				continue;
+			}
+			const node = Array.isArray(nodes)
+				? (nodes as readonly unknown[]).find((item) => readRuntime(item, "id") === id)
+				: undefined;
+			kinds.add(readRuntime(node, "type") === "file" ? "media" : readRuntime(node, "type") === "group" ? "frame" : "text");
 		}
 		return [...kinds];
-	}
-
-	/** Style fields live beside appearance in the same local override record. */
-	private styleOverrideFor(id: string | undefined): SelectionToolbarStyle {
-		if (id === undefined) {
-			return {};
-		}
-		const metadata = readRuntime(this.currentRawDocument, "miroCanvas");
-		const override = readRuntime(readRuntime(metadata, "localOverrides"), id);
-		if (!isObject(override)) {
-			return {};
-		}
-		const shapeValue = readRuntime(readRuntime(override, "shape"), "kind") ?? readRuntime(override, "shape");
-		const shape = typeof shapeValue === "string" && (CANVAS_SHAPE_KINDS as readonly string[]).includes(shapeValue)
-			? shapeValue as SelectionToolbarStyle["shape"]
-			: undefined;
-		const borderStyle = readRuntime(override, "borderStyle");
-		const borderWidth = readRuntime(override, "borderWidth");
-		const connector = readRuntime(override, "connector");
-		return {
-			...(shape === undefined ? {} : { shape }),
-			...(borderStyle === "solid" || borderStyle === "dashed" || borderStyle === "dotted" || borderStyle === "none"
-				? { borderStyle }
-				: {}),
-			...(typeof borderWidth === "number" && Number.isFinite(borderWidth) ? { borderWidth } : {}),
-			...(isObject(connector) ? { connector: connector as SelectionToolbarStyle["connector"] } : {}),
-		};
 	}
 
 	/** Screen placement comes from native DOM, so it stays correct under any
@@ -2426,6 +2548,7 @@ export class M1CanvasSession {
 		this.controls.dispose();
 		this.toolbar.dispose();
 		this.handles.dispose();
+		this.commentMarkers?.destroy();
 		this.authoring?.dispose();
 		this.authoring = undefined;
 		this.sourceRenderer?.dispose();

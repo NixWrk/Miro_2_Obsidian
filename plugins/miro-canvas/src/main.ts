@@ -12,7 +12,7 @@ import {
   type ObsidianMetadataStoreProbe,
 } from "./obsidian-metadata-store";
 import { M1CanvasSession } from "./m1-session";
-import { M2CanvasTools } from "./m2-tools";
+import { M2CanvasTools, type InitialCommentTarget } from "./m2-tools";
 import { createObsidianDocumentHost } from "./obsidian-document-host";
 import {
   DEFAULT_SETTINGS,
@@ -259,6 +259,10 @@ export default class MiroCanvasPlugin extends Plugin {
     this.m1Session = new M1CanvasSession(view, this.metadataWriter, {
       onNotice: (message) => new Notice(message),
       onStateChange: () => this.updateStatus(true),
+      onOpenCommentThread: (threadId, origin) => {
+        const session = this.activeM1Session();
+        if (session !== null) this.openLocalTools(session, { threadId, origin });
+      },
       settings: this.canvasSettings,
     });
     const mounted = this.m1Session.mount();
@@ -303,7 +307,7 @@ export default class MiroCanvasPlugin extends Plugin {
     return true;
   }
 
-  private openLocalTools(session: M1CanvasSession): void {
+  private openLocalTools(session: M1CanvasSession, initialComment?: InitialCommentTarget): void {
     this.toolsModal?.close();
     const modal = new Modal(this.app);
     this.toolsModal = modal;
@@ -312,7 +316,7 @@ export default class MiroCanvasPlugin extends Plugin {
     modal.setTitle("Miro Canvas · Local tools");
     const tools = new M2CanvasTools(session, createObsidianDocumentHost(
       this.app, (message) => new Notice(message), (value): value is TFile => value instanceof TFile,
-    ), modal.contentEl.ownerDocument);
+    ), modal.contentEl.ownerDocument, initialComment);
     modal.contentEl.append(tools.element);
     modal.onClose = () => {
       tools.dispose();

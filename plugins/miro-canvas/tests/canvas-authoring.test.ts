@@ -692,6 +692,46 @@ describe("CanvasAuthoring", () => {
 		expect(collisionResult.ok).toBe(false);
 		expect(collisionResult.diagnostics.map((item) => item.code)).toContain("shape-id-collision");
 	});
+
+	it("styles a multi-selection in one undoable transaction and preserves source evidence", () => {
+		const initial = endpointDocument();
+		const runtime = new NativeGraph(initial);
+		const authoring = createCanvasAuthoring(runtime);
+		const result = authoring.updateElementStyles([
+			{ id: "a", borderWidth: 3, colors: { fill: "#ffeeaa" } },
+			{ id: "b", borderWidth: 3, colors: { fill: "#ffeeaa" } },
+		]);
+
+		expect(result.ok).toBe(true);
+		expect(runtime.requestSaveSpy).toHaveBeenCalledTimes(1);
+		expect(runtime.history).toHaveLength(2);
+		const applied = runtime.getData();
+		const overrides = (applied.miroCanvas as CanvasDocument).localOverrides as Record<string, CanvasDocument>;
+		expect(overrides.a).toMatchObject({ borderWidth: 3, colors: { fill: "#ffeeaa" } });
+		expect(overrides.b).toMatchObject({ borderWidth: 3, colors: { fill: "#ffeeaa" } });
+		expect(applied.miroSource).toEqual(initial.miroSource);
+		expect(applied.futureRootField).toEqual(initial.futureRootField);
+		runtime.undo();
+		expect(runtime.getData()).toEqual(initial);
+		runtime.redo();
+		expect(runtime.getData()).toEqual(applied);
+	});
+
+	it("rejects a multi-selection style atomically when one target is locked", () => {
+		const initial = endpointDocument();
+		((initial.miroCanvas as CanvasDocument).localOverrides as Record<string, CanvasDocument>).b = { locked: true };
+		const runtime = new NativeGraph(initial);
+		const result = createCanvasAuthoring(runtime).updateElementStyles([
+			{ id: "a", borderWidth: 3 },
+			{ id: "b", borderWidth: 3 },
+		]);
+
+		expect(result.ok).toBe(false);
+		expect(result.diagnostics.map((item) => item.code)).toContain("element-style-blocked-lock");
+		expect(runtime.importDataSpy).not.toHaveBeenCalled();
+		expect(runtime.requestSaveSpy).not.toHaveBeenCalled();
+		expect(runtime.getData()).toEqual(initial);
+	});
 });
 
 describe("connector creation", () => {
@@ -726,6 +766,26 @@ describe("connector creation", () => {
 		const rejected = authoring.createConnector({ fromNode: "a", toNode: "b", fromSide: "middle" as never });
 		expect(rejected.status).toBe("rejected");
 		expect(rejected.diagnostics.some((item) => item.code === "connector-side-invalid")).toBe(true);
+	});
+
+	it("stores precise perimeter anchors in the same native history entry", () => {
+		const { graph, authoring } = host(board());
+		const result = authoring.createConnector({
+			fromNode: "a", toNode: "b",
+			fromAnchor: { type: "node", nodeId: "a", u: 1, v: 0.2 },
+			toAnchor: { type: "node", nodeId: "b", u: 0, v: 0.8 },
+		});
+		expect(result.status).toBe("applied");
+		expect(graph.requestSaveSpy).toHaveBeenCalledTimes(1);
+		const data = graph.getData();
+		expect(data.edges).toEqual([
+			{ id: result.edgeId, fromNode: "a", fromSide: "right", toNode: "b", toSide: "left", toEnd: "arrow" },
+		]);
+		const metadata = data.miroCanvas as { localOverrides: Record<string, { connectorAnchors: unknown }> };
+		expect(metadata.localOverrides[result.edgeId!].connectorAnchors).toEqual({
+			from: { type: "node", nodeId: "a", u: 1, v: 0.2 },
+			to: { type: "node", nodeId: "b", u: 0, v: 0.8 },
+		});
 	});
 
 	it("refuses a missing, repeated or self-referencing endpoint", () => {

@@ -160,9 +160,11 @@ export class CommentMarkers {
       button.setAttribute("data-comment-origin", marker.origin);
       button.setAttribute("data-comment-anchor", marker.anchorType);
       button.setAttribute("data-comment-state", marker.state);
+      button.setAttribute("data-comment-has-replies", marker.replyCount > 0 ? "true" : "false");
       button.setAttribute("aria-label", marker.label);
       button.title = marker.label;
-      button.textContent = marker.state === "resolved" ? "✓" : "●";
+      button.textContent = marker.state === "resolved" ? "✓"
+        : marker.replyCount > 0 ? String(marker.replyCount + 1) : "";
       button.style.left = `${marker.point.x}px`;
       button.style.top = `${marker.point.y}px`;
     }

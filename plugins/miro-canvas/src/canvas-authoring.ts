@@ -22,6 +22,7 @@ import {
 	updateConnectorEndpoint as buildConnectorEndpointUpdate,
 	type UpdateConnectorEndpointInput,
 } from "./connector-endpoints";
+import type { CanvasAnchor } from "./anchors";
 import { isSafeColor, normalizeColor } from "./appearance";
 import {
 	LOCAL_SHAPE_KINDS, CONNECTOR_CAPS, CONNECTOR_ROUTES, CONNECTOR_STROKES,
@@ -61,6 +62,8 @@ export interface CreateConnectorInput {
 	readonly toNode: string;
 	readonly fromSide?: ConnectorSide;
 	readonly toSide?: ConnectorSide;
+	readonly fromAnchor?: CanvasAnchor;
+	readonly toAnchor?: CanvasAnchor;
 	readonly id?: string;
 }
 
@@ -1618,6 +1621,15 @@ export class CanvasAuthoring {
 		setOwn(document, "edges", [...edges, {
 			id: allocation.id, fromNode, fromSide, toNode, toSide, toEnd: "arrow",
 		}]);
+		for (const [end, anchor] of [["from", input.fromAnchor], ["to", input.toAnchor]] as const) {
+			if (anchor === undefined) continue;
+			const update = buildConnectorEndpointUpdate(document, { edgeId: allocation.id, end, anchor });
+			for (const item of update.diagnostics) {
+				addDiagnostic(diagnostics, item.code, update.ok ? "info" : "error", item.message);
+			}
+			if (!update.ok || update.document === undefined) return reject();
+			document = update.document;
+		}
 		const verified = this.commitDocument(before, document, diagnostics);
 		if (verified === undefined) return reject();
 		return { ok: true, status: "applied", edgeId: allocation.id, document: verified.document, diagnostics: [...this.diagnosticList, ...diagnostics] };
@@ -1671,9 +1683,18 @@ export class CanvasAuthoring {
 	 * Connector color takes precedence over colors.edge when both are present.
 	 */
 	public updateElementStyle(input: UpdateElementStyleInput, expected?: CanvasAuthoringExpected): CanvasGraphResult {
+		return this.updateElementStyles([input], expected);
+	}
+
+	/** Apply one toolbar action to every selected element as one undoable transaction. */
+	public updateElementStyles(inputs: readonly UpdateElementStyleInput[], expected?: CanvasAuthoringExpected): CanvasGraphResult {
 		const diagnostics: CanvasAuthoringDiagnostic[] = [];
 		const reject = (): CanvasGraphResult => ({ ok: false, status: "rejected", diagnostics: [...this.diagnosticList, ...diagnostics] });
 		if (this.disposed || this.host === undefined) return reject();
+		if (!Array.isArray(inputs) || inputs.length === 0) {
+			addDiagnostic(diagnostics, "element-style-invalid", "error", "At least one style target is required.");
+			return reject();
+		}
 		const before = readSnapshotFromHost(this.host, diagnostics);
 		if (before === undefined) return reject();
 		if (expected !== undefined) {
@@ -1683,51 +1704,56 @@ export class CanvasAuthoring {
 				return reject();
 			}
 		}
-		let action: UnknownRecord;
-		try {
-			action = copyStyleData(input) as UnknownRecord;
-			if (!isPlainObject(action) || Object.keys(action).some((key) => !["id", "shape", "colors", "typography", "borderStyle", "borderWidth", "connector"].includes(key))) throw new SnapshotError("invalid action");
-		} catch {
-			addDiagnostic(diagnostics, "element-style-invalid", "error", "The style action must contain safe plain data and supported fields.");
-			return reject();
-		}
-		const id = readGraphActionId(action, diagnostics, "element-style");
-		if (id === undefined) return reject();
-		const node = before.nodes.find((item) => item.id === id);
-		const edge = before.edges.find((item) => item.id === id);
-		const sourceKind = node === undefined ? undefined : buildSourceScene(before.document).items.get(id)?.kind;
-		if (edge === undefined && (node === undefined || (sourceKind !== undefined ? sourceKind !== "shape" : node.type !== "text"))) {
-			addDiagnostic(diagnostics, "element-style-target-invalid", "error", "The target must be an existing Canvas shape, text node, or connector.");
-			return reject();
-		}
-		if (!policyAllowsGraphEdit(before.document, "edit", id, "element-style", diagnostics)) return reject();
-		const patch = readStylePatch(action, diagnostics, edge !== undefined);
-		if (patch === undefined) return reject();
-		if (hasOwn(action, "shape")) {
-			if (edge !== undefined || typeof action.shape !== "string" || !(CANVAS_SHAPE_KINDS as readonly string[]).includes(action.shape)) {
-				addDiagnostic(diagnostics, "shape-kind-invalid", "error", "A supported shape kind can only be applied to a shape node.");
-				return reject();
-			}
-			patch.shape = { kind: action.shape, fallback: "text" };
-		}
-		if (edge !== undefined && (hasOwn(patch, "borderStyle") || hasOwn(patch, "borderWidth"))) {
-			addDiagnostic(diagnostics, "element-style-invalid", "error", "Use connector settings for an edge stroke.");
-			return reject();
-		}
 		let document: UnknownRecord;
 		try {
 			document = cloneRecord(before.document);
+		} catch {
+			addDiagnostic(diagnostics, "element-style-invalid", "error", "The Canvas document could not be copied for the style transaction.");
+			return reject();
+		}
+		try {
 			const metadata = readMetadataForUpdate(document, diagnostics);
 			if (metadata === undefined) return reject();
 			const overrides = metadata.localOverrides ?? {};
 			if (!isPlainObject(overrides)) throw new SnapshotError("invalid overrides");
-			const previous = hasOwn(overrides, id) ? overrides[id] : {};
-			if (!isPlainObject(previous)) throw new SnapshotError("invalid target override");
-			const merged = mergeStylePatch(previous as UnknownRecord, patch);
-			// Empty patches do not add an empty metadata object to ordinary Canvas.
-			if (structurallyEqual(previous, merged)) document = before.document;
+			const scene = buildSourceScene(before.document);
+			let changed = false;
+			for (const input of inputs) {
+				const action = copyStyleData(input) as UnknownRecord;
+				if (!isPlainObject(action) || Object.keys(action).some((key) => !["id", "shape", "colors", "typography", "borderStyle", "borderWidth", "connector"].includes(key))) throw new SnapshotError("invalid action");
+				const id = readGraphActionId(action, diagnostics, "element-style");
+				if (id === undefined) return reject();
+				const node = before.nodes.find((item) => item.id === id);
+				const edge = before.edges.find((item) => item.id === id);
+				const sourceKind = node === undefined ? undefined : scene.items.get(id)?.kind;
+				if (edge === undefined && (node === undefined || (sourceKind !== undefined ? sourceKind !== "shape" : node.type !== "text"))) {
+					addDiagnostic(diagnostics, "element-style-target-invalid", "error", "The target must be an existing Canvas shape, text node, or connector.");
+					return reject();
+				}
+				if (!policyAllowsGraphEdit(before.document, "edit", id, "element-style", diagnostics)) return reject();
+				const patch = readStylePatch(action, diagnostics, edge !== undefined);
+				if (patch === undefined) return reject();
+				if (hasOwn(action, "shape")) {
+					if (edge !== undefined || typeof action.shape !== "string" || !(CANVAS_SHAPE_KINDS as readonly string[]).includes(action.shape)) {
+						addDiagnostic(diagnostics, "shape-kind-invalid", "error", "A supported shape kind can only be applied to a shape node.");
+						return reject();
+					}
+					patch.shape = { kind: action.shape, fallback: "text" };
+				}
+				if (edge !== undefined && (hasOwn(patch, "borderStyle") || hasOwn(patch, "borderWidth"))) {
+					addDiagnostic(diagnostics, "element-style-invalid", "error", "Use connector settings for an edge stroke.");
+					return reject();
+				}
+				const previous = hasOwn(overrides, id) ? overrides[id] : {};
+				if (!isPlainObject(previous)) throw new SnapshotError("invalid target override");
+				const merged = mergeStylePatch(previous as UnknownRecord, patch);
+				if (!structurallyEqual(previous, merged)) {
+					setOwn(overrides as UnknownRecord, id, merged);
+					changed = true;
+				}
+			}
+			if (!changed) document = before.document;
 			else {
-				setOwn(overrides as UnknownRecord, id, merged);
 				setOwn(metadata, "localOverrides", overrides);
 				if (!validateMiroCanvasMetadata(metadata).valid) throw new SnapshotError("invalid merged metadata");
 				setOwn(document, "miroCanvas", metadata);

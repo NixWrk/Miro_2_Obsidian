@@ -1022,30 +1022,32 @@
   line-height: 1;
 }
 
-/* One affordance per side: a small point that becomes an outward arrow on
-   hover, so a click adds a connected node and a drag pulls a connection. */
+/* Three points per side expose Miro-like off-centre connector anchors. */
 .miro-canvas-handle--connect {
   width: 10px;
   height: 10px;
   border-width: 1px;
   font-size: 0;
   cursor: crosshair;
-  transition: width 90ms ease, height 90ms ease, margin 90ms ease, font-size 90ms ease;
+  transform: translate(-50%, -50%);
+  transition: width 90ms ease, height 90ms ease, font-size 90ms ease;
 }
 
 .miro-canvas-handle--connect:hover,
 .miro-canvas-handle--connect:focus-visible {
   width: 22px;
   height: 22px;
-  margin: -6px;
   border-width: 2px;
   font-size: 12px;
 }
 
-.miro-canvas-handle--top { top: -5px; left: calc(50% - 5px); }
-.miro-canvas-handle--bottom { bottom: -5px; left: calc(50% - 5px); }
-.miro-canvas-handle--left { left: -5px; top: calc(50% - 5px); }
-.miro-canvas-handle--right { right: -5px; top: calc(50% - 5px); }
+.miro-canvas-handle--connect[data-handle-position="0.25"] { --miro-handle-position: 25%; }
+.miro-canvas-handle--connect[data-handle-position="0.5"] { --miro-handle-position: 50%; }
+.miro-canvas-handle--connect[data-handle-position="0.75"] { --miro-handle-position: 75%; }
+.miro-canvas-handle--top { top: 0; left: var(--miro-handle-position); }
+.miro-canvas-handle--bottom { top: 100%; left: var(--miro-handle-position); }
+.miro-canvas-handle--left { left: 0; top: var(--miro-handle-position); }
+.miro-canvas-handle--right { left: 100%; top: var(--miro-handle-position); }
 
 .miro-canvas-handle--rotate {
   width: 22px;
@@ -1080,6 +1082,58 @@
   background-color: transparent !important;
   border-color: transparent !important;
   box-shadow: none !important;
+}
+
+.miro-canvas-comment-card[data-comment-active="true"] {
+  border-color: var(--interactive-accent);
+  box-shadow: 0 0 0 1px var(--interactive-accent);
+}
+
+.miro-canvas-comment-markers {
+  position: absolute;
+  inset: 0;
+  z-index: 100;
+  pointer-events: none;
+}
+
+.miro-canvas-comment-marker {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  min-width: 28px !important;
+  min-height: 28px !important;
+  padding: 0;
+  color: var(--text-on-accent);
+  background: var(--interactive-accent);
+  border: 2px solid var(--background-primary);
+  border-radius: 50%;
+  box-shadow: var(--shadow-s, 0 3px 10px rgb(0 0 0 / 25%));
+  pointer-events: auto;
+}
+
+.miro-canvas-comment-marker[data-comment-state="resolved"] {
+  color: var(--text-muted);
+  background: var(--background-secondary);
+  border-color: var(--background-modifier-border);
+}
+
+.miro-canvas-comment-marker[data-comment-state="open"][data-comment-has-replies="false"]::before {
+  content: "";
+  width: 11px;
+  height: 8px;
+  border: 2px solid currentColor;
+  border-radius: 4px;
+}
+
+.miro-canvas-comment-marker[data-comment-state="open"][data-comment-has-replies="false"]::after {
+  content: "";
+  position: absolute;
+  width: 5px;
+  height: 5px;
+  margin: 9px 0 0 -7px;
+  border-left: 2px solid currentColor;
+  transform: skewY(-38deg);
 }
 
 /* Rotation is applied to an inner element, because native Canvas rewrites the

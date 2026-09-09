@@ -22,6 +22,7 @@ import {
 type UnknownRecord = Record<string, unknown>;
 type ConnectorEnd = "from" | "to";
 type NativeSide = "top" | "right" | "bottom" | "left";
+export type NodeBoundarySide = NativeSide;
 
 const ABSENT = Symbol("connector-endpoint-absent");
 const ERROR = Symbol("connector-endpoint-error");
@@ -480,6 +481,58 @@ export function buildCanvasAnchorGeometry(document: unknown, measurements?: Node
     resolveEdge(edgeId);
   }
   return { nodes, images, edges };
+}
+
+/**
+ * Project a point onto the actual silhouette of a node and return a relative
+ * anchor that survives resize and rotation. This is the precise endpoint used
+ * by the plugin; native Canvas still receives the nearest-side fallback.
+ */
+export function nodeBoundaryAnchor(
+  document: unknown,
+  nodeId: string,
+  toward: AnchorPoint,
+): CanvasAnchor | undefined {
+  const rect = buildCanvasAnchorGeometry(document).nodes?.[nodeId];
+  if (rect === undefined || !(rect.width > 0) || !(rect.height > 0)
+    || !Number.isFinite(toward.x) || !Number.isFinite(toward.y)) return undefined;
+  const center = { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 };
+  const angle = Number.isFinite(rect.rotation) ? -(rect.rotation ?? 0) * Math.PI / 180 : 0;
+  const dx = toward.x - center.x;
+  const dy = toward.y - center.y;
+  const local = {
+    x: center.x + dx * Math.cos(angle) - dy * Math.sin(angle),
+    y: center.y + dx * Math.sin(angle) + dy * Math.cos(angle),
+  };
+  const target = {
+    x: 50 + ((local.x - center.x) / rect.width) * 100,
+    y: 50 + ((local.y - center.y) / rect.height) * 100,
+  };
+  const descriptor = buildSourceScene(document).items.get(nodeId);
+  const point = contourPoint(shapeOutline(descriptor?.shape) ?? shapeOutline("rectangle"), target);
+  const clamp = (value: number): number => Math.max(0, Math.min(1, value / 100));
+  return { type: "node", nodeId, u: clamp(point.x), v: clamp(point.y) };
+}
+
+/** Resolve a dragged handle to the real local silhouette, including non-rectangular shapes. */
+export function nodeBoundaryAnchorAtSide(
+  document: unknown,
+  nodeId: string,
+  side: NodeBoundarySide,
+  position: number,
+): CanvasAnchor | undefined {
+  const rect = buildCanvasAnchorGeometry(document).nodes?.[nodeId];
+  if (rect === undefined || !(rect.width > 0) || !(rect.height > 0)
+    || !Number.isFinite(position) || position < 0 || position > 1) return undefined;
+  const along = position * 100;
+  const target: ShapePoint = side === "top" ? { x: along, y: 0 }
+    : side === "right" ? { x: 100, y: along }
+      : side === "bottom" ? { x: along, y: 100 }
+        : { x: 0, y: along };
+  const descriptor = buildSourceScene(document).items.get(nodeId);
+  const point = contourPoint(shapeOutline(descriptor?.shape) ?? shapeOutline("rectangle"), target);
+  const clamp = (value: number): number => Math.max(0, Math.min(1, value / 100));
+  return { type: "node", nodeId, u: clamp(point.x), v: clamp(point.y) };
 }
 
 /** One read-only route for the SVG renderer and edge-relative anchors. */

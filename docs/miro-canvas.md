@@ -82,9 +82,10 @@ keys are dropped and out-of-range numbers are clamped, so a bad preference can
 never stop a board from opening.
 
 Selecting one element adds the handles native Canvas does not provide: a
-rotation grip below the selection and one connection point on the middle of each
-side. A point becomes an outward arrow on hover: clicking it adds a connected
-node on that side, dragging it pulls a connection. Rotation previews in place
+rotation grip below the selection and three connection handles on each side.
+A handle becomes an outward arrow on hover: clicking it adds a connected node,
+while dragging it projects both endpoints onto the actual shape silhouettes at
+the pointer direction instead of fixing them to side centers. Rotation previews in place
 and writes once on release, so a drag produces one native history entry rather than dozens, and
 Shift snaps it to 15 degrees. A connection released over another node becomes a
 native edge; the quick-create arrow places a node beside the selection and
@@ -93,15 +94,18 @@ so review mode, a locked target and a stale document refuse them the same way a
 menu action would.
 
 M2 tools are available through **Local shapes, comments, anchors and documents**
-in the command palette. Create rectangles, rounded rectangles, ellipses,
-triangles, diamonds or stars with editable native text fallbacks. Edit/reply to
-and resolve local comment threads; imported comments remain read-only.
+in the command palette. Create the supported Miro shape set with editable native
+text fallbacks. Every local comment receives a stable Canvas anchor and marker;
+opening the marker focuses its thread, whose messages show author and creation
+time. Edit/reply to and resolve local threads; imported comments remain read-only.
 Choose a target and relative coordinates for node/image anchors, T for edges,
 or board X/Y for free anchors, then save an anchor or set a connector endpoint.
 Node/image connections update native endpoints; free/edge connections retain
 valid native endpoints as an approximate plugin-off fallback with a diagnostic.
 Graph edits reject readonly/review/locked targets, preserve `miroSource` and
-unknown metadata, and record one native history transaction.
+unknown metadata, and record one native history transaction. Precise connector
+anchors are stored beside a nearest-side native fallback, so the file remains
+useful when the plugin is disabled.
 
 Select a local file before opening tools for native document controls. PDF page
 navigation uses the entered page; fit depends on the detected native viewer and

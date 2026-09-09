@@ -105,6 +105,21 @@ def main() -> int:
                   miroBrowser.node.nodeEl.dispatchEvent(event); return event.defaultPrevented;
                 }""", key), f"Lock incorrectly blocked Ctrl+{key}"
             page.evaluate("miroBrowser.session.unlockSelection()")
+            edge_count = page.evaluate("miroBrowser.runtime.edges.size")
+            handle_box = page.locator('.miro-canvas-handle--right[data-handle-position="0.25"]').bounding_box()
+            target_box = page.evaluate("() => { const r = miroBrowser.fileNode.nodeEl.getBoundingClientRect(); return {x:r.x,y:r.y}; }")
+            assert handle_box is not None
+            page.mouse.move(handle_box["x"] + handle_box["width"] / 2, handle_box["y"] + handle_box["height"] / 2)
+            page.mouse.down()
+            page.mouse.move(target_box["x"] + 20, target_box["y"] + 20)
+            page.mouse.up()
+            assert page.evaluate("miroBrowser.runtime.edges.size") == edge_count + 1
+            precise = page.evaluate("""() => {
+              const edge = [...miroBrowser.runtime.edges.values()].at(-1).getData();
+              return miroBrowser.runtime.data.miroCanvas.localOverrides[edge.id].connectorAnchors;
+            }""")
+            assert precise["from"]["v"] != 0.5 and precise["to"]["v"] != 0.5
+            page.evaluate("miroBrowser.runtime.undo(); miroBrowser.session.refresh()")
             page.evaluate("miroBrowser.node.nodeEl.style.left = '65px'; miroBrowser.runtime.data = miroBrowser.runtime.getData(); miroBrowser.runtime.requestSave(true); miroBrowser.session.refresh()")
             assert page.evaluate("miroBrowser.node.nodeEl.style.left") == "65px", "Appearance clobbered native geometry"
             page.evaluate("miroBrowser.session.navigate('zoom-in')")
@@ -163,6 +178,10 @@ def main() -> int:
             assert card.count() == 1, "M2 add comment did not render a local thread"
             thread_id = card.get_attribute("data-comment-id")
             assert thread_id
+            page.evaluate("miroBrowser.session.refresh()")
+            marker = page.locator(f'.miro-canvas-comment-marker[data-comment-id="{thread_id}"]')
+            assert marker.count() == 1, "Comment was saved without its Canvas marker"
+            assert card.locator('[data-comment-time="created"]').count() == 1, "Comment creation time is missing"
             card.locator(".miro-canvas-comment-card__edit-toggle").click()
             card.get_by_label(f"Edit comment {thread_id}", exact=True).fill("Edited synthetic M2 comment")
             page.wait_for_timeout(650)
@@ -178,6 +197,7 @@ def main() -> int:
             assert card.get_by_label(f"Reply to {thread_id}", exact=True).evaluate("element => document.activeElement === element")
             card.get_by_role("button", name="Reply", exact=True).click()
             assert "Synthetic reply" in card.locator('[data-comment-region="replies"]').inner_text()
+            assert card.locator('[data-comment-region="replies"] [data-comment-time="created"]').count() == 1
             assert card.get_by_label(f"Reply to {thread_id}", exact=True).input_value() == ""
             card.get_by_role("button", name="Resolve", exact=True).click()
             assert card.get_by_text("Resolved", exact=True).count() == 1

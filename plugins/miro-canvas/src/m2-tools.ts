@@ -3,7 +3,7 @@ import { CommentsPanel } from "./comments-panel";
 import { addAnchor, normalizeAnchor, resolveAnchor, type CanvasAnchor } from "./anchors";
 import {
   addLocalComment, editLocalComment, deleteLocalComment, addReply, setCommentResolved,
-  listCommentThreads, type CommentMutationResult, type CommentScope, type CommentThread,
+  listCommentThreads, type CommentMutationResult, type CommentOrigin, type CommentScope, type CommentThread,
 } from "./local-comments";
 import { readCanvasElementFile, readCanvasElementId, readCanvasElementType } from "./canvas-elements";
 import { createCanvasAuthoring, type CanvasAuthoring } from "./canvas-authoring";
@@ -13,6 +13,7 @@ import { DocumentControls } from "./document-controls";
 import type { DocumentHost } from "./document-viewer";
 
 const IMAGE_EXTENSIONS = new Set(["png", "jpg", "jpeg", "gif", "webp", "bmp", "avif"]);
+const LOCAL_COMMENT_AUTHOR = Object.freeze({ name: "Local user" });
 /** Every kind the renderer can draw, labelled from its own token. */
 const SHAPE_OPTIONS: readonly (readonly [string, string])[] = LOCAL_SHAPE_KINDS.map((kind) => {
   const words = kind.replace(/_/gu, " ");
@@ -20,6 +21,11 @@ const SHAPE_OPTIONS: readonly (readonly [string, string])[] = LOCAL_SHAPE_KINDS.
 });
 
 type AnchorPickKind = "free" | "selection" | "node" | "image" | "edge";
+
+export interface InitialCommentTarget {
+  readonly threadId: string;
+  readonly origin: CommentOrigin;
+}
 
 interface SelectOption {
   readonly value: string;
@@ -89,12 +95,15 @@ export class M2CanvasTools {
   private anchorOptionsKey = "";
   private connectorOptionsKey = "";
   private disposed = false;
+  private initialComment: InitialCommentTarget | undefined;
 
   constructor(
     private readonly session: M1CanvasSession,
     documentHost: DocumentHost,
     private readonly document: Document,
+    initialComment?: InitialCommentTarget,
   ) {
+    this.initialComment = initialComment;
     session.refresh();
     this.authoring = createCanvasAuthoring(session.view);
     this.element = document.createElement("div");
@@ -294,14 +303,17 @@ export class M2CanvasTools {
     this.element.append(geometryFields);
 
     this.comments = new CommentsPanel({
-      onAddComment: (text) => {
-        const current = this.currentAnchor(true);
-        if (!current.ok) return;
-        this.mutate("add-comment", (draft) => addLocalComment(draft, { text, ...(current.anchor ? { anchor: current.anchor } : {}) }));
+      onAddComment: (text, anchor) => {
+        const current = anchor ?? this.session.defaultCommentAnchor();
+        this.mutate("add-comment", (draft) => addLocalComment(
+          draft, { text, ...(current ? { anchor: current } : {}) }, { author: LOCAL_COMMENT_AUTHOR },
+        ));
       },
       onEditComment: (id, text) => this.mutate("edit-comment", (draft) => editLocalComment(draft, id, text)),
       onDeleteComment: (id) => this.mutate("delete-comment", (draft) => deleteLocalComment(draft, id)),
-      onReplyComment: (id, text) => this.mutate("reply-comment", (draft) => addReply(draft, id, text)),
+      onReplyComment: (id, text) => this.mutate(
+        "reply-comment", (draft) => addReply(draft, id, text, { author: LOCAL_COMMENT_AUTHOR }),
+      ),
       onResolveComment: (id, resolved) => this.mutate("resolve-comment", (draft) => setCommentResolved(draft, id, resolved)),
       onFilterChange: (scope) => { this.scope = scope; this.refresh(); },
       onPickAnchor: (kind) => this.pickAnchor(kind),
@@ -495,6 +507,10 @@ export class M2CanvasTools {
       includeResolved: true, reviewMode: this.session.snapshot.reviewMode,
       anchorDraft: current.ok ? current.anchor : undefined,
     });
+    if (this.initialComment !== undefined
+      && this.comments.focusThread(this.initialComment.threadId, this.initialComment.origin)) {
+      this.initialComment = undefined;
+    }
   }
 
   dispose(): void {
