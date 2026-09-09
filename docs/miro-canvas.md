@@ -81,6 +81,16 @@ which surfaces are shown. A stored settings file is normalized on load: unknown
 keys are dropped and out-of-range numbers are clamped, so a bad preference can
 never stop a board from opening.
 
+Selecting one element adds the handles native Canvas does not provide: a
+rotation grip below the selection, one connection point on the middle of each
+side, and a quick-create arrow. Rotation previews in place and writes once on
+release, so a drag produces one native history entry rather than dozens, and
+Shift snaps it to 15 degrees. A connection released over another node becomes a
+native edge; the quick-create arrow places a node beside the selection and
+connects it. Every one of these goes through the guarded authoring transaction,
+so review mode, a locked target and a stale document refuse them the same way a
+menu action would.
+
 M2 tools are available through **Local shapes, comments, anchors and documents**
 in the command palette. Create rectangles, rounded rectangles, ellipses,
 triangles, diamonds or stars with editable native text fallbacks. Edit/reply to

@@ -986,3 +986,79 @@
 .miro-canvas-panel__minimap-canvas[hidden] {
   display: none;
 }
+
+/* Selection handles: the affordances native Canvas does not provide.  The
+   frame is inert; only the grips take pointer events, so a click that misses
+   a grip still reaches the Canvas underneath. */
+.miro-canvas-handles {
+  position: absolute;
+  inset: 0;
+  z-index: 99;
+  pointer-events: none;
+}
+
+.miro-canvas-handles[hidden],
+.miro-canvas-handles [hidden] {
+  display: none !important;
+}
+
+.miro-canvas-handles__frame {
+  position: absolute;
+  transform-origin: 50% 50%;
+}
+
+.miro-canvas-handle {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  color: var(--text-on-accent);
+  background: var(--interactive-accent);
+  border: 2px solid var(--background-primary);
+  border-radius: 50%;
+  cursor: pointer;
+  pointer-events: auto;
+  line-height: 1;
+}
+
+/* Connection points sit on the middle of each side, like Miro. */
+.miro-canvas-handle--connect {
+  width: 10px;
+  height: 10px;
+  border-width: 1px;
+  cursor: crosshair;
+}
+
+.miro-canvas-handle--top { top: -5px; left: calc(50% - 5px); }
+.miro-canvas-handle--bottom { bottom: -5px; left: calc(50% - 5px); }
+.miro-canvas-handle--left { left: -5px; top: calc(50% - 5px); }
+.miro-canvas-handle--right { right: -5px; top: calc(50% - 5px); }
+
+.miro-canvas-handle--rotate {
+  width: 22px;
+  height: 22px;
+  left: -30px;
+  bottom: -30px;
+  font-size: 13px;
+  cursor: grab;
+  background: var(--background-primary);
+  color: var(--text-normal);
+  border-color: var(--background-modifier-border);
+}
+
+.miro-canvas-handles[data-miro-canvas-rotating="true"] .miro-canvas-handle--rotate {
+  cursor: grabbing;
+}
+
+.miro-canvas-handle--create {
+  width: 22px;
+  height: 22px;
+  right: -34px;
+  top: calc(50% - 11px);
+  font-size: 13px;
+}
+
+.miro-canvas-handles[data-miro-canvas-editable="false"] .miro-canvas-handle {
+  display: none;
+}

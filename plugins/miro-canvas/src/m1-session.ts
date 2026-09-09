@@ -28,7 +28,13 @@ import {
 	type CanvasAdapter,
 	type CanvasScene,
 } from "./canvas-adapter";
-import { CANVAS_SHAPE_KINDS, createCanvasAuthoring, type CanvasAuthoring } from "./canvas-authoring";
+import { CANVAS_SHAPE_KINDS, createCanvasAuthoring, type CanvasAuthoring, type ConnectorSide } from "./canvas-authoring";
+import {
+	SelectionHandles,
+	type HandleRect,
+	type HandleSide,
+	type SelectionHandlesState,
+} from "./selection-handles";
 import {
 	SelectionToolbar,
 	type SelectionKind,
@@ -183,7 +189,7 @@ function clientSize(root: HTMLElement | undefined): { readonly width: number; re
 }
 
 /** A host that cannot measure yields no placement, and the toolbar stays hidden. */
-function boundingRect(value: unknown): { readonly left: number; readonly top: number; readonly right: number } | undefined {
+function boundingRect(value: unknown): { readonly left: number; readonly top: number; readonly right: number; readonly bottom: number } | undefined {
 	const measure = readRuntime(value, "getBoundingClientRect");
 	if (typeof measure !== "function") {
 		return undefined;
@@ -193,7 +199,10 @@ function boundingRect(value: unknown): { readonly left: number; readonly top: nu
 		const left = finite(readRuntime(rect, "left"));
 		const top = finite(readRuntime(rect, "top"));
 		const right = finite(readRuntime(rect, "right"));
-		return left === undefined || top === undefined || right === undefined ? undefined : { left, top, right };
+		const bottom = finite(readRuntime(rect, "bottom"));
+		return left === undefined || top === undefined || right === undefined || bottom === undefined
+			? undefined
+			: { left, top, right, bottom };
 	} catch {
 		return undefined;
 	}
@@ -415,6 +424,7 @@ export class M1CanvasSession {
 	public readonly viewport: ViewportController;
 	public readonly controls: M1Controls;
 	public readonly toolbar: SelectionToolbar;
+	public readonly handles: SelectionHandles;
 
 	private writer: MetadataWriter | null;
 	private readonly options: M1SessionOptions;
@@ -510,6 +520,11 @@ export class M1CanvasSession {
 			onStyle: (patch) => this.applyElementStyle(patch),
 			onLock: (locked) => (locked ? this.lockSelection() : this.unlockSelection()),
 		}, { document: controlDocument });
+		this.handles = new SelectionHandles({
+			onRotate: (degrees, commit) => this.applyHandleRotation(degrees, commit),
+			onConnect: (side, point) => this.applyHandleConnection(side, point),
+			onCreateConnected: (side) => this.createConnectedNode(side),
+		}, { document: controlDocument });
 	}
 
 	/**
@@ -518,6 +533,127 @@ export class M1CanvasSession {
 	 * transaction instead.  Every selected element is patched separately; the
 	 * first rejection stops the batch so a partial style is never committed.
 	 */
+	/**
+	 * A drag previews by rotating the decoration in place; only the release
+	 * writes, so a gesture produces one native history entry instead of dozens.
+	 */
+	private applyHandleRotation(degrees: number, commit: boolean): void {
+		const id = this.selectedIds[0];
+		if (id === undefined) {
+			return;
+		}
+		if (!commit) {
+			this.previewRotation(id, degrees);
+			return;
+		}
+		this.readInteractionState();
+		if (!this.editAllowed("restyle", [id])) {
+			this.refresh();
+			return;
+		}
+		this.authoring ??= createCanvasAuthoring(this.view);
+		const result = this.authoring.updateRotation({ id, rotation: degrees });
+		if (!result.ok) {
+			this.addDiagnostic(result.diagnostics.find((item) => item.level === "error")?.message
+				?? `Canvas rejected the rotation for ${id}.`);
+		}
+		this.refresh();
+	}
+
+	private previewRotation(id: string, degrees: number): void {
+		const element = [...(this.adapter.getNodes() ?? [])].find((item) => readCanvasElementId(item) === id);
+		const dom = readCanvasElementDom(element);
+		if (dom === undefined) {
+			return;
+		}
+		this.captureAppearanceDom(dom);
+		this.setAppearanceStyle(dom, "transform-origin", "50% 50%");
+		this.setAppearanceStyle(dom, "transform", `rotate(${degrees}deg)`);
+	}
+
+	/** A connection released over another node becomes a native edge. */
+	private applyHandleConnection(side: HandleSide, point: { readonly x: number; readonly y: number }): void {
+		const fromNode = this.selectedIds[0];
+		const toNode = this.nodeAtPoint(point, fromNode);
+		if (fromNode === undefined || toNode === undefined) {
+			this.addDiagnostic("Release a connection over another Canvas node to connect it.");
+			return;
+		}
+		this.createEdge(fromNode, toNode, side);
+	}
+
+	private createEdge(fromNode: string, toNode: string, side: HandleSide): void {
+		this.readInteractionState();
+		this.authoring ??= createCanvasAuthoring(this.view);
+		const opposite: Readonly<Record<HandleSide, HandleSide>> = {
+			top: "bottom", bottom: "top", left: "right", right: "left",
+		};
+		const result = this.authoring.createConnector({
+			fromNode, toNode, fromSide: side as ConnectorSide, toSide: opposite[side] as ConnectorSide,
+		});
+		if (!result.ok) {
+			this.addDiagnostic(result.diagnostics.find((item) => item.level === "error")?.message
+				?? "Canvas rejected the new connector.");
+		}
+		this.refresh();
+	}
+
+	private nodeAtPoint(point: { readonly x: number; readonly y: number }, exclude: string | undefined): string | undefined {
+		for (const element of this.adapter.getNodes() ?? []) {
+			const id = readCanvasElementId(element);
+			if (id === undefined || id === exclude) {
+				continue;
+			}
+			const rect = boundingRect(readCanvasElementDom(element));
+			if (rect === undefined) {
+				continue;
+			}
+			if (point.x >= rect.left && point.x <= rect.right && point.y >= rect.top && point.y <= rect.bottom) {
+				return id;
+			}
+		}
+		return undefined;
+	}
+
+	/** Place a node beside the selection and connect it, in that order. */
+	private createConnectedNode(side: HandleSide): void {
+		const fromNode = this.selectedIds[0];
+		if (fromNode === undefined) {
+			return;
+		}
+		const nodes = readRuntime(this.currentRawDocument, "nodes");
+		const source = Array.isArray(nodes)
+			? (nodes as readonly unknown[]).find((item) => readRuntime(item, "id") === fromNode)
+			: undefined;
+		const x = finite(readRuntime(source, "x"));
+		const y = finite(readRuntime(source, "y"));
+		const width = finite(readRuntime(source, "width"));
+		const height = finite(readRuntime(source, "height"));
+		if (x === undefined || y === undefined || width === undefined || height === undefined) {
+			this.addDiagnostic("The selected node has no usable geometry; a connected node was not created.");
+			return;
+		}
+		const gap = 80;
+		const offset: Readonly<Record<HandleSide, { readonly x: number; readonly y: number }>> = {
+			right: { x: x + width + gap, y },
+			left: { x: x - width - gap, y },
+			top: { x, y: y - height - gap },
+			bottom: { x, y: y + height + gap },
+		};
+		this.readInteractionState();
+		this.authoring ??= createCanvasAuthoring(this.view);
+		const created = this.authoring.createShape({
+			shape: "rectangle", text: "", width, height, ...offset[side],
+		});
+		if (!created.ok || created.nodeId === undefined) {
+			this.addDiagnostic(created.diagnostics.find((item) => item.level === "error")?.message
+				?? "Canvas rejected the connected node.");
+			this.refresh();
+			return;
+		}
+		this.createEdge(fromNode, created.nodeId, side);
+	}
+
 	private applyElementStyle(patch: SelectionStylePatch): void {
 		if (this.selectedIds.length === 0) {
 			this.addDiagnostic("Select a Canvas element before changing its shape, border or connector settings.");
@@ -620,7 +756,11 @@ export class M1CanvasSession {
 			if (isElement(this.toolbar.element)) {
 				this.root.appendChild(this.toolbar.element);
 			}
+			if (isElement(this.handles.element)) {
+				this.root.appendChild(this.handles.element);
+			}
 		} catch {
+			this.handles.dispose();
 			this.toolbar.dispose();
 			this.controls.minimapElement.remove();
 			this.controls.element.remove();
@@ -813,6 +953,58 @@ export class M1CanvasSession {
 			this.lastToolbarSignature = toolbarSignature;
 			this.toolbar.update(toolbarState);
 		}
+		this.handles.update(this.handlesState(toolbarState.editable));
+	}
+
+	private handlesState(editable: boolean): SelectionHandlesState {
+		const id = this.selectedIds[0];
+		const edgeIds = new Set(collectCanvasElementIds(this.adapter.getEdges() ?? []));
+		return {
+			selectedIds: this.selectedIds,
+			rotation: id === undefined ? 0 : this.rotationFor(id),
+			editable,
+			isEdge: id !== undefined && edgeIds.has(id),
+			...(id === undefined ? {} : { rect: this.handleRect(id) }),
+		};
+	}
+
+	private rotationFor(id: string): number {
+		const override = readRuntime(readRuntime(readRuntime(this.currentRawDocument, "miroCanvas"), "localOverrides"), id);
+		const rotation = finite(readRuntime(override, "rotation"));
+		return rotation ?? 0;
+	}
+
+	/**
+	 * The DOM box of a rotated node is its axis-aligned bounds, so only its
+	 * center is usable.  The unrotated size comes from the document and the
+	 * current zoom, which keeps the frame square to the node at any angle.
+	 */
+	private handleRect(id: string): HandleRect | undefined {
+		if (this.root === undefined) {
+			return undefined;
+		}
+		const rootRect = boundingRect(this.root);
+		const element = [...(this.adapter.getNodes() ?? [])].find((item) => readCanvasElementId(item) === id);
+		const rect = boundingRect(readCanvasElementDom(element));
+		if (rootRect === undefined || rect === undefined) {
+			return undefined;
+		}
+		const nodes = readRuntime(this.currentRawDocument, "nodes");
+		const node = Array.isArray(nodes)
+			? (nodes as readonly unknown[]).find((item) => readRuntime(item, "id") === id)
+			: undefined;
+		const zoom = finite(readRuntime(this.viewport.getViewport(), "zoom")) ?? 1;
+		const width = (finite(readRuntime(node, "width")) ?? (rect.right - rect.left) / zoom) * zoom;
+		const height = (finite(readRuntime(node, "height")) ?? (rect.bottom - rect.top) / zoom) * zoom;
+		if (!(width > 0) || !(height > 0)) {
+			return undefined;
+		}
+		return {
+			left: (rect.left + rect.right) / 2 - width / 2 - rootRect.left,
+			top: (rect.top + rect.bottom) / 2 - height / 2 - rootRect.top,
+			width,
+			height,
+		};
 	}
 
 	private toolbarState(state: M1ControlsState, lockedSelection: boolean): SelectionToolbarState {
@@ -2132,8 +2324,12 @@ export class M1CanvasSession {
 			});
 		}
 		const clearGesture = (): void => { this.pointerEditIds = undefined; };
+		const host = ownerDocument(this.root) ?? this.root;
+		this.listen(host, "pointermove", (event) => this.handles.handlePointerMove(event), true);
+		this.listen(host, "pointerup", (event) => this.handles.handlePointerUp(event), true);
+		this.listen(host, "pointercancel", () => this.handles.cancelGesture(), true);
 		for (const type of ["pointerup", "pointercancel", "mouseup"]) {
-			this.listen(ownerDocument(this.root) ?? this.root, type, clearGesture, true);
+			this.listen(host, type, clearGesture, true);
 		}
 		const window = readRuntime(ownerDocument(this.root), "defaultView");
 		if (isObject(window)) this.listen(window as unknown as EventTarget, "blur", () => {
@@ -2163,6 +2359,7 @@ export class M1CanvasSession {
 		this.disposed = true;
 		this.controls.dispose();
 		this.toolbar.dispose();
+		this.handles.dispose();
 		this.authoring?.dispose();
 		this.authoring = undefined;
 		this.sourceRenderer?.dispose();
