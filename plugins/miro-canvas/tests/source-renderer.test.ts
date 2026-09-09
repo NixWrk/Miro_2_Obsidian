@@ -183,4 +183,58 @@ describe("native paint markers", () => {
   });
 });
 
+describe("source-backed code rendering", () => {
+  it("adds reversible code chrome and metadata without replacing editable content", () => {
+    const nativeText = '<p><strong>Example</strong> · JavaScript · line-numbers</p><pre><code>const answer = 42;</code></pre>';
+    const data: any = {
+      nodes: [{ id: "code-1", type: "text", text: nativeText, x: 0, y: 0, width: 360, height: 180 }],
+      edges: [],
+      miroSource: { items: [{
+        id: "code-1",
+        type: "code",
+        data: {
+          title: "Example",
+          language: "JavaScript",
+          lineNumbersVisible: true,
+          code: "const answer = 42;",
+          content: "<script>must stay inert</script>",
+          url: "javascript:alert(1)",
+        },
+        future: { keep: true },
+      }], future: { keep: true } },
+      unknown: { keep: true },
+    };
+    const before = JSON.stringify(data);
+    const nodeEl = new Element("div"), contentEl = new Element("div");
+    (contentEl as any).textContent = nativeText;
+    nodeEl.appendChild(contentEl);
+    const renderer = new SourceRenderer({
+      getDocument: () => data,
+      getNodes: () => [{ id: "code-1", nodeEl, contentEl }],
+      getEdges: () => [],
+    }, dom);
+
+    renderer.refresh();
+    expect(nodeEl.getAttribute("data-miro-source-kind")).toBe("code");
+    expect(nodeEl.getAttribute("data-miro-source-code-title")).toBe("Example");
+    expect(nodeEl.getAttribute("data-miro-source-code-language")).toBe("JavaScript");
+    expect(nodeEl.getAttribute("data-miro-source-code-line-numbers")).toBe("true");
+    expect(nodeEl.querySelectorAll("div")).toHaveLength(2);
+    expect((contentEl as any).textContent).toBe(nativeText);
+    expect(JSON.stringify(data)).toBe(before);
+
+    renderer.refresh();
+    expect(nodeEl.querySelectorAll("div")).toHaveLength(2);
+    renderer.dispose();
+    expect(nodeEl.querySelectorAll("div")).toHaveLength(1);
+    expect(nodeEl.getAttribute("data-miro-source-kind")).toBeNull();
+    expect(nodeEl.getAttribute("data-miro-source-code-title")).toBeNull();
+    expect(nodeEl.getAttribute("data-miro-source-code-language")).toBeNull();
+    expect(nodeEl.getAttribute("data-miro-source-code-line-numbers")).toBeNull();
+    expect((contentEl as any).textContent).toBe(nativeText);
+    expect(data.miroSource.items[0].future).toEqual({ keep: true });
+    expect(data.unknown).toEqual({ keep: true });
+  });
+});
+
 

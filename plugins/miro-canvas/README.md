@@ -20,8 +20,10 @@ threads, connector endpoints and native document navigation. Select a file node
 first to expose its document controls. Source and unknown metadata survive
 graph edits and native history. M3 adds local/source rotation, layer ordering,
 rotated anchors, and reversible source-backed decoration for Miro shapes, text,
-sticky notes, connectors, frames and media. Automated browser checks use a synthetic host;
-real-Obsidian verification is still required.
+sticky notes, connectors, frames and media. The first M4 slice adds bounded,
+inert source-backed code-card styling while keeping native text editable.
+Automated browser checks use a synthetic host; real-Obsidian verification is
+still required.
 
 ## Development
 

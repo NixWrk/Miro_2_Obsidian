@@ -2,7 +2,18 @@
 
 import { isSafeColor, isSafeFontFamily, normalizeColor } from "./appearance";
 
-export type SourceItemKind = "shape" | "text" | "sticky" | "connector" | "frame" | "media";
+export type SourceItemKind = "shape" | "text" | "sticky" | "connector" | "frame" | "media" | "code";
+
+export interface SourceCodeDescriptor {
+  readonly title?: string;
+  readonly language?: string;
+  readonly lineNumbersVisible?: boolean;
+  readonly text?: string;
+}
+
+export interface SourceStructuredDescriptor {
+  readonly code?: SourceCodeDescriptor;
+}
 
 export interface SourceConnectorStyle {
   readonly shape?: "straight" | "elbowed" | "curved";
@@ -19,6 +30,7 @@ export interface SourceItemDescriptor {
   readonly zIndex?: number;
   readonly css: Readonly<Record<string, string>>;
   readonly connector?: SourceConnectorStyle;
+  readonly structured?: SourceStructuredDescriptor;
 }
 
 export interface SourceScene {
@@ -43,6 +55,9 @@ type ReadResult = { readonly state: "absent" } | { readonly state: "present"; re
 const MAX_SOURCE_ITEMS = 100_000;
 const MAX_ORDER_ENTRIES = 200_000;
 const MAX_BINDINGS = 100_000;
+const MAX_CODE_TITLE_LENGTH = 256;
+const MAX_CODE_LANGUAGE_LENGTH = 64;
+const MAX_CODE_TEXT_LENGTH = 100_000;
 const SAFE_TOKEN = /^[a-z0-9][a-z0-9_-]{0,63}$/iu;
 const NUMERIC_STRING = /^-?(?:\d+(?:\.\d*)?|\.\d+)$/u;
 /** Subtypes already recognized from Miro source; keep legacy local aliases too. */
@@ -147,6 +162,36 @@ function safeFontWeight(value: unknown): string | undefined {
   return weight >= 100 && weight <= 900 ? numeric : undefined;
 }
 
+function boundedSourceString(
+  value: unknown,
+  maxLength: number,
+  diagnostics: string[],
+  sourceId: string,
+  field: string,
+  trim: boolean,
+): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const normalized = trim ? value.trim() : value;
+  const bounded = normalized.length > maxLength ? normalized.slice(0, maxLength) : normalized;
+  if (normalized.length > maxLength) diagnostics.push(`source-code-field-truncated: ${sourceId}.${field}.`);
+  return bounded.length > 0 ? bounded : undefined;
+}
+
+function sourceCodeDescriptor(source: UnknownRecord, diagnostics: string[], sourceId: string): SourceCodeDescriptor {
+  const data = valueOf(source, "data");
+  if (!isRecord(data)) return Object.freeze({});
+  const title = boundedSourceString(valueOf(data, "title"), MAX_CODE_TITLE_LENGTH, diagnostics, sourceId, "data.title", true);
+  const language = boundedSourceString(valueOf(data, "language"), MAX_CODE_LANGUAGE_LENGTH, diagnostics, sourceId, "data.language", true);
+  const text = boundedSourceString(valueOf(data, "code"), MAX_CODE_TEXT_LENGTH, diagnostics, sourceId, "data.code", false);
+  const lineNumbersVisible = valueOf(data, "lineNumbersVisible");
+  return Object.freeze({
+    ...(title === undefined ? {} : { title }),
+    ...(language === undefined ? {} : { language }),
+    ...(typeof lineNumbersVisible === "boolean" ? { lineNumbersVisible } : {}),
+    ...(text === undefined ? {} : { text }),
+  });
+}
+
 function sourceKind(item: UnknownRecord, forcedConnector: boolean): SourceItemKind | undefined {
   if (forcedConnector) return "connector";
   const raw = valueOf(item, "type");
@@ -158,6 +203,7 @@ function sourceKind(item: UnknownRecord, forcedConnector: boolean): SourceItemKi
     case "connector": return "connector";
     case "frame": return "frame";
     case "image": case "document": case "doc_format": case "embed": case "preview": return "media";
+    case "code": return "code";
     default: return undefined;
   }
 }
@@ -409,6 +455,7 @@ function descriptorFor(document: unknown, canvasId: string, sourceId: string, so
   const css = sourceCss(source, kind);
   applyLocalCss(css, localOverride(document, canvasId));
   const connector = kind === "connector" ? applyLocalConnector(connectorStyle(source, diagnostics, sourceId), localOverride(document, canvasId), css) : undefined;
+  const structured = kind === "code" ? Object.freeze({ code: sourceCodeDescriptor(source, diagnostics, sourceId) }) : undefined;
   const zIndex = finiteNumber(valueOf(source, "zIndex"));
   return Object.freeze({
     sourceId,
@@ -418,6 +465,7 @@ function descriptorFor(document: unknown, canvasId: string, sourceId: string, so
     ...(zIndex === undefined ? {} : { zIndex }),
     css: Object.freeze(css),
     ...(connector === undefined ? {} : { connector }),
+    ...(structured === undefined ? {} : { structured }),
   });
 }
 

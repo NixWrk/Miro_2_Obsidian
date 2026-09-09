@@ -50,7 +50,9 @@ shapes, comment threads, connector endpoints and native document navigation.
 Graph edits preserve source/unknown metadata and use native undo/redo.
 Native zoom currently stays within 6.25%–200%. M3 adds local/source rotation,
 layer ordering, rotated anchors, and reversible source-backed decoration for
-Miro shapes, text, sticky notes, connectors, frames, and media.
+Miro shapes, text, sticky notes, connectors, frames, and media. M4 has started
+with bounded, inert code-block projection and code-card styling that leaves
+native Canvas text editable.
 
 ## Data flow
 

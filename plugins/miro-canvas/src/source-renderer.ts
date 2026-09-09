@@ -648,9 +648,15 @@ function applyNode(
   if (descriptor.sourceId !== undefined) patchAttribute(shell, "data-miro-source-id", descriptor.sourceId, patches);
   else patchAttribute(shell, "data-miro-local-source", "true", patches);
   if (descriptor.shape !== undefined) patchAttribute(shell, "data-miro-source-shape", descriptor.shape, patches);
+  const sourceCode = descriptor.structured?.code;
+  if (sourceCode?.title !== undefined) patchAttribute(shell, "data-miro-source-code-title", sourceCode.title, patches);
+  if (sourceCode?.language !== undefined) patchAttribute(shell, "data-miro-source-code-language", sourceCode.language, patches);
+  if (sourceCode?.lineNumbersVisible !== undefined) {
+    patchAttribute(shell, "data-miro-source-code-line-numbers", String(sourceCode.lineNumbersVisible), patches);
+  }
 
   let layer: DomElementLike | undefined;
-  if (descriptor.kind === "shape" || descriptor.kind === "sticky" || descriptor.kind === "frame" || descriptor.kind === "media") {
+  if (descriptor.kind === "shape" || descriptor.kind === "sticky" || descriptor.kind === "frame" || descriptor.kind === "media" || descriptor.kind === "code") {
     const created = document === undefined ? undefined : createElement(document, "div");
     if (created !== undefined) {
       addOwnedElementClass(created, DECORATION_CLASS);

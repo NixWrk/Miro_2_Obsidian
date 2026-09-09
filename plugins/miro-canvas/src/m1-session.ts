@@ -1224,7 +1224,7 @@ export class M1CanvasSession {
 			}
 			const kind = source.items.get(id)?.kind;
 			if (kind !== undefined) {
-				kinds.add(kind === "connector" ? "edge" : kind);
+				kinds.add(kind === "connector" ? "edge" : kind === "code" ? "text" : kind);
 				continue;
 			}
 			const node = Array.isArray(nodes)

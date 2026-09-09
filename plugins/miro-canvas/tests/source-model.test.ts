@@ -175,6 +175,70 @@ describe("source projection model", () => {
     expect(JSON.stringify([...scene.items.values()])).not.toContain("script");
   });
 
+  it("projects only the proven bounded code fields", () => {
+    const scene = buildSourceScene({ miroSource: { items: [{
+      id: "code-1",
+      type: "code",
+      data: {
+        title: "  Code block  ",
+        language: "  JavaScript  ",
+        lineNumbersVisible: true,
+        code: "const answer = 42;\nconsole.log(answer);",
+        content: "<b>raw html must stay in miroSource only</b>",
+        url: "https://example.invalid/raw",
+        payload: { secretShape: "must-not-project" },
+      },
+    }] } });
+    expect(scene.items.get("code-1")).toMatchObject({
+      sourceId: "code-1",
+      kind: "code",
+      structured: { code: {
+        title: "Code block",
+        language: "JavaScript",
+        lineNumbersVisible: true,
+        text: "const answer = 42;\nconsole.log(answer);",
+      } },
+    });
+    const projected = JSON.stringify(scene.items.get("code-1"));
+    expect(projected).not.toContain("raw html");
+    expect(projected).not.toContain("example.invalid");
+    expect(projected).not.toContain("secretShape");
+  });
+
+  it("hard-limits code strings and ignores non-boolean line-number metadata", () => {
+    const scene = buildSourceScene({ miroSource: { items: [{
+      id: "code-limited",
+      type: "code",
+      data: {
+        title: ` ${"t".repeat(300)} `,
+        language: ` ${"l".repeat(100)} `,
+        lineNumbersVisible: "true",
+        code: "x".repeat(120_000),
+      },
+    }] } });
+    const code = scene.items.get("code-limited")?.structured?.code;
+    expect(code?.title).toHaveLength(256);
+    expect(code?.language).toHaveLength(64);
+    expect(code?.text).toHaveLength(100_000);
+    expect(code).not.toHaveProperty("lineNumbersVisible");
+    expect(scene.diagnostics.filter((item) => item.startsWith("source-code-field-truncated:"))).toHaveLength(3);
+  });
+
+  it("keeps table source families unsupported without inventing cells", () => {
+    const scene = buildSourceScene({ miroSource: { items: [
+      { id: "table", type: "table", geometry: { width: 400, height: 200 } },
+      { id: "cell", type: "table_text", geometry: { width: 100, height: 40 } },
+      { id: "format", type: "data_table_format" },
+    ] } });
+    expect(scene.items.size).toBe(0);
+    expect(scene.diagnostics.filter((item) => item.startsWith("source-type-unsupported:"))).toEqual([
+      "source-type-unsupported: table.",
+      "source-type-unsupported: cell.",
+      "source-type-unsupported: format.",
+    ]);
+    expect(JSON.stringify([...scene.items.values()])).not.toContain("cell");
+  });
+
   it("prefers Canvas zOrder, maps source IDs through bindings, and keeps dangling entries", () => {
     const scene = buildSourceScene({
       miroSource: { items: [{ id: "s1", type: "text" }, { id: "s2", type: "text" }, { id: "s3", type: "text" }], zOrder: ["s3", "s2"] },

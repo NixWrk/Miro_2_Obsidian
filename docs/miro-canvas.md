@@ -121,6 +121,10 @@ sticky notes, connectors, frames, and media. It never replaces editable native
 content or executes source HTML/URLs. Native node and edge layers can be
 separate stacking contexts, so unsupported cross-layer interleaving and missing
 source fields remain explicit diagnostics.
+The first M4 slice recognizes proven Miro code payloads, projects only bounded
+title/language/line-number/code fields, and adds reversible code-card styling
+around the existing editable Canvas text. Raw HTML, URLs, and unknown source
+fields stay inert in `miroSource`.
 
 To run the plugin checks from the repository root:
 
@@ -526,8 +530,10 @@ and covered by automated tests.
 
 ### M4: structured content
 
-- Add frame, slide, document, image, preview, card, tag, code, and mind-map
-  renderers where source data is available.
+- [x] Add a source-backed code renderer without replacing editable Canvas text
+  or executing source payloads.
+- Add slide, document, image, preview, card, tag, and mind-map renderers where
+  source data is available.
 - For mind-map editing, evaluate the MIT-licensed
   [`obsidian-enhancing-mindmap`](https://github.com/MarkMindCkm/obsidian-enhancing-mindmap)
   tree model and interactions before writing new layout code. Candidate behavior

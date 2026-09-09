@@ -1084,6 +1084,25 @@
   box-shadow: none !important;
 }
 
+/* A source code item keeps the converted Canvas text editable.  The inert
+   layer supplies the Miro-like code-card chrome while the native <pre>/<code>
+   remains the only visible copy of the code. */
+[data-miro-source-kind="code"] {
+  border-radius: 8px;
+}
+
+[data-miro-source-kind="code"] > .miro-source-decoration-code {
+  background: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  box-shadow: var(--shadow-s, 0 2px 8px rgb(0 0 0 / 12%));
+}
+
+[data-miro-source-kind="code"] pre,
+[data-miro-source-kind="code"] code {
+  font-family: var(--font-monospace);
+}
+
 .miro-canvas-comment-card[data-comment-active="true"] {
   border-color: var(--interactive-accent);
   box-shadow: 0 0 0 1px var(--interactive-accent);

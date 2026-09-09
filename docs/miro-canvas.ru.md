@@ -119,6 +119,10 @@ anchors; z-order берётся из метаданных или source rank. О
 sticky notes, connectors, frames и media, не заменяя редактируемое содержимое и
 не выполняя source HTML/URL. Ограничения раздельных native node/edge layers и
 недостающих source-полей выдаются как диагностика.
+Первый срез M4 распознаёт подтверждённый payload Miro code, проецирует только
+ограниченные по размеру title/language/line-number/code поля и добавляет
+обратимое оформление code card вокруг редактируемого Canvas text. Raw HTML,
+URL и неизвестные source-поля остаются неактивными внутри `miroSource`.
 
 Текущие проверки плагина из корня репозитория:
 
@@ -791,12 +795,12 @@ node с тем же ID, что и Miro item, связывается без за�
 
 ## Code blocks
 
-- [ ] `CODE-001` `P1 P` Сохранять code text и whitespace без HTML-потерь.
-- [ ] `CODE-002` `P1 P` Показывать title, language и line-number visibility.
-- [ ] `CODE-003` `P1 P` Использовать monospace и доступную встроенную подсветку
+- [x] `CODE-001` `P1 P` Сохранять code text и whitespace без HTML-потерь.
+- [x] `CODE-002` `P1 P` Показывать title, language и line-number visibility.
+- [x] `CODE-003` `P1 P` Использовать monospace и доступную встроенную подсветку
   Obsidian без новой тяжёлой dependency.
-- [ ] `CODE-004` `P1 P` Исключить двойные scrollbars и сохранить source bbox.
-- [ ] `CODE-005` `P2 P` Не выполнять код и не доверять HTML из code payload.
+- [x] `CODE-004` `P1 P` Исключить двойные scrollbars и сохранить source bbox.
+- [x] `CODE-005` `P2 P` Не выполнять код и не доверять HTML из code payload.
 
 ## Mind maps
 
