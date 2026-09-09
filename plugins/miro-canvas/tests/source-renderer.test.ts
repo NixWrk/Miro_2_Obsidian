@@ -158,3 +158,25 @@ describe("shape text insets", () => {
   });
 });
 
+describe("native paint markers", () => {
+  it("marks a rotated node so its unrotated shell stops painting", () => {
+    const f = fixture("rectangle");
+    const data = f.data;
+    data.miroCanvas = { schemaVersion: 1, settings: {}, localOverrides: { a: { rotation: 24 } } };
+    f.data = data;
+    f.renderer.refresh();
+    expect(f.nodeEl.getAttribute("data-miro-source-rotated")).toBe("true");
+    f.renderer.dispose();
+    expect(f.nodeEl.getAttribute("data-miro-source-rotated")).toBe(null);
+  });
+
+  it("leaves an upright node unmarked", () => {
+    const f = fixture("rectangle");
+    f.renderer.refresh();
+    expect(f.nodeEl.getAttribute("data-miro-source-rotated")).toBe(null);
+    // The shape marker is what the stylesheet keys the contour override on.
+    expect(f.nodeEl.getAttribute("data-miro-source-kind")).toBe("shape");
+  });
+});
+
+

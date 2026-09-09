@@ -783,6 +783,12 @@ function applyNode(
   // shell's own transform and rewrites it while panning.  The shell therefore
   // stays axis-aligned, so its paint would show as an unrotated rectangle
   // behind the rotated node unless it steps aside.
+  if (Number.isFinite(descriptor.rotation) && descriptor.rotation !== 0) {
+    // Marks the node for the stylesheet: which descendant actually paints the
+    // native rectangle differs between Obsidian builds, so clearing the few
+    // elements this module can name is not enough on its own.
+    patchAttribute(shell, "data-miro-source-rotated", "true", patches);
+  }
   if (Number.isFinite(descriptor.rotation) && descriptor.rotation !== 0 && primary !== shell) {
     patchStyle(shell, "background-color", "transparent", patches);
     patchStyle(shell, "border-color", "transparent", patches);

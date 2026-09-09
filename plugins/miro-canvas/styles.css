@@ -1067,3 +1067,27 @@
 .miro-canvas-handles[data-miro-canvas-editable="false"] .miro-canvas-handle {
   display: none;
 }
+
+/* The plugin draws the shape itself, so the native rectangle behind a contour
+   has to step aside.  Which descendant paints it differs between Obsidian
+   builds and its rule can outrank an inline style, so the marker this plugin
+   sets carries the override; both markers disappear with the decoration. */
+[data-miro-source-kind="shape"],
+[data-miro-source-kind="shape"] > .canvas-node-container,
+[data-miro-source-kind="shape"] .canvas-node-content,
+[data-miro-source-kind="shape"] .markdown-preview-view,
+[data-miro-source-kind="shape"] .markdown-embed {
+  background-color: transparent !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
+}
+
+/* Rotation is applied to an inner element, because native Canvas rewrites the
+   shell's own transform while panning.  The shell therefore stays square to
+   the board and its paint would show as an unrotated rectangle behind the
+   node; the rotated element keeps painting normally. */
+[data-miro-source-rotated="true"] {
+  background-color: transparent !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
+}
