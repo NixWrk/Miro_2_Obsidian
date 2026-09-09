@@ -2098,6 +2098,13 @@ export class M1CanvasSession {
 		}
 	}
 
+	/**
+	 * Fails closed on an unverifiable policy as well as a verified refusal: if
+	 * the metadata cannot be read, a lock in it cannot be read either, so
+	 * letting a native edit through could modify a locked element. The cost is
+	 * that the host's own calls are dropped too, which is why the reason is
+	 * now reported rather than swallowed.
+	 */
 	private nativeEditAllowed(operation: string, ids: readonly string[]): boolean {
 		if (this.nativeHistoryDepth > 0) return true;
 		this.readInteractionState();
