@@ -34,6 +34,12 @@ describe("appearance core", () => {
     const state = createDefaultAppearanceState();
     expect(state.settings.displayTheme).toBe("system");
     expect(state.settings.palette.length).toBe(DEFAULT_PALETTE.length);
+    // Miro's own colours, Obsidian's theme colours and the six presets native
+    // Canvas offers are all reachable without opening the picker.
+    for (const id of ["miro-red", "obsidian-blue", "canvas-purple"]) {
+      expect(DEFAULT_PALETTE.some((entry) => entry.id === id)).toBe(true);
+    }
+    expect(new Set(DEFAULT_PALETTE.map((entry) => entry.color)).size).toBe(DEFAULT_PALETTE.length);
     expect(state.settings.recentColors).toEqual([]);
     expect(Object.isFrozen(state)).toBe(true);
   });

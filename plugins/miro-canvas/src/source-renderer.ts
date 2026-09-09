@@ -123,9 +123,9 @@ const SHAPE_CONTENT_INSETS: Readonly<Record<string, readonly [number, number, nu
   flow_chart_connector: [15, 15, 15, 15],
   flow_chart_or: [15, 15, 15, 15],
   flow_chart_summing_junction: [15, 15, 15, 15],
-  triangle: [45, 22, 6, 22],
+  triangle: [30, 18, 4, 18],
   rhombus: [22, 22, 22, 22],
-  star: [30, 26, 22, 26],
+  star: [24, 22, 18, 22],
   cloud: [22, 18, 20, 18],
   parallelogram: [6, 18, 6, 18],
   trapezoid: [6, 18, 6, 18],
@@ -158,7 +158,7 @@ const SHAPE_CONTENT_INSETS: Readonly<Record<string, readonly [number, number, nu
   flow_chart_note_curly_left: [6, 8, 6, 42],
   flow_chart_note_curly_right: [6, 42, 6, 8],
   wedge_round_rectangle_callout: [6, 8, 22, 8],
-  cross: [30, 30, 30, 30],
+  cross: [26, 26, 26, 26],
 });
 
 function shapePath(shape: string | undefined): string | undefined {
@@ -754,8 +754,14 @@ function applyNode(
   if (descriptor.kind === "shape" && descriptor.shape !== undefined && layer !== undefined) {
     const inset = SHAPE_CONTENT_INSETS[descriptor.shape];
     if (inset !== undefined) {
-      patchStyle(content, "padding", inset.map((value) => `${value}%`).join(" "), patches);
+      // The box is pinned first: padding on an auto-height content element
+      // grows the node instead of insetting its text, which turns a modest
+      // reserve into a shape several times the size the user drew.
       patchStyle(content, "box-sizing", "border-box", patches);
+      patchStyle(content, "width", "100%", patches);
+      patchStyle(content, "height", "100%", patches);
+      patchStyle(content, "overflow", "hidden", patches);
+      patchStyle(content, "padding", inset.map((value) => `${value}%`).join(" "), patches);
     }
   }
   applyNodeCss(descriptor, shell, content, layer, patches);

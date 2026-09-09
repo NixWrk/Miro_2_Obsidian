@@ -212,6 +212,14 @@ const BUILTIN_PALETTE: readonly PaletteColor[] = [
   { id: "obsidian-blue", label: "Obsidian blue", color: "#61afef", source: "obsidian" },
   { id: "obsidian-purple", label: "Obsidian purple", color: "#c678dd", source: "obsidian" },
   { id: "obsidian-gray", label: "Obsidian gray", color: "#abb2bf", source: "obsidian" },
+  // The six presets native Canvas offers in its own colour picker, so a board
+  // styled here keeps matching one styled with the plugin switched off.
+  { id: "canvas-red", label: "Canvas red", color: "#fb464c", source: "obsidian" },
+  { id: "canvas-orange", label: "Canvas orange", color: "#e9973f", source: "obsidian" },
+  { id: "canvas-yellow", label: "Canvas yellow", color: "#e0de71", source: "obsidian" },
+  { id: "canvas-green", label: "Canvas green", color: "#44cf6e", source: "obsidian" },
+  { id: "canvas-cyan", label: "Canvas cyan", color: "#53dfdd", source: "obsidian" },
+  { id: "canvas-purple", label: "Canvas purple", color: "#a882ff", source: "obsidian" },
 ].map((item) => Object.freeze(item) as PaletteColor);
 
 export const DEFAULT_PALETTE: readonly PaletteColor[] = Object.freeze(BUILTIN_PALETTE);

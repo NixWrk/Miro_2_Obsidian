@@ -140,8 +140,10 @@ describe("shape text insets", () => {
     const f = fixture("triangle");
     f.renderer.refresh();
     // Top gives up the most room: a triangle has almost no width up there.
-    expect(f.contentEl.style.getPropertyValue("padding")).toBe("45% 22% 6% 22%");
+    expect(f.contentEl.style.getPropertyValue("padding")).toBe("30% 18% 4% 18%");
+    // The box is pinned so the reserve cannot inflate the node instead.
     expect(f.contentEl.style.getPropertyValue("box-sizing")).toBe("border-box");
+    expect(f.contentEl.style.getPropertyValue("height")).toBe("100%");
   });
 
   it("leaves a rectangle alone and restores an inset shape on dispose", () => {
