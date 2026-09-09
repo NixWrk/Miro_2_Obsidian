@@ -140,7 +140,10 @@ describe("shape text insets", () => {
     const f = fixture("triangle");
     f.renderer.refresh();
     // Top gives up the most room: a triangle has almost no width up there.
-    expect(f.contentEl.style.getPropertyValue("padding")).toBe("30% 18% 4% 18%");
+    // The largest rectangle inside a triangle is its lower half, and the
+    // reserve is in pixels of the node's own 100x80 box, not percentages:
+    // a percentage padding resolves against the width on every side.
+    expect(f.contentEl.style.getPropertyValue("padding")).toBe("40px 25px 0px 25px");
     // The box is pinned so the reserve cannot inflate the node instead.
     expect(f.contentEl.style.getPropertyValue("box-sizing")).toBe("border-box");
     expect(f.contentEl.style.getPropertyValue("height")).toBe("100%");
@@ -152,7 +155,8 @@ describe("shape text insets", () => {
     expect(rectangle.contentEl.style.getPropertyValue("padding")).toBe("");
     const ellipse = fixture("circle");
     ellipse.renderer.refresh();
-    expect(ellipse.contentEl.style.getPropertyValue("padding")).toBe("15% 15% 15% 15%");
+    // The inscribed square of a circle: 50 - 50/sqrt(2) of each dimension.
+    expect(ellipse.contentEl.style.getPropertyValue("padding")).toBe("11.7px 14.7px 11.7px 14.7px");
     ellipse.renderer.dispose();
     expect(ellipse.contentEl.style.getPropertyValue("padding")).toBe("");
   });

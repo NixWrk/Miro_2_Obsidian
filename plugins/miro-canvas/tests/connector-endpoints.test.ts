@@ -348,4 +348,43 @@ describe("connectors on a rotated node", () => {
   });
 });
 
+describe("connectors meet the drawn shape", () => {
+  const board = (shape: string, rotation = 0) => ({
+    nodes: [
+      { id: "a", type: "text", x: 0, y: 0, width: 100, height: 100 },
+      { id: "b", type: "text", x: 400, y: 0, width: 100, height: 100 },
+    ],
+    edges: [{ id: "e", fromNode: "b", fromSide: "left", toNode: "a", toSide: "right" }],
+    miroCanvas: {
+      schemaVersion: 1, settings: {},
+      localOverrides: { a: { shape: { kind: shape, fallback: "text" }, rotation } },
+    },
+  });
+
+  it("ends on a triangle's slanted edge instead of in the empty corner", () => {
+    const end = buildCanvasAnchorGeometry(board("triangle")).edges!.e!.end!;
+    // The middle of the bounding box's right side is outside the triangle.
+    expect(end.x).toBeLessThan(100);
+    expect(end.x).toBeCloseTo(75, 0);
+    expect(end.y).toBeCloseTo(50, 0);
+  });
+
+  it("ends on a circle's arc", () => {
+    const end = buildCanvasAnchorGeometry(board("circle")).edges!.e!.end!;
+    expect(Math.hypot(end.x - 50, end.y - 50)).toBeCloseTo(50, 0);
+  });
+
+  it("keeps a rectangle's own edge", () => {
+    expect(buildCanvasAnchorGeometry(board("rectangle")).edges!.e!.end).toEqual({ x: 100, y: 50 });
+  });
+
+  it("turns the contour point with the node", () => {
+    const end = buildCanvasAnchorGeometry(board("triangle", 90)).edges!.e!.end!;
+    // The point found on the slanted edge, then rotated a quarter turn.
+    expect(end.x).toBeCloseTo(50, 0);
+    expect(end.y).toBeCloseTo(75, 0);
+  });
+});
+
+
 

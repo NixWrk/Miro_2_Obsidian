@@ -12,6 +12,7 @@ import type {
   CanvasAnchor,
 } from "./anchors";
 import { buildSourceScene } from "./source-model";
+import { contourPoint, shapeOutline, type ShapePoint } from "./shape-geometry";
 import { decideInteraction } from "./interaction-policy";
 import {
   MIRO_CANVAS_SCHEMA_VERSION,
@@ -272,7 +273,17 @@ function explicitImageCrop(document: UnknownRecord, node: UnknownRecord, id: str
   return undefined;
 }
 
-function sidePoint(rect: AnchorRect, side: unknown): AnchorPoint | undefined {
+/**
+ * The point on a node where a connector meets it.
+ *
+ * Native Canvas only records which of four sides an edge leaves from, and the
+ * middle of that side belongs to the bounding rectangle, not to the shape
+ * drawn inside it: on a triangle or an ellipse it lands in empty space. With
+ * a silhouette the point is pulled onto the contour first, and the node's own
+ * rotation is applied afterwards so the connector follows the shape as it
+ * turns.
+ */
+function sidePoint(rect: AnchorRect, side: unknown, outline?: readonly ShapePoint[]): AnchorPoint | undefined {
   if (side === ABSENT) {
     return { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 };
   }
@@ -285,6 +296,13 @@ function sidePoint(rect: AnchorRect, side: unknown): AnchorPoint | undefined {
     case "right": point = { x: rect.x + rect.width, y: rect.y + rect.height / 2 }; break;
     case "bottom": point = { x: rect.x + rect.width / 2, y: rect.y + rect.height }; break;
     case "left": point = { x: rect.x, y: rect.y + rect.height / 2 }; break;
+  }
+  if (outline !== undefined && rect.width > 0 && rect.height > 0) {
+    const local = contourPoint(outline, {
+      x: ((point.x - rect.x) / rect.width) * 100,
+      y: ((point.y - rect.y) / rect.height) * 100,
+    });
+    point = { x: rect.x + (local.x / 100) * rect.width, y: rect.y + (local.y / 100) * rect.height };
   }
   if (rect.rotation === undefined || rect.rotation === 0) return point;
   const cx = rect.rotationCenterX ?? rect.x + rect.width / 2;
@@ -440,7 +458,9 @@ export function buildCanvasAnchorGeometry(document: unknown, measurements?: Node
         return undefined;
       }
       const rect = nodes[nodeId];
-      return rect === undefined ? undefined : sidePoint(rect, side);
+      return rect === undefined
+        ? undefined
+        : sidePoint(rect, side, shapeOutline(sourceScene.items.get(nodeId)?.shape));
     };
     const start = endpoint("from");
     const end = endpoint("to");

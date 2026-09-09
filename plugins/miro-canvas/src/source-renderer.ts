@@ -1,4 +1,5 @@
 import { buildCanvasAnchorGeometry, type NodeMeasurements } from "./connector-endpoints";
+import { SHAPE_CLIP_PATHS, inscribedInsets, shapeOutline } from "./shape-geometry";
 import type { AnchorEdgeGeometry, AnchorPoint } from "./anchors";
 import { readCanvasElementId } from "./canvas-elements";
 import { buildSourceScene, type SourceItemDescriptor, type SourceScene } from "./source-model";
@@ -57,28 +58,6 @@ const CONNECTOR_ATTRIBUTE_CSS: Readonly<Record<string, string>> = Object.freeze(
   "stroke-opacity": "stroke-opacity",
 });
 
-const SHAPE_CLIP_PATHS: Readonly<Record<string, string>> = Object.freeze({
-  triangle: "polygon(50% 0%, 100% 100%, 0% 100%)",
-  rhombus: "polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%)",
-  diamond: "polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%)",
-  parallelogram: "polygon(18% 0%, 100% 0%, 82% 100%, 0% 100%)",
-  trapezoid: "polygon(18% 0%, 82% 0%, 100% 100%, 0% 100%)",
-  pentagon: "polygon(50% 0%, 100% 38%, 82% 100%, 18% 100%, 0% 38%)",
-  hexagon: "polygon(25% 0%, 75% 0%, 100% 50%, 75% 100%, 25% 100%, 0% 50%)",
-  octagon: "polygon(30% 0%, 70% 0%, 100% 30%, 100% 70%, 70% 100%, 30% 100%, 0% 70%, 0% 30%)",
-  star: "polygon(50% 0%, 61% 35%, 98% 35%, 68% 57%, 79% 94%, 50% 72%, 21% 94%, 32% 57%, 2% 35%, 39% 35%)",
-  cross: "polygon(35% 0%, 65% 0%, 65% 35%, 100% 35%, 100% 65%, 65% 65%, 65% 100%, 35% 100%, 35% 65%, 0% 65%, 0% 35%, 35% 35%)",
-  right_arrow: "polygon(0% 25%, 65% 25%, 65% 0%, 100% 50%, 65% 100%, 65% 75%, 0% 75%)",
-  left_arrow: "polygon(35% 0%, 35% 25%, 100% 25%, 100% 75%, 35% 75%, 35% 100%, 0% 50%)",
-  left_right_arrow: "polygon(20% 0%, 20% 25%, 80% 25%, 80% 0%, 100% 50%, 80% 100%, 80% 75%, 20% 75%, 20% 100%, 0% 50%)",
-  flow_chart_input_output: "polygon(18% 0%, 100% 0%, 82% 100%, 0% 100%)",
-  flow_chart_decision: "polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%)",
-  flow_chart_manual_input: "polygon(12% 12%, 100% 0%, 100% 100%, 0% 100%)",
-  flow_chart_manual_operation: "polygon(12% 0%, 88% 0%, 100% 100%, 0% 100%)",
-  flow_chart_merge: "polygon(0% 0%, 100% 0%, 50% 100%)",
-  flow_chart_offpage_connector: "polygon(0% 0%, 100% 0%, 100% 72%, 50% 100%, 0% 72%)",
-  flow_chart_preparation: "polygon(20% 0%, 80% 0%, 100% 50%, 80% 100%, 20% 100%, 0% 50%)",
-});
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 let markerSequence = 0;
@@ -108,58 +87,6 @@ const SHAPE_PATHS: Readonly<Record<string, string>> = Object.freeze({
   flow_chart_terminator: "M25 0H75C108 0 108 100 75 100H25C-8 100 -8 0 25 0Z",
 });
 
-/**
- * Percentage insets that keep a node's text inside its contour.
- *
- * Native Canvas lays text out in the node's rectangle, so on a triangle or an
- * ellipse the words spill outside the drawn shape.  Miro reserves the same
- * space, and the values below are the fraction of the box each side gives up:
- * top, right, bottom, left.  A shape that is missing here is close enough to
- * its rectangle to need nothing.
- */
-const SHAPE_CONTENT_INSETS: Readonly<Record<string, readonly [number, number, number, number]>> = Object.freeze({
-  circle: [15, 15, 15, 15],
-  ellipse: [15, 15, 15, 15],
-  flow_chart_connector: [15, 15, 15, 15],
-  flow_chart_or: [15, 15, 15, 15],
-  flow_chart_summing_junction: [15, 15, 15, 15],
-  triangle: [30, 18, 4, 18],
-  rhombus: [22, 22, 22, 22],
-  star: [24, 22, 18, 22],
-  cloud: [22, 18, 20, 18],
-  parallelogram: [6, 18, 6, 18],
-  trapezoid: [6, 18, 6, 18],
-  pentagon: [18, 12, 8, 12],
-  hexagon: [8, 16, 8, 16],
-  octagon: [12, 12, 12, 12],
-  right_arrow: [6, 24, 6, 8],
-  left_arrow: [6, 8, 6, 24],
-  left_right_arrow: [6, 20, 6, 20],
-  left_brace: [6, 8, 6, 42],
-  right_brace: [6, 42, 6, 8],
-  can: [18, 6, 10, 6],
-  flow_chart_magnetic_disk: [18, 6, 10, 6],
-  flow_chart_magnetic_drum: [6, 20, 6, 8],
-  flow_chart_online_storage: [6, 12, 6, 16],
-  flow_chart_delay: [6, 20, 6, 6],
-  flow_chart_display: [6, 22, 6, 14],
-  flow_chart_document: [6, 6, 18, 6],
-  flow_chart_multidocuments: [10, 10, 20, 6],
-  flow_chart_decision: [22, 22, 22, 22],
-  flow_chart_input_output: [6, 18, 6, 18],
-  flow_chart_preparation: [6, 18, 6, 18],
-  flow_chart_manual_input: [16, 6, 6, 6],
-  flow_chart_manual_operation: [6, 16, 6, 16],
-  flow_chart_internal_storage: [16, 6, 6, 16],
-  flow_chart_predefined_process: [6, 16, 6, 16],
-  flow_chart_predefined_process_2: [16, 16, 16, 16],
-  flow_chart_offpage_connector: [6, 6, 18, 6],
-  flow_chart_note_square: [6, 14, 6, 14],
-  flow_chart_note_curly_left: [6, 8, 6, 42],
-  flow_chart_note_curly_right: [6, 42, 6, 8],
-  wedge_round_rectangle_callout: [6, 8, 22, 8],
-  cross: [26, 26, 26, 26],
-});
 
 function shapePath(shape: string | undefined): string | undefined {
   if (shape === undefined) return undefined;
@@ -703,6 +630,7 @@ function applyNode(
   descriptor: SourceItemDescriptor,
   patches: RestorePatch[],
   diagnostics: string[],
+  size?: { readonly width: number; readonly height: number },
 ): RenderedItem | undefined {
   const nodeEl = elementFor(runtime, ["nodeEl"]);
   const containerEl = elementFor(runtime, ["containerEl"]);
@@ -752,8 +680,19 @@ function applyNode(
 
   // Reserve the room the contour takes away, so the text stays inside it.
   if (descriptor.kind === "shape" && descriptor.shape !== undefined && layer !== undefined) {
-    const inset = SHAPE_CONTENT_INSETS[descriptor.shape];
-    if (inset !== undefined) {
+    // Measured from the silhouette the contour encloses, so a new shape needs
+    // no hand-tuned table and the text can never sit outside what is drawn.
+    const inset = inscribedInsets(shapeOutline(descriptor.shape));
+    // In pixels, not percentages: a percentage padding resolves against the
+    // width on every side, so a reserve meant for the height would be wrong on
+    // any node that is not square.
+    const reserve = inset === undefined || size === undefined
+      ? undefined
+      : [
+        (inset[0] / 100) * size.height, (inset[1] / 100) * size.width,
+        (inset[2] / 100) * size.height, (inset[3] / 100) * size.width,
+      ] as const;
+    if (reserve !== undefined && reserve.some((value) => value > 0)) {
       // The box is pinned first: padding on an auto-height content element
       // grows the node instead of insetting its text, which turns a modest
       // reserve into a shape several times the size the user drew.
@@ -761,7 +700,7 @@ function applyNode(
       patchStyle(content, "width", "100%", patches);
       patchStyle(content, "height", "100%", patches);
       patchStyle(content, "overflow", "hidden", patches);
-      patchStyle(content, "padding", inset.map((value) => `${value}%`).join(" "), patches);
+      patchStyle(content, "padding", reserve.map((value) => `${Math.round(value * 10) / 10}px`).join(" "), patches);
     }
   }
   applyNodeCss(descriptor, shell, content, layer, patches);
@@ -906,6 +845,18 @@ export class SourceRenderer {
     }
 
     const runtimeNodes = readCollection(this.host, "getNodes", diagnostics);
+    const documentSizes = new Map<string, { readonly width: number; readonly height: number }>();
+    const documentNodes = safeGet(sourceDocument, "nodes");
+    if (Array.isArray(documentNodes)) {
+      for (const node of documentNodes) {
+        const nodeId = safeGet(node, "id");
+        const width = safeGet(node, "width"), height = safeGet(node, "height");
+        if (typeof nodeId === "string" && typeof width === "number" && typeof height === "number"
+          && width > 0 && height > 0) {
+          documentSizes.set(nodeId, { width, height });
+        }
+      }
+    }
     // A connector must end on what the host drew, not on what the file says a
     // collapsed group would occupy if it were open.
     const geometry = buildCanvasAnchorGeometry(sourceDocument, measureNodes(sourceDocument, runtimeNodes, scene));
@@ -929,7 +880,7 @@ export class SourceRenderer {
             diagnostics.push(`node-runtime-missing: ${id}.`);
             continue;
           }
-          const item = applyNode(this.document, runtime, id, descriptor, nextPatches, diagnostics);
+          const item = applyNode(this.document, runtime, id, descriptor, nextPatches, diagnostics, documentSizes.get(id));
           if (item !== undefined) rendered.push(item);
         }
       }
