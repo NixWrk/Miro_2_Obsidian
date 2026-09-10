@@ -99,6 +99,8 @@ export interface M1SessionOptions {
 	readonly onStateChange?: (state: M1ControlsState) => void;
 	/** User preferences; defaults apply when the host supplies none. */
 	readonly settings?: MiroCanvasSettings;
+	/** Why persistence is unavailable, when the host could not build a store. */
+	readonly persistenceProblem?: string;
 	readonly onOpenCommentThread?: (threadId: string, origin: CommentOrigin) => void;
 }
 
@@ -116,6 +118,8 @@ export interface M1SessionSnapshot {
 
 type UnknownRecord = Record<string, unknown>;
 
+/** Pixels of slack around a node when a connection is released near it. */
+const CONNECT_REACH = 24;
 const PANEL_SELECTOR = ".miro-canvas-panel, .miro-canvas-toolbar, .miro-canvas-comment-markers, .miro-canvas-handles, .miro-canvas-minimap";
 const DEFAULT_TOOLBAR_FONT = "Inter";
 const DEFAULT_TOOLBAR_FONT_SIZE = 16;
@@ -564,6 +568,8 @@ export class M1CanvasSession {
 	private interactionBlock: string | undefined;
 	private rotationPreview: { readonly id: string; readonly rotation: number } | undefined;
 	private rotationGestureTarget: string | undefined;
+	/** What the last rotation gesture actually did, for the selection dump. */
+	private lastRotationAttempt = "none";
 	private lastToolbarSignature = "";
 	private minimapDragStart: MinimapPoint | undefined;
 	private minimapDragViewport: ViewportTransform | undefined;
@@ -668,17 +674,21 @@ export class M1CanvasSession {
 		}
 		this.readInteractionState();
 		if (!this.editAllowed("restyle", [id])) {
+			this.lastRotationAttempt = `write ${id} blocked by policy`;
 			this.refresh();
 			return undefined;
 		}
 		const rotation = normalizeAngle(degrees);
-		return this.writeMetadata("set-rotation", (draft) => {
+		this.lastRotationAttempt = `write ${id} ${Math.round(rotation)}`;
+		const written = this.writeMetadata("set-rotation", (draft) => {
 			const overrides: Record<string, unknown> = isRecord(draft.localOverrides) ? { ...draft.localOverrides } : {};
 			const override = isRecord(overrides[id]) ? { ...overrides[id] } : {};
 			override.rotation = rotation;
 			overrides[id] = override;
 			draft.localOverrides = overrides;
 		});
+		this.lastRotationAttempt = `write ${id} ${Math.round(rotation)} -> ${written?.status ?? "no writer"}`;
+		return written;
 	}
 
 	private previewRotation(id: string, degrees: number): void {
@@ -760,6 +770,7 @@ export class M1CanvasSession {
 	}
 
 	private nodeAtPoint(point: { readonly x: number; readonly y: number }, exclude: string | undefined): string | undefined {
+		let nearest: { readonly id: string; readonly distance: number } | undefined;
 		for (const element of this.adapter.getNodes() ?? []) {
 			const id = readCanvasElementId(element);
 			if (id === undefined || id === exclude) {
@@ -772,8 +783,18 @@ export class M1CanvasSession {
 			if (point.x >= rect.left && point.x <= rect.right && point.y >= rect.top && point.y <= rect.bottom) {
 				return id;
 			}
+			// Releasing a connection a few pixels outside a node is still an
+			// attempt to connect it, so the nearest node within a small reach
+			// wins rather than the gesture being refused.
+			const distance = Math.hypot(
+				Math.max(rect.left - point.x, 0, point.x - rect.right),
+				Math.max(rect.top - point.y, 0, point.y - rect.bottom),
+			);
+			if (distance <= CONNECT_REACH && (nearest === undefined || distance < nearest.distance)) {
+				nearest = { id, distance };
+			}
 		}
-		return undefined;
+		return nearest?.id;
 	}
 
 	/** Place a node beside the selection and connect it, in that order. */
@@ -840,6 +861,50 @@ export class M1CanvasSession {
 
 	public get snapshot(): M1SessionSnapshot {
 		return this.lastSnapshot;
+	}
+
+	/**
+	 * A compact dump of what the selection layers currently believe.
+	 *
+	 * Rotation and connector attachment are decided by several pieces at once -
+	 * the stored angle, the previewed one, the frame the handles draw, and the
+	 * anchors written for an edge - and a screenshot cannot tell which of them
+	 * disagrees.  This reports all of them together, including what the last
+	 * rotation gesture actually did, which is the difference between "blocked",
+	 * "refused" and "never ran".
+	 */
+	public describeSelection(): string {
+		const id = this.selectedIds[0];
+		if (id === undefined) {
+			return "No Canvas element is selected.";
+		}
+		const descriptor = buildSourceScene(this.currentRawDocument).items.get(id);
+		const overrides = readRuntime(readRuntime(this.currentRawDocument, "miroCanvas"), "localOverrides");
+		const override = readRuntime(overrides, id);
+		const handles = this.handlesState(true);
+		const edges = readRuntime(this.currentRawDocument, "edges");
+		const attached = (Array.isArray(edges) ? edges as readonly unknown[] : []).filter((edge) =>
+			readRuntime(edge, "fromNode") === id || readRuntime(edge, "toNode") === id);
+		return [
+			`id=${id}`,
+			`kind=${descriptor?.kind ?? "none"}`,
+			`shape=${descriptor?.shape ?? "none"}`,
+			`storedRotation=${finite(readRuntime(override, "rotation")) ?? "none"}`,
+			`projectedRotation=${descriptor?.rotation ?? "none"}`,
+			`previewRotation=${this.rotationPreview?.id === id ? this.rotationPreview.rotation : "none"}`,
+			`handleRotation=${handles.rotation}`,
+			`handleRect=${handles.rect === undefined
+				? "none"
+				: `${Math.round(handles.rect.left)},${Math.round(handles.rect.top)} ${Math.round(handles.rect.width)}x${Math.round(handles.rect.height)}`}`,
+			`lastRotation=${this.lastRotationAttempt}`,
+			`edges=${attached.length}`,
+			`anchors=${attached.map((edge) => {
+				const edgeId = readRuntime(edge, "id");
+				if (typeof edgeId !== "string") return "?:unknown";
+				const anchors = readRuntime(readRuntime(overrides, edgeId), "connectorAnchors");
+				return `${edgeId}:${anchors === undefined ? "side" : "anchored"}`;
+			}).join(",") || "none"}`,
+		].join("  ");
 	}
 
 	/**
@@ -1016,7 +1081,12 @@ export class M1CanvasSession {
 			}
 		}
 		if (this.writer === null) {
-			diagnostics.push("Metadata persistence is unavailable; explicit appearance and safety writes are disabled. Run \"Miro Canvas: Show plugin status\" to see which runtime member is missing.");
+			// Naming the missing member here saves a trip through another
+			// command: without persistence nothing this plugin writes can work,
+			// including locking, so this is the first thing worth knowing.
+			diagnostics.push(this.options.persistenceProblem === undefined
+				? "Metadata persistence is unavailable; explicit appearance and safety writes are disabled."
+				: `Metadata persistence is unavailable, so appearance, locking and every other write is disabled: ${this.options.persistenceProblem}`);
 		}
 		const selection = this.adapter.getSelection();
 		this.selectedIds = selection === undefined ? [] : allIds(selection);

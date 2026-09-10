@@ -85,7 +85,7 @@ function byLabel(root: FakeElement, label: string): FakeElement {
 
 const RECT = { left: 100, top: 100, width: 200, height: 100 };
 
-function build(overrides: Partial<SelectionHandlesState> = {}) {
+function build(overrides: Partial<SelectionHandlesState> = {}, options: Record<string, unknown> = {}) {
   const rotations: Array<{ degrees: number; commit: boolean }> = [];
   let cancellations = 0;
   const connects: Array<{ sourceId: string; side: HandleSide; position: HandlePosition; point: { x: number; y: number } }> = [];
@@ -95,7 +95,7 @@ function build(overrides: Partial<SelectionHandlesState> = {}) {
     onCancelRotation: () => { cancellations += 1; },
     onConnect: (sourceId, side, position, point) => { connects.push({ sourceId, side, position, point: { x: point.x, y: point.y } }); },
     onCreateConnected: (sourceId, side, position) => { creates.push({ sourceId, side, position }); },
-  }, { document: new FakeDocument() as unknown as Document });
+  }, { document: new FakeDocument() as unknown as Document, ...options });
   const base: SelectionHandlesState = {
     rect: RECT, rotation: 0, editable: true, isEdge: false, selectedIds: ["n1"], ...overrides,
   };
@@ -276,6 +276,15 @@ describe("selection handles", () => {
     const point = bySide(root, "right");
     expect(Number.parseFloat(point.style.left)).toBeLessThan(100);
     expect(Number.parseFloat(point.style.left)).toBeGreaterThan(50);
+  });
+
+  it("pulls a connection from a held point even when it never moved", () => {
+    const { root, creates, connects, handles } = build({}, { holdMilliseconds: 0 });
+    bySide(root, "right").dispatch("pointerdown", { clientX: 300, clientY: 150, pointerId: 21 });
+    handles.handlePointerUp({ clientX: 300, clientY: 150 });
+    // Holding is how a connection is pulled, so this is not a tap.
+    expect(creates).toEqual([]);
+    expect(connects).toHaveLength(1);
   });
 
   it("removes its listeners on dispose", () => {

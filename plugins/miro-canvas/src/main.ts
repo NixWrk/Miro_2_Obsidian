@@ -185,6 +185,17 @@ export default class MiroCanvasPlugin extends Plugin {
     }
 
     this.addCommand({
+      id: "m1-describe-selection",
+      name: "Miro Canvas: Describe the selected element",
+      checkCallback: (checking) => this.runM1Command(checking, (session) => {
+        const description = session.describeSelection();
+        // A notice can be copied out of, which a panel line cannot.
+        new Notice(description, 20000);
+        console.info(`[miro-canvas] ${description}`);
+      }),
+    });
+
+    this.addCommand({
       id: "m1-toggle-attachment-names",
       name: "Miro Canvas: Toggle attachment names",
       checkCallback: (checking) => this.runM1Command(checking, (session) => session.toggleAttachmentNames()),
@@ -276,6 +287,10 @@ export default class MiroCanvasPlugin extends Plugin {
         if (session !== null) this.openLocalTools(session, { threadId, origin });
       },
       settings: this.canvasSettings,
+      ...(this.metadataStoreProbe?.store !== undefined ? {} : {
+        persistenceProblem: this.metadataStoreProbe?.diagnostics
+          .map((item) => item.message).join(" ") || "no native Canvas runtime was found.",
+      }),
     });
     const mounted = this.m1Session.mount();
     this.updateStatus(true);
