@@ -580,3 +580,21 @@ describe("rotation and a node the host is moving", () => {
     expect(f.nodeEl.values.get("transform")).toBe("translate(300px, 400px) rotate(24deg)");
   });
 });
+
+describe("the point a node turns about", () => {
+  it("asserts the node's own centre over a host that holds the origin elsewhere", () => {
+    const f = fixture("rectangle");
+    const data = f.data;
+    data.miroCanvas = { schemaVersion: 1, settings: {}, localOverrides: { a: { rotation: 24 } } };
+    f.data = data;
+    // A host that pins the origin to a corner would swing the node away from
+    // where its geometry says it is.
+    f.nodeEl.style.setProperty("transform-origin", "0 0", "important");
+    f.renderer.refresh();
+    expect(f.nodeEl.values.get("transform-origin")).toBe("50% 50%");
+    expect(f.nodeEl.priorities.get("transform-origin")).toBe("important");
+    f.renderer.dispose();
+    expect(f.nodeEl.values.get("transform-origin")).toBe("0 0");
+    expect(f.nodeEl.priorities.get("transform-origin")).toBe("important");
+  });
+});

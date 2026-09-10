@@ -923,7 +923,9 @@ export class M1CanvasSession {
 						return "?";
 					}
 				};
-				return dom === undefined ? "no dom" : `rotate:${read("rotate")} transform:${read("transform")}`;
+				return dom === undefined
+					? "no dom"
+					: `rotate:${read("rotate")} origin:${read("transform-origin")} transform:${read("transform")}`;
 			})()}`,
 			`frameCentre=${handles.rect === undefined
 				? "none"

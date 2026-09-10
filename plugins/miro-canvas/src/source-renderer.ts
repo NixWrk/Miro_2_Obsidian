@@ -470,11 +470,53 @@ function strippedRotation(value: string): string {
   return trimmed.replace(/\s*rotate\([^()]*\)\s*$/u, "").trim();
 }
 
-function applyElementRotation(element: DomElementLike, rotation: number, patches: RestorePatch[]): boolean {
+/**
+ * Write a declaration that must win over the host's own rule.
+ *
+ * An ordinary inline write loses to a host stylesheet rule marked important,
+ * and losing that contest for the rotation centre puts the node somewhere its
+ * geometry does not describe.  This one declaration therefore carries the same
+ * weight, and restores the host's value and priority exactly.
+ */
+function setStyleWithPriority(
+  element: DomElementLike, property: string, value: string, patches: RestorePatch[],
+): boolean {
+  const before = readStyle(element, property);
+  const beforePriority = readStylePriority(element, property) ?? "";
+  if (before === undefined) return false;
+  if (before === value && beforePriority === "important") return true;
+  if (!setStyleRaw(element, property, value, "important")) return false;
+  patches.push(() => {
+    if (readStyle(element, property) !== value) return;
+    if (before.length === 0) {
+      const style = styleObject(element);
+      if (style !== undefined) safeCall(style, "removeProperty", [property]);
+      return;
+    }
+    setStyleRaw(element, property, before, beforePriority);
+  });
+  return true;
+}
+
+function applyElementRotation(
+  element: DomElementLike,
+  rotation: number,
+  patches: RestorePatch[],
+  /** Collects elements whose rotation centre the host would not let go of. */
+  originRefused: DomElementLike[] = [],
+): boolean {
   if (!Number.isFinite(rotation) || rotation === 0) return false;
   clearLegacyOwnedTransformRotation(element, patches);
   const owned = (): boolean => {
-    patchStyle(element, "transform-origin", "50% 50%", patches);
+    // A node must turn about its own centre.  The host may hold the origin at
+    // a corner for its own positioning, and a rotation about a corner swings
+    // the node away from where its geometry says it is - which is what made
+    // the picture and the model disagree.  The centre is asserted with the
+    // priority an author rule carries, and a host that still refuses it is
+    // named rather than left to rotate about the wrong point.
+    if (!setStyleWithPriority(element, "transform-origin", "50% 50%", patches)) {
+      originRefused.push(element);
+    }
     patchAttribute(element, OWNED_ROTATION_ATTRIBUTE, String(rotation), patches);
     return true;
   };
@@ -520,9 +562,13 @@ function applyInteractionRotation(runtime: unknown, primary: DomElementLike, rot
 
 function applyRotation(runtime: unknown, primary: DomElementLike, rotation: number, patches: RestorePatch[], diagnostics: string[], id: string): boolean {
   if (!Number.isFinite(rotation) || rotation === 0) return false;
-  if (!applyElementRotation(primary, rotation, patches)) {
+  const originRefused: DomElementLike[] = [];
+  if (!applyElementRotation(primary, rotation, patches, originRefused)) {
     diagnostics.push(`rotation-dom-inaccessible: ${id}.`);
     return false;
+  }
+  if (originRefused.includes(primary)) {
+    diagnostics.push(`rotation-centre-unavailable: ${id} turns about the point its host chose.`);
   }
   applyInteractionRotation(runtime, primary, rotation, patches);
   return true;
