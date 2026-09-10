@@ -87,10 +87,12 @@ const RECT = { left: 100, top: 100, width: 200, height: 100 };
 
 function build(overrides: Partial<SelectionHandlesState> = {}) {
   const rotations: Array<{ degrees: number; commit: boolean }> = [];
+  let cancellations = 0;
   const connects: Array<{ side: HandleSide; position: HandlePosition; point: { x: number; y: number } }> = [];
   const creates: Array<{ side: HandleSide; position: HandlePosition }> = [];
   const handles = new SelectionHandles({
     onRotate: (degrees, commit) => { rotations.push({ degrees, commit }); },
+    onCancelRotation: () => { cancellations += 1; },
     onConnect: (side, position, point) => { connects.push({ side, position, point: { x: point.x, y: point.y } }); },
     onCreateConnected: (side, position) => { creates.push({ side, position }); },
   }, { document: new FakeDocument() as unknown as Document });
@@ -99,7 +101,7 @@ function build(overrides: Partial<SelectionHandlesState> = {}) {
   };
   const update = (patch: Partial<SelectionHandlesState> = {}): void => handles.update({ ...base, ...patch });
   update();
-  return { handles, root: handles.element as unknown as FakeElement, rotations, connects, creates, update };
+  return { handles, root: handles.element as unknown as FakeElement, rotations, connects, creates, update, cancellations: () => cancellations };
 }
 
 describe("selection handle geometry", () => {
@@ -186,12 +188,13 @@ describe("selection handles", () => {
     expect(Number.isInteger(rotations[0]!.degrees / 15)).toBe(true);
   });
 
-  it("restores the committed rotation when a gesture is cancelled", () => {
-    const { root, rotations, handles } = build({ rotation: 20 });
+  it("cancels a preview without committing it", () => {
+    const { root, rotations, handles, cancellations } = build({ rotation: 20 });
     byLabel(root, "Rotate").dispatch("pointerdown", { clientX: 200, clientY: 250, pointerId: 1 });
     handles.handlePointerMove({ clientX: 400, clientY: 150 });
     handles.cancelGesture();
-    expect(rotations[rotations.length - 1]).toEqual({ degrees: 20, commit: true });
+    expect(rotations.filter((item) => item.commit)).toEqual([]);
+    expect(cancellations()).toBe(1);
   });
 
   it("reports a connection pulled from a side to its release point", () => {
@@ -244,6 +247,28 @@ describe("selection handles", () => {
     handles.cancelGesture();
     update({ rect: { left: 900, top: 900, width: 10, height: 10 } });
     expect(frame.style.left).toBe("900px");
+  });
+
+  it("keeps gesture geometry, follows preview rotation, and commits once", () => {
+    const { root, rotations, update, handles } = build({ rotation: 20 });
+    const frame = root.children[0]!;
+    byLabel(root, "Rotate").dispatch("pointerdown", { clientX: 200, clientY: 250, pointerId: 13 });
+    handles.handlePointerMove({ clientX: 400, clientY: 150 });
+    update({ rect: undefined, selectedIds: [], rotation: 33 });
+    expect(frame.style.left).toBe("100px");
+    expect(frame.style.transform).toBe("rotate(33deg)");
+    handles.handlePointerUp({ clientX: 400, clientY: 150 });
+    expect(rotations.filter((item) => item.commit)).toHaveLength(1);
+  });
+
+  it("places all three connection points on the visible shape contour", () => {
+    const { root, update } = build();
+    update({ shape: "triangle" });
+    for (const position of [0.25, 0.5, 0.75] as const) {
+      const point = bySide(root, "right", position);
+      expect(Number.parseFloat(point.style.left)).toBeLessThan(100);
+      expect(Number.parseFloat(point.style.left)).toBeGreaterThan(50);
+    }
   });
 
   it("removes its listeners on dispose", () => {

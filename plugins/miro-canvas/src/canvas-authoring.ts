@@ -339,12 +339,15 @@ function isFiniteNumber(value: unknown): value is number {
 	return typeof value === "number" && Number.isFinite(value);
 }
 
+const OMIT = Symbol("omit");
+
 function cloneJson(
 	value: unknown,
 	seen = new Set<object>(),
 	path = "document",
 	state: { items: number } = { items: 0 },
 	depth = 0,
+	lenient = false,
 ): unknown {
 	state.items += 1;
 	if (state.items > MAX_DOCUMENT_ITEMS) {
@@ -354,6 +357,11 @@ function cloneJson(
 		throw new SnapshotError(`document depth limit exceeded at ${path}`);
 	}
 	if (value === null || typeof value !== "object") {
+		if (lenient) {
+			if (value === undefined || typeof value === "function" || typeof value === "symbol") return OMIT;
+			if (typeof value === "bigint") throw new SnapshotError(`non-JSON value at ${path}`);
+			return typeof value === "number" && !Number.isFinite(value) ? null : value;
+		}
 		if (value === undefined || typeof value === "function" || typeof value === "symbol" || typeof value === "bigint") {
 			throw new SnapshotError(`non-JSON value at ${path}`);
 		}
@@ -382,24 +390,29 @@ function cloneJson(
 			const result: unknown[] = [];
 			for (let index = 0; index < length.value; index += 1) {
 				if (!hasOwn(array, String(index))) {
+					if (lenient) {
+						result.push(null);
+						continue;
+					}
 					throw new SnapshotError(`sparse array at ${path}[${index}]`);
 				}
 				const item = safeRead(array, index);
 				if (!item.ok) {
 					throw new SnapshotError(`array item read failed at ${path}[${index}]`);
 				}
-				result.push(cloneJson(item.value, seen, `${path}[${index}]`, state, depth + 1));
+				const cloned = cloneJson(item.value, seen, `${path}[${index}]`, state, depth + 1, lenient);
+				result.push(cloned === OMIT ? null : cloned);
 			}
-			const keys = ownKeys(value as AnyRecord);
-			if (keys === undefined || keys.some((key) => key !== "length" && !/^\d+$/.test(key))) {
+			const keys = lenient ? (() => { try { return Object.keys(value); } catch { return undefined; } })() : ownKeys(value as AnyRecord);
+			if (keys === undefined || (!lenient && keys.some((key) => key !== "length" && !/^\d+$/.test(key)))) {
 				throw new SnapshotError(`invalid array fields at ${path}`);
 			}
 			return result;
 		}
-		if (!isPlainObject(value)) {
+		if (!lenient && !isPlainObject(value)) {
 			throw new SnapshotError(`non-plain object at ${path}`);
 		}
-		const keys = ownKeys(value);
+		const keys = lenient ? (() => { try { return Object.keys(value); } catch { return undefined; } })() : ownKeys(value as AnyRecord);
 		if (keys === undefined) {
 			throw new SnapshotError(`object enumeration failed at ${path}`);
 		}
@@ -409,10 +422,12 @@ function cloneJson(
 			if (!item.ok) {
 				throw new SnapshotError(`property read failed at ${path}.${key}`);
 			}
+			const cloned = cloneJson(item.value, seen, `${path}.${key}`, state, depth + 1, lenient);
+			if (cloned === OMIT) continue;
 			Object.defineProperty(result, key, {
 				configurable: true,
 				enumerable: true,
-				value: cloneJson(item.value, seen, `${path}.${key}`, state, depth + 1),
+				value: cloned,
 				writable: true,
 			});
 		}
@@ -420,6 +435,14 @@ function cloneJson(
 	} finally {
 		seen.delete(value);
 	}
+}
+
+function normalizeRecord(value: unknown): UnknownRecord {
+	const result = cloneJson(value, new Set<object>(), "document", { items: 0 }, 0, true);
+	if (result === OMIT || !isPlainObject(result)) {
+		throw new SnapshotError("Canvas document root must be an object");
+	}
+	return result as UnknownRecord;
 }
 
 function cloneRecord(value: unknown): UnknownRecord {
@@ -488,7 +511,7 @@ function readRequiredString(record: UnknownRecord, key: string): string | undefi
 }
 
 function validateGraphDocument(value: unknown): InternalSnapshot {
-	const document = cloneRecord(value);
+	const document = normalizeRecord(value);
 	const nodesValue = safeRead(document, "nodes");
 	const edgesValue = safeRead(document, "edges");
 	if (!nodesValue.ok || !edgesValue.ok || !Array.isArray(nodesValue.value) || !Array.isArray(edgesValue.value)) {

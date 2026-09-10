@@ -820,3 +820,27 @@ describe("connector creation", () => {
 	});
 });
 
+describe("host JSON normalization", () => {
+	it("accepts optional values that native Canvas leaves undefined", () => {
+		class UndefinedFieldGraph extends NativeGraph {
+			public override getData(): Record<string, unknown> {
+				const document = super.getData();
+				const nodes = document.nodes as Record<string, unknown>[];
+				nodes[0]!.subpath = undefined;
+				return document;
+			}
+		}
+		const graph = new UndefinedFieldGraph({
+			nodes: [
+				{ id: "a", type: "file", file: "note.md", x: 0, y: 0, width: 100, height: 80 },
+				{ id: "b", type: "text", text: "b", x: 300, y: 0, width: 100, height: 80 },
+			],
+			edges: [],
+		});
+		const authoring = createCanvasAuthoring({ canvas: graph });
+		expect(authoring.probe().status).toBe("ready");
+		expect(authoring.createConnector({ fromNode: "a", toNode: "b" }).status).toBe("applied");
+		expect(graph.requestSaveSpy).toHaveBeenCalledWith(true);
+	});
+});
+

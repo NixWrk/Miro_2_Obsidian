@@ -10,6 +10,7 @@ export interface SourceRendererHost {
   getDocument(): unknown | undefined;
   getNodes(): readonly unknown[] | undefined;
   getEdges(): readonly unknown[] | undefined;
+  getRotationPreview?(): { readonly id: string; readonly rotation: number } | undefined;
 }
 
 interface DomElementLike extends UnknownRecord {
@@ -20,6 +21,9 @@ interface RenderedItem {
   readonly id: string;
   readonly kind: "node" | "edge";
   readonly element: DomElementLike;
+  readonly marker: DomElementLike;
+  readonly ownedChildren?: readonly DomElementLike[];
+  readonly expectedRotation?: number;
   readonly descriptor: SourceItemDescriptor;
 }
 
@@ -541,6 +545,15 @@ function measureNodes(document: unknown, runtimeNodes: readonly unknown[], scene
   return measurements;
 }
 
+function safeSignature(value: unknown): string | undefined {
+  try {
+    return JSON.stringify(value, (_key, item: unknown) =>
+      typeof item === "number" && Number.isFinite(item) ? Math.round(item * 100) / 100 : item);
+  } catch {
+    return undefined;
+  }
+}
+
 function queryAll(element: DomElementLike, selector: string): DomElementLike[] {
   const values = safeCall(element, "querySelectorAll", [selector]);
   if (!isObject(values)) return [];
@@ -678,7 +691,7 @@ function applyConnector(
     }
   }
   renderConnectorGeometry(document, runtime, descriptor, geometry, native, patches, diagnostics, id);
-  return { id, kind: "edge", element: primary, descriptor };
+  return { id, kind: "edge", element: primary, marker: primary, descriptor };
 }
 
 function applyNode(
@@ -689,6 +702,7 @@ function applyNode(
   patches: RestorePatch[],
   diagnostics: string[],
   size?: { readonly width: number; readonly height: number },
+  previewRotation?: number,
 ): RenderedItem | undefined {
   const nodeEl = elementFor(runtime, ["nodeEl"]);
   const containerEl = elementFor(runtime, ["containerEl"]);
@@ -826,23 +840,18 @@ function applyNode(
       patchStyle(element, "box-shadow", "none", patches);
     }
   }
-  // Rotation is applied to the inner container because native Canvas owns the
-  // shell's own transform and rewrites it while panning.  The shell therefore
-  // stays axis-aligned, so its paint would show as an unrotated rectangle
-  // behind the rotated node unless it steps aside.
-  if (Number.isFinite(descriptor.rotation) && descriptor.rotation !== 0) {
+  const rotation = previewRotation ?? descriptor.rotation;
+  if (Number.isFinite(rotation) && rotation !== 0) {
     // Marks the node for the stylesheet: which descendant actually paints the
     // native rectangle differs between Obsidian builds, so clearing the few
     // elements this module can name is not enough on its own.
     patchAttribute(shell, "data-miro-source-rotated", "true", patches);
   }
-  if (Number.isFinite(descriptor.rotation) && descriptor.rotation !== 0 && primary !== shell) {
-    patchStyle(shell, "background-color", "transparent", patches);
-    patchStyle(shell, "border-color", "transparent", patches);
-    patchStyle(shell, "box-shadow", "none", patches);
-  }
-  applyRotation(runtime, primary, descriptor.rotation, patches, diagnostics, id);
-  return { id, kind: "node", element: primary, descriptor };
+  // The outer shell owns the complete painted node. Rotating an inner
+  // container leaves native paint behind as an upright rectangle.
+  applyRotation(runtime, shell, rotation, patches, diagnostics, id);
+  const ownedChildren = [layer, tagLayer].filter((item): item is DomElementLike => item !== undefined);
+  return { id, kind: "node", element: primary, marker: shell, ownedChildren, expectedRotation: rotation, descriptor };
 }
 
 function itemById(values: readonly unknown[]): ReadonlyMap<string, unknown> {
@@ -909,6 +918,8 @@ function applyOrdering(scene: SourceScene, items: readonly RenderedItem[], patch
  */
 export class SourceRenderer {
   private patches: RestorePatch[] = [];
+  private lastSignature: string | undefined;
+  private renderedItems: RenderedItem[] = [];
   private diagnosticList: readonly string[] = [];
   private readonly document: Document | undefined;
 
@@ -921,13 +932,13 @@ export class SourceRenderer {
   }
 
   public refresh(): readonly string[] {
-    this.restoreOwnedPatches();
     const diagnostics: string[] = [];
     const sourceDocument = safeCall(this.host, "getDocument");
     let scene: SourceScene;
     try {
       scene = buildSourceScene(sourceDocument);
     } catch {
+      this.resetRenderedState();
       this.diagnosticList = Object.freeze(["source-scene-build-failed: source metadata could not be projected safely."]);
       return this.diagnosticList;
     }
@@ -948,12 +959,23 @@ export class SourceRenderer {
         descriptors.set(id, { kind: "connector", rotation: 0, css: {} });
       }
     }
+    const previewValue = safeCall(this.host, "getRotationPreview");
+    const previewId = safeGet(previewValue, "id");
+    const previewAngle = safeGet(previewValue, "rotation");
+    const preview = typeof previewId === "string" && typeof previewAngle === "number" && Number.isFinite(previewAngle)
+      ? { id: previewId, rotation: previewAngle }
+      : undefined;
+    if (preview !== undefined && !descriptors.has(preview.id)) {
+      descriptors.set(preview.id, { kind: "text", rotation: preview.rotation, css: {} });
+    }
     if (descriptors.size === 0) {
+      this.resetRenderedState();
       this.diagnosticList = Object.freeze(diagnostics);
       return this.diagnosticList;
     }
 
     const runtimeNodes = readCollection(this.host, "getNodes", diagnostics);
+    const runtimeEdges = readCollection(this.host, "getEdges", diagnostics);
     const documentSizes = new Map<string, { readonly width: number; readonly height: number }>();
     const documentNodes = safeGet(sourceDocument, "nodes");
     if (Array.isArray(documentNodes)) {
@@ -969,8 +991,15 @@ export class SourceRenderer {
     // A connector must end on what the host drew, not on what the file says a
     // collapsed group would occupy if it were open.
     const geometry = buildCanvasAnchorGeometry(sourceDocument, measureNodes(sourceDocument, runtimeNodes, scene));
+    const signature = safeSignature({ descriptors: [...descriptors], order: scene.order, preview, geometry, diagnostics });
+    if (signature !== undefined && signature === this.lastSignature && this.decorationsIntact(descriptors.size)) {
+      return this.diagnosticList;
+    }
+    this.restoreOwnedPatches();
+    this.renderedItems = [];
+    this.lastSignature = signature;
     const nodes = itemById(runtimeNodes);
-    const edges = itemById(readCollection(this.host, "getEdges", diagnostics));
+    const edges = itemById(runtimeEdges);
     const nextPatches: RestorePatch[] = [];
     const rendered: RenderedItem[] = [];
     try {
@@ -989,26 +1018,60 @@ export class SourceRenderer {
             diagnostics.push(`node-runtime-missing: ${id}.`);
             continue;
           }
-          const item = applyNode(this.document, runtime, id, descriptor, nextPatches, diagnostics, documentSizes.get(id));
+          const item = applyNode(
+            this.document,
+            runtime,
+            id,
+            descriptor,
+            nextPatches,
+            diagnostics,
+            documentSizes.get(id),
+            preview?.id === id ? preview.rotation : undefined,
+          );
           if (item !== undefined) rendered.push(item);
         }
       }
       applyOrdering(scene, rendered, nextPatches, diagnostics);
       this.patches = nextPatches;
+      this.renderedItems = rendered;
     } catch {
       for (let index = nextPatches.length - 1; index >= 0; index -= 1) {
         try { nextPatches[index]!(); } catch { /* fail closed */ }
       }
       diagnostics.push("source-render-failed: DOM decoration aborted safely.");
       this.patches = [];
+      this.renderedItems = [];
+      this.lastSignature = undefined;
     }
     this.diagnosticList = Object.freeze(diagnostics);
     return this.diagnosticList;
   }
 
   public dispose(): void {
-    this.restoreOwnedPatches();
+    this.resetRenderedState();
     this.diagnosticList = Object.freeze([]);
+  }
+
+  private decorationsIntact(expectedItems: number): boolean {
+    if (this.renderedItems.length !== expectedItems) return false;
+    for (const item of this.renderedItems) {
+      const marker = safeCall(item.marker, "getAttribute", ["data-miro-source-kind"]);
+      if (safeGet(item.marker, "isConnected") === false || typeof marker !== "string") return false;
+      if (item.expectedRotation !== undefined && item.expectedRotation !== 0) {
+        const transform = readStyle(item.marker, "transform");
+        if (transform === undefined || !transform.trim().endsWith(`rotate(${item.expectedRotation}deg)`)) return false;
+      }
+      for (const child of item.ownedChildren ?? []) {
+        if (safeGet(child, "parentNode") !== item.marker) return false;
+      }
+    }
+    return true;
+  }
+
+  private resetRenderedState(): void {
+    this.restoreOwnedPatches();
+    this.renderedItems = [];
+    this.lastSignature = undefined;
   }
 
   private restoreOwnedPatches(): void {

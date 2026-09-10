@@ -49,8 +49,20 @@ function fixture(shape = "triangle", routing = "straight") {
   path.setAttribute("d", "M 100 40 L 300 240"); path.style.setProperty("stroke", "native-stroke", "important");
   hit.setAttribute("d", "M 100 40 L 300 240"); hit.classList.add("canvas-interaction-path"); hit.style.setProperty("stroke-width", "24");
   lineGroupEl.appendChild(path); lineGroupEl.appendChild(hit);
-  const renderer = new SourceRenderer({ getDocument: () => data, getNodes: () => [{ id: "a", nodeEl, contentEl }], getEdges: () => [{ id: "e", edgeEl, lineGroupEl, lineEndGroupEl }] }, dom);
-  return { renderer, nodeEl, contentEl, path, hit, lineGroupEl, lineEndGroupEl, get data() { return data; }, set data(value: any) { data = value; } };
+  let preview: { id: string; rotation: number } | undefined;
+  let nodesVisible = true;
+  const renderer = new SourceRenderer({
+    getDocument: () => data,
+    getNodes: () => nodesVisible ? [{ id: "a", nodeEl, contentEl }] : [],
+    getEdges: () => [{ id: "e", edgeEl, lineGroupEl, lineEndGroupEl }],
+    getRotationPreview: () => preview,
+  }, dom);
+  return {
+    renderer, nodeEl, contentEl, path, hit, lineGroupEl, lineEndGroupEl,
+    get data() { return data; }, set data(value: any) { data = value; },
+    get preview() { return preview; }, set preview(value: { id: string; rotation: number } | undefined) { preview = value; },
+    get nodesVisible() { return nodesVisible; }, set nodesVisible(value: boolean) { nodesVisible = value; },
+  };
 }
 
 describe("reversible source geometry DOM", () => {
@@ -163,15 +175,78 @@ describe("shape text insets", () => {
 });
 
 describe("native paint markers", () => {
-  it("marks a rotated node so its unrotated shell stops painting", () => {
+  it("rotates the complete node shell and restores the host transform", () => {
     const f = fixture("rectangle");
+    f.nodeEl.style.setProperty("transform", "translate(10px, 20px)");
     const data = f.data;
     data.miroCanvas = { schemaVersion: 1, settings: {}, localOverrides: { a: { rotation: 24 } } };
     f.data = data;
     f.renderer.refresh();
     expect(f.nodeEl.getAttribute("data-miro-source-rotated")).toBe("true");
+    expect(f.nodeEl.style.getPropertyValue("transform")).toBe("translate(10px, 20px) rotate(24deg)");
+    expect(f.contentEl.style.getPropertyValue("transform")).toBe("");
     f.renderer.dispose();
     expect(f.nodeEl.getAttribute("data-miro-source-rotated")).toBe(null);
+    expect(f.nodeEl.style.getPropertyValue("transform")).toBe("translate(10px, 20px)");
+  });
+
+  it("uses the renderer as the single writer for rotation previews", () => {
+    const f = fixture("rectangle");
+    f.data.miroCanvas = { schemaVersion: 1, settings: {}, localOverrides: { a: { rotation: 10 } } };
+    f.renderer.refresh();
+    expect(f.nodeEl.style.getPropertyValue("transform")).toContain("rotate(10deg)");
+    f.preview = { id: "a", rotation: 55 };
+    f.renderer.refresh();
+    expect(f.nodeEl.style.getPropertyValue("transform")).toContain("rotate(55deg)");
+    f.preview = undefined;
+    f.renderer.refresh();
+    expect(f.nodeEl.style.getPropertyValue("transform")).toContain("rotate(10deg)");
+  });
+
+  it("reapplies rotation after the host rewrites its transform", () => {
+    const f = fixture("rectangle");
+    f.data.miroCanvas = { schemaVersion: 1, settings: {}, localOverrides: { a: { rotation: 24 } } };
+    f.nodeEl.style.setProperty("transform", "translate(10px, 20px)");
+    f.renderer.refresh();
+    f.nodeEl.style.setProperty("transform", "translate(30px, 40px)");
+    f.renderer.refresh();
+    expect(f.nodeEl.style.getPropertyValue("transform")).toBe("translate(30px, 40px) rotate(24deg)");
+  });
+
+  it("skips an intact projection, rebuilds a removed layer, and clears stale decoration", () => {
+    const f = fixture("rectangle");
+    f.renderer.refresh();
+    let writes = 0;
+    const setProperty = f.nodeEl.style.setProperty;
+    f.nodeEl.style.setProperty = (name: string, value: string, priority = "") => {
+      writes += 1;
+      setProperty.call(f.nodeEl.style, name, value, priority);
+    };
+    f.renderer.refresh();
+    expect(writes).toBe(0);
+
+    const layer = f.nodeEl.children.find((child) => child.getAttribute("data-miro-source-decoration") !== null)!;
+    f.nodeEl.removeChild(layer);
+    f.renderer.refresh();
+    expect(f.nodeEl.children.some((child) => child.getAttribute("data-miro-source-decoration") !== null)).toBe(true);
+
+    f.data = { nodes: f.data.nodes, edges: [] };
+    f.renderer.refresh();
+    expect(f.nodeEl.getAttribute("data-miro-source-kind")).toBe(null);
+    expect(f.nodeEl.children.some((child) => child.getAttribute("data-miro-source-decoration") !== null)).toBe(false);
+  });
+
+  it("retries incomplete projections and preserves render diagnostics across intact refreshes", () => {
+    const f = fixture("rectangle");
+    f.nodesVisible = false;
+    expect(f.renderer.refresh()).toContain("node-runtime-missing: a.");
+    f.nodesVisible = true;
+    expect(f.renderer.refresh()).not.toContain("node-runtime-missing: a.");
+    expect(f.nodeEl.getAttribute("data-miro-source-kind")).toBe("shape");
+
+    f.data.miroSource.connectors[0].style.endStrokeCap = "future_cap";
+    expect(f.renderer.refresh().some((item) => item.startsWith("connector-endcap-fallback"))).toBe(true);
+    expect(f.renderer.refresh().some((item) => item.startsWith("connector-endcap-fallback"))).toBe(true);
   });
 
   it("leaves an upright node unmarked", () => {

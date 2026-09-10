@@ -226,7 +226,10 @@ export default class MiroCanvasPlugin extends Plugin {
     // half-initialized object or carry a previous file's review overlay across.
     this.registerEvent(this.app.workspace.on("file-open", () => this.handleActiveLeafChange(this.app.workspace.activeLeaf)));
     this.registerEvent(this.app.workspace.on("layout-change", () => {
-      if (this.m1Session?.status !== "ready") this.handleActiveLeafChange(this.app.workspace.activeLeaf);
+      const currentClosed = this.currentCanvasView !== null && !this.currentCanvasStillOpen();
+      if (currentClosed || this.m1Session?.status !== "ready") {
+        this.handleActiveLeafChange(this.app.workspace.activeLeaf);
+      }
     }));
     this.handleActiveLeafChange(this.app.workspace.activeLeaf);
   }
@@ -242,11 +245,12 @@ export default class MiroCanvasPlugin extends Plugin {
     if (this.shellDisposed) return;
     if (this.initializationRetry !== null) clearTimeout(this.initializationRetry);
     this.initializationRetry = null;
-    this.toolsModal?.close();
-    this.m1Session?.dispose();
-    this.m1Session = null;
     const view = leaf?.view;
     if (!isNativeCanvasView(view)) {
+      if (this.currentCanvasStillOpen()) return;
+      this.toolsModal?.close();
+      this.m1Session?.dispose();
+      this.m1Session = null;
       this.canvasInspection = null;
       this.metadataStoreProbe = null;
       this.metadataWriter = null;
@@ -255,6 +259,9 @@ export default class MiroCanvasPlugin extends Plugin {
       return;
     }
 
+    this.toolsModal?.close();
+    this.m1Session?.dispose();
+    this.m1Session = null;
     this.currentCanvasView = view;
     this.canvasInspection = inspectCanvasView(view);
     this.metadataStoreProbe = createObsidianMetadataStore(view);
@@ -282,6 +289,12 @@ export default class MiroCanvasPlugin extends Plugin {
       }, 250);
     }
   };
+
+  private currentCanvasStillOpen(): boolean {
+    return this.currentCanvasView !== null
+      && this.app.workspace.getLeavesOfType(NATIVE_CANVAS_VIEW_TYPE)
+        .some((leaf) => leaf.view === this.currentCanvasView);
+  }
 
   /** Persist a settings change and rebuild the session so it takes effect. */
   public async saveCanvasSettings(patch: Partial<MiroCanvasSettings>): Promise<void> {

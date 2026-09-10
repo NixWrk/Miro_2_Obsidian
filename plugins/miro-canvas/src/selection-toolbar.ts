@@ -568,6 +568,7 @@ export class SelectionToolbar {
       for (const color of wanted) {
         const button = append(container, makeButton(this.document!, "", color, "miro-canvas-toolbar__button--swatch"));
         button.setAttribute("data-color", color);
+        button.style.setProperty?.("background-color", color);
         button.style.setProperty?.("--miro-canvas-swatch", color);
         this.listen(button, "click", () => this.appearance({ type: APPEARANCE_ACTIONS.setColor, slot, color }));
       }

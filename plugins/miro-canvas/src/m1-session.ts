@@ -115,7 +115,7 @@ export interface M1SessionSnapshot {
 
 type UnknownRecord = Record<string, unknown>;
 
-const PANEL_SELECTOR = ".miro-canvas-panel, .miro-canvas-toolbar, .miro-canvas-comment-markers";
+const PANEL_SELECTOR = ".miro-canvas-panel, .miro-canvas-toolbar, .miro-canvas-comment-markers, .miro-canvas-handles, .miro-canvas-minimap";
 const DEFAULT_TOOLBAR_FONT = "Inter";
 const DEFAULT_TOOLBAR_FONT_SIZE = 16;
 const REFRESH_INTERVAL_MS = 750;
@@ -280,21 +280,6 @@ function clientSize(root: HTMLElement | undefined): { readonly width: number; re
 	return { width: Math.max(1, width), height: Math.max(1, height) };
 }
 
-/**
- * The element the source renderer rotates.  Native Canvas owns the shell's own
- * transform and rewrites it while panning, so the inner container is the only
- * safe place to compose a rotation.
- */
-function rotationTarget(value: unknown): HTMLElement | undefined {
-	for (const key of ["containerEl", "nodeEl", "contentEl", "el"] as const) {
-		const candidate = readRuntime(value, key);
-		if (isElement(candidate)) {
-			return candidate;
-		}
-	}
-	return undefined;
-}
-
 /** A host that cannot measure yields no placement, and the toolbar stays hidden. */
 function boundingRect(value: unknown): { readonly left: number; readonly top: number; readonly right: number; readonly bottom: number } | undefined {
 	const measure = readRuntime(value, "getBoundingClientRect");
@@ -313,6 +298,11 @@ function boundingRect(value: unknown): { readonly left: number; readonly top: nu
 	} catch {
 		return undefined;
 	}
+}
+
+function firstProblem(diagnostics: readonly { readonly level: string; readonly message: string }[]): string | undefined {
+	return (diagnostics.find((item) => item.level === "error")
+		?? diagnostics.find((item) => item.level === "warning"))?.message;
 }
 
 function sceneFromDocument(document: unknown): CanvasScene | undefined {
@@ -571,11 +561,8 @@ export class M1CanvasSession {
 	};
 	private authoring: CanvasAuthoring | undefined;
 	private interactionBlock: string | undefined;
-	private rotationPreview: {
-		readonly element: HTMLElement;
-		readonly base: string;
-		readonly committed: number;
-	} | undefined;
+	private rotationPreview: { readonly id: string; readonly rotation: number } | undefined;
+	private rotationGestureTarget: string | undefined;
 	private lastToolbarSignature = "";
 	private minimapDragStart: MinimapPoint | undefined;
 	private minimapDragViewport: ViewportTransform | undefined;
@@ -610,6 +597,7 @@ export class M1CanvasSession {
 			getDocument: () => this.adapter.getDocument(),
 			getNodes: () => this.adapter.getNodes(),
 			getEdges: () => this.adapter.getEdges(),
+			getRotationPreview: () => this.rotationPreview,
 		}, renderDocument);
 		const settings = options.settings ?? DEFAULT_SETTINGS;
 		this.settings = settings;
@@ -636,6 +624,7 @@ export class M1CanvasSession {
 		}, { document: controlDocument });
 		this.handles = new SelectionHandles({
 			onRotate: (degrees, commit) => this.applyHandleRotation(degrees, commit),
+			onCancelRotation: () => this.cancelHandleRotation(),
 			onConnect: (side, position, point) => this.applyHandleConnection(side, position, point),
 			onCreateConnected: (side, position) => this.createConnectedNode(side, position),
 		}, { document: controlDocument });
@@ -654,15 +643,18 @@ export class M1CanvasSession {
 	 * writes, so a gesture produces one native history entry instead of dozens.
 	 */
 	private applyHandleRotation(degrees: number, commit: boolean): void {
-		const id = this.selectedIds[0];
+		const id = commit ? this.rotationGestureTarget ?? this.selectedIds[0] : this.selectedIds[0];
 		if (id === undefined) {
+			if (commit) this.cancelHandleRotation();
 			return;
 		}
 		if (!commit) {
+			this.rotationGestureTarget = id;
 			this.previewRotation(id, degrees);
 			return;
 		}
 		this.rotationPreview = undefined;
+		this.rotationGestureTarget = undefined;
 		this.readInteractionState();
 		if (!this.editAllowed("restyle", [id])) {
 			this.refresh();
@@ -671,39 +663,23 @@ export class M1CanvasSession {
 		this.authoring ??= createCanvasAuthoring(this.view);
 		const result = this.authoring.updateRotation({ id, rotation: degrees });
 		if (!result.ok) {
-			this.addDiagnostic(result.diagnostics.find((item) => item.level === "error")?.message
-				?? `Canvas rejected the rotation for ${id}.`);
+			this.addDiagnostic(firstProblem(result.diagnostics) ?? `Canvas rejected the rotation for ${id}.`);
 		}
 		this.refresh();
 	}
 
-	/**
-	 * Preview by composing a delta onto the element the renderer already
-	 * rotates, never by replacing a transform.  The node shell carries the
-	 * translation native Canvas uses to place it, so overwriting that would
-	 * move the node instead of turning it, and turning it about the wrong
-	 * point.  Rotations about the same origin add, so the base captured at the
-	 * start of the gesture plus the delta is the previewed angle.
-	 */
 	private previewRotation(id: string, degrees: number): void {
-		const element = [...(this.adapter.getNodes() ?? [])].find((item) => readCanvasElementId(item) === id);
-		const dom = rotationTarget(element);
-		if (dom === undefined) {
-			return;
-		}
-		if (this.rotationPreview?.element !== dom) {
-			this.captureAppearanceDom(dom);
-			const base = readRuntime(readRuntime(dom, "style"), "transform");
-			this.rotationPreview = {
-				element: dom,
-				base: typeof base === "string" && base.trim() !== "none" ? base.trim() : "",
-				committed: this.rotationFor(id),
-			};
-		}
-		const preview = this.rotationPreview;
-		const delta = degrees - preview.committed;
-		this.setAppearanceStyle(dom, "transform-origin", "50% 50%");
-		this.setAppearanceStyle(dom, "transform", `${preview.base} rotate(${delta}deg)`.trim());
+		this.rotationPreview = { id, rotation: degrees };
+		this.sourceRenderer?.refresh();
+		this.handles.update(this.handlesState(true));
+	}
+
+	private cancelHandleRotation(): void {
+		if (this.rotationPreview === undefined && this.rotationGestureTarget === undefined) return;
+		this.rotationPreview = undefined;
+		this.rotationGestureTarget = undefined;
+		this.sourceRenderer?.refresh();
+		this.refresh();
 	}
 
 	/** A connection released over another node becomes a native edge. */
@@ -727,13 +703,15 @@ export class M1CanvasSession {
 		side: HandleSide,
 		position: number = 0.5,
 		dropPoint?: { readonly x: number; readonly y: number },
+		documentOverride?: unknown,
 	): void {
 		this.readInteractionState();
 		this.authoring ??= createCanvasAuthoring(this.view);
+		const anchorDocument = documentOverride ?? this.currentRawDocument;
 		const opposite: Readonly<Record<HandleSide, HandleSide>> = {
 			top: "bottom", bottom: "top", left: "right", right: "left",
 		};
-		const geometry = buildCanvasAnchorGeometry(this.currentRawDocument);
+		const geometry = buildCanvasAnchorGeometry(anchorDocument);
 		const center = (id: string): { readonly x: number; readonly y: number } | undefined => {
 			const rect = geometry.nodes?.[id];
 			return rect === undefined ? undefined : { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 };
@@ -743,16 +721,18 @@ export class M1CanvasSession {
 			x: dropPoint.x - (rootRect?.left ?? 0),
 			y: dropPoint.y - (rootRect?.top ?? 0),
 		});
-		const fromAnchor = nodeBoundaryAnchorAtSide(this.currentRawDocument, fromNode, side, position);
-		const toAnchor = nodeBoundaryAnchor(this.currentRawDocument, toNode, droppedOnBoard ?? center(fromNode) ?? { x: 0, y: 0 });
+		const fromAnchor = nodeBoundaryAnchorAtSide(anchorDocument, fromNode, side, position);
+		const toAnchor = nodeBoundaryAnchor(anchorDocument, toNode, droppedOnBoard ?? center(fromNode) ?? { x: 0, y: 0 });
+		if (fromAnchor === undefined || toAnchor === undefined) {
+			this.addDiagnostic(`A connector endpoint could not be measured on the node outline (${fromAnchor === undefined ? fromNode : toNode}).`);
+		}
 		const result = this.authoring.createConnector({
 			fromNode, toNode, fromSide: side as ConnectorSide, toSide: opposite[side] as ConnectorSide,
 			...(fromAnchor === undefined ? {} : { fromAnchor }),
 			...(toAnchor === undefined ? {} : { toAnchor }),
 		});
 		if (!result.ok) {
-			this.addDiagnostic(result.diagnostics.find((item) => item.level === "error")?.message
-				?? "Canvas rejected the new connector.");
+			this.addDiagnostic(firstProblem(result.diagnostics) ?? "Canvas rejected the new connector.");
 		}
 		this.refresh();
 	}
@@ -805,12 +785,11 @@ export class M1CanvasSession {
 			shape: "rectangle", text: "", width, height, ...offset[side],
 		});
 		if (!created.ok || created.nodeId === undefined) {
-			this.addDiagnostic(created.diagnostics.find((item) => item.level === "error")?.message
-				?? "Canvas rejected the connected node.");
+			this.addDiagnostic(firstProblem(created.diagnostics) ?? "Canvas rejected the connected node.");
 			this.refresh();
 			return;
 		}
-		this.createEdge(fromNode, created.nodeId, side, position);
+		this.createEdge(fromNode, created.nodeId, side, position, undefined, created.document);
 	}
 
 	private applyElementStyle(patch: SelectionStylePatch): void {
@@ -825,7 +804,7 @@ export class M1CanvasSession {
 		this.authoring ??= createCanvasAuthoring(this.view);
 		const result = this.authoring.updateElementStyles(this.selectedIds.map((id) => ({ id, ...patch })));
 		if (!result.ok) {
-			const reason = result.diagnostics.find((diagnostic) => diagnostic.level === "error")?.message;
+			const reason = firstProblem(result.diagnostics);
 			this.addDiagnostic(reason ?? "Canvas rejected the style change.");
 		}
 		this.refresh();
@@ -1147,9 +1126,20 @@ export class M1CanvasSession {
 		const edgeIds = new Set(collectCanvasElementIds(this.adapter.getEdges() ?? []));
 		return {
 			selectedIds: this.selectedIds,
-			rotation: id === undefined ? 0 : this.rotationFor(id),
+			rotation: id === undefined
+				? 0
+				: this.rotationPreview?.id === id
+					? this.rotationPreview.rotation
+					: buildSourceScene(this.currentRawDocument).items.get(id)?.rotation ?? this.rotationFor(id),
 			editable,
 			isEdge: id !== undefined && edgeIds.has(id),
+			...(() => {
+				const rootRect = boundingRect(this.root);
+				return rootRect === undefined ? {} : { origin: { x: rootRect.left, y: rootRect.top } };
+			})(),
+			...(id === undefined
+				? {}
+				: { shape: resolveSelectionToolbarPresentation(this.currentRawDocument, id).style.shape }),
 			...(id === undefined ? {} : { rect: this.handleRect(id) }),
 		};
 	}
@@ -2527,6 +2517,7 @@ export class M1CanvasSession {
 		}
 		const window = readRuntime(ownerDocument(this.root), "defaultView");
 		if (isObject(window)) this.listen(window as unknown as EventTarget, "blur", () => {
+			this.handles.cancelGesture();
 			clearGesture();
 			this.spacePanHeld = false;
 		});

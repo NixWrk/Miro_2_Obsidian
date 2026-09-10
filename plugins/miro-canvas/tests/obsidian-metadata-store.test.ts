@@ -39,6 +39,19 @@ describe("native Obsidian metadata store", () => {
 		expect(runtime.requestSave).not.toHaveBeenCalled();
 	});
 
+	it("accepts host fields that JSON serialization omits", () => {
+		const runtime = nativeRuntime({
+			nodes: [{ id: "a", type: "file", file: "note.md", subpath: undefined }],
+			edges: [],
+		});
+		const probe = readyStore(runtime);
+		expect(probe.store?.readDocument()).toEqual({
+			nodes: [{ id: "a", type: "file", file: "note.md" }],
+			edges: [],
+		});
+		expect(runtime.requestSave).not.toHaveBeenCalled();
+	});
+
 	it("names the precondition a rejected commit failed on", () => {
 		const cases: readonly (readonly [string, Record<string, unknown>])[] = [
 			["canvas-readonly", { data: { nodes: [], edges: [] }, readonly: true, requestSave: vi.fn() }],

@@ -700,12 +700,12 @@ export function createObsidianMetadataStore(view: unknown): ObsidianMetadataStor
 		return makeProbe("incompatible", diagnostics);
 	}
 	try {
-		cloneDocument(data.value);
+		normalizeDocument(data.value);
 	} catch (error) {
 		diagnostics.push({
 			code: "native-data-invalid",
 			level: "warning",
-			message: `The native Canvas root document is not a safe JSON object: ${describeError(error)}.`,
+			message: `The native Canvas root document cannot be read as JSON: ${describeError(error)}.`,
 		});
 		return makeProbe("incompatible", diagnostics);
 	}

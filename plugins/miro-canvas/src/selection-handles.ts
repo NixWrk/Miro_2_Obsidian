@@ -11,9 +11,16 @@
  * be exercised without a layout engine.
  */
 
+import { contourPoint, shapeOutline } from "./shape-geometry";
+
 export type HandleSide = "top" | "right" | "bottom" | "left";
 export const HANDLE_POSITIONS = [0.25, 0.5, 0.75] as const;
 export type HandlePosition = (typeof HANDLE_POSITIONS)[number];
+
+interface ShapePointLike {
+  readonly x: number;
+  readonly y: number;
+}
 
 export interface HandleRect {
   readonly left: number;
@@ -30,11 +37,17 @@ export interface SelectionHandlesState {
   /** A connector has no sides to pull from and no shape to rotate. */
   readonly isEdge: boolean;
   readonly selectedIds: readonly string[];
+  /** Shape kind used to place connection points on the visible contour. */
+  readonly shape?: string;
+  /** Viewport position of the overlay origin; pointer events use window coordinates. */
+  readonly origin?: ShapePointLike;
 }
 
 export interface SelectionHandlesActions {
   /** Called continuously while dragging, then once with `commit` true. */
   readonly onRotate: (degrees: number, commit: boolean) => void;
+  /** Discard an in-flight preview without creating a history entry. */
+  readonly onCancelRotation: () => void;
   /** A connection was pulled from `side` and released at a viewport point. */
   readonly onConnect: (
     side: HandleSide,
@@ -214,6 +227,11 @@ export class SelectionHandles {
     }
   }
 
+  private local(point: ShapePointLike): ShapePointLike {
+    const origin = this.state.origin;
+    return origin === undefined ? point : { x: point.x - origin.x, y: point.y - origin.y };
+  }
+
   private beginRotate(event: unknown): void {
     const rect = this.state.rect;
     if (!this.state.editable || rect === undefined) return;
@@ -222,7 +240,7 @@ export class SelectionHandles {
     (event as Event).preventDefault?.();
     this.capture(event);
     this.rotating = true;
-    this.rotationOffset = this.state.rotation - pointerAngle(rect, point);
+    this.rotationOffset = this.state.rotation - pointerAngle(rect, this.local(point));
     this.element.setAttribute("data-miro-canvas-rotating", "true");
   }
 
@@ -243,7 +261,7 @@ export class SelectionHandles {
     const point = pointOf(event);
     if (point === undefined) return;
     const shift = (event as { shiftKey?: unknown }).shiftKey === true;
-    const degrees = normalizeAngle(pointerAngle(rect, point) + this.rotationOffset, shift ? this.snapDegrees : 0);
+    const degrees = normalizeAngle(pointerAngle(rect, this.local(point)) + this.rotationOffset, shift ? this.snapDegrees : 0);
     this.actions.onRotate(degrees, false);
   }
 
@@ -254,7 +272,8 @@ export class SelectionHandles {
       const shift = (event as { shiftKey?: unknown }).shiftKey === true;
       const degrees = point === undefined
         ? this.state.rotation
-        : normalizeAngle(pointerAngle(rect, point) + this.rotationOffset, shift ? this.snapDegrees : 0);
+        : normalizeAngle(pointerAngle(rect, this.local(point)) + this.rotationOffset, shift ? this.snapDegrees : 0);
+      this.rotating = false;
       this.actions.onRotate(degrees, true);
     }
     if (this.dragSide !== undefined && this.dragPosition !== undefined) {
@@ -272,7 +291,7 @@ export class SelectionHandles {
   /** Losing the pointer must not leave a half-applied preview behind. */
   public cancelGesture(): void {
     if (this.rotating) {
-      this.actions.onRotate(this.state.rotation, true);
+      this.actions.onCancelRotation();
     }
     this.rotating = false;
     this.dragSide = undefined;
@@ -288,11 +307,22 @@ export class SelectionHandles {
 
   public update(state: SelectionHandlesState): void {
     const previous = this.state;
-    this.state = state;
+    this.state = this.gestureActive
+      ? {
+          ...state,
+          rect: previous.rect,
+          selectedIds: previous.selectedIds,
+          shape: previous.shape,
+          origin: previous.origin,
+        }
+      : state;
     const refs = this.refs;
     if (refs === undefined) return;
-    // A gesture in flight owns the frame; a mid-drag refresh must not move it.
-    if (this.gestureActive && previous.rect !== undefined) return;
+    // A gesture owns its original geometry, but the frame follows the preview angle.
+    if (this.gestureActive && previous.rect !== undefined) {
+      refs.frame.style.transform = this.state.rotation === 0 ? "none" : `rotate(${this.state.rotation}deg)`;
+      return;
+    }
     const visible = state.rect !== undefined && state.selectedIds.length === 1;
     this.element.hidden = !visible;
     if (!visible || state.rect === undefined) return;
@@ -304,8 +334,16 @@ export class SelectionHandles {
     style.transform = state.rotation === 0 ? "none" : `rotate(${state.rotation}deg)`;
     this.element.setAttribute("data-miro-canvas-editable", state.editable ? "true" : "false");
     refs.rotate.hidden = state.isEdge || !state.editable;
+    const outline = shapeOutline(state.shape);
     for (const connector of refs.connectors) {
       connector.hidden = state.isEdge || !state.editable;
+      const side = connector.getAttribute("data-handle-side") as HandleSide | null;
+      const position = Number(connector.getAttribute("data-handle-position"));
+      if (side === null || !Number.isFinite(position)) continue;
+      const boxPoint = sideAnchor({ left: 0, top: 0, width: 100, height: 100 }, side, position);
+      const point = contourPoint(outline, boxPoint);
+      connector.style.left = `${point.x}%`;
+      connector.style.top = `${point.y}%`;
     }
   }
 
