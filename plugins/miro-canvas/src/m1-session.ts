@@ -896,6 +896,19 @@ export class M1CanvasSession {
 			`handleRect=${handles.rect === undefined
 				? "none"
 				: `${Math.round(handles.rect.left)},${Math.round(handles.rect.top)} ${Math.round(handles.rect.width)}x${Math.round(handles.rect.height)}`}`,
+			// The frame turns about its own centre and the node about its own, so
+			// the two centres are the thing to compare when they appear to
+			// rotate about different points.
+			`nodeBox=${(() => {
+				const origin = this.overlayOrigin();
+				const element = [...(this.adapter.getNodes() ?? [])].find((item) => readCanvasElementId(item) === id);
+				const box = boundingRect(readCanvasElementDom(element));
+				if (origin === undefined || box === undefined) return "none";
+				return `${Math.round((box.left + box.right) / 2 - origin.left)},${Math.round((box.top + box.bottom) / 2 - origin.top)}`;
+			})()}`,
+			`frameCentre=${handles.rect === undefined
+				? "none"
+				: `${Math.round(handles.rect.left + handles.rect.width / 2)},${Math.round(handles.rect.top + handles.rect.height / 2)}`}`,
 			`lastRotation=${this.lastRotationAttempt}`,
 			`edges=${attached.length}`,
 			`anchors=${attached.map((edge) => {
@@ -1224,8 +1237,8 @@ export class M1CanvasSession {
 			editable,
 			isEdge: id !== undefined && edgeIds.has(id),
 			...(() => {
-				const rootRect = boundingRect(this.root);
-				return rootRect === undefined ? {} : { origin: { x: rootRect.left, y: rootRect.top } };
+				const origin = this.overlayOrigin();
+				return origin === undefined ? {} : { origin: { x: origin.left, y: origin.top } };
 			})(),
 			...(id === undefined
 				? {}
@@ -1245,11 +1258,25 @@ export class M1CanvasSession {
 	 * center is usable.  The unrotated size comes from the document and the
 	 * current zoom, which keeps the frame square to the node at any angle.
 	 */
+	/**
+	 * The overlay's own origin, not the Canvas root's.
+	 *
+	 * The overlay is absolutely positioned, so its coordinates start at its
+	 * containing block - the nearest positioned ancestor, which is not always
+	 * the root this session measured.  Assuming the root shifted the frame by a
+	 * constant, and a frame that turns about its own centre while sitting
+	 * beside the node reads as rotating about a different point entirely.
+	 */
+	private overlayOrigin(): { readonly left: number; readonly top: number } | undefined {
+		return boundingRect(isElement(this.handles.element) ? this.handles.element : this.root)
+			?? boundingRect(this.root);
+	}
+
 	private handleRect(id: string): HandleRect | undefined {
 		if (this.root === undefined) {
 			return undefined;
 		}
-		const rootRect = boundingRect(this.root);
+		const rootRect = this.overlayOrigin();
 		const element = [...(this.adapter.getNodes() ?? [])].find((item) => readCanvasElementId(item) === id);
 		const rect = boundingRect(readCanvasElementDom(element));
 		if (rootRect === undefined || rect === undefined) {
