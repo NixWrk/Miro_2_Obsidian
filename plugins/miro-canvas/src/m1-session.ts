@@ -906,6 +906,25 @@ export class M1CanvasSession {
 				if (origin === undefined || box === undefined) return "none";
 				return `${Math.round((box.left + box.right) / 2 - origin.left)},${Math.round((box.top + box.bottom) / 2 - origin.top)}`;
 			})()}`,
+			// Model and DOM can disagree: the angle may be stored, projected and
+			// shown by the handles while the host refused to apply it, which
+			// looks exactly like the frame turning on its own.
+			`domRotation=${(() => {
+				const element = [...(this.adapter.getNodes() ?? [])].find((item) => readCanvasElementId(item) === id);
+				const dom = readCanvasElementDom(element);
+				const style = readRuntime(dom, "style");
+				const read = (property: string): string => {
+					const getter = readRuntime(style, "getPropertyValue");
+					if (typeof getter !== "function") return "?";
+					try {
+						const value = Reflect.apply(getter, style, [property]);
+						return typeof value === "string" && value.length > 0 ? value : "-";
+					} catch {
+						return "?";
+					}
+				};
+				return dom === undefined ? "no dom" : `rotate:${read("rotate")} transform:${read("transform")}`;
+			})()}`,
 			`frameCentre=${handles.rect === undefined
 				? "none"
 				: `${Math.round(handles.rect.left + handles.rect.width / 2)},${Math.round(handles.rect.top + handles.rect.height / 2)}`}`,
