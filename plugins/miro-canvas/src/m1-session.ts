@@ -625,8 +625,8 @@ export class M1CanvasSession {
 		this.handles = new SelectionHandles({
 			onRotate: (degrees, commit) => this.applyHandleRotation(degrees, commit),
 			onCancelRotation: () => this.cancelHandleRotation(),
-			onConnect: (side, position, point) => this.applyHandleConnection(side, position, point),
-			onCreateConnected: (side, position) => this.createConnectedNode(side, position),
+			onConnect: (sourceId, side, position, point) => this.applyHandleConnection(sourceId, side, position, point),
+			onCreateConnected: (sourceId, side, position) => this.createConnectedNode(sourceId, side, position),
 		}, { document: controlDocument });
 		this.commentMarkers = controlDocument === undefined ? undefined : new CommentMarkers({
 			onOpenThread: (threadId, origin) => this.options.onOpenCommentThread?.(threadId, origin),
@@ -684,17 +684,17 @@ export class M1CanvasSession {
 
 	/** A connection released over another node becomes a native edge. */
 	private applyHandleConnection(
+		sourceId: string,
 		side: HandleSide,
 		position: number,
 		point: { readonly x: number; readonly y: number },
 	): void {
-		const fromNode = this.selectedIds[0];
-		const toNode = this.nodeAtPoint(point, fromNode);
-		if (fromNode === undefined || toNode === undefined) {
+		const toNode = this.nodeAtPoint(point, sourceId);
+		if (toNode === undefined) {
 			this.addDiagnostic("Release a connection over another Canvas node to connect it.");
 			return;
 		}
-		this.createEdge(fromNode, toNode, side, position, point);
+		this.createEdge(sourceId, toNode, side, position, point);
 	}
 
 	private createEdge(
@@ -755,11 +755,10 @@ export class M1CanvasSession {
 	}
 
 	/** Place a node beside the selection and connect it, in that order. */
-	private createConnectedNode(side: HandleSide, position: number = 0.5): void {
-		const fromNode = this.selectedIds[0];
-		if (fromNode === undefined) {
-			return;
-		}
+	private createConnectedNode(fromNode: string, side: HandleSide, position: number = 0.5): void {
+		// The gesture pins its source across native selection changes, but the
+		// node must still exist in the live document when the click commits.
+		this.readInteractionState();
 		const nodes = readRuntime(this.currentRawDocument, "nodes");
 		const source = Array.isArray(nodes)
 			? (nodes as readonly unknown[]).find((item) => readRuntime(item, "id") === fromNode)
@@ -779,7 +778,6 @@ export class M1CanvasSession {
 			top: { x, y: y - height - gap },
 			bottom: { x, y: y + height + gap },
 		};
-		this.readInteractionState();
 		this.authoring ??= createCanvasAuthoring(this.view);
 		const created = this.authoring.createShape({
 			shape: "rectangle", text: "", width, height, ...offset[side],

@@ -213,6 +213,21 @@ describe("native paint markers", () => {
     expect(f.nodeEl.style.getPropertyValue("transform")).toBe("translate(30px, 40px) rotate(24deg)");
   });
 
+  it("replaces every stale plugin rotation instead of accumulating on reselection", () => {
+    const f = fixture("rectangle");
+    f.data.miroCanvas = { schemaVersion: 1, settings: {}, localOverrides: { a: { rotation: 24 } } };
+    f.nodeEl.style.setProperty("transform", "translate(10px, 20px) rotate(90deg) rotate(24deg)");
+    f.renderer.refresh();
+    expect(f.nodeEl.style.getPropertyValue("transform")).toBe("translate(10px, 20px) rotate(24deg)");
+    for (let pass = 0; pass < 5; pass += 1) {
+      f.nodeEl.style.setProperty("transform", `${f.nodeEl.style.getPropertyValue("transform")} rotate(24deg)`);
+      f.renderer.refresh();
+      expect(f.nodeEl.style.getPropertyValue("transform")).toBe("translate(10px, 20px) rotate(24deg)");
+    }
+    f.renderer.dispose();
+    expect(f.nodeEl.style.getPropertyValue("transform")).toBe("translate(10px, 20px)");
+  });
+
   it("skips an intact projection, rebuilds a removed layer, and clears stale decoration", () => {
     const f = fixture("rectangle");
     f.renderer.refresh();

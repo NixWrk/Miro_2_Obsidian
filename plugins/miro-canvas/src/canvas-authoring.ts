@@ -658,6 +658,71 @@ function setOwn(record: UnknownRecord, key: string, value: unknown): void {
 	});
 }
 
+/**
+ * Restore only root metadata when native Canvas rebuilt the requested graph
+ * exactly but discarded keys it does not understand. Node and edge content is
+ * compared in full, so geometry, endpoints and unknown per-item fields cannot
+ * be accepted after a lossy rebuild.
+ */
+function restoreDiscardedRootMetadata(
+	host: NativeHost,
+	imported: InternalSnapshot,
+	requested: UnknownRecord,
+	diagnostics: CanvasAuthoringDiagnostic[],
+): InternalSnapshot | undefined {
+	const requestedSnapshot = makeSnapshot(requested, diagnostics);
+	if (requestedSnapshot === undefined
+		|| !structurallyEqual(imported.nodes, requestedSnapshot.nodes)
+		|| !structurallyEqual(imported.edges, requestedSnapshot.edges)) {
+		return imported;
+	}
+	let candidate: UnknownRecord;
+	try {
+		candidate = cloneRecord(imported.document);
+	} catch {
+		return imported;
+	}
+	const repairs: Array<readonly [string, unknown]> = [];
+	for (const key of Object.keys(requested)) {
+		if (key === "nodes" || key === "edges") continue;
+		const current = optionalValue(candidate, key);
+		const wanted = optionalValue(requested, key);
+		if (current.present === wanted.present && structurallyEqual(current.value, wanted.value)) continue;
+		// Repair omission only. A present but changed value may be a concurrent
+		// host/plugin write and must make the transaction fail rather than be
+		// overwritten.
+		if (current.present || !wanted.present) return imported;
+		let value: unknown;
+		try {
+			value = cloneJson(wanted.value);
+		} catch {
+			return imported;
+		}
+		setOwn(candidate, key, value);
+		repairs.push([key, value]);
+	}
+	// Extra or graph-level host changes are not metadata loss and remain a hard
+	// verification failure.
+	if (repairs.length === 0 || !structurallyEqual(candidate, requested)) return imported;
+	const data = safeRead(host.runtime, "data");
+	if (!data.ok || !isPlainObject(data.value)) return imported;
+	try {
+		for (const [key, value] of repairs) setOwn(data.value as UnknownRecord, key, cloneJson(value));
+	} catch {
+		return imported;
+	}
+	const repaired = readSnapshotFromHost(host, diagnostics);
+	if (repaired !== undefined && structurallyEqual(repaired.document, requested)) {
+		addDiagnostic(
+			diagnostics,
+			"native-import-root-metadata-restored",
+			"info",
+			`Native Canvas discarded root metadata during import; restored and verified: ${repairs.map(([key]) => key).join(", ")}.`,
+		);
+	}
+	return repaired;
+}
+
 function actionProperty(action: unknown, key: string): ReadResult {
 	if (!isPlainObject(action) || !hasOwn(action, key)) {
 		return { ok: false };
@@ -1371,7 +1436,10 @@ function restoreGraph(host: NativeHost, before: InternalSnapshot, diagnostics: C
 	if (!invokeMutation(rollbackHost, before.document, diagnostics, "rollback")) {
 		return false;
 	}
-	const restored = readSnapshotFromHost(host, diagnostics);
+	let restored = readSnapshotFromHost(host, diagnostics);
+	if (restored !== undefined && !structurallyEqual(restored.document, before.document)) {
+		restored = restoreDiscardedRootMetadata(host, restored, before.document, diagnostics);
+	}
 	if (restored === undefined || !structurallyEqual(restored.document, before.document)) {
 		addDiagnostic(diagnostics, "rollback-verification-failed", "error", "Native Canvas rollback could not be verified.");
 		return false;
@@ -1937,7 +2005,10 @@ export class CanvasAuthoring {
 			restoreGraph(this.host, before, diagnostics);
 			return undefined;
 		}
-		const imported = readSnapshotFromHost(this.host, diagnostics);
+		let imported = readSnapshotFromHost(this.host, diagnostics);
+		if (imported !== undefined && !structurallyEqual(imported.document, document)) {
+			imported = restoreDiscardedRootMetadata(this.host, imported, document, diagnostics);
+		}
 		if (imported === undefined || !structurallyEqual(imported.document, document)) {
 			addDiagnostic(diagnostics, "native-import-verification-failed", "error", "The imported Canvas graph did not match the requested document; history was not requested.");
 			restoreGraph(this.host, before, diagnostics);

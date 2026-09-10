@@ -88,13 +88,13 @@ const RECT = { left: 100, top: 100, width: 200, height: 100 };
 function build(overrides: Partial<SelectionHandlesState> = {}) {
   const rotations: Array<{ degrees: number; commit: boolean }> = [];
   let cancellations = 0;
-  const connects: Array<{ side: HandleSide; position: HandlePosition; point: { x: number; y: number } }> = [];
-  const creates: Array<{ side: HandleSide; position: HandlePosition }> = [];
+  const connects: Array<{ sourceId: string; side: HandleSide; position: HandlePosition; point: { x: number; y: number } }> = [];
+  const creates: Array<{ sourceId: string; side: HandleSide; position: HandlePosition }> = [];
   const handles = new SelectionHandles({
     onRotate: (degrees, commit) => { rotations.push({ degrees, commit }); },
     onCancelRotation: () => { cancellations += 1; },
-    onConnect: (side, position, point) => { connects.push({ side, position, point: { x: point.x, y: point.y } }); },
-    onCreateConnected: (side, position) => { creates.push({ side, position }); },
+    onConnect: (sourceId, side, position, point) => { connects.push({ sourceId, side, position, point: { x: point.x, y: point.y } }); },
+    onCreateConnected: (sourceId, side, position) => { creates.push({ sourceId, side, position }); },
   }, { document: new FakeDocument() as unknown as Document });
   const base: SelectionHandlesState = {
     rect: RECT, rotation: 0, editable: true, isEdge: false, selectedIds: ["n1"], ...overrides,
@@ -202,7 +202,7 @@ describe("selection handles", () => {
     bySide(root, "right", 0.25).dispatch("pointerdown", { clientX: 300, clientY: 125, pointerId: 2 });
     expect(root.getAttribute("data-miro-canvas-connecting")).toBe("right");
     handles.handlePointerUp({ clientX: 640, clientY: 155 });
-    expect(connects).toEqual([{ side: "right", position: 0.25, point: { x: 640, y: 155 } }]);
+    expect(connects).toEqual([{ sourceId: "n1", side: "right", position: 0.25, point: { x: 640, y: 155 } }]);
     expect(handles.gestureActive).toBe(false);
   });
 
@@ -211,7 +211,7 @@ describe("selection handles", () => {
     bySide(root, "top").dispatch("pointerdown", { clientX: 200, clientY: 100, pointerId: 6 });
     // Released where it started: a click, not a drag.
     handles.handlePointerUp({ clientX: 201, clientY: 101 });
-    expect(creates).toEqual([{ side: "top", position: 0.5 }]);
+    expect(creates).toEqual([{ sourceId: "n1", side: "top", position: 0.5 }]);
     expect(connects).toEqual([]);
   });
 
@@ -259,6 +259,15 @@ describe("selection handles", () => {
     expect(frame.style.transform).toBe("rotate(33deg)");
     handles.handlePointerUp({ clientX: 400, clientY: 150 });
     expect(rotations.filter((item) => item.commit)).toHaveLength(1);
+  });
+
+  it("keeps the source node when Canvas clears selection during a connection gesture", () => {
+    const { root, creates, connects, update, handles } = build();
+    bySide(root, "right", 0.75).dispatch("pointerdown", { clientX: 300, clientY: 175, pointerId: 14 });
+    update({ rect: undefined, selectedIds: [] });
+    handles.handlePointerUp({ clientX: 300, clientY: 175 });
+    expect(creates).toEqual([{ sourceId: "n1", side: "right", position: 0.75 }]);
+    expect(connects).toEqual([]);
   });
 
   it("places all three connection points on the visible shape contour", () => {

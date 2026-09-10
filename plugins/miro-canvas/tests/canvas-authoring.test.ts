@@ -844,3 +844,69 @@ describe("host JSON normalization", () => {
 	});
 });
 
+describe("native root metadata rebuilds", () => {
+	it("creates a connected node and edge when importData drops unknown root keys", () => {
+		class RootDroppingGraph extends NativeGraph {
+			public dropRootMetadata = true;
+
+			public override importData(document: CanvasDocument, rebuild: boolean): void {
+				super.importData(document, rebuild);
+				if (!this.dropRootMetadata) return;
+				for (const key of Object.keys(this.data)) {
+					if (key !== "nodes" && key !== "edges") delete this.data[key];
+				}
+			}
+		}
+		const initial = initialDocument();
+		const runtime = new RootDroppingGraph(initial);
+		const authoring = createCanvasAuthoring({ canvas: runtime });
+		const shape = authoring.createShape(action({ id: "connected" }));
+		expect(shape.status).toBe("applied");
+		expect(shape.diagnostics.map((item) => item.code)).toContain("native-import-root-metadata-restored");
+		const connector = authoring.createConnector({ fromNode: "existing", toNode: "connected" });
+		expect(connector.status).toBe("applied");
+		const data = runtime.getData();
+		expect((data.nodes as CanvasDocument[]).map((node) => node.id)).toContain("connected");
+		expect((data.edges as CanvasDocument[]).some((edge) => edge.fromNode === "existing" && edge.toNode === "connected")).toBe(true);
+		expect(data.miroSource).toEqual(initial.miroSource);
+		expect(data.futureRootField).toEqual(initial.futureRootField);
+		expect(data).toHaveProperty("miroCanvas.localOverrides.connected.shape.kind", "diamond");
+		expect(runtime.requestSaveSpy).toHaveBeenCalledTimes(2);
+		expect(runtime.history).toHaveLength(3);
+		expect(runtime.history[2]).toMatchObject({
+			miroSource: initial.miroSource,
+			futureRootField: initial.futureRootField,
+		});
+		const final = runtime.getData();
+		runtime.dropRootMetadata = false;
+		runtime.undo();
+		expect((runtime.getData().edges as CanvasDocument[]).some((edge) => edge.toNode === "connected")).toBe(false);
+		expect(runtime.getData().miroSource).toEqual(initial.miroSource);
+		runtime.undo();
+		expect(runtime.getData()).toEqual(initial);
+		runtime.redo();
+		runtime.redo();
+		expect(runtime.getData()).toEqual(final);
+	});
+
+	it("still rejects and rolls back a rebuild that changed graph content", () => {
+		class GraphChangingHost extends NativeGraph {
+			private imports = 0;
+
+			public override importData(document: CanvasDocument, rebuild: boolean): void {
+				super.importData(document, rebuild);
+				this.imports += 1;
+				if (this.imports !== 1) return;
+				const existing = this.nodes.get("existing");
+				if (existing !== undefined) existing.x = 999;
+			}
+		}
+		const initial = initialDocument();
+		const runtime = new GraphChangingHost(initial);
+		const result = createCanvasAuthoring({ canvas: runtime }).createShape(action({ id: "must-rollback" }));
+		expect(result.status).toBe("rejected");
+		expect(runtime.requestSaveSpy).not.toHaveBeenCalled();
+		expect(runtime.getData()).toEqual(initial);
+	});
+});
+

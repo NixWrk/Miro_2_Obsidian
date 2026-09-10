@@ -50,12 +50,13 @@ export interface SelectionHandlesActions {
   readonly onCancelRotation: () => void;
   /** A connection was pulled from `side` and released at a viewport point. */
   readonly onConnect: (
+    sourceId: string,
     side: HandleSide,
     position: HandlePosition,
     point: { readonly x: number; readonly y: number },
   ) => void;
   /** A connection point was clicked rather than dragged. */
-  readonly onCreateConnected: (side: HandleSide, position: HandlePosition) => void;
+  readonly onCreateConnected: (sourceId: string, side: HandleSide, position: HandlePosition) => void;
 }
 
 export interface SelectionHandlesOptions {
@@ -169,6 +170,7 @@ export class SelectionHandles {
   private rotationOffset = 0;
   private dragSide: HandleSide | undefined;
   private dragPosition: HandlePosition | undefined;
+  private dragSourceId: string | undefined;
   private dragOrigin: { readonly x: number; readonly y: number } | undefined;
 
   public constructor(actions: SelectionHandlesActions, options: SelectionHandlesOptions = {}) {
@@ -246,10 +248,13 @@ export class SelectionHandles {
 
   private beginConnect(side: HandleSide, position: HandlePosition, event: unknown): void {
     if (!this.state.editable || this.state.isEdge) return;
+    const sourceId = this.state.selectedIds[0];
+    if (sourceId === undefined) return;
     (event as Event).preventDefault?.();
     this.capture(event);
     this.dragSide = side;
     this.dragPosition = position;
+    this.dragSourceId = sourceId;
     this.dragOrigin = pointOf(event);
     this.element.setAttribute("data-miro-canvas-connecting", side);
   }
@@ -276,14 +281,14 @@ export class SelectionHandles {
       this.rotating = false;
       this.actions.onRotate(degrees, true);
     }
-    if (this.dragSide !== undefined && this.dragPosition !== undefined) {
+    if (this.dragSourceId !== undefined && this.dragSide !== undefined && this.dragPosition !== undefined) {
       const point = pointOf(event);
       const origin = this.dragOrigin;
       const moved = point === undefined || origin === undefined
         ? 0
         : Math.hypot(point.x - origin.x, point.y - origin.y);
-      if (moved < this.dragThreshold) this.actions.onCreateConnected(this.dragSide, this.dragPosition);
-      else if (point !== undefined) this.actions.onConnect(this.dragSide, this.dragPosition, point);
+      if (moved < this.dragThreshold) this.actions.onCreateConnected(this.dragSourceId, this.dragSide, this.dragPosition);
+      else if (point !== undefined) this.actions.onConnect(this.dragSourceId, this.dragSide, this.dragPosition, point);
     }
     this.cancelGesture();
   }
@@ -296,6 +301,7 @@ export class SelectionHandles {
     this.rotating = false;
     this.dragSide = undefined;
     this.dragPosition = undefined;
+    this.dragSourceId = undefined;
     this.dragOrigin = undefined;
     this.element.removeAttribute?.("data-miro-canvas-rotating");
     this.element.removeAttribute?.("data-miro-canvas-connecting");

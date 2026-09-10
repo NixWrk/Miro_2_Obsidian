@@ -216,12 +216,20 @@ function setStyleRaw(element: DomElementLike, property: string, value: string, p
   return readStyle(element, property) === value;
 }
 
-function patchStyle(element: DomElementLike, property: string, value: string, patches: RestorePatch[]): boolean {
+function patchStyle(
+  element: DomElementLike,
+  property: string,
+  value: string,
+  patches: RestorePatch[],
+  restoreValue?: string,
+): boolean {
   const before = readStyle(element, property);
   if (before === undefined) return false;
   const beforePriority = readStylePriority(element, property) ?? "";
-  if (before === value && beforePriority === "") return true;
-  if (!setStyleRaw(element, property, value)) return false;
+  const restored = restoreValue ?? before;
+  const restoredPriority = restoreValue === undefined ? beforePriority : "";
+  if (before === value && beforePriority === "" && restored === before) return true;
+  if ((before !== value || beforePriority !== "") && !setStyleRaw(element, property, value)) return false;
   patches.push(() => {
     const current = readStyle(element, property);
     const currentPriority = readStylePriority(element, property) ?? "";
@@ -230,9 +238,9 @@ function patchStyle(element: DomElementLike, property: string, value: string, pa
       // active. Remove only that exact owned suffix so refresh cannot
       // accumulate rotations and the newer native transform remains intact.
       if (property === "transform" && current !== undefined && currentPriority === "") {
-        const ownedSuffix = before.trim().length === 0 || before.trim() === "none"
+        const ownedSuffix = restored.trim().length === 0 || restored.trim() === "none"
           ? value.trim()
-          : value.startsWith(`${before} `) ? value.slice(before.length + 1).trim() : "";
+          : value.startsWith(`${restored} `) ? value.slice(restored.length + 1).trim() : "";
         const marker = ` ${ownedSuffix}`;
         if (ownedSuffix.length > 0 && (current === ownedSuffix || current.endsWith(marker))) {
           const retained = current === ownedSuffix ? "" : current.slice(0, -marker.length);
@@ -246,11 +254,11 @@ function patchStyle(element: DomElementLike, property: string, value: string, pa
       }
       return;
     }
-    if (before.length === 0) {
+    if (restored.length === 0) {
       const currentStyle = styleObject(element);
       if (currentStyle !== undefined) safeCall(currentStyle, "removeProperty", [property]);
     } else {
-      setStyleRaw(element, property, before, beforePriority);
+      setStyleRaw(element, property, restored, restoredPriority);
     }
   });
   return true;
@@ -431,17 +439,34 @@ function isContained(outer: DomElementLike, inner: DomElementLike): boolean {
   return result === true;
 }
 
-function composedTransform(element: DomElementLike, rotation: number): string | undefined {
+const TRAILING_PLUGIN_ROTATION = /\s*rotate\(\s*[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:e[-+]?\d+)?deg\s*\)\s*$/iu;
+
+/** Recover the native transform by removing every trailing rotation this renderer could have written. */
+function hostBaseTransform(element: DomElementLike): string | undefined {
   const before = readStyle(element, "transform");
   if (before === undefined) return undefined;
+  let base = before.trim();
+  if (base === "none") return "";
+  while (TRAILING_PLUGIN_ROTATION.test(base)) base = base.replace(TRAILING_PLUGIN_ROTATION, "").trim();
+  return base;
+}
+
+function transformWithRotation(base: string, rotation: number): string {
+  if (rotation === 0) return base;
   const rotate = `rotate(${rotation}deg)`;
-  return before.trim().length === 0 || before.trim() === "none" ? rotate : `${before} ${rotate}`;
+  return base.length === 0 ? rotate : `${base} ${rotate}`;
+}
+
+function composedTransform(element: DomElementLike, rotation: number): string | undefined {
+  const base = hostBaseTransform(element);
+  return base === undefined ? undefined : transformWithRotation(base, rotation);
 }
 
 function applyRotation(runtime: unknown, primary: DomElementLike, rotation: number, patches: RestorePatch[], diagnostics: string[], id: string): void {
-  if (!Number.isFinite(rotation) || rotation === 0) return;
-  const transform = composedTransform(primary, rotation);
-  if (transform === undefined || !patchStyle(primary, "transform", transform, patches)) {
+  if (!Number.isFinite(rotation)) return;
+  const base = hostBaseTransform(primary);
+  const transform = base === undefined ? undefined : transformWithRotation(base, rotation);
+  if (transform === undefined || !patchStyle(primary, "transform", transform, patches, base)) {
     diagnostics.push(`rotation-dom-inaccessible: ${id}.`);
     return;
   }
@@ -450,9 +475,10 @@ function applyRotation(runtime: unknown, primary: DomElementLike, rotation: numb
   const interactionElements = allElementsFor(runtime, ["hitboxEl", "interactionEl", "resizerEl", "resizeEl", "selectionEl", "bboxEl"]);
   for (const element of interactionElements) {
     if (element === primary || isContained(primary, element) || isContained(element, primary)) continue;
-    const interactionTransform = composedTransform(element, rotation);
-    if (interactionTransform !== undefined) {
-      patchStyle(element, "transform", interactionTransform, patches);
+    const interactionBase = hostBaseTransform(element);
+    const interactionTransform = interactionBase === undefined ? undefined : transformWithRotation(interactionBase, rotation);
+    if (interactionTransform !== undefined && interactionBase !== undefined) {
+      patchStyle(element, "transform", interactionTransform, patches, interactionBase);
       patchStyle(element, "transform-origin", "50% 50%", patches);
     }
   }
@@ -1057,9 +1083,10 @@ export class SourceRenderer {
     for (const item of this.renderedItems) {
       const marker = safeCall(item.marker, "getAttribute", ["data-miro-source-kind"]);
       if (safeGet(item.marker, "isConnected") === false || typeof marker !== "string") return false;
-      if (item.expectedRotation !== undefined && item.expectedRotation !== 0) {
+      if (item.expectedRotation !== undefined) {
         const transform = readStyle(item.marker, "transform");
-        if (transform === undefined || !transform.trim().endsWith(`rotate(${item.expectedRotation}deg)`)) return false;
+        const expected = composedTransform(item.marker, item.expectedRotation);
+        if (transform === undefined || expected === undefined || transform.trim() !== expected.trim()) return false;
       }
       for (const child of item.ownedChildren ?? []) {
         if (safeGet(child, "parentNode") !== item.marker) return false;
