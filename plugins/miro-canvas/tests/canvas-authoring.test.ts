@@ -821,6 +821,29 @@ describe("connector creation", () => {
 });
 
 describe("host JSON normalization", () => {
+	it("accepts additive native defaults while preserving every requested graph and source field", () => {
+		class DefaultingGraph extends NativeGraph {
+			public override importData(document: CanvasDocument, rebuild: boolean): void {
+				super.importData(document, rebuild);
+				for (const node of this.nodes.values()) {
+					if (!("color" in node)) node.color = "";
+				}
+				for (const edge of this.edges.values()) {
+					if (!("label" in edge)) edge.label = "";
+				}
+			}
+		}
+		const initial = initialDocument();
+		const graph = new DefaultingGraph(initial);
+		const result = createCanvasAuthoring({ canvas: graph }).createShape(action({ id: "normalized" }));
+		expect(result.status).toBe("applied");
+		expect(result.diagnostics.map((item) => item.code)).toContain("native-graph-normalized");
+		expect(graph.getData()).toHaveProperty("nodes.0.text", "keep");
+		expect(graph.getData()).toHaveProperty("nodes.1.color", "");
+		expect(graph.getData().miroSource).toEqual(initial.miroSource);
+		expect(graph.getData().futureRootField).toEqual(initial.futureRootField);
+	});
+
 	it("accepts optional values that native Canvas leaves undefined", () => {
 		class UndefinedFieldGraph extends NativeGraph {
 			public override getData(): Record<string, unknown> {
@@ -852,6 +875,9 @@ describe("native root metadata rebuilds", () => {
 			public override importData(document: CanvasDocument, rebuild: boolean): void {
 				super.importData(document, rebuild);
 				if (!this.dropRootMetadata) return;
+				for (const node of this.nodes.values()) {
+					if (!("color" in node)) node.color = "";
+				}
 				for (const key of Object.keys(this.data)) {
 					if (key !== "nodes" && key !== "edges") delete this.data[key];
 				}
@@ -903,6 +929,24 @@ describe("native root metadata rebuilds", () => {
 		}
 		const initial = initialDocument();
 		const runtime = new GraphChangingHost(initial);
+		const result = createCanvasAuthoring({ canvas: runtime }).createShape(action({ id: "must-rollback" }));
+		expect(result.status).toBe("rejected");
+		expect(runtime.requestSaveSpy).not.toHaveBeenCalled();
+		expect(runtime.getData()).toEqual(initial);
+	});
+
+	it("rejects an unrecognized additive graph field as a concurrent host mutation", () => {
+		class UnknownAddingHost extends NativeGraph {
+			private imports = 0;
+
+			public override importData(document: CanvasDocument, rebuild: boolean): void {
+				super.importData(document, rebuild);
+				this.imports += 1;
+				if (this.imports === 1) this.nodes.get("existing")!.futureHostMutation = { unsafe: true };
+			}
+		}
+		const initial = initialDocument();
+		const runtime = new UnknownAddingHost(initial);
 		const result = createCanvasAuthoring({ canvas: runtime }).createShape(action({ id: "must-rollback" }));
 		expect(result.status).toBe("rejected");
 		expect(runtime.requestSaveSpy).not.toHaveBeenCalled();

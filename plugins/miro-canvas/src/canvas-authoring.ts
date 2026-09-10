@@ -658,11 +658,67 @@ function setOwn(record: UnknownRecord, key: string, value: unknown): void {
 	});
 }
 
+const NATIVE_NODE_DEFAULTS = new Set(["color", "subpath"]);
+const NATIVE_EDGE_DEFAULTS = new Set(["color", "label", "fromEnd", "toEnd", "fromFloating", "toFloating", "styleAttributes"]);
+
+function nativeDefaultAllowed(kind: "nodes" | "edges", key: string, value: unknown): boolean {
+	if (kind === "nodes") return NATIVE_NODE_DEFAULTS.has(key) && (typeof value === "string" || value === null);
+	if (!NATIVE_EDGE_DEFAULTS.has(key)) return false;
+	if (key === "fromFloating" || key === "toFloating") return typeof value === "boolean";
+	if (key === "styleAttributes") {
+		const keys = isPlainObject(value) ? ownKeys(value) : undefined;
+		return keys !== undefined && keys.length === 0;
+	}
+	return typeof value === "string" || value === null;
+}
+
+/** Native import may add only its documented optional defaults to graph items. */
+function graphItemsMatchNativeNormalization(observed: unknown, requested: unknown, kind: "nodes" | "edges"): boolean {
+	if (!Array.isArray(observed) || !Array.isArray(requested) || observed.length !== requested.length) return false;
+	for (let index = 0; index < requested.length; index += 1) {
+		const actual = observed[index];
+		const wanted = requested[index];
+		if (!isPlainObject(actual) || !isPlainObject(wanted)) return false;
+		const actualKeys = ownKeys(actual);
+		const wantedKeys = ownKeys(wanted);
+		if (actualKeys === undefined || wantedKeys === undefined) return false;
+		for (const key of wantedKeys) {
+			const actualValue = safeRead(actual, key);
+			const wantedValue = safeRead(wanted, key);
+			if (!actualValue.ok || !wantedValue.ok || !structurallyEqual(actualValue.value, wantedValue.value)) return false;
+		}
+		for (const key of actualKeys) {
+			if (hasOwn(wanted, key)) continue;
+			const value = safeRead(actual, key);
+			if (!value.ok || !nativeDefaultAllowed(kind, key, value.value)) return false;
+		}
+	}
+	return true;
+}
+
+/** Permit host-added defaults only inside nodes/edges, never in plugin/source roots. */
+function matchesNativeGraphNormalization(observed: UnknownRecord, requested: UnknownRecord): boolean {
+	const observedKeys = ownKeys(observed);
+	const requestedKeys = ownKeys(requested);
+	if (observedKeys === undefined || requestedKeys === undefined
+		|| observedKeys.length !== requestedKeys.length
+		|| requestedKeys.some((key) => !hasOwn(observed, key))) return false;
+	for (const key of requestedKeys) {
+		const actual = safeRead(observed, key);
+		const wanted = safeRead(requested, key);
+		if (!actual.ok || !wanted.ok) return false;
+		const matches = key === "nodes" || key === "edges"
+			? graphItemsMatchNativeNormalization(actual.value, wanted.value, key)
+			: structurallyEqual(actual.value, wanted.value);
+		if (!matches) return false;
+	}
+	return true;
+}
+
 /**
  * Restore only root metadata when native Canvas rebuilt the requested graph
- * exactly but discarded keys it does not understand. Node and edge content is
- * compared in full, so geometry, endpoints and unknown per-item fields cannot
- * be accepted after a lossy rebuild.
+ * but discarded keys it does not understand. Requested node and edge content
+ * must remain intact; only additive native defaults are accepted.
  */
 function restoreDiscardedRootMetadata(
 	host: NativeHost,
@@ -672,8 +728,8 @@ function restoreDiscardedRootMetadata(
 ): InternalSnapshot | undefined {
 	const requestedSnapshot = makeSnapshot(requested, diagnostics);
 	if (requestedSnapshot === undefined
-		|| !structurallyEqual(imported.nodes, requestedSnapshot.nodes)
-		|| !structurallyEqual(imported.edges, requestedSnapshot.edges)) {
+		|| !graphItemsMatchNativeNormalization(imported.nodes, requestedSnapshot.nodes, "nodes")
+		|| !graphItemsMatchNativeNormalization(imported.edges, requestedSnapshot.edges, "edges")) {
 		return imported;
 	}
 	let candidate: UnknownRecord;
@@ -703,7 +759,7 @@ function restoreDiscardedRootMetadata(
 	}
 	// Extra or graph-level host changes are not metadata loss and remain a hard
 	// verification failure.
-	if (repairs.length === 0 || !structurallyEqual(candidate, requested)) return imported;
+	if (repairs.length === 0 || !matchesNativeGraphNormalization(candidate, requested)) return imported;
 	const data = safeRead(host.runtime, "data");
 	if (!data.ok || !isPlainObject(data.value)) return imported;
 	try {
@@ -712,7 +768,7 @@ function restoreDiscardedRootMetadata(
 		return imported;
 	}
 	const repaired = readSnapshotFromHost(host, diagnostics);
-	if (repaired !== undefined && structurallyEqual(repaired.document, requested)) {
+	if (repaired !== undefined && matchesNativeGraphNormalization(repaired.document, requested)) {
 		addDiagnostic(
 			diagnostics,
 			"native-import-root-metadata-restored",
@@ -1440,7 +1496,7 @@ function restoreGraph(host: NativeHost, before: InternalSnapshot, diagnostics: C
 	if (restored !== undefined && !structurallyEqual(restored.document, before.document)) {
 		restored = restoreDiscardedRootMetadata(host, restored, before.document, diagnostics);
 	}
-	if (restored === undefined || !structurallyEqual(restored.document, before.document)) {
+	if (restored === undefined || !matchesNativeGraphNormalization(restored.document, before.document)) {
 		addDiagnostic(diagnostics, "rollback-verification-failed", "error", "Native Canvas rollback could not be verified.");
 		return false;
 	}
@@ -2009,17 +2065,20 @@ export class CanvasAuthoring {
 		if (imported !== undefined && !structurallyEqual(imported.document, document)) {
 			imported = restoreDiscardedRootMetadata(this.host, imported, document, diagnostics);
 		}
-		if (imported === undefined || !structurallyEqual(imported.document, document)) {
+		if (imported === undefined || !matchesNativeGraphNormalization(imported.document, document)) {
 			addDiagnostic(diagnostics, "native-import-verification-failed", "error", "The imported Canvas graph did not match the requested document; history was not requested.");
 			restoreGraph(this.host, before, diagnostics);
 			return undefined;
+		}
+		if (!structurallyEqual(imported.document, document)) {
+			addDiagnostic(diagnostics, "native-graph-normalized", "info", "Native Canvas added optional graph defaults; every requested field and source value was verified unchanged.");
 		}
 		if (this.host.mode === "importData" && !invokeMutation(this.host, document, diagnostics, "history")) {
 			restoreGraph(this.host, before, diagnostics);
 			return undefined;
 		}
 		const verified = readSnapshotFromHost(this.host, diagnostics);
-		if (verified === undefined || !structurallyEqual(verified.document, document)) {
+		if (verified === undefined || !matchesNativeGraphNormalization(verified.document, document)) {
 			addDiagnostic(diagnostics, "native-history-verification-failed", "error", "The native history/save boundary did not preserve the requested Canvas graph.");
 			restoreGraph(this.host, before, diagnostics);
 			return undefined;

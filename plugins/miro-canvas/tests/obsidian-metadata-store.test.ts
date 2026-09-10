@@ -194,6 +194,26 @@ describe("native Obsidian metadata store", () => {
 		expect(runtime.requestSave).toHaveBeenCalledTimes(1);
 	});
 
+	it("rejects and restores a save that drops another producer's root metadata", () => {
+		const initial = { nodes: [], edges: [], futureRoot: { keep: true } };
+		const runtime: { data: Record<string, unknown>; requestSave: () => void } = {
+			data: initial,
+			requestSave: () => {
+				runtime.data = {
+					nodes: runtime.data.nodes,
+					edges: runtime.data.edges,
+					miroCanvas: runtime.data.miroCanvas,
+				};
+			},
+		};
+		const store = readyStore(runtime).store!;
+		const expected = store.readDocument() as Record<string, unknown>;
+
+		expect(store.commitDocument({ ...initial, miroCanvas: { schemaVersion: 1 } }, expected)).toBe(false);
+		expect(store.describeLastCommitFailure?.()).toBe("post-save-metadata-lost: root-keys");
+		expect(runtime.data).toEqual(initial);
+	});
+
 	it("integrates with MetadataWriter while keeping source bytes and native history boundaries", () => {
 		const source = { items: [{ id: "source-1", payload: { keep: true } }] };
 		const runtime = nativeRuntime({ nodes: [], edges: [], miroSource: source });

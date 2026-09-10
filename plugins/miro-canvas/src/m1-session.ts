@@ -31,6 +31,7 @@ import {
 import { CANVAS_SHAPE_KINDS, createCanvasAuthoring, type CanvasAuthoring, type ConnectorSide } from "./canvas-authoring";
 import {
 	SelectionHandles,
+	normalizeAngle,
 	type HandleRect,
 	type HandleSide,
 	type SelectionHandlesState,
@@ -88,7 +89,7 @@ import {
 } from "./source-model";
 import { CommentMarkers } from "./comment-markers";
 import { listCommentThreads, type CommentOrigin } from "./local-comments";
-import { buildCanvasAnchorGeometry, nodeBoundaryAnchor, nodeBoundaryAnchorAtSide } from "./connector-endpoints";
+import { buildCanvasAnchorGeometry, nodeBoundaryAnchor } from "./connector-endpoints";
 import type { CanvasAnchor } from "./anchors";
 
 export interface M1SessionOptions {
@@ -655,17 +656,29 @@ export class M1CanvasSession {
 		}
 		this.rotationPreview = undefined;
 		this.rotationGestureTarget = undefined;
+		this.setElementRotation(id, degrees);
+	}
+
+	/** Persist one absolute angle without rebuilding the host-owned graph. */
+	public setElementRotation(id: string, degrees: number): MetadataWriteResult | undefined {
+		if (!Number.isFinite(degrees)) {
+			this.addDiagnostic("Rotation must be a finite number.");
+			this.refresh();
+			return undefined;
+		}
 		this.readInteractionState();
 		if (!this.editAllowed("restyle", [id])) {
 			this.refresh();
-			return;
+			return undefined;
 		}
-		this.authoring ??= createCanvasAuthoring(this.view);
-		const result = this.authoring.updateRotation({ id, rotation: degrees });
-		if (!result.ok) {
-			this.addDiagnostic(firstProblem(result.diagnostics) ?? `Canvas rejected the rotation for ${id}.`);
-		}
-		this.refresh();
+		const rotation = normalizeAngle(degrees);
+		return this.writeMetadata("set-rotation", (draft) => {
+			const overrides: Record<string, unknown> = isRecord(draft.localOverrides) ? { ...draft.localOverrides } : {};
+			const override = isRecord(overrides[id]) ? { ...overrides[id] } : {};
+			override.rotation = rotation;
+			overrides[id] = override;
+			draft.localOverrides = overrides;
+		});
 	}
 
 	private previewRotation(id: string, degrees: number): void {
@@ -686,7 +699,7 @@ export class M1CanvasSession {
 	private applyHandleConnection(
 		sourceId: string,
 		side: HandleSide,
-		position: number,
+		_position: number,
 		point: { readonly x: number; readonly y: number },
 	): void {
 		const toNode = this.nodeAtPoint(point, sourceId);
@@ -694,23 +707,19 @@ export class M1CanvasSession {
 			this.addDiagnostic("Release a connection over another Canvas node to connect it.");
 			return;
 		}
-		this.createEdge(sourceId, toNode, side, position, point);
+		this.createEdge(sourceId, toNode, side, point);
 	}
 
 	private createEdge(
 		fromNode: string,
 		toNode: string,
 		side: HandleSide,
-		position: number = 0.5,
 		dropPoint?: { readonly x: number; readonly y: number },
 		documentOverride?: unknown,
 	): void {
 		this.readInteractionState();
 		this.authoring ??= createCanvasAuthoring(this.view);
 		const anchorDocument = documentOverride ?? this.currentRawDocument;
-		const opposite: Readonly<Record<HandleSide, HandleSide>> = {
-			top: "bottom", bottom: "top", left: "right", right: "left",
-		};
 		const geometry = buildCanvasAnchorGeometry(anchorDocument);
 		const center = (id: string): { readonly x: number; readonly y: number } | undefined => {
 			const rect = geometry.nodes?.[id];
@@ -721,13 +730,26 @@ export class M1CanvasSession {
 			x: dropPoint.x - (rootRect?.left ?? 0),
 			y: dropPoint.y - (rootRect?.top ?? 0),
 		});
-		const fromAnchor = nodeBoundaryAnchorAtSide(anchorDocument, fromNode, side, position);
+		// The four visible points only start the gesture. Both endpoints remain
+		// continuous: the release direction is projected onto each node's actual
+		// local contour (including rotation and non-rectangular source shapes).
+		const aim = droppedOnBoard ?? center(toNode) ?? center(fromNode) ?? { x: 0, y: 0 };
+		const fromAnchor = nodeBoundaryAnchor(anchorDocument, fromNode, aim);
 		const toAnchor = nodeBoundaryAnchor(anchorDocument, toNode, droppedOnBoard ?? center(fromNode) ?? { x: 0, y: 0 });
 		if (fromAnchor === undefined || toAnchor === undefined) {
 			this.addDiagnostic(`A connector endpoint could not be measured on the node outline (${fromAnchor === undefined ? fromNode : toNode}).`);
 		}
+		const nativeSide = (anchor: CanvasAnchor | undefined, fallback: HandleSide): ConnectorSide => {
+			if (anchor?.type !== "node") return fallback as ConnectorSide;
+			const candidates: readonly [ConnectorSide, number][] = [
+				["top", anchor.v], ["right", 1 - anchor.u], ["bottom", 1 - anchor.v], ["left", anchor.u],
+			];
+			return candidates.reduce((best, candidate) => candidate[1] < best[1] ? candidate : best)[0];
+		};
 		const result = this.authoring.createConnector({
-			fromNode, toNode, fromSide: side as ConnectorSide, toSide: opposite[side] as ConnectorSide,
+			fromNode, toNode,
+			fromSide: nativeSide(fromAnchor, side),
+			toSide: nativeSide(toAnchor, side === "top" ? "bottom" : side === "bottom" ? "top" : side === "left" ? "right" : "left"),
 			...(fromAnchor === undefined ? {} : { fromAnchor }),
 			...(toAnchor === undefined ? {} : { toAnchor }),
 		});
@@ -755,7 +777,7 @@ export class M1CanvasSession {
 	}
 
 	/** Place a node beside the selection and connect it, in that order. */
-	private createConnectedNode(fromNode: string, side: HandleSide, position: number = 0.5): void {
+	private createConnectedNode(fromNode: string, side: HandleSide, _position: number = 0.5): void {
 		// The gesture pins its source across native selection changes, but the
 		// node must still exist in the live document when the click commits.
 		this.readInteractionState();
@@ -787,7 +809,7 @@ export class M1CanvasSession {
 			this.refresh();
 			return;
 		}
-		this.createEdge(fromNode, created.nodeId, side, position, undefined, created.document);
+		this.createEdge(fromNode, created.nodeId, side, undefined, created.document);
 	}
 
 	private applyElementStyle(patch: SelectionStylePatch): void {

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   SHAPE_CLIP_PATHS,
+  closestContourPoint,
   contourPoint,
   inscribedInsets,
   shapeOutline,
@@ -39,6 +40,16 @@ describe("shape silhouettes", () => {
 });
 
 describe("contour points", () => {
+	it("keeps arbitrary points on polygon and curved perimeters", () => {
+		const star = shapeOutline("star")!;
+		const from = star[2]!, to = star[3]!;
+		const arbitrary = { x: from.x + (to.x - from.x) * 0.37, y: from.y + (to.y - from.y) * 0.37 };
+		expect(closestContourPoint(star, arbitrary)).toEqual(arbitrary);
+
+		const circle = closestContourPoint(shapeOutline("circle"), { x: 91, y: 73 }, { x: 2, y: 1 });
+		expect(Math.hypot(circle.x - 50, circle.y - 50)).toBeCloseTo(50, 0);
+	});
+
   it("meets a triangle on its slanted edge, not on the bounding box", () => {
     const outline = shapeOutline("triangle");
     // The middle of the right-hand side of the box is outside the triangle.

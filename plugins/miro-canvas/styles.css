@@ -1107,9 +1107,7 @@
   font-size: 12px;
 }
 
-.miro-canvas-handle--connect[data-handle-position="0.25"] { --miro-handle-position: 25%; }
 .miro-canvas-handle--connect[data-handle-position="0.5"] { --miro-handle-position: 50%; }
-.miro-canvas-handle--connect[data-handle-position="0.75"] { --miro-handle-position: 75%; }
 .miro-canvas-handle--top { top: 0; left: var(--miro-handle-position); }
 .miro-canvas-handle--bottom { top: 100%; left: var(--miro-handle-position); }
 .miro-canvas-handle--left { left: 0; top: var(--miro-handle-position); }
@@ -1340,10 +1338,8 @@
   transform: skewY(-38deg);
 }
 
-/* Rotation is applied to an inner element, because native Canvas rewrites the
-   shell's own transform while panning.  The shell therefore stays square to
-   the board and its paint would show as an unrotated rectangle behind the
-   node; the rotated element keeps painting normally. */
+/* Shape geometry and editable content rotate as separate layers. Native paint
+   on the square shell stays transparent behind the vector contour. */
 [data-miro-source-rotated="true"] {
   background-color: transparent !important;
   border-color: transparent !important;

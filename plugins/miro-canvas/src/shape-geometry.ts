@@ -214,6 +214,39 @@ export function contourPoint(
   return best === undefined ? target : { x: center.x + dx * best, y: center.y + dy * best };
 }
 
+/**
+ * Nearest point on the rendered contour. `scale` keeps distance correct for a
+ * non-square node even though the stored outline uses a normalized box.
+ */
+export function closestContourPoint(
+  outline: readonly ShapePoint[] | undefined,
+  target: ShapePoint,
+  scale: ShapePoint = { x: 1, y: 1 },
+): ShapePoint {
+  if (outline === undefined || outline.length < 2
+    || !(scale.x > 0) || !(scale.y > 0)) return target;
+  let best: ShapePoint | undefined;
+  let bestDistance = Number.POSITIVE_INFINITY;
+  for (let index = 0; index < outline.length; index += 1) {
+    const from = outline[index]!;
+    const to = outline[(index + 1) % outline.length]!;
+    const dx = (to.x - from.x) * scale.x;
+    const dy = (to.y - from.y) * scale.y;
+    const tx = (target.x - from.x) * scale.x;
+    const ty = (target.y - from.y) * scale.y;
+    const lengthSquared = dx * dx + dy * dy;
+    const along = lengthSquared <= 1e-12 ? 0 : Math.max(0, Math.min(1, (tx * dx + ty * dy) / lengthSquared));
+    const point = { x: from.x + (to.x - from.x) * along, y: from.y + (to.y - from.y) * along };
+    const distance = ((target.x - point.x) * scale.x) ** 2 + ((target.y - point.y) * scale.y) ** 2;
+    // Stable outline order resolves corners and equal-distance segments.
+    if (distance < bestDistance - 1e-9) {
+      best = point;
+      bestDistance = distance;
+    }
+  }
+  return best ?? target;
+}
+
 function insideSpan(outline: readonly ShapePoint[], y: number): { readonly left: number; readonly right: number } | undefined {
   const crossings: number[] = [];
   for (let index = 0; index < outline.length; index += 1) {

@@ -39,15 +39,17 @@ describe("connector endpoints", () => {
   it("projects arbitrary pointer positions onto a node silhouette", () => {
     const document = baseDocument();
     expect(nodeBoundaryAnchor(document, "a", { x: 150, y: 20 })).toEqual({
-      type: "node", nodeId: "a", u: 1, v: 0.375,
+      type: "node", nodeId: "a", u: 1, v: 0.25,
     });
     (document.miroCanvas as Record<string, unknown>).localOverrides = {
       a: { shape: { kind: "triangle", fallback: "text" } },
     };
     const triangle = nodeBoundaryAnchor(document, "a", { x: 150, y: 20 });
     expect(triangle?.type).toBe("node");
-    expect((triangle as { u: number }).u).toBeLessThan(1);
-    expect((triangle as { v: number }).v).toBeCloseTo(0.444, 2);
+		const point = triangle as { u: number; v: number };
+		expect(point.u).toBeCloseTo(0.5 + point.v / 2, 6);
+		expect(point.v).toBeGreaterThan(0.25);
+		expect(point.v).toBeLessThan(1);
   });
 
   it("projects an off-centre dragged handle onto the selected shape silhouette", () => {

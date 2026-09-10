@@ -12,7 +12,7 @@ import type {
   CanvasAnchor,
 } from "./anchors";
 import { buildSourceScene } from "./source-model";
-import { contourPoint, shapeOutline, type ShapePoint } from "./shape-geometry";
+import { closestContourPoint, contourPoint, shapeOutline, type ShapePoint } from "./shape-geometry";
 import { decideInteraction } from "./interaction-policy";
 import {
   MIRO_CANVAS_SCHEMA_VERSION,
@@ -509,7 +509,11 @@ export function nodeBoundaryAnchor(
     y: 50 + ((local.y - center.y) / rect.height) * 100,
   };
   const descriptor = buildSourceScene(document).items.get(nodeId);
-  const point = contourPoint(shapeOutline(descriptor?.shape) ?? shapeOutline("rectangle"), target);
+	const point = closestContourPoint(
+		shapeOutline(descriptor?.shape) ?? shapeOutline("rectangle"),
+		target,
+		{ x: rect.width / 100, y: rect.height / 100 },
+	);
   const clamp = (value: number): number => Math.max(0, Math.min(1, value / 100));
   return { type: "node", nodeId, u: clamp(point.x), v: clamp(point.y) };
 }

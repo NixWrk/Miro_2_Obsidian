@@ -275,9 +275,9 @@ export class M2CanvasTools {
       const value = rotation.value.trim().length > 0 ? Number(rotation.value) : Number.NaN;
       if (id === undefined) { this.status.textContent = "Select one Canvas element to rotate."; return; }
       if (!Number.isFinite(value)) { this.status.textContent = "Rotation must be a finite number."; return; }
-      const result = this.authoring.updateRotation({ id, rotation: value });
-      this.status.textContent = result.ok ? "Rotation saved in native Canvas history."
-        : result.diagnostics[0]?.message ?? "Rotation was rejected.";
+		const result = this.session.setElementRotation(id, value);
+		this.status.textContent = result?.ok === true ? "Rotation saved in native Canvas history."
+			: result?.diagnostics[0]?.message ?? "Rotation was rejected.";
       this.refreshFromNative();
     });
     geometryActions.append(applyRotation);

@@ -58,9 +58,10 @@ function fixture(options: {
 	};
 	const canvas = {
 		wrapperEl: root,
-		nodes: new Map(), edges: new Map(), selection: new Set(),
+		nodes: new Map(), edges: new Map(), selection: new Set<unknown>(),
 		data: clone(initial) as Data,
 		readonly: false,
+		historyRequests: [] as boolean[],
 		/** Rebuilds from the model: unknown root keys are not carried over. */
 		getData(): Data {
 			const rebuilt: Data = { nodes: clone(this.data.nodes), edges: clone(this.data.edges) };
@@ -79,16 +80,20 @@ function fixture(options: {
 		setViewport() {}, requestRender() {},
 		setReadonly(value: boolean) { this.readonly = value; },
 		requestSave(addHistory: boolean) {
+			this.historyRequests.push(addHistory);
 			// The save path replaces the live root with the host's own rebuild.
 			if (addHistory) this.data = this.getData();
 		},
 	};
+	const runtimeNode = { id: "n1", data: clone(initial.nodes[0]), nodeEl: root };
+	canvas.nodes.set("n1", runtimeNode);
 	const view = { canvas };
 	const probe = createObsidianMetadataStore(view);
 	expect(probe.store).toBeDefined();
-	const session = new M1CanvasSession(view, new MetadataWriter(probe.store!));
+	const writer = new MetadataWriter(probe.store!);
+	const session = new M1CanvasSession(view, writer);
 	sessions.push(session);
-	return { root, canvas, session, initial };
+	return { root, canvas, session, initial, runtimeNode, writer };
 }
 
 describe("M1 session document persistence", () => {
@@ -127,6 +132,27 @@ describe("M1 session document persistence", () => {
 		// Source evidence must survive the host's rebuild untouched.
 		expect(canvas.data.miroSource).toEqual({ items: [{ id: "n1" }] });
 		expect(session.diagnostics.some((item) => item.includes("did not accept"))).toBe(false);
+	});
+
+	it("commits one rotation gesture through metadata and replays it without losing source fields", () => {
+		const { canvas, session, runtimeNode, writer } = fixture();
+		canvas.data.miroCanvas.localOverrides.n1 = { futureOverride: { keep: true } };
+		canvas.data.miroCanvas.futureMetadata = ["keep"];
+		session.mount();
+		canvas.selection.add(runtimeNode);
+		session.refresh();
+		session.setElementRotation("n1", 37);
+
+		expect(canvas.historyRequests).toEqual([true]);
+		expect(canvas.data).toHaveProperty("miroCanvas.localOverrides.n1.rotation", 37);
+		expect(canvas.data).toHaveProperty("miroCanvas.localOverrides.n1.futureOverride.keep", true);
+		expect(canvas.data).toHaveProperty("miroCanvas.futureMetadata.0", "keep");
+		expect(canvas.data.miroSource).toEqual({ items: [{ id: "n1" }] });
+
+		expect(writer.undo().status).toBe("applied");
+		expect(canvas.data.miroCanvas.localOverrides.n1).not.toHaveProperty("rotation");
+		expect(writer.redo().status).toBe("applied");
+		expect(canvas.data).toHaveProperty("miroCanvas.localOverrides.n1.rotation", 37);
 	});
 
 	it("accepts a host that also normalizes nodes, and says so instead of hiding it", () => {

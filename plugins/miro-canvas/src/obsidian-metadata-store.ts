@@ -1,4 +1,3 @@
-import { PLUGIN_ROOT_KEYS } from "./metadata";
 import type { MetadataDocumentStore } from "./metadata-writer";
 
 /**
@@ -283,23 +282,50 @@ function normalizeDocument(value: unknown): Record<string, unknown> {
 	return clone as Record<string, unknown>;
 }
 
-/** Compare only the identity of the graph: which nodes and edges exist. */
+const NATIVE_NODE_DEFAULTS = new Set(["color", "subpath"]);
+const NATIVE_EDGE_DEFAULTS = new Set(["color", "label", "fromEnd", "toEnd", "fromFloating", "toFloating", "styleAttributes"]);
+
+function nativeDefaultAllowed(kind: "nodes" | "edges", key: string, value: unknown): boolean {
+	if (kind === "nodes") return NATIVE_NODE_DEFAULTS.has(key) && (typeof value === "string" || value === null);
+	if (!NATIVE_EDGE_DEFAULTS.has(key)) return false;
+	if (key === "fromFloating" || key === "toFloating") return typeof value === "boolean";
+	if (key === "styleAttributes") return value !== null && typeof value === "object"
+		&& !Array.isArray(value) && Object.keys(value).length === 0;
+	return typeof value === "string" || value === null;
+}
+
+/** Compare graph values exactly, except for known optional defaults materialized by native Canvas. */
 function graphDrift(observed: Record<string, unknown>, written: Record<string, unknown>): string | undefined {
 	for (const key of ["nodes", "edges"] as const) {
-		const ids = (value: unknown): string[] => {
-			if (!Array.isArray(value)) {
-				return [];
+		const actual = observed[key];
+		const wanted = written[key];
+		if (!Array.isArray(actual) || !Array.isArray(wanted) || actual.length !== wanted.length) return key;
+		for (let index = 0; index < wanted.length; index += 1) {
+			const actualItem = actual[index];
+			const wantedItem = wanted[index];
+			if (!isObject(actualItem) || !isObject(wantedItem)) return key;
+			for (const field of Object.keys(wantedItem)) {
+				if (!hasOwn(actualItem, field) || !equalJson(actualItem[field], wantedItem[field])) return key;
 			}
-			return value
-				.map((item) => (isObject(item) ? item.id : undefined))
-				.filter((id): id is string => typeof id === "string")
-				.sort();
-		};
-		const left = ids(observed[key]);
-		const right = ids(written[key]);
-		if (!equalJson(left, right)) {
-			return key;
+			for (const field of Object.keys(actualItem)) {
+				if (hasOwn(wantedItem, field)) continue;
+				if (!nativeDefaultAllowed(key, field, actualItem[field])) return key;
+			}
 		}
+	}
+	return undefined;
+}
+
+/** Every non-graph root belongs to the source, this plugin, or another producer. */
+function rootMetadataDrift(observed: Record<string, unknown>, written: Record<string, unknown>): string | undefined {
+	const roots = (value: Record<string, unknown>): string[] => Object.keys(value)
+		.filter((key) => key !== "nodes" && key !== "edges")
+		.sort();
+	const actual = roots(observed);
+	const wanted = roots(written);
+	if (!equalJson(actual, wanted)) return "root-keys";
+	for (const key of wanted) {
+		if (!equalJson(observed[key], written[key])) return key;
 	}
 	return undefined;
 }
@@ -597,13 +623,12 @@ class ObsidianRootMetadataStore implements MetadataDocumentStore {
 		// The host rebuilds the document from its own model when it saves, so an
 		// exact match is not something it can be required to produce.  Verify the
 		// invariants this plugin actually owns instead of accepting silently:
-		// its own root keys must survive byte-for-byte and the graph must be the
-		// one that was written.
-		for (const key of PLUGIN_ROOT_KEYS) {
-			if (!equalJson(observedSnapshot[key], replacement[key])) {
-				this.restoreRoot(currentSnapshot);
-				return this.fail(`post-save-metadata-lost: ${key}`);
-			}
+		// every source/extension root must survive byte-for-byte and the graph may
+		// gain only native optional defaults.
+		const rootDrift = rootMetadataDrift(observedSnapshot, replacement);
+		if (rootDrift !== undefined) {
+			this.restoreRoot(currentSnapshot);
+			return this.fail(`post-save-metadata-lost: ${rootDrift}`);
 		}
 		const drift = graphDrift(observedSnapshot, replacement);
 		if (drift !== undefined) {

@@ -343,19 +343,33 @@ function snapshotDocument(value: unknown): Snapshot {
 	};
 }
 
-/** Identity of the graph only: which nodes and edges the document still holds. */
+/** Every written graph value survives; a host may only materialize extra defaults. */
 function graphIsUnchanged(observed: Record<string, unknown>, written: Record<string, unknown>): boolean {
 	for (const key of ["nodes", "edges"] as const) {
-		const ids = (value: unknown): string[] => (Array.isArray(value)
-			? value.map((item) => (isRecord(item) ? item.id : undefined))
-				.filter((id): id is string => typeof id === "string")
-				.sort()
-			: []);
-		if (!structurallyEqual(ids(observed[key]), ids(written[key]))) {
-			return false;
+		const actual = observed[key];
+		const wanted = written[key];
+		if (!Array.isArray(actual) || !Array.isArray(wanted) || actual.length !== wanted.length) return false;
+		for (let index = 0; index < wanted.length; index += 1) {
+			const actualItem = actual[index];
+			const wantedItem = wanted[index];
+			if (!isRecord(actualItem) || !isRecord(wantedItem)) return false;
+			for (const field of Object.keys(wantedItem)) {
+				if (!hasOwn(actualItem, field) || !structurallyEqual(actualItem[field], wantedItem[field])) return false;
+			}
 		}
 	}
 	return true;
+}
+
+/** Unknown extension/source roots are evidence and must survive byte-for-byte. */
+function nonGraphRootsAreUnchanged(observed: Record<string, unknown>, written: Record<string, unknown>): boolean {
+	const roots = (value: Record<string, unknown>): string[] => Object.keys(value)
+		.filter((key) => key !== "nodes" && key !== "edges")
+		.sort();
+	const actual = roots(observed);
+	const wanted = roots(written);
+	return structurallyEqual(actual, wanted)
+		&& wanted.every((key) => structurallyEqual(observed[key], written[key]));
 }
 
 function sourceIsUnchanged(before: Snapshot, after: Snapshot): boolean {
@@ -717,7 +731,8 @@ export class MetadataWriter {
 			// that only when the metadata this writer produced survived and the
 			// graph is still the one that was written, and never accept it quietly.
 			if (structurallyEqual(observed.document.miroCanvas, after.document.miroCanvas)
-				&& graphIsUnchanged(observed.document, after.document)) {
+				&& graphIsUnchanged(observed.document, after.document)
+				&& nonGraphRootsAreUnchanged(observed.document, after.document)) {
 				let notice: string | undefined;
 				try {
 					notice = this.store.describeLastCommitNotice?.();

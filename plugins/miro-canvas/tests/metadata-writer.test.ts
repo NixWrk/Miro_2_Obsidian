@@ -173,6 +173,32 @@ describe("MetadataWriter", () => {
 		expect(store.commits).toHaveLength(1);
 	});
 
+	it("rolls back a host that drops an unknown root while preserving plugin metadata", () => {
+		const before = { nodes: [], edges: [], futureRoot: { keep: true } };
+		const store = new MemoryStore(before);
+		let firstCommit = true;
+		const normalCommit = store.commitDocument.bind(store);
+		store.commitDocument = (next, expected) => {
+			if (firstCommit) {
+				firstCommit = false;
+				const tampered = clone(next) as Record<string, unknown>;
+				delete tampered.futureRoot;
+				store.current = tampered;
+				return true;
+			}
+			return normalCommit(next, expected);
+		};
+		const writer = new MetadataWriter(store);
+
+		const write = writer.write("rotation", (draft) => {
+			draft.localOverrides = { node: { rotation: 17 } };
+		});
+
+		expect(write.status).toBe("rejected");
+		expect(store.current).toEqual(before);
+		expect(writer.undoDepth).toBe(0);
+	});
+
 	it("preserves exact snapshots through undo and redo", () => {
 		const source = { items: [{ id: "source", nested: [1, { keep: true }] }] };
 		const initial = { nodes: [{ id: "node" }], edges: [], miroSource: source };

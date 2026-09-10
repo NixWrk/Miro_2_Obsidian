@@ -199,10 +199,10 @@ describe("selection handles", () => {
 
   it("reports a connection pulled from a side to its release point", () => {
     const { root, connects, handles } = build();
-    bySide(root, "right", 0.25).dispatch("pointerdown", { clientX: 300, clientY: 125, pointerId: 2 });
+    bySide(root, "right").dispatch("pointerdown", { clientX: 300, clientY: 150, pointerId: 2 });
     expect(root.getAttribute("data-miro-canvas-connecting")).toBe("right");
     handles.handlePointerUp({ clientX: 640, clientY: 155 });
-    expect(connects).toEqual([{ sourceId: "n1", side: "right", position: 0.25, point: { x: 640, y: 155 } }]);
+    expect(connects).toEqual([{ sourceId: "n1", side: "right", position: 0.5, point: { x: 640, y: 155 } }]);
     expect(handles.gestureActive).toBe(false);
   });
 
@@ -215,14 +215,14 @@ describe("selection handles", () => {
     expect(connects).toEqual([]);
   });
 
-  it("offers three affordances per side, arrowed away from the node", () => {
+  it("offers one affordance per side, arrowed away from the node", () => {
     const { root } = build();
     expect(bySide(root, "top").textContent).toBe("↑");
     expect(bySide(root, "right").textContent).toBe("→");
     expect(bySide(root, "bottom").textContent).toBe("↓");
     expect(bySide(root, "left").textContent).toBe("←");
-    expect(descendants(root).filter((item) => item.className.includes("--connect"))).toHaveLength(12);
-    expect(bySide(root, "right", 0.25).getAttribute("data-handle-position")).toBe("0.25");
+    expect(descendants(root).filter((item) => item.className.includes("--connect"))).toHaveLength(4);
+    expect(bySide(root, "right").getAttribute("data-handle-position")).toBe("0.5");
     // The separate quick-create button is gone; the point is the arrow.
     expect(descendants(root).filter((item) => item.className.includes("--create"))).toHaveLength(0);
   });
@@ -263,21 +263,19 @@ describe("selection handles", () => {
 
   it("keeps the source node when Canvas clears selection during a connection gesture", () => {
     const { root, creates, connects, update, handles } = build();
-    bySide(root, "right", 0.75).dispatch("pointerdown", { clientX: 300, clientY: 175, pointerId: 14 });
+    bySide(root, "right").dispatch("pointerdown", { clientX: 300, clientY: 150, pointerId: 14 });
     update({ rect: undefined, selectedIds: [] });
-    handles.handlePointerUp({ clientX: 300, clientY: 175 });
-    expect(creates).toEqual([{ sourceId: "n1", side: "right", position: 0.75 }]);
+    handles.handlePointerUp({ clientX: 300, clientY: 150 });
+    expect(creates).toEqual([{ sourceId: "n1", side: "right", position: 0.5 }]);
     expect(connects).toEqual([]);
   });
 
-  it("places all three connection points on the visible shape contour", () => {
+  it("places the connection affordance on the visible shape contour", () => {
     const { root, update } = build();
     update({ shape: "triangle" });
-    for (const position of [0.25, 0.5, 0.75] as const) {
-      const point = bySide(root, "right", position);
-      expect(Number.parseFloat(point.style.left)).toBeLessThan(100);
-      expect(Number.parseFloat(point.style.left)).toBeGreaterThan(50);
-    }
+    const point = bySide(root, "right");
+    expect(Number.parseFloat(point.style.left)).toBeLessThan(100);
+    expect(Number.parseFloat(point.style.left)).toBeGreaterThan(50);
   });
 
   it("removes its listeners on dispose", () => {

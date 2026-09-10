@@ -106,7 +106,8 @@ def main() -> int:
                 }""", key), f"Lock incorrectly blocked Ctrl+{key}"
             page.evaluate("miroBrowser.session.unlockSelection()")
             edge_count = page.evaluate("miroBrowser.runtime.edges.size")
-            handle_box = page.locator('.miro-canvas-handle--right[data-handle-position="0.25"]').bounding_box()
+            assert page.locator(".miro-canvas-handle--connect").count() == 4
+            handle_box = page.locator('.miro-canvas-handle--right[data-handle-position="0.5"]').bounding_box()
             target_box = page.evaluate("() => { const r = miroBrowser.fileNode.nodeEl.getBoundingClientRect(); return {x:r.x,y:r.y}; }")
             assert handle_box is not None
             page.mouse.move(handle_box["x"] + handle_box["width"] / 2, handle_box["y"] + handle_box["height"] / 2)

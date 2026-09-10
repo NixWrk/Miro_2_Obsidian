@@ -23,7 +23,7 @@ interface RenderedItem {
   readonly element: DomElementLike;
   readonly marker: DomElementLike;
   readonly ownedChildren?: readonly DomElementLike[];
-  readonly expectedRotation?: number;
+  readonly expectedRotations?: readonly { readonly element: DomElementLike; readonly rotation: number }[];
   readonly descriptor: SourceItemDescriptor;
 }
 
@@ -243,7 +243,10 @@ function patchStyle(
           : value.startsWith(`${restored} `) ? value.slice(restored.length + 1).trim() : "";
         const marker = ` ${ownedSuffix}`;
         if (ownedSuffix.length > 0 && (current === ownedSuffix || current.endsWith(marker))) {
-          const retained = current === ownedSuffix ? "" : current.slice(0, -marker.length);
+          let retained = current;
+          while (retained === ownedSuffix || retained.endsWith(marker)) {
+            retained = retained === ownedSuffix ? "" : retained.slice(0, -marker.length);
+          }
           if (retained.length === 0) {
             const currentStyle = styleObject(element);
             if (currentStyle !== undefined) safeCall(currentStyle, "removeProperty", [property]);
@@ -439,15 +442,22 @@ function isContained(outer: DomElementLike, inner: DomElementLike): boolean {
   return result === true;
 }
 
-const TRAILING_PLUGIN_ROTATION = /\s*rotate\(\s*[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:e[-+]?\d+)?deg\s*\)\s*$/iu;
+const OWNED_ROTATION_ATTRIBUTE = "data-miro-source-owned-rotation";
 
-/** Recover the native transform by removing every trailing rotation this renderer could have written. */
+/** Recover the native transform by removing only the suffix marked as ours. */
 function hostBaseTransform(element: DomElementLike): string | undefined {
   const before = readStyle(element, "transform");
   if (before === undefined) return undefined;
   let base = before.trim();
   if (base === "none") return "";
-  while (TRAILING_PLUGIN_ROTATION.test(base)) base = base.replace(TRAILING_PLUGIN_ROTATION, "").trim();
+  const owned = readAttribute(element, OWNED_ROTATION_ATTRIBUTE);
+  if (owned !== null && owned !== undefined) {
+    const suffix = `rotate(${owned}deg)`;
+    const marker = ` ${suffix}`;
+    while (base === suffix || base.endsWith(marker)) {
+      base = base === suffix ? "" : base.slice(0, -marker.length).trim();
+    }
+  }
   return base;
 }
 
@@ -462,26 +472,32 @@ function composedTransform(element: DomElementLike, rotation: number): string | 
   return base === undefined ? undefined : transformWithRotation(base, rotation);
 }
 
-function applyRotation(runtime: unknown, primary: DomElementLike, rotation: number, patches: RestorePatch[], diagnostics: string[], id: string): void {
-  if (!Number.isFinite(rotation)) return;
-  const base = hostBaseTransform(primary);
+function applyElementRotation(element: DomElementLike, rotation: number, patches: RestorePatch[]): boolean {
+  if (!Number.isFinite(rotation)) return false;
+  const base = hostBaseTransform(element);
   const transform = base === undefined ? undefined : transformWithRotation(base, rotation);
-  if (transform === undefined || !patchStyle(primary, "transform", transform, patches, base)) {
-    diagnostics.push(`rotation-dom-inaccessible: ${id}.`);
-    return;
+  if (transform === undefined || !patchStyle(element, "transform", transform, patches, base)) {
+    return false;
   }
-  patchStyle(primary, "transform-origin", "50% 50%", patches);
+  patchStyle(element, "transform-origin", "50% 50%", patches);
+  patchAttribute(element, OWNED_ROTATION_ATTRIBUTE, String(rotation), patches);
+  return true;
+}
 
+function applyInteractionRotation(runtime: unknown, primary: DomElementLike, rotation: number, patches: RestorePatch[]): void {
   const interactionElements = allElementsFor(runtime, ["hitboxEl", "interactionEl", "resizerEl", "resizeEl", "selectionEl", "bboxEl"]);
   for (const element of interactionElements) {
     if (element === primary || isContained(primary, element) || isContained(element, primary)) continue;
-    const interactionBase = hostBaseTransform(element);
-    const interactionTransform = interactionBase === undefined ? undefined : transformWithRotation(interactionBase, rotation);
-    if (interactionTransform !== undefined && interactionBase !== undefined) {
-      patchStyle(element, "transform", interactionTransform, patches, interactionBase);
-      patchStyle(element, "transform-origin", "50% 50%", patches);
-    }
+    applyElementRotation(element, rotation, patches);
   }
+}
+
+function applyRotation(runtime: unknown, primary: DomElementLike, rotation: number, patches: RestorePatch[], diagnostics: string[], id: string): void {
+  if (!applyElementRotation(primary, rotation, patches)) {
+    diagnostics.push(`rotation-dom-inaccessible: ${id}.`);
+    return;
+  }
+  applyInteractionRotation(runtime, primary, rotation, patches);
 }
 
 function normalizedZIndex(value: number | undefined): string | undefined {
@@ -873,11 +889,32 @@ function applyNode(
     // elements this module can name is not enough on its own.
     patchAttribute(shell, "data-miro-source-rotated", "true", patches);
   }
-  // The outer shell owns the complete painted node. Rotating an inner
-  // container leaves native paint behind as an upright rectangle.
-  applyRotation(runtime, shell, rotation, patches, diagnostics, id);
+  let expectedRotations: Array<{ readonly element: DomElementLike; readonly rotation: number }>;
+  if (descriptor.kind === "shape" && layer !== undefined) {
+    // Keep geometry, editable content and tags as separate compositor inputs.
+    // The SVG contour stays vector-sharp and Chromium no longer resamples the
+    // complete Canvas node (including its controls) as one blurred texture.
+    // The shell keeps every host-owned transform; only visual layers rotate.
+    applyElementRotation(shell, 0, patches);
+    for (const parent of [shell, containerEl].filter(
+      (element, index, all): element is DomElementLike => element !== undefined && all.indexOf(element) === index,
+    )) patchStyle(parent, "overflow", "visible", patches);
+    const visualTargets = [layer, content, tagLayer].filter(
+      (element, index, all): element is DomElementLike => element !== undefined && element !== shell && all.indexOf(element) === index,
+    );
+    expectedRotations = [];
+    for (const element of visualTargets) {
+      if (applyElementRotation(element, rotation, patches)) expectedRotations.push({ element, rotation });
+    }
+    if (expectedRotations.length === 0) diagnostics.push(`rotation-dom-inaccessible: ${id}.`);
+    patchStyle(content, "text-rendering", "geometricPrecision", patches);
+    applyInteractionRotation(runtime, shell, rotation, patches);
+  } else {
+    applyRotation(runtime, shell, rotation, patches, diagnostics, id);
+    expectedRotations = [{ element: shell, rotation }];
+  }
   const ownedChildren = [layer, tagLayer].filter((item): item is DomElementLike => item !== undefined);
-  return { id, kind: "node", element: primary, marker: shell, ownedChildren, expectedRotation: rotation, descriptor };
+  return { id, kind: "node", element: primary, marker: shell, ownedChildren, expectedRotations, descriptor };
 }
 
 function itemById(values: readonly unknown[]): ReadonlyMap<string, unknown> {
@@ -1083,9 +1120,9 @@ export class SourceRenderer {
     for (const item of this.renderedItems) {
       const marker = safeCall(item.marker, "getAttribute", ["data-miro-source-kind"]);
       if (safeGet(item.marker, "isConnected") === false || typeof marker !== "string") return false;
-      if (item.expectedRotation !== undefined) {
-        const transform = readStyle(item.marker, "transform");
-        const expected = composedTransform(item.marker, item.expectedRotation);
+      for (const expectedRotation of item.expectedRotations ?? []) {
+        const transform = readStyle(expectedRotation.element, "transform");
+        const expected = composedTransform(expectedRotation.element, expectedRotation.rotation);
         if (transform === undefined || expected === undefined || transform.trim() !== expected.trim()) return false;
       }
       for (const child of item.ownedChildren ?? []) {

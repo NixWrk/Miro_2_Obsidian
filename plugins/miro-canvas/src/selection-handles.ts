@@ -1,11 +1,11 @@
 /**
- * Selection handles drawn over the Canvas: a rotation grip, one connection
- * connection points along every side, and quick-create arrows.
+ * Selection handles drawn over the Canvas: a rotation grip and one combined
+ * connect/quick-create affordance on every side.
  *
  * The native Canvas keeps its own resize handles and selection outline.  This
  * overlay only adds the affordances it does not have, reports finished
  * gestures to its host, and owns no persistence: a rotation is previewed here
- * and written by the host through the guarded authoring transaction.
+ * and written by the host through one guarded metadata transaction.
  *
  * All geometry arrives already resolved in viewport pixels, so this module can
  * be exercised without a layout engine.
@@ -14,7 +14,7 @@
 import { contourPoint, shapeOutline } from "./shape-geometry";
 
 export type HandleSide = "top" | "right" | "bottom" | "left";
-export const HANDLE_POSITIONS = [0.25, 0.5, 0.75] as const;
+export const HANDLE_POSITIONS = [0.5] as const;
 export type HandlePosition = (typeof HANDLE_POSITIONS)[number];
 
 interface ShapePointLike {

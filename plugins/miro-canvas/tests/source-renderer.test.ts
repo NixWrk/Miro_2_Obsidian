@@ -175,57 +175,62 @@ describe("shape text insets", () => {
 });
 
 describe("native paint markers", () => {
-  it("rotates the complete node shell and restores the host transform", () => {
-    const f = fixture("rectangle");
-    f.nodeEl.style.setProperty("transform", "translate(10px, 20px)");
+	it("rotates shape geometry and content separately while preserving the host transform", () => {
+		const f = fixture("rectangle");
+		f.nodeEl.style.setProperty("transform", "translate(10px, 20px)");
     const data = f.data;
     data.miroCanvas = { schemaVersion: 1, settings: {}, localOverrides: { a: { rotation: 24 } } };
     f.data = data;
-    f.renderer.refresh();
-    expect(f.nodeEl.getAttribute("data-miro-source-rotated")).toBe("true");
-    expect(f.nodeEl.style.getPropertyValue("transform")).toBe("translate(10px, 20px) rotate(24deg)");
-    expect(f.contentEl.style.getPropertyValue("transform")).toBe("");
-    f.renderer.dispose();
-    expect(f.nodeEl.getAttribute("data-miro-source-rotated")).toBe(null);
-    expect(f.nodeEl.style.getPropertyValue("transform")).toBe("translate(10px, 20px)");
-  });
+		f.renderer.refresh();
+		const decoration = f.nodeEl.children.find((item) => item.getAttribute("data-miro-source-decoration") === "shape")!;
+		expect(f.nodeEl.getAttribute("data-miro-source-rotated")).toBe("true");
+		expect(f.nodeEl.style.getPropertyValue("transform")).toBe("translate(10px, 20px)");
+		expect(decoration.style.getPropertyValue("transform")).toBe("rotate(24deg)");
+		expect(f.contentEl.style.getPropertyValue("transform")).toBe("rotate(24deg)");
+		expect(f.contentEl.style.getPropertyValue("text-rendering")).toBe("geometricPrecision");
+		f.renderer.dispose();
+		expect(f.nodeEl.getAttribute("data-miro-source-rotated")).toBe(null);
+		expect(f.nodeEl.style.getPropertyValue("transform")).toBe("translate(10px, 20px)");
+		expect(f.contentEl.style.getPropertyValue("transform")).toBe("");
+	});
 
   it("uses the renderer as the single writer for rotation previews", () => {
     const f = fixture("rectangle");
     f.data.miroCanvas = { schemaVersion: 1, settings: {}, localOverrides: { a: { rotation: 10 } } };
     f.renderer.refresh();
-    expect(f.nodeEl.style.getPropertyValue("transform")).toContain("rotate(10deg)");
-    f.preview = { id: "a", rotation: 55 };
-    f.renderer.refresh();
-    expect(f.nodeEl.style.getPropertyValue("transform")).toContain("rotate(55deg)");
-    f.preview = undefined;
-    f.renderer.refresh();
-    expect(f.nodeEl.style.getPropertyValue("transform")).toContain("rotate(10deg)");
+		expect(f.contentEl.style.getPropertyValue("transform")).toContain("rotate(10deg)");
+		f.preview = { id: "a", rotation: 55 };
+		f.renderer.refresh();
+		expect(f.contentEl.style.getPropertyValue("transform")).toContain("rotate(55deg)");
+		f.preview = undefined;
+		f.renderer.refresh();
+		expect(f.contentEl.style.getPropertyValue("transform")).toContain("rotate(10deg)");
   });
 
   it("reapplies rotation after the host rewrites its transform", () => {
     const f = fixture("rectangle");
     f.data.miroCanvas = { schemaVersion: 1, settings: {}, localOverrides: { a: { rotation: 24 } } };
-    f.nodeEl.style.setProperty("transform", "translate(10px, 20px)");
-    f.renderer.refresh();
-    f.nodeEl.style.setProperty("transform", "translate(30px, 40px)");
-    f.renderer.refresh();
-    expect(f.nodeEl.style.getPropertyValue("transform")).toBe("translate(30px, 40px) rotate(24deg)");
+		f.nodeEl.style.setProperty("transform", "translate(10px, 20px)");
+		f.renderer.refresh();
+		f.nodeEl.style.setProperty("transform", "translate(30px, 40px)");
+		f.renderer.refresh();
+		expect(f.nodeEl.style.getPropertyValue("transform")).toBe("translate(30px, 40px)");
+		expect(f.contentEl.style.getPropertyValue("transform")).toBe("rotate(24deg)");
   });
 
-  it("replaces every stale plugin rotation instead of accumulating on reselection", () => {
+	it("preserves unmarked host rotations and removes repeated owned suffixes", () => {
     const f = fixture("rectangle");
     f.data.miroCanvas = { schemaVersion: 1, settings: {}, localOverrides: { a: { rotation: 24 } } };
-    f.nodeEl.style.setProperty("transform", "translate(10px, 20px) rotate(90deg) rotate(24deg)");
-    f.renderer.refresh();
-    expect(f.nodeEl.style.getPropertyValue("transform")).toBe("translate(10px, 20px) rotate(24deg)");
-    for (let pass = 0; pass < 5; pass += 1) {
-      f.nodeEl.style.setProperty("transform", `${f.nodeEl.style.getPropertyValue("transform")} rotate(24deg)`);
-      f.renderer.refresh();
-      expect(f.nodeEl.style.getPropertyValue("transform")).toBe("translate(10px, 20px) rotate(24deg)");
-    }
-    f.renderer.dispose();
-    expect(f.nodeEl.style.getPropertyValue("transform")).toBe("translate(10px, 20px)");
+		f.nodeEl.style.setProperty("transform", "translate(10px, 20px) rotate(90deg) rotate(24deg)");
+		f.renderer.refresh();
+		expect(f.nodeEl.style.getPropertyValue("transform")).toBe("translate(10px, 20px) rotate(90deg) rotate(24deg)");
+		for (let pass = 0; pass < 5; pass += 1) {
+			f.contentEl.style.setProperty("transform", `${f.contentEl.style.getPropertyValue("transform")} rotate(24deg)`);
+			f.renderer.refresh();
+			expect(f.contentEl.style.getPropertyValue("transform")).toBe("rotate(24deg)");
+		}
+		f.renderer.dispose();
+		expect(f.nodeEl.style.getPropertyValue("transform")).toBe("translate(10px, 20px) rotate(90deg) rotate(24deg)");
   });
 
   it("skips an intact projection, rebuilds a removed layer, and clears stale decoration", () => {
