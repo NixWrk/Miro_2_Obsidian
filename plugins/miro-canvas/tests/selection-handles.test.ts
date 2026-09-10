@@ -278,13 +278,13 @@ describe("selection handles", () => {
     expect(Number.parseFloat(point.style.left)).toBeGreaterThan(50);
   });
 
-  it("pulls a connection from a held point even when it never moved", () => {
-    const { root, creates, connects, handles } = build({}, { holdMilliseconds: 0 });
+  it("adds a node however long the point was held, as long as it did not move", () => {
+    const { root, creates, connects, handles } = build();
     bySide(root, "right").dispatch("pointerdown", { clientX: 300, clientY: 150, pointerId: 21 });
     handles.handlePointerUp({ clientX: 300, clientY: 150 });
-    // Holding is how a connection is pulled, so this is not a tap.
-    expect(creates).toEqual([]);
-    expect(connects).toHaveLength(1);
+    // Treating a slow click as a drag stopped the point adding a node at all.
+    expect(creates).toHaveLength(1);
+    expect(connects).toEqual([]);
   });
 
   it("removes its listeners on dispose", () => {

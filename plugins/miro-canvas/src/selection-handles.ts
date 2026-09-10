@@ -66,14 +66,11 @@ export interface SelectionHandlesOptions {
   readonly snapDegrees?: number;
   /** Movement under this many pixels counts as a click, not a drag. */
   readonly dragThreshold?: number;
-  /** A press held longer than this pulls a connection even without movement. */
-  readonly holdMilliseconds?: number;
 }
 
 const SIDES: readonly HandleSide[] = ["top", "right", "bottom", "left"];
 const DEFAULT_SNAP = 15;
 const DEFAULT_DRAG_THRESHOLD = 4;
-const DEFAULT_HOLD_MS = 250;
 /** Each connection point becomes an arrow pointing away from the node. */
 const SIDE_ARROWS: Readonly<Record<HandleSide, string>> = Object.freeze({
   top: "↑", right: "→", bottom: "↓", left: "←",
@@ -165,7 +162,6 @@ export class SelectionHandles {
   private readonly actions: SelectionHandlesActions;
   private readonly snapDegrees: number;
   private readonly dragThreshold: number;
-  private readonly holdMilliseconds: number;
   private readonly listeners: Array<() => void> = [];
   private readonly refs: HandleRefs | undefined;
   private state: SelectionHandlesState = { rotation: 0, editable: false, isEdge: false, selectedIds: [] };
@@ -176,13 +172,11 @@ export class SelectionHandles {
   private dragPosition: HandlePosition | undefined;
   private dragSourceId: string | undefined;
   private dragOrigin: { readonly x: number; readonly y: number } | undefined;
-  private dragStartedAt = 0;
 
   public constructor(actions: SelectionHandlesActions, options: SelectionHandlesOptions = {}) {
     this.actions = actions;
     this.snapDegrees = options.snapDegrees ?? DEFAULT_SNAP;
     this.dragThreshold = options.dragThreshold ?? DEFAULT_DRAG_THRESHOLD;
-    this.holdMilliseconds = options.holdMilliseconds ?? DEFAULT_HOLD_MS;
     this.document = options.document ?? (typeof document !== "undefined" ? document : undefined);
     if (!hasDocument(this.document)) {
       this.element = {} as HTMLElement;
@@ -262,7 +256,6 @@ export class SelectionHandles {
     this.dragPosition = position;
     this.dragSourceId = sourceId;
     this.dragOrigin = pointOf(event);
-    this.dragStartedAt = Date.now();
     this.element.setAttribute("data-miro-canvas-connecting", side);
   }
 
@@ -294,11 +287,11 @@ export class SelectionHandles {
       const moved = point === undefined || origin === undefined
         ? 0
         : Math.hypot(point.x - origin.x, point.y - origin.y);
-      // A quick tap adds a connected node; holding the point is how a
-      // connection is pulled, so a deliberate hold is a drag even when the
-      // pointer never actually moved.
-      const held = Date.now() - this.dragStartedAt >= this.holdMilliseconds;
-      if (moved < this.dragThreshold && !held) this.actions.onCreateConnected(this.dragSourceId, this.dragSide, this.dragPosition);
+      // Movement alone decides: a press that never moved is a click, however
+      // long it was held.  Treating a slow click as a drag stopped the point
+      // from adding a node at all, and holding still cannot connect anything
+      // because the only thing under the pointer is the node it started on.
+      if (moved < this.dragThreshold) this.actions.onCreateConnected(this.dragSourceId, this.dragSide, this.dragPosition);
       else if (point !== undefined) this.actions.onConnect(this.dragSourceId, this.dragSide, this.dragPosition, point);
     }
     this.cancelGesture();

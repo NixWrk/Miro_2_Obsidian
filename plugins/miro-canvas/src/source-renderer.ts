@@ -466,10 +466,27 @@ function clearLegacyOwnedTransformRotation(element: DomElementLike, patches: Res
 function applyElementRotation(element: DomElementLike, rotation: number, patches: RestorePatch[]): boolean {
   if (!Number.isFinite(rotation) || rotation === 0) return false;
   clearLegacyOwnedTransformRotation(element, patches);
-  if (!patchStyle(element, "rotate", rotationStyle(rotation), patches)) return false;
-  patchStyle(element, "transform-origin", "50% 50%", patches);
-  patchAttribute(element, OWNED_ROTATION_ATTRIBUTE, String(rotation), patches);
-  return true;
+  const owned = (): boolean => {
+    patchStyle(element, "transform-origin", "50% 50%", patches);
+    patchAttribute(element, OWNED_ROTATION_ATTRIBUTE, String(rotation), patches);
+    return true;
+  };
+  if (patchStyle(element, "rotate", rotationStyle(rotation), patches)) return owned();
+  // The independent `rotate` property is the clean way to turn a node without
+  // touching the transform the host owns, but a host that does not accept it
+  // leaves the node upright and reports only that the DOM was inaccessible.
+  // Composing onto `transform` reaches the same result anywhere.  The base is
+  // recovered by dropping a trailing rotate, so repeated refreshes cannot
+  // accumulate and an element an earlier build already turned is repaired.
+  const before = readStyle(element, "transform");
+  if (before === undefined) return false;
+  const trimmed = before.trim();
+  const base = trimmed.length === 0 || trimmed === "none"
+    ? ""
+    : trimmed.replace(/\s*rotate\([^()]*\)\s*$/u, "").trim();
+  const composed = base.length === 0 ? `rotate(${rotation}deg)` : `${base} rotate(${rotation}deg)`;
+  if (!patchStyle(element, "transform", composed, patches, base)) return false;
+  return owned();
 }
 
 function applyInteractionRotation(runtime: unknown, primary: DomElementLike, rotation: number, patches: RestorePatch[]): void {
