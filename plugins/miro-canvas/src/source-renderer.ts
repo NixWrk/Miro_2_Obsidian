@@ -463,6 +463,13 @@ function clearLegacyOwnedTransformRotation(element: DomElementLike, patches: Res
   safeCall(element, "removeAttribute", [OWNED_ROTATION_ATTRIBUTE]);
 }
 
+/** A transform with this module's trailing rotation removed, if it has one. */
+function strippedRotation(value: string): string {
+  const trimmed = value.trim();
+  if (trimmed.length === 0 || trimmed === "none") return "";
+  return trimmed.replace(/\s*rotate\([^()]*\)\s*$/u, "").trim();
+}
+
 function applyElementRotation(element: DomElementLike, rotation: number, patches: RestorePatch[]): boolean {
   if (!Number.isFinite(rotation) || rotation === 0) return false;
   clearLegacyOwnedTransformRotation(element, patches);
@@ -480,12 +487,26 @@ function applyElementRotation(element: DomElementLike, rotation: number, patches
   // accumulate and an element an earlier build already turned is repaired.
   const before = readStyle(element, "transform");
   if (before === undefined) return false;
-  const trimmed = before.trim();
-  const base = trimmed.length === 0 || trimmed === "none"
-    ? ""
-    : trimmed.replace(/\s*rotate\([^()]*\)\s*$/u, "").trim();
+  const base = strippedRotation(before);
   const composed = base.length === 0 ? `rotate(${rotation}deg)` : `${base} rotate(${rotation}deg)`;
-  if (!patchStyle(element, "transform", composed, patches, base)) return false;
+  if (!setStyleRaw(element, "transform", composed)) return false;
+  // The restore re-derives instead of writing back the string captured here.
+  // Native Canvas rewrites this transform as it moves a node, so replaying a
+  // captured value pinned the node at the position it held when the rotation
+  // was first applied: it stayed put on screen while the document, the
+  // handles and every connector moved on without it.
+  patches.push(() => {
+    const current = readStyle(element, "transform");
+    if (current === undefined) return;
+    const restored = strippedRotation(current);
+    if (restored === current.trim()) return;
+    if (restored.length === 0) {
+      const style = styleObject(element);
+      if (style !== undefined) safeCall(style, "removeProperty", ["transform"]);
+      return;
+    }
+    setStyleRaw(element, "transform", restored);
+  });
   return owned();
 }
 

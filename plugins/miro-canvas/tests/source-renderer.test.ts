@@ -555,4 +555,28 @@ describe("source-backed mindmap rendering", () => {
   });
 });
 
-
+describe("rotation and a node the host is moving", () => {
+  it("follows the host's transform instead of pinning the node where it was", () => {
+    const f = fixture("rectangle");
+    const data = f.data;
+    data.miroCanvas = { schemaVersion: 1, settings: {}, localOverrides: { a: { rotation: 24 } } };
+    f.data = data;
+    // This host does not accept the independent rotate property, so the
+    // rotation is composed onto the transform it owns.
+    (f.nodeEl.style as unknown as { setProperty(name: string, value: string, priority?: string): void }).setProperty =
+      function (this: never, name: string, value: string, priority = "") {
+        if (name === "rotate") return;
+        f.nodeEl.values.set(name, value);
+        f.nodeEl.priorities.set(name, priority);
+      };
+    f.nodeEl.style.setProperty("transform", "translate(10px, 20px)");
+    f.renderer.refresh();
+    expect(f.nodeEl.values.get("transform")).toBe("translate(10px, 20px) rotate(24deg)");
+    // The host drags the node: it rewrites its own transform under us.
+    f.nodeEl.style.setProperty("transform", "translate(300px, 400px) rotate(24deg)");
+    f.renderer.refresh();
+    // Replaying the captured value would put the node back at 10,20 while the
+    // document, the handles and every connector had moved on.
+    expect(f.nodeEl.values.get("transform")).toBe("translate(300px, 400px) rotate(24deg)");
+  });
+});
