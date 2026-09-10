@@ -295,21 +295,31 @@ function nativeDefaultAllowed(kind: "nodes" | "edges", key: string, value: unkno
 }
 
 /** Compare graph values exactly, except for known optional defaults materialized by native Canvas. */
+/**
+ * What the host changed in the graph while saving, named precisely.
+ *
+ * Reporting only "nodes" left every field of every node as a suspect, which
+ * is no more actionable than saying the transaction failed.  The item and the
+ * field are named so a refusal points straight at what disagreed.
+ */
 function graphDrift(observed: Record<string, unknown>, written: Record<string, unknown>): string | undefined {
 	for (const key of ["nodes", "edges"] as const) {
 		const actual = observed[key];
 		const wanted = written[key];
-		if (!Array.isArray(actual) || !Array.isArray(wanted) || actual.length !== wanted.length) return key;
+		if (!Array.isArray(actual) || !Array.isArray(wanted)) return `${key} missing`;
+		if (actual.length !== wanted.length) return `${key} count ${wanted.length}->${actual.length}`;
 		for (let index = 0; index < wanted.length; index += 1) {
 			const actualItem = actual[index];
 			const wantedItem = wanted[index];
-			if (!isObject(actualItem) || !isObject(wantedItem)) return key;
+			if (!isObject(actualItem) || !isObject(wantedItem)) return `${key}[${index}] not an object`;
+			const id = typeof wantedItem.id === "string" ? wantedItem.id : `[${index}]`;
 			for (const field of Object.keys(wantedItem)) {
-				if (!hasOwn(actualItem, field) || !equalJson(actualItem[field], wantedItem[field])) return key;
+				if (!hasOwn(actualItem, field)) return `${key} ${id} lost ${field}`;
+				if (!equalJson(actualItem[field], wantedItem[field])) return `${key} ${id} changed ${field}`;
 			}
 			for (const field of Object.keys(actualItem)) {
 				if (hasOwn(wantedItem, field)) continue;
-				if (!nativeDefaultAllowed(key, field, actualItem[field])) return key;
+				if (!nativeDefaultAllowed(key, field, actualItem[field])) return `${key} ${id} gained ${field}`;
 			}
 		}
 	}
