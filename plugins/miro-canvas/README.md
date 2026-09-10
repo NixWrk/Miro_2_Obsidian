@@ -24,6 +24,12 @@ sticky notes, connectors, frames and media. The first M4 slice adds bounded,
 inert source-backed code-card styling while keeping native text editable.
 Proven `app_card` field collections now receive the same reversible treatment
 without copying field payloads into plugin-owned DOM.
+Preview metadata stays inert above native clickable links, while ordinary cards
+resolve source tag definitions into bounded, non-interactive chips.
+Proven `mindmap_node` trees keep native Canvas text and generated hierarchy
+edges, with reversible root/branch styling and explicit legacy limitations.
+The source/provenance inspector is available from Commands and the command
+palette; it reports bounded counts and key paths without exposing raw values.
 Automated browser checks use a synthetic host; real-Obsidian verification is
 still required.
 

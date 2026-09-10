@@ -130,6 +130,11 @@ export default class MiroCanvasPlugin extends Plugin {
       checkCallback: (checking) => this.runM1Command(checking, (session) => this.openLocalTools(session)),
     });
     this.addCommand({
+      id: "source-provenance-inspector",
+      name: "Miro Canvas: Open source and provenance inspector",
+      checkCallback: (checking) => this.runM1Command(checking, (session) => session.openSourceInspector()),
+    });
+    this.addCommand({
       id: "m1-theme-system",
       name: "Miro Canvas: Use system board theme",
       checkCallback: (checking) => this.runM1Command(checking, (session) => session.setTheme("system")),

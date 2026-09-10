@@ -323,6 +323,59 @@ function addOwnedElementClass(element: DomElementLike, className: string): void 
   if (isObject(classList)) safeCall(classList, "add", [className]);
 }
 
+function setOwnedElementText(element: DomElementLike, value: string): void {
+  try { Reflect.set(element, "textContent", value, element); } catch { /* owned optional decoration */ }
+}
+
+function decoratePreview(document: Document | undefined, layer: DomElementLike, descriptor: SourceItemDescriptor): boolean {
+  const preview = descriptor.structured?.preview;
+  if (document === undefined || preview === undefined) return false;
+  const metadata = createElement(document, "div");
+  if (metadata === undefined) return false;
+  addOwnedElementClass(metadata, "miro-source-preview-meta");
+  const add = (className: string, value: string | undefined): void => {
+    if (value === undefined) return;
+    const item = createElement(document, "div");
+    if (item === undefined) return;
+    addOwnedElementClass(item, className);
+    setOwnedElementText(item, value);
+    safeCall(metadata, "appendChild", [item]);
+  };
+  add("miro-source-preview-provider", preview.provider);
+  add("miro-source-preview-title", preview.title);
+  add("miro-source-preview-description", preview.description);
+  if (safeGet(metadata, "children") !== undefined && safeCall(layer, "appendChild", [metadata]) !== undefined) {
+    return safeGet(metadata, "parentNode") === layer;
+  }
+  return false;
+}
+
+function decorateTags(
+  document: Document | undefined,
+  shell: DomElementLike,
+  descriptor: SourceItemDescriptor,
+  patches: RestorePatch[],
+): DomElementLike | undefined {
+  const tags = descriptor.structured?.tags;
+  if (document === undefined || tags === undefined || tags.length === 0) return undefined;
+  const list = createElement(document, "div");
+  if (list === undefined) return undefined;
+  addOwnedElementClass(list, "miro-source-tag-list");
+  setOwnedElementAttribute(list, "aria-hidden", "true");
+  setOwnedElementAttribute(list, "data-miro-source-tags", String(tags.length));
+  setOwnedElementStyle(list, "pointer-events", "none");
+  setOwnedElementStyle(list, "z-index", "3");
+  for (const tag of tags) {
+    const chip = createElement(document, "span");
+    if (chip === undefined) continue;
+    addOwnedElementClass(chip, "miro-source-tag-chip");
+    setOwnedElementText(chip, tag.title);
+    if (tag.color !== undefined) setOwnedElementStyle(chip, "background-color", tag.color);
+    safeCall(list, "appendChild", [chip]);
+  }
+  return appendOwnedChild(shell, list, patches) ? list : undefined;
+}
+
 function decorateShape(document: Document | undefined, layer: DomElementLike, descriptor: SourceItemDescriptor): boolean {
   const d = shapePath(descriptor.shape);
   if (d === undefined) return false;
@@ -595,11 +648,16 @@ function applyConnector(
     return undefined;
   }
   const primary = targets[0]!;
+  const mindmapEdge = descriptor.structured?.mindmapEdge;
   for (const target of targets) {
     patchClass(target, OWNED_CLASS, patches);
     patchClass(target, "miro-source-connector", patches);
     patchAttribute(target, "data-miro-source-kind", "connector", patches);
     if (descriptor.sourceId !== undefined) patchAttribute(target, "data-miro-source-id", descriptor.sourceId, patches);
+    if (mindmapEdge !== undefined) {
+      patchClass(target, "miro-source-mindmap-edge", patches);
+      patchAttribute(target, "data-miro-source-mindmap-edge", "true", patches);
+    }
     for (const [property, attribute] of Object.entries(CONNECTOR_ATTRIBUTE_CSS)) {
       const value = descriptor.css[property];
       if (value !== undefined) patchAttribute(target, attribute, value, patches);
@@ -650,6 +708,9 @@ function applyNode(
   if (descriptor.shape !== undefined) patchAttribute(shell, "data-miro-source-shape", descriptor.shape, patches);
   const sourceCode = descriptor.structured?.code;
   const sourceAppCard = descriptor.structured?.appCard;
+  const sourceCard = descriptor.structured?.card;
+  const sourcePreview = descriptor.structured?.preview;
+  const sourceMindmap = descriptor.structured?.mindmapNode;
   if (sourceCode?.title !== undefined) patchAttribute(shell, "data-miro-source-code-title", sourceCode.title, patches);
   if (sourceCode?.language !== undefined) patchAttribute(shell, "data-miro-source-code-language", sourceCode.language, patches);
   if (sourceCode?.lineNumbersVisible !== undefined) {
@@ -662,12 +723,36 @@ function applyNode(
     patchAttribute(shell, "data-miro-source-card-title", String(sourceAppCard.hasTitle), patches);
     patchAttribute(shell, "data-miro-source-card-description", String(sourceAppCard.hasDescription), patches);
   }
+  if (sourceCard !== undefined) {
+    patchClass(shell, "miro-source-card", patches);
+    patchAttribute(shell, "data-miro-source-card-kind", sourceCard.kind, patches);
+    patchAttribute(shell, "data-miro-source-card-fields", String(sourceCard.fieldCount), patches);
+    patchAttribute(shell, "data-miro-source-card-title", String(sourceCard.hasTitle), patches);
+    patchAttribute(shell, "data-miro-source-card-description", String(sourceCard.hasDescription), patches);
+    patchAttribute(shell, "data-miro-source-card-url", String(sourceCard.hasUrl), patches);
+    patchAttribute(shell, "data-miro-source-card-due-date", String(sourceCard.hasDueDate), patches);
+    patchAttribute(shell, "data-miro-source-card-assignee", String(sourceCard.hasAssignee), patches);
+  }
+  if (sourcePreview !== undefined) {
+    patchClass(shell, "miro-source-preview", patches);
+    patchAttribute(shell, "data-miro-source-preview-title", String(sourcePreview.title !== undefined), patches);
+    patchAttribute(shell, "data-miro-source-preview-description", String(sourcePreview.description !== undefined), patches);
+    patchAttribute(shell, "data-miro-source-preview-provider", String(sourcePreview.provider !== undefined), patches);
+    patchAttribute(shell, "data-miro-source-preview-target", String(sourcePreview.hasTargetUrl), patches);
+    patchAttribute(shell, "data-miro-source-preview-asset", String(sourcePreview.hasPreviewAsset), patches);
+  }
+  if (sourceMindmap !== undefined) {
+    patchClass(shell, "miro-source-mindmap-node", patches);
+    patchAttribute(shell, "data-miro-source-mindmap-root", String(sourceMindmap.isRoot), patches);
+    patchAttribute(shell, "data-miro-source-mindmap-content", String(sourceMindmap.hasContent), patches);
+    if (sourceMindmap.shape !== undefined) patchAttribute(shell, "data-miro-source-mindmap-shape", sourceMindmap.shape, patches);
+  }
 
   let layer: DomElementLike | undefined;
-  if (descriptor.kind === "shape" || descriptor.kind === "sticky" || descriptor.kind === "frame" || descriptor.kind === "media" || descriptor.kind === "code" || sourceAppCard !== undefined) {
+  if (descriptor.kind === "shape" || descriptor.kind === "sticky" || descriptor.kind === "frame" || descriptor.kind === "media" || descriptor.kind === "code" || sourceAppCard !== undefined || sourceCard !== undefined || sourcePreview !== undefined || sourceMindmap !== undefined) {
     const created = document === undefined ? undefined : createElement(document, "div");
     if (created !== undefined) {
-      const decorationKind = sourceAppCard === undefined ? descriptor.kind : "app-card";
+      const decorationKind = sourceAppCard !== undefined ? "app-card" : sourceCard !== undefined ? "card" : sourcePreview !== undefined ? "preview" : sourceMindmap !== undefined ? "mindmap-node" : descriptor.kind;
       addOwnedElementClass(created, DECORATION_CLASS);
       addOwnedElementClass(created, `miro-source-decoration-${decorationKind}`);
       setOwnedElementAttribute(created, "aria-hidden", "true");
@@ -676,16 +761,24 @@ function applyNode(
       setOwnedElementStyle(created, "inset", "0");
       setOwnedElementStyle(created, "box-sizing", "border-box");
       setOwnedElementStyle(created, "pointer-events", "none");
-      setOwnedElementStyle(created, "z-index", "0");
-      const drawable = descriptor.kind !== "shape" || decorateShape(document, created, descriptor);
+      setOwnedElementStyle(created, "z-index", sourcePreview === undefined ? "0" : "2");
+      if (sourceMindmap?.branchColor !== undefined) setOwnedElementStyle(created, "--miro-mindmap-color", sourceMindmap.branchColor);
+      const drawable = descriptor.kind === "shape"
+        ? decorateShape(document, created, descriptor)
+        : sourcePreview === undefined || decoratePreview(document, created, descriptor);
       if (!drawable) diagnostics.push(`shape-renderer-fallback: ${id} (${descriptor.shape ?? "unknown"}).`);
       if (drawable && appendOwnedChild(shell, created, patches)) layer = created;
     }
     if (layer === undefined) diagnostics.push(`decoration-dom-inaccessible: ${id}.`);
   }
 
-  if (layer !== undefined) {
+  const tagLayer = decorateTags(document, shell, descriptor, patches);
+  if (descriptor.structured?.tags !== undefined && tagLayer === undefined) diagnostics.push(`tag-decoration-dom-inaccessible: ${id}.`);
+
+  if (layer !== undefined || tagLayer !== undefined) {
     patchStyle(shell, "isolation", "isolate", patches);
+  }
+  if (layer !== undefined) {
     for (const foreground of allElementsFor(runtime, ["contentEl", "labelEl", "fileEl", "embedEl"])) {
       if (foreground === layer || !isContained(shell, foreground)) continue;
       patchStyle(foreground, "position", "relative", patches);
@@ -845,6 +938,7 @@ export class SourceRenderer {
     for (const [id, descriptor] of descriptors) {
       const override = safeGet(overrides, id);
       if (descriptor.kind === "connector" && descriptor.sourceId === undefined
+        && descriptor.structured?.mindmapEdge === undefined
         && !isObject(safeGet(override, "connectorAnchors")) && !isObject(safeGet(override, "connector"))) descriptors.delete(id);
     }
     const rawEdges = safeGet(sourceDocument, "edges");

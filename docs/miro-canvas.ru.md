@@ -126,6 +126,17 @@ URL и неизвестные source-поля остаются неактивн�
 Следующий срез распознаёт подтверждённые `app_card.fields[]` и card theme.
 Плагин добавляет обратимое оформление и ограниченное состояние card, а title,
 description и fields остаются редактируемым native Canvas text конвертера.
+Preview metadata теперь показывается inert overlay поверх native clickable
+link. Обычные cards связывают ограниченный список tag IDs с definitions и
+показывают безопасные chips; сами tag definitions не становятся board nodes.
+Подтверждённые `mindmap_node` сохраняют native text и hierarchy edges,
+созданные конвертером. Renderer различает root/branch, применяет безопасные
+source colors/shapes и отдельно маркирует generated hierarchy edges. Legacy
+`mindmap` остаётся явно source-limited.
+Через Commands и command palette открывается read-only source/provenance
+inspector. Он показывает bounded counts по типам, completeness, provenance,
+diagnostics, selection и paths/types неизвестных полей. Raw values остаются
+только в Canvas-файле, а доска не получает служебных nodes.
 
 Текущие проверки плагина из корня репозитория:
 
@@ -447,7 +458,7 @@ node с тем же ID, что и Miro item, связывается без за�
 - [x] `DATA-008` `P1 P` Поддержать миграции metadata между версиями без
   переписывания файла при открытии.
 - [x] `DATA-009` `P0 P` Никогда не изменять или сокращать `miroSource`.
-- [ ] `DATA-010` `P1 P` Показывать provenance REST/Web SDK и completeness в
+- [x] `DATA-010` `P1 P` Показывать provenance REST/Web SDK и completeness в
   inspector, а не отдельными шумными узлами по умолчанию.
 - [ ] `DATA-011` `P0 P` Хранить local typography, lock и attachment-title settings
   как overrides по стабильному Canvas/source ID.
@@ -781,15 +792,15 @@ node с тем же ID, что и Miro item, связывается без за�
 
 ## Cards, app cards и tags
 
-- [ ] `CARD-001` `P1 P` Рендерить card title, description, URL, due date,
+- [x] `CARD-001` `P1 P` Рендерить card title, description, URL, due date,
   assignee, color и доступные metadata fields.
 - [x] `CARD-002` `P1 P` Рендерить все meaningful `app_card.fields[]`, сохраняя
   label, display value и порядок.
 - [ ] `CARD-003` `P1 P` Сохранять card padding, wrapping и отсутствие внутренних
   scrollbars.
-- [ ] `CARD-004` `P1 P` Связывать item tag IDs с tag definitions и показывать
+- [x] `CARD-004` `P1 P` Связывать item tag IDs с tag definitions и показывать
   title/color как chips внутри соответствующего item.
-- [ ] `CARD-005` `P1 P` Не рисовать tag definitions отдельными board nodes без
+- [x] `CARD-005` `P1 P` Не рисовать tag definitions отдельными board nodes без
   source geometry.
 - [ ] `CARD-006` `P2 P` Показывать неизвестные app-card fields в inspector, даже
   если для них нет специализированного UI.
@@ -807,15 +818,15 @@ node с тем же ID, что и Miro item, связывается без за�
 
 ## Mind maps
 
-- [ ] `MIND-001` `P1 P` Рендерить `mindmap_node` content из фактического source
+- [x] `MIND-001` `P1 P` Рендерить `mindmap_node` content из фактического source
   payload.
-- [ ] `MIND-002` `P1 P` Сохранять hierarchy, parent-relative coordinates и
+- [x] `MIND-002` `P1 P` Сохранять hierarchy, parent-relative coordinates и
   отдельный стиль hierarchy edges.
-- [ ] `MIND-003` `P1 P` Сохранять node shape, branch/fill color, typography и
+- [x] `MIND-003` `P1 P` Сохранять node shape, branch/fill color, typography и
   root/child distinction, когда данные доступны.
-- [ ] `MIND-004` `P1 P` Не смешивать generated hierarchy edges с Miro connectors.
+- [x] `MIND-004` `P1 P` Не смешивать generated hierarchy edges с Miro connectors.
 - [ ] `MIND-005` `P2 P` Поддержать collapsed state только при наличии source data.
-- [ ] `MIND-006` `P3 S` Legacy `mindmap` без recoverable nodes остаётся
+- [x] `MIND-006` `P3 S` Legacy `mindmap` без recoverable nodes остаётся
   source-limited.
 - [ ] `MIND-007` `P1 P` Для child/sibling insert, drag reparent, collapse/expand,
   keyboard navigation и переключения mind map / Markdown сначала оценить
@@ -829,7 +840,7 @@ node с тем же ID, что и Miro item, связывается без за�
 - [ ] `MIND-009` `P1 P` При переносе MIT-кода сохранить copyright и текст
   лицензии в third-party notices; не подключать весь plugin как runtime
   dependency без доказанной необходимости.
-- [ ] `MIND-010` `P0 P` Оставить native Canvas JSON источником истины, чтобы
+- [x] `MIND-010` `P0 P` Оставить native Canvas JSON источником истины, чтобы
   mind-map editing не создавал закрытый формат и не ломал обычный Canvas.
 
 ## Защита от редактирования
@@ -931,7 +942,7 @@ node с тем же ID, что и Miro item, связывается без за�
 - [ ] `LIMIT-001` `P0 P` Ни один unknown type не должен исчезать молча.
 - [ ] `LIMIT-002` `P0 P` Diagnostics различает `unsupported`, `source-limited`,
   `missing asset`, `invalid source` и `plugin unsupported`.
-- [ ] `LIMIT-003` `P1 P` Default view не засоряется большими placeholders;
+- [x] `LIMIT-003` `P1 P` Default view не засоряется большими placeholders;
   используются маленькие badges и отдельная panel.
 - [ ] `LIMIT-004` `P1 P` Inspector всегда показывает полный raw object без
   сокращения ключей.

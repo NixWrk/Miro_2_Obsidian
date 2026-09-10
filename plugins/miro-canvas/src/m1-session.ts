@@ -79,6 +79,7 @@ import {
 	type M1NavigationAction,
 } from "./m1-controls";
 import { SourceRenderer } from "./source-renderer";
+import { buildSourceInspection } from "./source-inspector";
 import {
 	buildSourceScene,
 	CONNECTOR_CAPS,
@@ -860,6 +861,10 @@ export class M1CanvasSession {
 		this.openCommandModal();
 	}
 
+	public openSourceInspector(): void {
+		this.controls.openSourceInspector(buildSourceInspection(this.adapter.getDocument(), this.selectedIds));
+	}
+
 	public setTheme(theme: "system" | "light" | "dark"): void {
 		this.applyAppearance({ type: APPEARANCE_ACTIONS.setDisplayTheme, displayTheme: theme });
 	}
@@ -1534,6 +1539,7 @@ export class M1CanvasSession {
 			{ id: "zoom-reset", label: "Reset zoom", run: () => this.applyNavigation("zoom-reset") },
 			{ id: "zoom-fit", label: "Fit board", run: () => this.applyNavigation("zoom-fit") },
 			{ id: "minimap-toggle", label: "Toggle minimap", run: () => this.applyNavigation("toggle-minimap") },
+			{ id: "source-inspector", label: "Open source & provenance", description: "Read-only completeness, provenance and unknown-field summary", run: () => this.openSourceInspector() },
 		];
 		this.controls.openCommandModal(commands);
 	}

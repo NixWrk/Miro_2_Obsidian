@@ -18,9 +18,52 @@ export interface SourceAppCardDescriptor {
   readonly fieldCount: number;
 }
 
+export interface SourcePreviewDescriptor {
+  readonly title?: string;
+  readonly description?: string;
+  readonly provider?: string;
+  readonly hasTargetUrl: boolean;
+  readonly hasPreviewAsset: boolean;
+}
+
+export interface SourceTagDescriptor {
+  readonly id: string;
+  readonly title: string;
+  readonly color?: string;
+}
+
+export interface SourceCardDescriptor {
+  readonly kind: "card";
+  readonly hasTitle: boolean;
+  readonly hasDescription: boolean;
+  readonly hasUrl: boolean;
+  readonly hasDueDate: boolean;
+  readonly hasAssignee: boolean;
+  readonly fieldCount: number;
+}
+
+export interface SourceMindmapNodeDescriptor {
+  readonly isRoot: boolean;
+  readonly hasContent: boolean;
+  readonly parentId?: string;
+  readonly shape?: string;
+  readonly branchColor?: string;
+}
+
+export interface SourceMindmapEdgeDescriptor {
+  readonly parentId: string;
+  readonly childId: string;
+  readonly branchColor?: string;
+}
+
 export interface SourceStructuredDescriptor {
   readonly code?: SourceCodeDescriptor;
   readonly appCard?: SourceAppCardDescriptor;
+  readonly preview?: SourcePreviewDescriptor;
+  readonly card?: SourceCardDescriptor;
+  readonly tags?: readonly SourceTagDescriptor[];
+  readonly mindmapNode?: SourceMindmapNodeDescriptor;
+  readonly mindmapEdge?: SourceMindmapEdgeDescriptor;
 }
 
 export interface SourceConnectorStyle {
@@ -67,6 +110,13 @@ const MAX_CODE_TITLE_LENGTH = 256;
 const MAX_CODE_LANGUAGE_LENGTH = 64;
 const MAX_CODE_TEXT_LENGTH = 100_000;
 const MAX_APP_CARD_FIELDS = 64;
+const MAX_PREVIEW_TITLE_LENGTH = 256;
+const MAX_PREVIEW_DESCRIPTION_LENGTH = 2_048;
+const MAX_PREVIEW_PROVIDER_LENGTH = 128;
+const MAX_CARD_FIELDS = 64;
+const MAX_ITEM_TAGS = 32;
+const MAX_TAG_DEFINITIONS = 10_000;
+const MAX_TAG_TITLE_LENGTH = 128;
 const SAFE_TOKEN = /^[a-z0-9][a-z0-9_-]{0,63}$/iu;
 const NUMERIC_STRING = /^-?(?:\d+(?:\.\d*)?|\.\d+)$/u;
 /** Subtypes already recognized from Miro source; keep legacy local aliases too. */
@@ -105,6 +155,11 @@ const STICKY_COLORS: Readonly<Record<string, string>> = Object.freeze({
   light_yellow: "#fff59d", yellow: "#ffd54f", orange: "#ff8a65", red: "#ff0000", light_pink: "#f48fb1",
   pink: "#f06292", light_blue: "#7986cb", violet: "#9fa8da", blue: "#4fc3f7", dark_blue: "#42a5f5",
   cyan: "#26a69a", dark_green: "#66bb6a", light_green: "#c5e1a5", green: "#aed581", white: "#ffffff", black: "#000000",
+});
+const TAG_COLORS: Readonly<Record<string, string>> = Object.freeze({
+  red: "#f24726", orange: "#ff9d48", yellow: "#ffd02f", green: "#67c6a0",
+  blue: "#4262ff", violet: "#9b51e0", magenta: "#ea94bb", gray: "#c3c4c7",
+  grey: "#c3c4c7", black: "#1e1e1e", white: "#ffffff",
 });
 
 function isRecord(value: unknown): value is UnknownRecord {
@@ -186,6 +241,10 @@ function boundedSourceString(
   return bounded.length > 0 ? bounded : undefined;
 }
 
+function hasSourceText(value: unknown): boolean {
+  return typeof value === "string" && value.trim().length > 0;
+}
+
 function sourceCodeDescriptor(source: UnknownRecord, diagnostics: string[], sourceId: string): SourceCodeDescriptor {
   const data = valueOf(source, "data");
   if (!isRecord(data)) return Object.freeze({});
@@ -208,13 +267,146 @@ function sourceAppCardDescriptor(source: UnknownRecord, diagnostics: string[], s
   if (fields !== undefined && fields.length > MAX_APP_CARD_FIELDS) {
     diagnostics.push(`source-app-card-fields-truncated: ${sourceId}.data.fields.`);
   }
-  const hasText = (value: unknown): boolean => typeof value === "string" && value.trim().length > 0;
   return Object.freeze({
     kind: "app_card",
-    hasTitle: isRecord(data) && hasText(valueOf(data, "title")),
-    hasDescription: isRecord(data) && hasText(valueOf(data, "description")),
+    hasTitle: isRecord(data) && hasSourceText(valueOf(data, "title")),
+    hasDescription: isRecord(data) && hasSourceText(valueOf(data, "description")),
     fieldCount,
   });
+}
+
+function sourcePreviewDescriptor(source: UnknownRecord): SourcePreviewDescriptor {
+  const data = valueOf(source, "data");
+  const rawProvider = isRecord(data) ? valueOf(data, "provider") ?? valueOf(data, "providerName") : undefined;
+  const provider = isRecord(rawProvider)
+    ? valueOf(rawProvider, "name") ?? valueOf(rawProvider, "displayName") ?? valueOf(rawProvider, "title")
+    : rawProvider;
+  const bounded = (value: unknown, maxLength: number): string | undefined => {
+    if (typeof value !== "string") return undefined;
+    const normalized = value.trim();
+    return normalized.length === 0 ? undefined : normalized.slice(0, maxLength);
+  };
+  const title = isRecord(data) ? bounded(valueOf(data, "title"), MAX_PREVIEW_TITLE_LENGTH) : undefined;
+  const description = isRecord(data) ? bounded(valueOf(data, "description"), MAX_PREVIEW_DESCRIPTION_LENGTH) : undefined;
+  const providerText = bounded(provider, MAX_PREVIEW_PROVIDER_LENGTH);
+  return Object.freeze({
+    ...(title === undefined ? {} : { title }),
+    ...(description === undefined ? {} : { description }),
+    ...(providerText === undefined ? {} : { provider: providerText }),
+    hasTargetUrl: isRecord(data) && hasSourceText(valueOf(data, "url")),
+    hasPreviewAsset: isRecord(data) && hasSourceText(valueOf(data, "previewUrl")),
+  });
+}
+
+function sourceCardDescriptor(source: UnknownRecord, diagnostics: string[], sourceId: string): SourceCardDescriptor {
+  const data = valueOf(source, "data");
+  const fields = isRecord(data) ? arrayValue(valueOf(data, "fields")) : undefined;
+  const fieldCount = Math.min(fields?.length ?? 0, MAX_CARD_FIELDS);
+  if (fields !== undefined && fields.length > MAX_CARD_FIELDS) {
+    diagnostics.push(`source-card-fields-truncated: ${sourceId}.data.fields.`);
+  }
+  return Object.freeze({
+    kind: "card",
+    hasTitle: isRecord(data) && hasSourceText(valueOf(data, "title")),
+    hasDescription: isRecord(data) && hasSourceText(valueOf(data, "description")),
+    hasUrl: isRecord(data) && hasSourceText(valueOf(data, "url")),
+    hasDueDate: isRecord(data) && hasSourceText(valueOf(data, "dueDate")),
+    hasAssignee: isRecord(data) && hasSourceText(valueOf(data, "assigneeId")),
+    fieldCount,
+  });
+}
+
+function sourceTagDefinition(item: UnknownRecord, diagnostics: string[], sourceId: string): SourceTagDescriptor | undefined {
+  const data = valueOf(item, "data");
+  const rawTitle = valueOf(item, "title") ?? valueOf(data, "title");
+  if (!hasSourceText(rawTitle)) return undefined;
+  const normalizedTitle = (rawTitle as string).trim();
+  const title = normalizedTitle.slice(0, MAX_TAG_TITLE_LENGTH);
+  if (normalizedTitle.length > MAX_TAG_TITLE_LENGTH) diagnostics.push(`source-tag-title-truncated: ${sourceId}.`);
+  const style = valueOf(item, "style");
+  const rawColor = valueOf(item, "color") ?? valueOf(data, "color") ?? valueOf(style, "fillColor");
+  const token = typeof rawColor === "string" ? rawColor.trim().toLowerCase() : "";
+  const color = safeColor(rawColor) ?? TAG_COLORS[token];
+  return Object.freeze({ id: sourceId, title, ...(color === undefined ? {} : { color }) });
+}
+
+function sourceTagsForItem(
+  source: UnknownRecord,
+  tagDefinitions: ReadonlyMap<string, SourceTagDescriptor>,
+  diagnostics: string[],
+  sourceId: string,
+): readonly SourceTagDescriptor[] | undefined {
+  const data = valueOf(source, "data");
+  const raw = valueOf(source, "tagIds") ?? valueOf(data, "tagIds");
+  if (raw === undefined) return undefined;
+  const ids = arrayValue(raw);
+  if (ids === undefined) { diagnostics.push(`source-tag-ids-malformed: ${sourceId}.`); return undefined; }
+  const result: SourceTagDescriptor[] = [];
+  const seen = new Set<string>();
+  const limit = Math.min(ids.length, MAX_ITEM_TAGS);
+  for (let index = 0; index < limit; index += 1) {
+    const id = ids[index];
+    if (typeof id !== "string" || id.length === 0 || seen.has(id)) continue;
+    seen.add(id);
+    const tag = tagDefinitions.get(id);
+    if (tag === undefined) diagnostics.push(`source-tag-dangling: ${sourceId} -> ${id}.`);
+    else result.push(tag);
+  }
+  if (ids.length > limit) diagnostics.push(`source-item-tags-truncated: ${sourceId}.`);
+  return result.length === 0 ? undefined : Object.freeze(result);
+}
+
+function sourceMindmapNodeDescriptor(source: UnknownRecord): SourceMindmapNodeDescriptor {
+  const data = valueOf(source, "data");
+  const nodeView = isRecord(data) ? valueOf(data, "nodeView") : valueOf(source, "nodeView");
+  const nodeViewData = valueOf(nodeView, "data");
+  const parent = valueOf(source, "parent");
+  const rawParentId = valueOf(parent, "id");
+  const parentId = typeof rawParentId === "string" && rawParentId.length > 0 ? rawParentId.slice(0, 512) : undefined;
+  const styleCandidates = [valueOf(nodeView, "style"), isRecord(data) ? valueOf(data, "style") : undefined, valueOf(source, "style")];
+  const styleValue = (key: string): unknown => {
+    for (const style of styleCandidates) {
+      const candidate = valueOf(style, key);
+      if (candidate !== undefined) return candidate;
+    }
+    return undefined;
+  };
+  const rawShape = styleValue("shape");
+  const shapeToken = typeof rawShape === "string" ? rawShape.trim().toLowerCase() : "";
+  const shape = shapeToken === "rounded_rectangle" ? "round_rectangle"
+    : shapeToken.length > 0 && shapeToken !== "none" && SAFE_TOKEN.test(shapeToken) ? shapeToken : undefined;
+  const branchColor = safeColor(styleValue("nodeColor") ?? styleValue("fillColor") ?? styleValue("color"));
+  const contentCandidates = [
+    valueOf(nodeViewData, "content"), valueOf(nodeView, "content"), isRecord(data) ? valueOf(data, "content") : undefined,
+    isRecord(data) ? valueOf(data, "title") : undefined, valueOf(source, "plain_text"), valueOf(source, "title"),
+  ];
+  return Object.freeze({
+    isRoot: (isRecord(data) && valueOf(data, "isRoot") === true) || parentId === undefined,
+    hasContent: contentCandidates.some(hasSourceText),
+    ...(parentId === undefined ? {} : { parentId }),
+    ...(shape === undefined ? {} : { shape }),
+    ...(branchColor === undefined ? {} : { branchColor }),
+  });
+}
+
+function sourceStructuredDescriptor(
+  source: UnknownRecord,
+  kind: SourceItemKind,
+  diagnostics: string[],
+  sourceId: string,
+  tagDefinitions: ReadonlyMap<string, SourceTagDescriptor>,
+): SourceStructuredDescriptor | undefined {
+  const result: { code?: SourceCodeDescriptor; appCard?: SourceAppCardDescriptor; preview?: SourcePreviewDescriptor; card?: SourceCardDescriptor; tags?: readonly SourceTagDescriptor[]; mindmapNode?: SourceMindmapNodeDescriptor } = {};
+  if (kind === "code") result.code = sourceCodeDescriptor(source, diagnostics, sourceId);
+  const rawType = valueOf(source, "type");
+  const type = typeof rawType === "string" ? rawType.toLowerCase() : "";
+  if (type === "app_card") result.appCard = sourceAppCardDescriptor(source, diagnostics, sourceId);
+  if (type === "preview") result.preview = sourcePreviewDescriptor(source);
+  if (type === "card") result.card = sourceCardDescriptor(source, diagnostics, sourceId);
+  if (type === "mindmap_node") result.mindmapNode = sourceMindmapNodeDescriptor(source);
+  const tags = sourceTagsForItem(source, tagDefinitions, diagnostics, sourceId);
+  if (tags !== undefined) result.tags = tags;
+  return Object.keys(result).length === 0 ? undefined : Object.freeze(result);
 }
 
 function sourceKind(item: UnknownRecord, forcedConnector: boolean): SourceItemKind | undefined {
@@ -230,6 +422,8 @@ function sourceKind(item: UnknownRecord, forcedConnector: boolean): SourceItemKi
     case "image": case "document": case "doc_format": case "embed": case "preview": return "media";
     case "code": return "code";
     case "app_card": return "text";
+    case "card": return "text";
+    case "mindmap_node": return "text";
     default: return undefined;
   }
 }
@@ -402,12 +596,33 @@ interface IndexedSource {
   readonly connectorIds: ReadonlySet<string>;
   readonly canvasForSource: Map<string, string>;
   readonly sourceForCanvas: Map<string, string>;
+  readonly tagDefinitions: ReadonlyMap<string, SourceTagDescriptor>;
+}
+
+function mindmapEdgeDescriptor(edge: UnknownRecord, index: IndexedSource): SourceMindmapEdgeDescriptor | undefined {
+  const fromCanvas = valueOf(edge, "fromNode");
+  const toCanvas = valueOf(edge, "toNode");
+  if (typeof fromCanvas !== "string" || typeof toCanvas !== "string") return undefined;
+  const fromSource = index.sourceForCanvas.get(fromCanvas) ?? fromCanvas;
+  const toSource = index.sourceForCanvas.get(toCanvas) ?? toCanvas;
+  const child = index.byId.get(toSource);
+  if (child === undefined) return undefined;
+  const rawType = valueOf(child, "type");
+  if (typeof rawType !== "string" || rawType.toLowerCase() !== "mindmap_node") return undefined;
+  const descriptor = sourceMindmapNodeDescriptor(child);
+  if (descriptor.parentId !== fromSource) return undefined;
+  return Object.freeze({
+    parentId: fromCanvas,
+    childId: toCanvas,
+    ...(descriptor.branchColor === undefined ? {} : { branchColor: descriptor.branchColor }),
+  });
 }
 
 function indexSource(document: unknown, diagnostics: string[]): IndexedSource {
   const byId = new Map<string, UnknownRecord>();
   const insertion: string[] = [];
   const connectorIds = new Set<string>();
+  const tagDefinitions = new Map<string, SourceTagDescriptor>();
   const rootRead = readOwn(document, "miroSource");
   if (rootRead.state === "error") diagnostics.push("miro-source-read-failed: miroSource could not be read safely.");
   const source = rootRead.state === "present" && isRecord(rootRead.value) ? rootRead.value : undefined;
@@ -425,6 +640,13 @@ function indexSource(document: unknown, diagnostics: string[]): IndexedSource {
       if (!isRecord(item)) { diagnostics.push(`source-item-malformed: miroSource.${field}[${index}].`); continue; }
       const id = valueOf(item, "id");
       if (typeof id !== "string" || id.length === 0) { diagnostics.push(`source-id-malformed: miroSource.${field}[${index}].`); continue; }
+      const rawType = valueOf(item, "type");
+      if (!forcedConnector && typeof rawType === "string" && rawType.toLowerCase() === "tag") {
+        if (tagDefinitions.size >= MAX_TAG_DEFINITIONS) { diagnostics.push(`source-tag-definition-limit-reached: ${id}.`); continue; }
+        const tag = sourceTagDefinition(item, diagnostics, id);
+        if (tag !== undefined && !tagDefinitions.has(id)) tagDefinitions.set(id, tag);
+        continue;
+      }
       if (byId.has(id)) { diagnostics.push(`source-id-duplicate: ${id}.`); continue; }
       byId.set(id, item);
       insertion.push(id);
@@ -434,6 +656,27 @@ function indexSource(document: unknown, diagnostics: string[]): IndexedSource {
   };
   addArray("items", false);
   addArray("connectors", true);
+
+  if (source !== undefined) {
+    const tagsRead = readOwn(source, "tags");
+    if (tagsRead.state === "error") diagnostics.push("source-array-read-failed: miroSource.tags.");
+    else if (tagsRead.state === "present") {
+      const tags = arrayValue(tagsRead.value);
+      if (tags === undefined) diagnostics.push("source-array-malformed: miroSource.tags must be an array.");
+      else {
+        const limit = Math.min(tags.length, MAX_TAG_DEFINITIONS);
+        for (let index = 0; index < limit; index += 1) {
+          const item = tags[index];
+          if (!isRecord(item)) continue;
+          const id = valueOf(item, "id");
+          if (typeof id !== "string" || id.length === 0 || tagDefinitions.has(id)) continue;
+          const tag = sourceTagDefinition(item, diagnostics, id);
+          if (tag !== undefined) tagDefinitions.set(id, tag);
+        }
+        if (tags.length > limit) diagnostics.push(`source-tag-definition-limit-reached: at most ${MAX_TAG_DEFINITIONS} tags are projected.`);
+      }
+    }
+  }
 
   const sourceForCanvas = new Map<string, string>();
   const canvasForSource = new Map<string, string>();
@@ -459,7 +702,7 @@ function indexSource(document: unknown, diagnostics: string[]): IndexedSource {
     }
     if (keys.length > limit) diagnostics.push(`binding-limit-reached: at most ${MAX_BINDINGS} bindings are projected.`);
   }
-  return { byId, insertion: Object.freeze(insertion), connectorIds, canvasForSource, sourceForCanvas };
+  return { byId, insertion: Object.freeze(insertion), connectorIds, canvasForSource, sourceForCanvas, tagDefinitions };
 }
 
 function localShapeKind(document: unknown, canvasId: string): string | undefined {
@@ -468,9 +711,15 @@ function localShapeKind(document: unknown, canvasId: string): string | undefined
   return typeof kind === "string" && LOCAL_SHAPES.has(kind) ? kind : undefined;
 }
 
-function descriptorFor(document: unknown, canvasId: string, sourceId: string, source: UnknownRecord, forcedConnector: boolean, diagnostics: string[]): SourceItemDescriptor | undefined {
+function descriptorFor(document: unknown, canvasId: string, sourceId: string, source: UnknownRecord, forcedConnector: boolean, diagnostics: string[], tagDefinitions: ReadonlyMap<string, SourceTagDescriptor>): SourceItemDescriptor | undefined {
   const kind = sourceKind(source, forcedConnector);
-  if (kind === undefined) { diagnostics.push(`source-type-unsupported: ${sourceId}.`); return undefined; }
+  if (kind === undefined) {
+    const rawType = valueOf(source, "type");
+    diagnostics.push(typeof rawType === "string" && rawType.toLowerCase() === "mindmap"
+      ? `source-mindmap-legacy-limited: ${sourceId}.`
+      : `source-type-unsupported: ${sourceId}.`);
+    return undefined;
+  }
   let shape: string | undefined;
   if (kind === "shape") {
     const subtype = sourceSubtype(source);
@@ -482,12 +731,7 @@ function descriptorFor(document: unknown, canvasId: string, sourceId: string, so
   const css = sourceCss(source, kind);
   applyLocalCss(css, localOverride(document, canvasId));
   const connector = kind === "connector" ? applyLocalConnector(connectorStyle(source, diagnostics, sourceId), localOverride(document, canvasId), css) : undefined;
-  const sourceType = valueOf(source, "type");
-  const structured = kind === "code"
-    ? Object.freeze({ code: sourceCodeDescriptor(source, diagnostics, sourceId) })
-    : typeof sourceType === "string" && sourceType.toLowerCase() === "app_card"
-      ? Object.freeze({ appCard: sourceAppCardDescriptor(source, diagnostics, sourceId) })
-      : undefined;
+  const structured = sourceStructuredDescriptor(source, kind, diagnostics, sourceId, tagDefinitions);
   const zIndex = finiteNumber(valueOf(source, "zIndex"));
   return Object.freeze({
     sourceId,
@@ -537,7 +781,7 @@ export function buildSourceScene(document: unknown): SourceScene {
     const explicitCanvas = index.canvasForSource.get(sourceId);
     if (explicitCanvas === undefined && index.sourceForCanvas.has(sourceId) && index.sourceForCanvas.get(sourceId) !== sourceId) continue;
     const canvasId = explicitCanvas ?? sourceId;
-    const descriptor = descriptorFor(document, canvasId, sourceId, source, index.connectorIds.has(sourceId), diagnostics);
+    const descriptor = descriptorFor(document, canvasId, sourceId, source, index.connectorIds.has(sourceId), diagnostics, index.tagDefinitions);
     if (descriptor !== undefined) {
       if (items.has(canvasId)) diagnostics.push(`canvas-id-duplicate: ${canvasId}.`);
       else items.set(canvasId, descriptor);
@@ -553,12 +797,17 @@ export function buildSourceScene(document: unknown): SourceScene {
     if (color !== undefined) css.stroke = color;
     const override = localOverride(document, id);
     applyLocalCss(css, override);
+    const mindmapEdge = isRecord(edge) ? mindmapEdgeDescriptor(edge, index) : undefined;
+    if (mindmapEdge?.branchColor !== undefined && css.stroke === undefined) css.stroke = mindmapEdge.branchColor;
     const connector = applyLocalConnector({
       shape: "curved", strokeStyle: "solid",
-      startCap: valueOf(edge, "fromEnd") === "arrow" ? "arrow" : "none",
-      endCap: valueOf(edge, "toEnd") === "none" ? "none" : "arrow",
+      startCap: mindmapEdge === undefined && valueOf(edge, "fromEnd") === "arrow" ? "arrow" : "none",
+      endCap: mindmapEdge !== undefined || valueOf(edge, "toEnd") === "none" ? "none" : "arrow",
     }, override, css);
-    items.set(id, Object.freeze({ kind: "connector", rotation: effectiveRotationFor(document, id), css: Object.freeze(css), connector }));
+    items.set(id, Object.freeze({
+      kind: "connector", rotation: effectiveRotationFor(document, id), css: Object.freeze(css), connector,
+      ...(mindmapEdge === undefined ? {} : { structured: Object.freeze({ mindmapEdge }) }),
+    }));
   }
   const metadata = valueOf(document, "miroCanvas");
   const overrides = valueOf(metadata, "localOverrides");

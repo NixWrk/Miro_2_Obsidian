@@ -424,6 +424,72 @@
   color: var(--text-muted);
 }
 
+.miro-canvas-source-inspector__dialog {
+  width: min(680px, calc(100vw - 32px));
+  max-height: min(760px, calc(100vh - 32px));
+  overflow: hidden;
+}
+
+.miro-canvas-source-inspector__body {
+  display: grid;
+  gap: 12px;
+  overflow: auto;
+  padding-right: 4px;
+}
+
+.miro-canvas-source-inspector__section {
+  display: grid;
+  gap: 6px;
+  padding: 10px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  background: var(--background-secondary);
+}
+
+.miro-canvas-source-inspector__heading {
+  margin: 0;
+  font-size: var(--font-ui-medium, 15px);
+}
+
+.miro-canvas-source-inspector__summary {
+  display: grid;
+  grid-template-columns: minmax(150px, 1fr) auto;
+  gap: 3px 12px;
+  margin: 0;
+}
+
+.miro-canvas-source-inspector__summary dt {
+  color: var(--text-muted);
+}
+
+.miro-canvas-source-inspector__summary dd {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.miro-canvas-source-inspector__list {
+  margin: 0;
+  padding-left: 20px;
+}
+
+.miro-canvas-source-inspector__list [data-state="false"],
+.miro-canvas-source-inspector__list [data-state="invalid"] {
+  color: var(--text-error);
+}
+
+.miro-canvas-source-inspector__unknown {
+  max-height: 180px;
+  overflow: auto;
+  font-family: var(--font-monospace);
+  font-size: var(--font-ui-smaller);
+}
+
+.miro-canvas-source-inspector__note {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+}
+
 .miro-canvas-local-tools-modal {
   width: min(940px, calc(100vw - 48px));
   max-width: none;
@@ -1105,11 +1171,12 @@
 
 /* App-card fields stay native editable text; this layer only restores the
    compact rounded card silhouette and its left status accent. */
-[data-miro-source-card-kind="app_card"] {
+[data-miro-source-card-kind] {
   border-radius: 10px;
 }
 
-[data-miro-source-card-kind="app_card"] > .miro-source-decoration-app-card {
+[data-miro-source-card-kind] > .miro-source-decoration-app-card,
+[data-miro-source-card-kind] > .miro-source-decoration-card {
   overflow: hidden;
   background: var(--background-primary-alt, var(--background-primary));
   border: 1px solid var(--background-modifier-border);
@@ -1117,12 +1184,108 @@
   box-shadow: var(--shadow-s, 0 2px 8px rgb(0 0 0 / 12%));
 }
 
-[data-miro-source-card-kind="app_card"] > .miro-source-decoration-app-card::before {
+[data-miro-source-card-kind] > .miro-source-decoration-app-card::before,
+[data-miro-source-card-kind] > .miro-source-decoration-card::before {
   position: absolute;
   inset: 0 auto 0 0;
   width: 4px;
   content: "";
   background: var(--interactive-accent);
+}
+
+.miro-source-tag-list {
+  position: absolute;
+  right: 10px;
+  bottom: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  justify-content: flex-end;
+  max-width: calc(100% - 20px);
+}
+
+.miro-source-tag-chip {
+  overflow: hidden;
+  max-width: 160px;
+  padding: 2px 8px;
+  color: #1e1e1e;
+  font-size: var(--font-ui-smaller);
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  border: 1px solid rgb(0 0 0 / 12%);
+  border-radius: 999px;
+  box-shadow: 0 1px 2px rgb(0 0 0 / 12%);
+}
+
+/* Preview links stay native and clickable; the source layer only supplies a
+   stable card edge behind Obsidian's own preview surface. */
+.miro-source-preview {
+  border-radius: 10px;
+}
+
+.miro-source-preview > .miro-source-decoration-preview {
+  overflow: hidden;
+  background: transparent;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 10px;
+  box-shadow: var(--shadow-s, 0 2px 8px rgb(0 0 0 / 12%));
+}
+
+.miro-source-preview-meta {
+  position: absolute;
+  inset: auto 0 0;
+  display: grid;
+  gap: 2px;
+  padding: 24px 12px 10px;
+  color: var(--text-normal);
+  background: linear-gradient(to bottom, transparent, var(--background-primary) 30%);
+}
+
+.miro-source-preview-provider {
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+}
+
+.miro-source-preview-title {
+  overflow: hidden;
+  font-weight: var(--font-semibold, 600);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.miro-source-preview-description {
+  display: -webkit-box;
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+/* Mind-map nodes keep native editable text. The source layer restores root and
+   branch silhouettes; hierarchy edges remain ordinary Canvas edges. */
+.miro-source-mindmap-node,
+.miro-source-mindmap-node > .canvas-node-container,
+.miro-source-mindmap-node .canvas-node-content,
+.miro-source-mindmap-node .markdown-preview-view {
+  background-color: transparent !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
+}
+
+.miro-source-decoration-mindmap-node {
+  border-bottom: 2px solid var(--miro-mindmap-color, var(--interactive-accent));
+}
+
+[data-miro-source-mindmap-root="true"] > .miro-source-decoration-mindmap-node {
+  background: color-mix(in srgb, var(--miro-mindmap-color, var(--interactive-accent)) 12%, transparent);
+  border: 2px solid var(--miro-mindmap-color, var(--interactive-accent));
+  border-radius: 10px;
+}
+
+[data-miro-source-mindmap-edge="true"] path:not(.canvas-interaction-path) {
+  stroke-linecap: round;
 }
 
 .miro-canvas-comment-card[data-comment-active="true"] {

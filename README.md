@@ -54,6 +54,14 @@ Miro shapes, text, sticky notes, connectors, frames, and media. M4 has started
 with bounded, inert code-block projection and code-card styling that leaves
 native Canvas text editable. Proven `app_card` field collections also receive
 reversible source-backed card styling while their content remains native text.
+Preview metadata overlays keep native links clickable, and ordinary cards show
+bounded chips resolved from non-visual source tag definitions.
+Proven `mindmap_node` trees keep native Canvas text and hierarchy edges while
+the plugin adds reversible root/branch styling; legacy `mindmap` stays explicit
+as source-limited.
+A read-only source inspector shows bounded type counts, completeness flags,
+provenance counts, diagnostics, and unknown field paths without putting raw
+source values into the DOM.
 
 ## Data flow
 

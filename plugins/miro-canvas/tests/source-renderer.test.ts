@@ -290,4 +290,155 @@ describe("source-backed app-card rendering", () => {
   });
 });
 
+describe("source-backed preview rendering", () => {
+  it("adds reversible inert preview chrome while keeping the native link untouched", () => {
+    const data: any = {
+      nodes: [{ id: "preview-1", type: "link", url: "https://example.test/article", x: 0, y: 0, width: 400, height: 225 }],
+      edges: [],
+      miroSource: { items: [{
+        id: "preview-1",
+        type: "preview",
+        data: {
+          title: "Article",
+          description: "Saved preview",
+          provider: { name: "Example" },
+          url: "javascript:alert(1)",
+          previewUrl: "https://example.invalid/preview.png",
+          html: "<script>unsafe</script>",
+        },
+        future: { keep: true },
+      }] },
+    };
+    const before = JSON.stringify(data);
+    const nodeEl = new Element("div"), contentEl = new Element("a");
+    contentEl.setAttribute("href", "https://example.test/article");
+    nodeEl.appendChild(contentEl);
+    const renderer = new SourceRenderer({
+      getDocument: () => data,
+      getNodes: () => [{ id: "preview-1", nodeEl, contentEl }],
+      getEdges: () => [],
+    }, dom);
+
+    renderer.refresh();
+    expect(nodeEl.classList.contains("miro-source-preview")).toBe(true);
+    expect(nodeEl.getAttribute("data-miro-source-preview-title")).toBe("true");
+    expect(nodeEl.getAttribute("data-miro-source-preview-provider")).toBe("true");
+    expect(nodeEl.getAttribute("data-miro-source-preview-target")).toBe("true");
+    expect(nodeEl.getAttribute("data-miro-source-preview-asset")).toBe("true");
+    const decoration = nodeEl.children.find((child) => child.classList.contains("miro-source-decoration-preview"));
+    expect(decoration?.style.getPropertyValue("pointer-events")).toBe("none");
+    expect(decoration?.style.getPropertyValue("z-index")).toBe("2");
+    expect((decoration?.children.find((child) => child.classList.contains("miro-source-preview-meta"))?.children ?? [])
+      .map((child) => (child as any).textContent)).toEqual(["Example", "Article", "Saved preview"]);
+    expect(contentEl.getAttribute("href")).toBe("https://example.test/article");
+    expect(JSON.stringify(data)).toBe(before);
+
+    renderer.refresh();
+    expect(nodeEl.children.filter((child) => child.classList.contains("miro-source-decoration-preview"))).toHaveLength(1);
+    renderer.dispose();
+    expect(nodeEl.classList.contains("miro-source-preview")).toBe(false);
+    expect(nodeEl.getAttribute("data-miro-source-preview-target")).toBeNull();
+    expect(nodeEl.children.filter((child) => child.classList.contains("miro-source-decoration-preview"))).toHaveLength(0);
+    expect(contentEl.getAttribute("href")).toBe("https://example.test/article");
+    expect(data.miroSource.items[0].future).toEqual({ keep: true });
+  });
+});
+
+describe("source-backed card tags", () => {
+  it("renders safe inert chips and restores the untouched native card", () => {
+    const nativeText = "<p><strong>Release</strong></p><p>Status: Ready</p>";
+    const data: any = {
+      nodes: [{ id: "card-1", type: "text", text: nativeText, x: 0, y: 0, width: 360, height: 240 }],
+      edges: [],
+      miroSource: { items: [
+        { id: "tag-todo", type: "tag", title: "Todo", color: "yellow" },
+        { id: "tag-urgent", type: "tag", title: "Urgent", color: "#ea94bb" },
+        {
+          id: "card-1",
+          type: "card",
+          data: { title: "Release", dueDate: "2026-06-30", fields: [{ value: "Ready" }], tagIds: ["tag-todo", "tag-urgent"] },
+          style: { cardTheme: "#4262ff" },
+          future: { keep: true },
+        },
+      ] },
+    };
+    const before = JSON.stringify(data);
+    const nodeEl = new Element("div"), contentEl = new Element("div");
+    (contentEl as any).textContent = nativeText;
+    nodeEl.appendChild(contentEl);
+    const renderer = new SourceRenderer({
+      getDocument: () => data,
+      getNodes: () => [{ id: "card-1", nodeEl, contentEl }],
+      getEdges: () => [],
+    }, dom);
+
+    renderer.refresh();
+    expect(nodeEl.classList.contains("miro-source-card")).toBe(true);
+    expect(nodeEl.getAttribute("data-miro-source-card-kind")).toBe("card");
+    expect(nodeEl.getAttribute("data-miro-source-card-due-date")).toBe("true");
+    const tagList = nodeEl.children.find((child) => child.classList.contains("miro-source-tag-list"));
+    expect(tagList?.style.getPropertyValue("pointer-events")).toBe("none");
+    expect(tagList?.children.map((child) => (child as any).textContent)).toEqual(["Todo", "Urgent"]);
+    expect(tagList?.children.map((child) => child.style.getPropertyValue("background-color"))).toEqual(["#ffd02f", "#ea94bb"]);
+    expect((contentEl as any).textContent).toBe(nativeText);
+    expect(JSON.stringify(data)).toBe(before);
+
+    renderer.refresh();
+    expect(nodeEl.children.filter((child) => child.classList.contains("miro-source-tag-list"))).toHaveLength(1);
+    renderer.dispose();
+    expect(nodeEl.children.filter((child) => child.classList.contains("miro-source-tag-list"))).toHaveLength(0);
+    expect(nodeEl.getAttribute("data-miro-source-card-kind")).toBeNull();
+    expect((contentEl as any).textContent).toBe(nativeText);
+    expect(data.miroSource.items[2].future).toEqual({ keep: true });
+  });
+});
+
+describe("source-backed mindmap rendering", () => {
+  it("decorates native nodes and hierarchy edges reversibly", () => {
+    const data: any = {
+      nodes: [
+        { id: "mind-root", type: "text", text: "Root", x: 0, y: 0, width: 140, height: 64 },
+        { id: "mind-child", type: "text", text: "Child", x: 260, y: 20, width: 110, height: 36 },
+      ],
+      edges: [{ id: "mindmap-mind-root-mind-child", fromNode: "mind-root", toNode: "mind-child" }],
+      miroSource: { items: [
+        { id: "mind-root", type: "mindmap_node", style: { nodeColor: "#1a85ff", shape: "rounded_rectangle" }, data: { isRoot: true, nodeView: { data: { content: "<p>Root</p>" } } } },
+        { id: "mind-child", type: "mindmap_node", parent: { id: "mind-root" }, style: { nodeColor: "#7a28ff", shape: "none" }, data: { nodeView: { data: { content: "<p>Child</p>" } } } },
+      ], future: { keep: true } },
+    };
+    const before = JSON.stringify(data);
+    const rootEl = new Element("div"), rootContent = new Element("div"); rootEl.appendChild(rootContent);
+    const childEl = new Element("div"), childContent = new Element("div"); childEl.appendChild(childContent);
+    const edgeEl = new Element("g"), lineGroupEl = new Element("g"), lineEndGroupEl = new Element("g");
+    edgeEl.appendChild(lineGroupEl); edgeEl.appendChild(lineEndGroupEl);
+    const path = new Element("path"), hit = new Element("path");
+    path.setAttribute("d", "M 140 32 L 260 38"); hit.setAttribute("d", "M 140 32 L 260 38");
+    hit.classList.add("canvas-interaction-path"); lineGroupEl.appendChild(path); lineGroupEl.appendChild(hit);
+    const renderer = new SourceRenderer({
+      getDocument: () => data,
+      getNodes: () => [{ id: "mind-root", nodeEl: rootEl, contentEl: rootContent }, { id: "mind-child", nodeEl: childEl, contentEl: childContent }],
+      getEdges: () => [{ id: "mindmap-mind-root-mind-child", edgeEl, lineGroupEl, lineEndGroupEl }],
+    }, dom);
+
+    renderer.refresh();
+    expect(rootEl.getAttribute("data-miro-source-mindmap-root")).toBe("true");
+    expect(childEl.getAttribute("data-miro-source-mindmap-root")).toBe("false");
+    expect(rootEl.children.some((child) => child.classList.contains("miro-source-decoration-mindmap-node"))).toBe(true);
+    expect(edgeEl.getAttribute("data-miro-source-mindmap-edge")).toBe("true");
+    expect(path.style.getPropertyValue("stroke")).toBe("#7a28ff");
+    expect(path.getAttribute("marker-start")).toBe("none");
+    expect(path.getAttribute("marker-end")).toBe("none");
+    expect(JSON.stringify(data)).toBe(before);
+
+    renderer.refresh();
+    expect(rootEl.children.filter((child) => child.classList.contains("miro-source-decoration-mindmap-node"))).toHaveLength(1);
+    renderer.dispose();
+    expect(rootEl.getAttribute("data-miro-source-mindmap-root")).toBeNull();
+    expect(edgeEl.getAttribute("data-miro-source-mindmap-edge")).toBeNull();
+    expect(rootEl.children.filter((child) => child.classList.contains("miro-source-decoration-mindmap-node"))).toHaveLength(0);
+    expect(path.getAttribute("d")).toBe("M 140 32 L 260 38");
+    expect(data.miroSource.future).toEqual({ keep: true });
+  });
+});
+
 

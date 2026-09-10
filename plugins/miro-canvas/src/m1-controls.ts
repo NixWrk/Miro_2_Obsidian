@@ -15,6 +15,7 @@ import {
 	type PaletteColor,
 	type TypographySettings,
 } from "./appearance";
+import type { SourceInspection } from "./source-inspector";
 
 export type M1NavigationAction =
 	| "zoom-in"
@@ -393,8 +394,8 @@ export class M1Controls {
 				append(item, makeElement(this.document, "small", "miro-canvas-command-modal__item-description", command.description));
 			}
 			this.listenModal(item, "click", () => {
-				command.run();
 				this.closeCommandModal();
+				command.run();
 			});
 			if (label.textContent === "") {
 				setText(item, command.label);
@@ -405,6 +406,88 @@ export class M1Controls {
 				this.closeCommandModal();
 			}
 		});
+		this.element.appendChild(modal);
+		this.modal = modal;
+		heading.focus();
+	}
+
+	/** Show only the bounded inspection model; raw source values never enter DOM. */
+	public openSourceInspector(inspection: SourceInspection): void {
+		this.closeCommandModal();
+		if (!hasDocument(this.document) || !isDomElement(this.element)) return;
+		const modal = makeElement(this.document, "div", "miro-canvas-command-modal miro-canvas-source-inspector");
+		modal.setAttribute("role", "dialog");
+		modal.setAttribute("aria-modal", "true");
+		modal.setAttribute("aria-label", "Miro source and provenance inspector");
+		const dialog = append(modal, makeElement(this.document, "div", "miro-canvas-command-modal__dialog miro-canvas-source-inspector__dialog"));
+		const heading = append(dialog, makeElement(this.document, "h2", "miro-canvas-command-modal__title", "Source & provenance"));
+		heading.tabIndex = -1;
+		const close = makeButton(this.document, "Close", "Close source inspector", "miro-canvas-command-modal__close");
+		append(dialog, close);
+		this.listenModal(close, "click", () => this.closeCommandModal());
+		const body = append(dialog, makeElement(this.document, "div", "miro-canvas-source-inspector__body"));
+		const addSection = (title: string): HTMLElement => {
+			const section = append(body, makeElement(this.document!, "section", "miro-canvas-source-inspector__section"));
+			append(section, makeElement(this.document!, "h3", "miro-canvas-source-inspector__heading", title));
+			return section;
+		};
+		const addRows = (section: HTMLElement, rows: readonly (readonly [string, string | number])[]): void => {
+			const list = append(section, makeElement(this.document!, "dl", "miro-canvas-source-inspector__summary"));
+			for (const [label, value] of rows) {
+				append(list, makeElement(this.document!, "dt", undefined, label));
+				const detail = append(list, makeElement(this.document!, "dd"));
+				setText(detail, value);
+			}
+		};
+		const addCounts = (section: HTMLElement, values: readonly { readonly label: string; readonly count: number }[]): void => {
+			const list = append(section, makeElement(this.document!, "ul", "miro-canvas-source-inspector__list"));
+			if (values.length === 0) append(list, makeElement(this.document!, "li", undefined, "None"));
+			for (const value of values) append(list, makeElement(this.document!, "li", undefined, `${value.label}: ${value.count}`));
+		};
+
+		const overview = addSection("Source snapshot");
+		addRows(overview, [
+			["Status", inspection.status], ["Items", inspection.counts.items], ["Connectors", inspection.counts.connectors],
+			["Comments", inspection.counts.comments], ["Assets", inspection.counts.assets], ["Tags", inspection.counts.tags],
+		]);
+		addCounts(overview, inspection.typeCounts);
+
+		if (inspection.selected.canvasItems > 0) {
+			const selected = addSection("Selection");
+			addRows(selected, [
+				["Canvas items", inspection.selected.canvasItems], ["Matched source items", inspection.selected.matchedSourceItems],
+				["With provenance", inspection.selected.itemsWithProvenance],
+			]);
+			addCounts(selected, inspection.selected.typeCounts);
+		}
+
+		const provenance = addSection("Provenance");
+		addRows(provenance, [
+			["Items with provenance", inspection.provenance.itemsWithProvenance],
+			["Available field sources", inspection.provenance.fieldSourceEntries],
+			["Selected field sources", inspection.provenance.selectedFieldSourceEntries],
+			["Original source copies", inspection.provenance.originalSourceCopies],
+		]);
+
+		const completeness = addSection("Completeness & limitations");
+		const completenessList = append(completeness, makeElement(this.document, "ul", "miro-canvas-source-inspector__list"));
+		for (const flag of inspection.completeness) {
+			const item = append(completenessList, makeElement(this.document, "li", undefined, `${flag.path}: ${flag.state}`));
+			item.dataset.state = flag.state;
+		}
+		addRows(completeness, [["Declared limitations", inspection.declaredLimitationCount]]);
+
+		const diagnostics = addSection("Source diagnostics");
+		addCounts(diagnostics, inspection.diagnosticCounts);
+
+		const unknown = addSection("Unknown metadata fields");
+		const unknownList = append(unknown, makeElement(this.document, "ul", "miro-canvas-source-inspector__list miro-canvas-source-inspector__unknown"));
+		if (inspection.unknownFields.length === 0) append(unknownList, makeElement(this.document, "li", undefined, "None"));
+		for (const field of inspection.unknownFields) append(unknownList, makeElement(this.document, "li", undefined, `${field.path}: ${field.type}`));
+		append(body, makeElement(this.document, "p", "miro-canvas-source-inspector__note",
+			inspection.truncated ? "Read-only summary; bounded limits were reached." : "Read-only summary; source values remain in the Canvas file."));
+
+		this.listenModal(modal, "click", (event) => { if (event.target === modal) this.closeCommandModal(); });
 		this.element.appendChild(modal);
 		this.modal = modal;
 		heading.focus();

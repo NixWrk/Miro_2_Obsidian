@@ -281,6 +281,137 @@ describe("source projection model", () => {
     expect(scene.diagnostics).toContain("source-app-card-fields-truncated: app-card-large.data.fields.");
   });
 
+  it("projects preview availability without copying or trusting source URLs and HTML", () => {
+    const scene = buildSourceScene({ miroSource: { items: [{
+      id: "preview-1",
+      type: "preview",
+      data: {
+        title: "Article",
+        description: "Saved preview",
+        provider: { name: "Example" },
+        url: "javascript:alert(1)",
+        previewUrl: "https://example.invalid/preview.png",
+        html: "<script>unsafe</script>",
+      },
+    }, { id: "preview-empty", type: "preview", data: {} }] } });
+    expect(scene.items.get("preview-1")).toMatchObject({
+      kind: "media",
+      structured: { preview: {
+        title: "Article",
+        description: "Saved preview",
+        provider: "Example",
+        hasTargetUrl: true,
+        hasPreviewAsset: true,
+      } },
+    });
+    expect(scene.items.get("preview-empty")?.structured?.preview).toEqual({
+      hasTargetUrl: false,
+      hasPreviewAsset: false,
+    });
+    const projected = JSON.stringify(scene.items.get("preview-1"));
+    expect(projected).not.toContain("javascript:");
+    expect(projected).not.toContain("example.invalid");
+    expect(projected).not.toContain("unsafe");
+    expect(projected).not.toContain("<script>");
+  });
+
+  it("resolves ordinary card tags from source definitions without rendering tag records", () => {
+    const scene = buildSourceScene({ miroSource: {
+      items: [
+        { id: "tag-todo", type: "tag", title: "Todo", color: "yellow", future: { keep: true } },
+        { id: "tag-urgent", type: "tag", data: { title: "Urgent", color: "#ea94bb" } },
+        {
+          id: "card-1",
+          type: "card",
+          data: {
+            title: "Release",
+            description: "Ship it",
+            url: "https://example.invalid/card",
+            dueDate: "2026-06-30",
+            assigneeId: "user-1",
+            fields: [{ label: "Status", value: "Ready" }],
+            tagIds: ["tag-todo", "tag-urgent", "missing-tag"],
+          },
+          style: { cardTheme: "#4262ff" },
+        },
+      ],
+    } });
+    expect(scene.items.has("tag-todo")).toBe(false);
+    expect(scene.items.has("tag-urgent")).toBe(false);
+    expect(scene.items.get("card-1")).toMatchObject({
+      kind: "text",
+      css: { "background-color": "#4262ff" },
+      structured: {
+        card: {
+          kind: "card",
+          hasTitle: true,
+          hasDescription: true,
+          hasUrl: true,
+          hasDueDate: true,
+          hasAssignee: true,
+          fieldCount: 1,
+        },
+        tags: [
+          { id: "tag-todo", title: "Todo", color: "#ffd02f" },
+          { id: "tag-urgent", title: "Urgent", color: "#ea94bb" },
+        ],
+      },
+    });
+    expect(scene.diagnostics).toContain("source-tag-dangling: card-1 -> missing-tag.");
+    expect(scene.diagnostics.some((item) => item.includes("source-type-unsupported: tag"))).toBe(false);
+  });
+
+  it("resolves root tag definitions and keeps tag titles bounded", () => {
+    const scene = buildSourceScene({ miroSource: {
+      tags: [{ id: "tag-root", title: "t".repeat(200), color: "magenta" }],
+      items: [{ id: "card-root", type: "card", tagIds: ["tag-root"] }],
+    } });
+    expect(scene.items.get("card-root")?.structured?.tags?.[0]).toMatchObject({ color: "#ea94bb" });
+    expect(scene.items.get("card-root")?.structured?.tags?.[0]?.title).toHaveLength(128);
+    expect(scene.diagnostics).toContain("source-tag-title-truncated: tag-root.");
+  });
+
+  it("projects proven mindmap nodes and identifies generated hierarchy edges", () => {
+    const document = {
+      nodes: [
+        { id: "mind-root", type: "text", x: 0, y: 0, width: 140, height: 64 },
+        { id: "mind-child", type: "text", x: 260, y: 20, width: 110, height: 36 },
+      ],
+      edges: [{ id: "mindmap-mind-root-mind-child", fromNode: "mind-root", toNode: "mind-child" }],
+      miroSource: { items: [
+        {
+          id: "mind-root", type: "mindmap_node", style: { nodeColor: "#1a85ff", shape: "rounded_rectangle" },
+          data: { isRoot: true, nodeView: { data: { content: "<p>Root</p>" } } },
+        },
+        {
+          id: "mind-child", type: "mindmap_node", parent: { id: "mind-root" }, style: { nodeColor: "#7a28ff", shape: "none" },
+          data: { nodeView: { data: { content: "<p>Child</p>" } } },
+        },
+      ] },
+    };
+    const before = JSON.stringify(document);
+    const scene = buildSourceScene(document);
+    expect(scene.items.get("mind-root")?.structured?.mindmapNode).toEqual({
+      isRoot: true, hasContent: true, shape: "round_rectangle", branchColor: "#1a85ff",
+    });
+    expect(scene.items.get("mind-child")?.structured?.mindmapNode).toEqual({
+      isRoot: false, hasContent: true, parentId: "mind-root", branchColor: "#7a28ff",
+    });
+    expect(scene.items.get("mindmap-mind-root-mind-child")).toMatchObject({
+      kind: "connector",
+      css: { stroke: "#7a28ff" },
+      connector: { shape: "curved", startCap: "none", endCap: "none", strokeStyle: "solid" },
+      structured: { mindmapEdge: { parentId: "mind-root", childId: "mind-child", branchColor: "#7a28ff" } },
+    });
+    expect(JSON.stringify(document)).toBe(before);
+  });
+
+  it("keeps legacy mindmap source-limited instead of inventing a tree", () => {
+    const scene = buildSourceScene({ miroSource: { items: [{ id: "legacy", type: "mindmap", data: { content: "unknown" } }] } });
+    expect(scene.items.has("legacy")).toBe(false);
+    expect(scene.diagnostics).toContain("source-mindmap-legacy-limited: legacy.");
+  });
+
   it("prefers Canvas zOrder, maps source IDs through bindings, and keeps dangling entries", () => {
     const scene = buildSourceScene({
       miroSource: { items: [{ id: "s1", type: "text" }, { id: "s2", type: "text" }, { id: "s3", type: "text" }], zOrder: ["s3", "s2"] },

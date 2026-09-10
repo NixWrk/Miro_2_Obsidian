@@ -128,6 +128,17 @@ fields stay inert in `miroSource`.
 The next slice recognizes proven `app_card` field collections and card themes.
 It adds reversible card chrome and bounded state only; the converter's native
 editable text remains the visible title, description, and field content.
+Preview metadata now renders as an inert overlay above the native clickable
+link, and ordinary cards resolve bounded tag IDs to definition-backed chips.
+Tag definitions stay non-visual source evidence.
+Proven `mindmap_node` payloads retain converter-created native text and
+hierarchy edges. The renderer distinguishes roots and branches, applies safe
+source colors and shapes, and marks generated hierarchy edges separately from
+Miro connectors. Legacy `mindmap` remains explicitly source-limited.
+The Commands menu and command palette now open a read-only source/provenance
+inspector. It shows bounded source-type, completeness, provenance, diagnostic,
+selection, and unknown-field summaries. Raw source values remain only in the
+Canvas file and no inspector content is added to the board.
 
 To run the plugin checks from the repository root:
 
@@ -537,8 +548,13 @@ and covered by automated tests.
   or executing source payloads.
 - [x] Add bounded source-backed `app_card` state and reversible card styling
   without copying field payloads into plugin DOM.
-- Add slide, document, image, preview, card, tag, and mind-map renderers where
-  source data is available.
+- [x] Add bounded preview metadata over native links without executing source
+  URLs or HTML.
+- [x] Add ordinary card state and resolve source tag definitions to inert chips.
+- [x] Add source-backed `mindmap_node` root/branch styling and distinguish its
+  generated hierarchy edges from Miro connectors; report legacy `mindmap` as
+  source-limited.
+- Add slide, document, and image renderers where source data is available.
 - For mind-map editing, evaluate the MIT-licensed
   [`obsidian-enhancing-mindmap`](https://github.com/MarkMindCkm/obsidian-enhancing-mindmap)
   tree model and interactions before writing new layout code. Candidate behavior
@@ -549,7 +565,8 @@ and covered by automated tests.
   a UX reference: its README says it is not open source, so its implementation
   must not be copied. Keep native Canvas data as the source of truth and record
   any reused MIT code and copyright in third-party notices.
-- Add provenance and source-limitation inspection without default board clutter.
+- [x] Add bounded provenance and source-limitation inspection without default
+  board clutter or raw source values in DOM.
 
 ### M5: release hardening
 
