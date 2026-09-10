@@ -444,41 +444,29 @@ function isContained(outer: DomElementLike, inner: DomElementLike): boolean {
 
 const OWNED_ROTATION_ATTRIBUTE = "data-miro-source-owned-rotation";
 
-/** Recover the native transform by removing only the suffix marked as ours. */
-function hostBaseTransform(element: DomElementLike): string | undefined {
-  const before = readStyle(element, "transform");
-  if (before === undefined) return undefined;
-  let base = before.trim();
-  if (base === "none") return "";
+function rotationStyle(rotation: number): string {
+  return `${rotation}deg`;
+}
+
+/** Repair a transform suffix left by a previous plugin build, when ownership is proven. */
+function clearLegacyOwnedTransformRotation(element: DomElementLike, patches: RestorePatch[]): void {
   const owned = readAttribute(element, OWNED_ROTATION_ATTRIBUTE);
-  if (owned !== null && owned !== undefined) {
-    const suffix = `rotate(${owned}deg)`;
-    const marker = ` ${suffix}`;
-    while (base === suffix || base.endsWith(marker)) {
-      base = base === suffix ? "" : base.slice(0, -marker.length).trim();
-    }
+  const before = readStyle(element, "transform");
+  if (owned === null || owned === undefined || before === undefined) return;
+  const suffix = `rotate(${owned}deg)`;
+  const marker = ` ${suffix}`;
+  let base = before.trim();
+  while (base === suffix || base.endsWith(marker)) {
+    base = base === suffix ? "" : base.slice(0, -marker.length).trim();
   }
-  return base;
-}
-
-function transformWithRotation(base: string, rotation: number): string {
-  if (rotation === 0) return base;
-  const rotate = `rotate(${rotation}deg)`;
-  return base.length === 0 ? rotate : `${base} ${rotate}`;
-}
-
-function composedTransform(element: DomElementLike, rotation: number): string | undefined {
-  const base = hostBaseTransform(element);
-  return base === undefined ? undefined : transformWithRotation(base, rotation);
+  if (base !== before.trim()) patchStyle(element, "transform", base, patches, base);
+  safeCall(element, "removeAttribute", [OWNED_ROTATION_ATTRIBUTE]);
 }
 
 function applyElementRotation(element: DomElementLike, rotation: number, patches: RestorePatch[]): boolean {
-  if (!Number.isFinite(rotation)) return false;
-  const base = hostBaseTransform(element);
-  const transform = base === undefined ? undefined : transformWithRotation(base, rotation);
-  if (transform === undefined || !patchStyle(element, "transform", transform, patches, base)) {
-    return false;
-  }
+  if (!Number.isFinite(rotation) || rotation === 0) return false;
+  clearLegacyOwnedTransformRotation(element, patches);
+  if (!patchStyle(element, "rotate", rotationStyle(rotation), patches)) return false;
   patchStyle(element, "transform-origin", "50% 50%", patches);
   patchAttribute(element, OWNED_ROTATION_ATTRIBUTE, String(rotation), patches);
   return true;
@@ -492,12 +480,14 @@ function applyInteractionRotation(runtime: unknown, primary: DomElementLike, rot
   }
 }
 
-function applyRotation(runtime: unknown, primary: DomElementLike, rotation: number, patches: RestorePatch[], diagnostics: string[], id: string): void {
+function applyRotation(runtime: unknown, primary: DomElementLike, rotation: number, patches: RestorePatch[], diagnostics: string[], id: string): boolean {
+  if (!Number.isFinite(rotation) || rotation === 0) return false;
   if (!applyElementRotation(primary, rotation, patches)) {
     diagnostics.push(`rotation-dom-inaccessible: ${id}.`);
-    return;
+    return false;
   }
   applyInteractionRotation(runtime, primary, rotation, patches);
+  return true;
 }
 
 function normalizedZIndex(value: number | undefined): string | undefined {
@@ -831,9 +821,6 @@ function applyNode(
   const tagLayer = decorateTags(document, shell, descriptor, patches);
   if (descriptor.structured?.tags !== undefined && tagLayer === undefined) diagnostics.push(`tag-decoration-dom-inaccessible: ${id}.`);
 
-  if (layer !== undefined || tagLayer !== undefined) {
-    patchStyle(shell, "isolation", "isolate", patches);
-  }
   if (layer !== undefined) {
     for (const foreground of allElementsFor(runtime, ["contentEl", "labelEl", "fileEl", "embedEl"])) {
       if (foreground === layer || !isContained(shell, foreground)) continue;
@@ -883,36 +870,26 @@ function applyNode(
     }
   }
   const rotation = previewRotation ?? descriptor.rotation;
+  for (const element of [shell, containerEl, contentEl, content].filter(
+    (item, index, all): item is DomElementLike => item !== undefined && all.indexOf(item) === index,
+  )) clearLegacyOwnedTransformRotation(element, patches);
   if (Number.isFinite(rotation) && rotation !== 0) {
     // Marks the node for the stylesheet: which descendant actually paints the
     // native rectangle differs between Obsidian builds, so clearing the few
     // elements this module can name is not enough on its own.
     patchAttribute(shell, "data-miro-source-rotated", "true", patches);
   }
-  let expectedRotations: Array<{ readonly element: DomElementLike; readonly rotation: number }>;
-  if (descriptor.kind === "shape" && layer !== undefined) {
-    // Keep geometry, editable content and tags as separate compositor inputs.
-    // The SVG contour stays vector-sharp and Chromium no longer resamples the
-    // complete Canvas node (including its controls) as one blurred texture.
-    // The shell keeps every host-owned transform; only visual layers rotate.
-    applyElementRotation(shell, 0, patches);
+  const expectedRotations: Array<{ readonly element: DomElementLike; readonly rotation: number }> = [];
+  if (descriptor.kind === "shape" && layer !== undefined && rotation !== 0) {
+    // A stacking context forces Chromium to rasterize the subtree before it is
+    // rotated. Keep the contour and text as ordinary descendants so both stay
+    // sharp while the one native node shell supplies the rotation.
     for (const parent of [shell, containerEl].filter(
       (element, index, all): element is DomElementLike => element !== undefined && all.indexOf(element) === index,
     )) patchStyle(parent, "overflow", "visible", patches);
-    const visualTargets = [layer, content, tagLayer].filter(
-      (element, index, all): element is DomElementLike => element !== undefined && element !== shell && all.indexOf(element) === index,
-    );
-    expectedRotations = [];
-    for (const element of visualTargets) {
-      if (applyElementRotation(element, rotation, patches)) expectedRotations.push({ element, rotation });
-    }
-    if (expectedRotations.length === 0) diagnostics.push(`rotation-dom-inaccessible: ${id}.`);
     patchStyle(content, "text-rendering", "geometricPrecision", patches);
-    applyInteractionRotation(runtime, shell, rotation, patches);
-  } else {
-    applyRotation(runtime, shell, rotation, patches, diagnostics, id);
-    expectedRotations = [{ element: shell, rotation }];
   }
+  if (applyRotation(runtime, shell, rotation, patches, diagnostics, id)) expectedRotations.push({ element: shell, rotation });
   const ownedChildren = [layer, tagLayer].filter((item): item is DomElementLike => item !== undefined);
   return { id, kind: "node", element: primary, marker: shell, ownedChildren, expectedRotations, descriptor };
 }
@@ -1121,9 +1098,7 @@ export class SourceRenderer {
       const marker = safeCall(item.marker, "getAttribute", ["data-miro-source-kind"]);
       if (safeGet(item.marker, "isConnected") === false || typeof marker !== "string") return false;
       for (const expectedRotation of item.expectedRotations ?? []) {
-        const transform = readStyle(expectedRotation.element, "transform");
-        const expected = composedTransform(expectedRotation.element, expectedRotation.rotation);
-        if (transform === undefined || expected === undefined || transform.trim() !== expected.trim()) return false;
+        if (readStyle(expectedRotation.element, "rotate") !== rotationStyle(expectedRotation.rotation)) return false;
       }
       for (const child of item.ownedChildren ?? []) {
         if (safeGet(child, "parentNode") !== item.marker) return false;

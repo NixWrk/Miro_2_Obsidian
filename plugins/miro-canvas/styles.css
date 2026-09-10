@@ -1338,9 +1338,9 @@
   transform: skewY(-38deg);
 }
 
-/* Shape geometry and editable content rotate as separate layers. Native paint
-   on the square shell stays transparent behind the vector contour. */
-[data-miro-source-rotated="true"] {
+/* A source shape supplies its own vector contour, so only its native rectangular
+   paint must step aside while the complete node rotates as one unit. */
+[data-miro-source-kind="shape"][data-miro-source-rotated="true"] {
   background-color: transparent !important;
   border-color: transparent !important;
   box-shadow: none !important;

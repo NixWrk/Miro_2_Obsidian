@@ -138,20 +138,23 @@ def main() -> int:
             m2.get_by_label("Rotation degrees", exact=True).fill("30")
             m2.get_by_role("button", name="Apply rotation", exact=True).click()
             assert page.evaluate("miroBrowser.runtime.data.miroCanvas.localOverrides.n1.rotation") == 30
-            assert "rotate(30deg)" in page.evaluate("miroBrowser.node.nodeEl.style.transform")
+            assert page.evaluate("miroBrowser.node.nodeEl.style.rotate") == "30deg"
+            assert "rotate" not in page.evaluate("miroBrowser.node.nodeEl.style.transform")
             assert page.evaluate("miroBrowser.getHistoryLength()") == history_before_geometry + 1
-            page.evaluate("miroBrowser.node.nodeEl.style.transform = 'translate(20px, 0px) rotate(30deg)'; miroBrowser.session.refresh()")
-            assert page.evaluate("(miroBrowser.node.nodeEl.style.transform.match(/rotate\\(30deg\\)/g) || []).length") == 1
-            assert "translate(20px, 0px)" in page.evaluate("miroBrowser.node.nodeEl.style.transform")
+            page.evaluate("miroBrowser.node.nodeEl.style.transform = 'translate(20px, 0px)'; miroBrowser.session.refresh()")
+            for _ in range(5):
+                page.evaluate("miroBrowser.runtime.selection.clear(); miroBrowser.session.refresh(); miroBrowser.runtime.selection.add(miroBrowser.node); miroBrowser.session.refresh()")
+                assert page.evaluate("miroBrowser.node.nodeEl.style.rotate") == "30deg"
+                assert page.evaluate("miroBrowser.node.nodeEl.style.transform") == "translate(20px, 0px)"
             page.evaluate("miroBrowser.runtime.undo(); miroBrowser.session.refresh(); miroBrowser.m2.refresh()")
-            assert "rotate(30deg)" not in page.evaluate("miroBrowser.node.nodeEl.style.transform")
+            assert page.evaluate("miroBrowser.node.nodeEl.style.rotate") == ""
             page.evaluate("miroBrowser.runtime.redo(); miroBrowser.session.refresh(); miroBrowser.m2.refresh()")
-            assert "rotate(30deg)" in page.evaluate("miroBrowser.node.nodeEl.style.transform")
+            assert page.evaluate("miroBrowser.node.nodeEl.style.rotate") == "30deg"
             m2.get_by_role("button", name="Bring to front", exact=True).click()
             assert page.evaluate("miroBrowser.runtime.data.miroCanvas.zOrder.at(-1)") == "n1"
             assert page.evaluate("miroBrowser.sourceUnchanged()")
             page.evaluate("miroBrowser.runtime.undo(); miroBrowser.runtime.undo(); miroBrowser.session.refresh(); miroBrowser.m2.refresh()")
-            assert "rotate(30deg)" not in page.evaluate("miroBrowser.node.nodeEl.style.transform")
+            assert page.evaluate("miroBrowser.node.nodeEl.style.rotate") == ""
 
             node_count = page.evaluate("miroBrowser.runtime.nodes.size")
             m2.get_by_label("Shape kind", exact=True).select_option("diamond")
