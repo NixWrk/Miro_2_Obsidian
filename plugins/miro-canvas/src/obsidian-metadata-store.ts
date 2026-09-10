@@ -308,11 +308,20 @@ function graphDrift(observed: Record<string, unknown>, written: Record<string, u
 		const wanted = written[key];
 		if (!Array.isArray(actual) || !Array.isArray(wanted)) return `${key} missing`;
 		if (actual.length !== wanted.length) return `${key} count ${wanted.length}->${actual.length}`;
+		// Matched by id, not by position: the host reorders the array when it
+		// rebuilds - it owns the stacking order - and comparing by index read
+		// that as every node changing its id, refusing writes that were fine.
+		const byId = new Map<string, UnknownRecord>();
+		for (const item of actual) {
+			if (isObject(item) && typeof item.id === "string") byId.set(item.id, item);
+		}
 		for (let index = 0; index < wanted.length; index += 1) {
-			const actualItem = actual[index];
 			const wantedItem = wanted[index];
-			if (!isObject(actualItem) || !isObject(wantedItem)) return `${key}[${index}] not an object`;
-			const id = typeof wantedItem.id === "string" ? wantedItem.id : `[${index}]`;
+			if (!isObject(wantedItem)) return `${key}[${index}] not an object`;
+			const id = typeof wantedItem.id === "string" ? wantedItem.id : undefined;
+			if (id === undefined) return `${key}[${index}] has no id`;
+			const actualItem = byId.get(id);
+			if (actualItem === undefined) return `${key} ${id} missing after save`;
 			for (const field of Object.keys(wantedItem)) {
 				if (!hasOwn(actualItem, field)) return `${key} ${id} lost ${field}`;
 				if (!equalJson(actualItem[field], wantedItem[field])) return `${key} ${id} changed ${field}`;

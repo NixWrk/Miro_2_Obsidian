@@ -272,3 +272,46 @@ describe("native Obsidian metadata store", () => {
 		expect(guessed.diagnostics.map((item) => item.code)).toContain("native-save-missing");
 	});
 });
+
+describe("a host that reorders the graph while saving", () => {
+  it("accepts a save that kept every node but changed their order", () => {
+    const initial = {
+      nodes: [
+        { id: "a", type: "text", text: "a", x: 0, y: 0, width: 10, height: 10 },
+        { id: "b", type: "text", text: "b", x: 20, y: 0, width: 10, height: 10 },
+      ],
+      edges: [],
+    };
+    const runtime = {
+      data: JSON.parse(JSON.stringify(initial)) as Record<string, unknown>,
+      requestSave: vi.fn(function (this: { data: Record<string, unknown> }) {
+        // Native Canvas owns the stacking order and rewrites the array; the
+        // set of nodes is unchanged.
+        const nodes = this.data.nodes as unknown[];
+        this.data = { ...this.data, nodes: [...nodes].reverse() };
+      }),
+    };
+    const probe = createObsidianMetadataStore({ canvas: runtime });
+    const store = probe.store!;
+    const before = store.readDocument() as Record<string, unknown>;
+    expect(store.commitDocument({ ...before, miroCanvas: { schemaVersion: 1 } }, before)).toBe(true);
+    expect(runtime.data).toHaveProperty("miroCanvas.schemaVersion", 1);
+  });
+
+  it("still refuses a save that lost a node", () => {
+    const initial = {
+      nodes: [{ id: "a", type: "text", text: "a", x: 0, y: 0, width: 10, height: 10 }],
+      edges: [],
+    };
+    const runtime = {
+      data: JSON.parse(JSON.stringify(initial)) as Record<string, unknown>,
+      requestSave: vi.fn(function (this: { data: Record<string, unknown> }) {
+        this.data = { ...this.data, nodes: [{ id: "different", type: "text" }] };
+      }),
+    };
+    const store = createObsidianMetadataStore({ canvas: runtime }).store!;
+    const before = store.readDocument() as Record<string, unknown>;
+    expect(store.commitDocument({ ...before, miroCanvas: { schemaVersion: 1 } }, before)).toBe(false);
+    expect(store.describeLastCommitFailure?.()).toContain("missing after save");
+  });
+});
