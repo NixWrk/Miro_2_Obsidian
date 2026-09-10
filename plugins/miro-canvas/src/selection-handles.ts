@@ -315,33 +315,48 @@ export class SelectionHandles {
     return this.rotating || this.dragSide !== undefined;
   }
 
+  /** Position and size the frame over the node it belongs to. */
+  private placeFrame(frame: HTMLElement, rect: HandleRect): void {
+    frame.style.left = `${rect.left}px`;
+    frame.style.top = `${rect.top}px`;
+    frame.style.width = `${rect.width}px`;
+    frame.style.height = `${rect.height}px`;
+  }
+
   public update(state: SelectionHandlesState): void {
     const previous = this.state;
+    // A gesture must not lose the geometry it started with - pressing the
+    // rotation grip can clear the Canvas selection, and the refresh that
+    // follows reports none - but it must still follow geometry that is
+    // reported.  Freezing it outright left the frame wherever the node had
+    // been at the last refresh, so a pan just before the gesture parked the
+    // handles away from the node and they appeared to turn about their own
+    // point until the drag ended.
     this.state = this.gestureActive
       ? {
           ...state,
-          rect: previous.rect,
-          selectedIds: previous.selectedIds,
-          shape: previous.shape,
-          origin: previous.origin,
+          rect: state.rect ?? previous.rect,
+          selectedIds: state.selectedIds.length > 0 ? state.selectedIds : previous.selectedIds,
+          shape: state.shape ?? previous.shape,
+          origin: state.origin ?? previous.origin,
         }
       : state;
     const refs = this.refs;
     if (refs === undefined) return;
-    // A gesture owns its original geometry, but the frame follows the preview angle.
+    // A gesture keeps the handles it started with rather than hiding them, but
+    // it still tracks where the node is: writing only the angle left the frame
+    // at the position of the last refresh before the drag.
     if (this.gestureActive && previous.rect !== undefined) {
+      const rect = this.state.rect;
+      if (rect !== undefined) this.placeFrame(refs.frame, rect);
       refs.frame.style.transform = this.state.rotation === 0 ? "none" : `rotate(${this.state.rotation}deg)`;
       return;
     }
     const visible = state.rect !== undefined && state.selectedIds.length === 1;
     this.element.hidden = !visible;
     if (!visible || state.rect === undefined) return;
-    const style = refs.frame.style;
-    style.left = `${state.rect.left}px`;
-    style.top = `${state.rect.top}px`;
-    style.width = `${state.rect.width}px`;
-    style.height = `${state.rect.height}px`;
-    style.transform = state.rotation === 0 ? "none" : `rotate(${state.rotation}deg)`;
+    this.placeFrame(refs.frame, state.rect);
+    refs.frame.style.transform = state.rotation === 0 ? "none" : `rotate(${state.rotation}deg)`;
     this.element.setAttribute("data-miro-canvas-editable", state.editable ? "true" : "false");
     refs.rotate.hidden = state.isEdge || !state.editable;
     const outline = shapeOutline(state.shape);

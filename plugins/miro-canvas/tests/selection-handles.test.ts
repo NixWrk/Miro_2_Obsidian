@@ -238,12 +238,18 @@ describe("selection handles", () => {
     expect(rotations).toEqual([]);
   });
 
-  it("does not move the frame while a gesture is in flight", () => {
+  it("keeps the geometry a gesture started with only while none is reported", () => {
     const { root, update, handles } = build();
     const frame = root.children[0]!;
     byLabel(root, "Rotate").dispatch("pointerdown", { clientX: 200, clientY: 250, pointerId: 5 });
-    update({ rect: { left: 900, top: 900, width: 10, height: 10 } });
+    // Pressing the grip can clear the selection: geometry that is not
+    // reported must not be adopted as gone.
+    update({ rect: undefined, selectedIds: [] });
     expect(frame.style.left).toBe("100px");
+    // Geometry that is reported is followed, so panning under a drag does not
+    // park the handles where the node used to be.
+    update({ rect: { left: 900, top: 900, width: 10, height: 10 } });
+    expect(frame.style.left).toBe("900px");
     handles.cancelGesture();
     update({ rect: { left: 900, top: 900, width: 10, height: 10 } });
     expect(frame.style.left).toBe("900px");
