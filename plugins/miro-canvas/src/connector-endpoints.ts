@@ -562,6 +562,69 @@ export function routeConnector(
   return { start, end, points: [start, end], path: `M ${p(start)} L ${p(end)}` };
 }
 
+/** A board coordinate to a thousandth of a unit, without a negative zero. */
+export function roundCoordinate(value: number): number {
+  const rounded = Math.round(value * 1000) / 1000;
+  return Object.is(rounded, -0) ? 0 : rounded;
+}
+
+/** Outward normals of the four sides, before the node turns. */
+const SIDE_NORMALS: Readonly<Record<NativeSide, AnchorPoint>> = {
+  top: { x: 0, y: -1 }, right: { x: 1, y: 0 }, bottom: { x: 0, y: 1 }, left: { x: -1, y: 0 },
+};
+
+/** The angle native Canvas turns an arrowhead to on each side of an upright node. */
+const SIDE_ARROW_ANGLES: Readonly<Record<NativeSide, number>> = { top: 180, right: 270, bottom: 0, left: 90 };
+
+export interface NativeEdgeEnd {
+  /** Where the edge meets the node: the side's middle, on the contour, turned with the node. */
+  readonly point: AnchorPoint;
+  /** The side's outward direction, turned with the node. */
+  readonly normal: AnchorPoint;
+  /** The arrowhead angle native Canvas uses for the side, plus the node's rotation. */
+  readonly arrowAngle: number;
+}
+
+/** One end of a native edge on a node that may be turned or drawn as a shape. */
+export function nativeEdgeEnd(rect: AnchorRect, side: unknown, outline?: readonly ShapePoint[]): NativeEdgeEnd | undefined {
+  if (typeof side !== "string" || !SIDES.has(side as NativeSide)) return undefined;
+  const point = sidePoint(rect, side, outline);
+  if (point === undefined) return undefined;
+  const base = SIDE_NORMALS[side as NativeSide];
+  const rotation = Number.isFinite(rect.rotation) ? rect.rotation ?? 0 : 0;
+  const radians = rotation * Math.PI / 180;
+  return {
+    point,
+    normal: {
+      x: base.x * Math.cos(radians) - base.y * Math.sin(radians),
+      y: base.x * Math.sin(radians) + base.y * Math.cos(radians),
+    },
+    arrowAngle: SIDE_ARROW_ANGLES[side as NativeSide] + rotation,
+  };
+}
+
+/**
+ * The curve native Canvas draws between two edge ends, as a path.
+ *
+ * It follows Obsidian's own: the line stops 7 units short of a side, where the
+ * arrowhead sits - or runs on to the side without one - and leaves along the
+ * side's outward normal, its control points half the distance away and kept
+ * between 70 and 150 units.  The only difference is that the normals turn
+ * with the node, so an edge still meets a rotated side square on.
+ */
+export function nativeEdgeRoute(from: NativeEdgeEnd, fromArrow: boolean, to: NativeEdgeEnd, toArrow: boolean): string {
+  const along = (origin: AnchorPoint, normal: AnchorPoint, distance: number): AnchorPoint =>
+    ({ x: origin.x + normal.x * distance, y: origin.y + normal.y * distance });
+  const start = along(from.point, from.normal, 7);
+  const finish = along(to.point, to.normal, 7);
+  const reach = Math.min(150, Math.max(70, Math.hypot(finish.x - start.x, finish.y - start.y) / 2));
+  const p = (point: AnchorPoint): string => `${roundCoordinate(point.x)} ${roundCoordinate(point.y)}`;
+  let path = `M ${p(start)} C ${p(along(start, from.normal, reach))} ${p(along(finish, to.normal, reach))} ${p(finish)}`;
+  if (!fromArrow) path = `M ${p(from.point)} L ${p(start)} ${path}`;
+  if (!toArrow) path = `${path} M ${p(finish)} L ${p(to.point)}`;
+  return path;
+}
+
 function nearestSide(anchor: CanvasAnchor): NativeSide | undefined {
   if (anchor.type !== "node" && anchor.type !== "image") {
     return undefined;

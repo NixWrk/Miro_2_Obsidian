@@ -1,6 +1,8 @@
-import { buildCanvasAnchorGeometry, type NodeMeasurements } from "./connector-endpoints";
-import { SHAPE_CLIP_PATHS, inscribedInsets, shapeOutline } from "./shape-geometry";
-import type { AnchorEdgeGeometry, AnchorPoint } from "./anchors";
+import {
+  buildCanvasAnchorGeometry, nativeEdgeEnd, nativeEdgeRoute, roundCoordinate, routeConnector, type NodeMeasurements,
+} from "./connector-endpoints";
+import { SHAPE_CLIP_PATHS, inscribedInsets, shapeOutline, type ShapePoint } from "./shape-geometry";
+import { normalizeAnchor, resolveAnchor, type AnchorEdgeGeometry, type AnchorPoint, type AnchorRect } from "./anchors";
 import { readCanvasElementId } from "./canvas-elements";
 import { buildSourceScene, type SourceItemDescriptor, type SourceScene } from "./source-model";
 
@@ -25,6 +27,10 @@ interface RenderedItem {
   readonly ownedChildren?: readonly DomElementLike[];
   readonly expectedRotations?: readonly { readonly element: DomElementLike; readonly rotation: number }[];
   readonly descriptor: SourceItemDescriptor;
+  /** Replaces the marker check for an item that puts no marker on the host. */
+  readonly intact?: () => boolean;
+  /** Draws the item again after the host redrew the element it decorates. */
+  readonly follow?: { readonly element: DomElementLike; readonly attribute: string; readonly apply: () => void };
 }
 
 type RestorePatch = () => void;
@@ -782,8 +788,10 @@ function localRoute(path: DomElementLike, geometry: AnchorEdgeGeometry): string 
   return `M ${p(start)}` + (geometry.points ?? [start, end]).slice(1).map(point => ` L ${p(point)}`).join("");
 }
 
+/** Draws the connector's route and returns each path with the route it now carries. */
 function renderConnectorGeometry(document: Document | undefined, runtime: unknown, descriptor: SourceItemDescriptor,
-  geometry: AnchorEdgeGeometry | undefined, native: unknown, patches: RestorePatch[], diagnostics: string[], id: string): void {
+  geometry: AnchorEdgeGeometry | undefined, native: unknown, patches: RestorePatch[], diagnostics: string[], id: string,
+): readonly { readonly path: DomElementLike; readonly d: string }[] | undefined {
   const group = elementFor(runtime, ["lineGroupEl", "edgeEl", "el"]);
   const direct = elementFor(runtime, ["pathEl", "lineEl"]);
   const paths = group === undefined ? [] : queryAll(group, "path").filter(path => !safeCall(path, "closest", ["defs, marker"]));
@@ -791,20 +799,20 @@ function renderConnectorGeometry(document: Document | undefined, runtime: unknow
   const routes = geometry === undefined ? [] : paths.map(path => ({ path, d: localRoute(path, geometry) }));
   if (group === undefined || routes.length === 0 || routes.some(route => route.d === undefined)) {
     diagnostics.push(`connector-geometry-fallback: ${id}.`);
-    return;
+    return undefined;
   }
   const caps = [descriptor.connector?.startCap ?? (safeGet(native, "fromEnd") === "arrow" ? "arrow" : "none"),
     descriptor.connector?.endCap ?? (safeGet(native, "toEnd") === "none" ? "none" : "arrow")];
   if (caps.some(cap => cap !== "none" && CAP_PATHS[cap] === undefined)) {
     diagnostics.push(`connector-endcap-fallback: ${id}.`);
-    return;
+    return undefined;
   }
   const color = descriptor.css.stroke ?? "var(--canvas-color, currentColor)";
   const startMarker = marker(document, caps[0]!, color, patches, group);
   const endMarker = marker(document, caps[1]!, color, patches, group);
   if (startMarker === undefined || endMarker === undefined) {
     diagnostics.push(`connector-marker-fallback: ${id}.`);
-    return;
+    return undefined;
   }
   for (const { path, d } of routes) {
     patchAttribute(path, "d", d!, patches);
@@ -822,6 +830,208 @@ function renderConnectorGeometry(document: Document | undefined, runtime: unknow
   }
   const ends = elementFor(runtime, ["lineEndGroupEl"]);
   if (ends !== undefined && ends !== group && !isContained(ends, group)) patchStyle(ends, "display", "none", patches);
+  return routes as readonly { readonly path: DomElementLike; readonly d: string }[];
+}
+
+/**
+ * Keep a connector this module routes on its route while the host redraws it.
+ *
+ * Native Canvas redraws every edge of a node that moves, back to the middle
+ * of a side; `apply` routes it again from the live node positions.  Once it
+ * has, the path no longer matches the native route captured at render time,
+ * so a restore asks the host to redraw its own edge instead.
+ */
+function connectorFollow(
+  runtime: unknown,
+  routes: readonly { readonly path: DomElementLike; readonly d: string }[],
+  live: () => AnchorEdgeGeometry | undefined,
+  patches: RestorePatch[],
+): NonNullable<RenderedItem["follow"]> {
+  const display = routes.find(({ path }) => safeCall(safeGet(path, "classList"), "contains", ["canvas-interaction-path"]) !== true)?.path
+    ?? routes[0]!.path;
+  let written: string | undefined;
+  patches.push(() => {
+    if (written !== undefined && readAttribute(display, "d") === written) safeCall(runtime, "updatePath");
+  });
+  return {
+    element: display,
+    attribute: "d",
+    apply: () => {
+      const geometry = live();
+      if (geometry === undefined) return;
+      for (const { path } of routes) {
+        const d = localRoute(path, geometry);
+        if (d === undefined) continue;
+        if (readAttribute(path, "d") !== d) safeCall(path, "setAttribute", ["d", d]);
+        if (path === display) written = d;
+      }
+    },
+  };
+}
+
+/**
+ * The route of a connector from where its nodes are right now.
+ *
+ * Each end is recomputed from the host's live node box: a precise anchor on
+ * the node, or the middle of a native side on its contour, turned with the
+ * node.  An end anchored to another connector or to an image crop has no live
+ * form, and such a connector waits for the next refresh instead.
+ */
+function liveConnectorGeometry(
+  document: unknown,
+  id: string,
+  runtime: unknown,
+  native: unknown,
+  nodeOf: (nodeId: unknown) => RouteNode | undefined,
+  routing: "straight" | "elbowed" | "curved" | undefined,
+): (() => AnchorEdgeGeometry | undefined) | undefined {
+  const anchors = safeGet(safeGet(safeGet(safeGet(document, "miroCanvas"), "localOverrides"), id), "connectorAnchors");
+  const endOf = (end: "from" | "to"): (() => AnchorPoint | undefined) | undefined => {
+    const live = safeGet(runtime, end);
+    const liveNode = safeGet(live, "node");
+    const liveId = readCanvasElementId(liveNode);
+    const raw = safeGet(anchors, end);
+    if (raw === undefined) {
+      const known = nodeOf(liveId ?? safeGet(native, `${end}Node`));
+      if (known === undefined) return undefined;
+      const side = safeGet(live, "side") ?? safeGet(native, `${end}Side`);
+      return () => nativeEdgeEnd(liveRect(liveNode, known.rect), side, known.outline)?.point;
+    }
+    const normalized = normalizeAnchor(raw);
+    const anchor = normalized.valid ? normalized.anchor : undefined;
+    if (anchor?.type === "free") return () => ({ x: anchor.x, y: anchor.y });
+    if (anchor?.type !== "node") return undefined;
+    const known = nodeOf(anchor.nodeId);
+    if (known === undefined) return undefined;
+    const node = anchor.nodeId === liveId ? liveNode : undefined;
+    return () => {
+      const rect = node === undefined ? known.rect : liveRect(node, known.rect);
+      const point = resolveAnchor(anchor, { nodes: { [anchor.nodeId]: rect } }).point;
+      return point === undefined ? undefined : { x: point.x, y: point.y };
+    };
+  };
+  const from = endOf("from"), to = endOf("to");
+  if (from === undefined || to === undefined) return undefined;
+  return () => {
+    const start = from(), end = to();
+    return start === undefined || end === undefined ? undefined : routeConnector(start, end, routing);
+  };
+}
+
+/** A node a native edge is drawn to: its box as the document places it, and its silhouette. */
+interface RouteNode {
+  readonly rect: AnchorRect;
+  readonly outline?: readonly ShapePoint[];
+}
+
+function finiteNumber(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value);
+}
+
+/** The node's box as the host holds it right now, turned as the document turns it. */
+function liveRect(node: unknown, known: AnchorRect): AnchorRect {
+  const x = safeGet(node, "x"), y = safeGet(node, "y");
+  const width = safeGet(node, "width"), height = safeGet(node, "height");
+  if (!finiteNumber(x) || !finiteNumber(y) || !finiteNumber(width) || !finiteNumber(height)) return known;
+  const rotation = known.rotation ?? 0;
+  return rotation === 0
+    ? { x, y, width, height }
+    : { x, y, width, height, rotation, rotationCenterX: x + width / 2, rotationCenterY: y + height / 2 };
+}
+
+/**
+ * Draw a native edge to where its turned or shaped nodes really are.
+ *
+ * Native Canvas draws every edge to the middle of a side of the node's
+ * upright box: for a turned node that point stays behind while the node
+ * turns, and on a shape it lands in empty space.  The edge keeps its native
+ * look - Obsidian's curve, arrowheads and styles - and only its path and the
+ * placement of its arrowheads move onto the real geometry.  The host redraws
+ * the edge whenever a node moves; `follow` draws it again from the live
+ * positions, and a restore asks the host to redraw its own edge, which is
+ * the only restore that stays right after a node moved.
+ */
+function applyNativeRoute(
+  runtime: unknown,
+  id: string,
+  native: unknown,
+  nodeOf: (nodeId: unknown) => RouteNode | undefined,
+  patches: RestorePatch[],
+  diagnostics: string[],
+): RenderedItem | undefined {
+  const group = elementFor(runtime, ["lineGroupEl"]);
+  const paths = group === undefined ? [] : queryAll(group, "path").filter((path) => !safeCall(path, "closest", ["defs, marker"]));
+  const display = paths.find((path) => safeCall(safeGet(path, "classList"), "contains", ["canvas-interaction-path"]) !== true);
+  if (display === undefined) {
+    diagnostics.push(`connector-geometry-fallback: ${id}.`);
+    return undefined;
+  }
+  const end = (which: "from" | "to") => {
+    const live = safeGet(runtime, which);
+    const liveNode = safeGet(live, "node");
+    const known = nodeOf(readCanvasElementId(liveNode) ?? safeGet(native, `${which}Node`));
+    if (known === undefined) return undefined;
+    const side = safeGet(live, "side") ?? safeGet(native, `${which}Side`);
+    const kind = safeGet(live, "end") ?? safeGet(native, `${which}End`) ?? (which === "from" ? "none" : "arrow");
+    const geometry = nativeEdgeEnd(liveRect(liveNode, known.rect), side, known.outline);
+    const head = safeGet(safeGet(runtime, `${which}LineEnd`), "el");
+    return geometry === undefined ? undefined : { geometry, arrow: kind === "arrow", head: isElement(head) ? head : undefined };
+  };
+  const draw = (): string | undefined => {
+    const from = end("from"), to = end("to");
+    if (from === undefined || to === undefined) return undefined;
+    const d = nativeEdgeRoute(from.geometry, from.arrow, to.geometry, to.arrow);
+    for (const path of paths) {
+      if (readAttribute(path, "d") !== d) safeCall(path, "setAttribute", ["d", d]);
+    }
+    for (const item of [from, to]) {
+      if (!item.arrow || item.head === undefined) continue;
+      const { point, arrowAngle } = item.geometry;
+      const at = `translate(${roundCoordinate(point.x)}px, ${roundCoordinate(point.y)}px)`;
+      setStyleRaw(item.head, "transform", `${at} rotate(${roundCoordinate(arrowAngle)}deg)`);
+    }
+    return d;
+  };
+  const nativePaths = paths.map((path) => [path, readAttribute(path, "d")] as const);
+  const heads = (["from", "to"] as const)
+    .map((which) => safeGet(safeGet(runtime, `${which}LineEnd`), "el"))
+    .filter(isElement)
+    .map((head) => [head, readStyle(head, "transform")] as const);
+  let drawn = draw();
+  if (drawn === undefined) {
+    diagnostics.push(`connector-geometry-fallback: ${id}.`);
+    return undefined;
+  }
+  patches.push(() => {
+    if (readAttribute(display, "d") !== drawn) return;
+    if (typeof safeGet(runtime, "updatePath") === "function") {
+      safeCall(runtime, "updatePath");
+      return;
+    }
+    for (const [path, d] of nativePaths) {
+      if (typeof d === "string") safeCall(path, "setAttribute", ["d", d]);
+      else safeCall(path, "removeAttribute", ["d"]);
+    }
+    for (const [head, transform] of heads) {
+      if (transform !== undefined) writeTransform(head, transform);
+    }
+  });
+  return {
+    id,
+    kind: "edge",
+    element: display,
+    marker: display,
+    descriptor: { kind: "connector", rotation: 0, css: {} },
+    intact: () => readAttribute(display, "d") === drawn,
+    follow: {
+      element: display,
+      attribute: "d",
+      apply: () => {
+        const d = draw();
+        if (d !== undefined) drawn = d;
+      },
+    },
+  };
 }
 
 function applyConnector(
@@ -831,6 +1041,7 @@ function applyConnector(
   descriptor: SourceItemDescriptor,
   patches: RestorePatch[],
   diagnostics: string[],
+  live?: () => AnchorEdgeGeometry | undefined,
 ): RenderedItem | undefined {
   const targets = allElementsFor(runtime, ["edgeEl", "lineGroupEl", "lineEndGroupEl", "el"]);
   if (targets.length === 0) {
@@ -867,8 +1078,9 @@ function applyConnector(
       if (TYPOGRAPHY_CSS.has(property)) patchAttribute(target, `data-miro-source-label-${property}`, value, patches);
     }
   }
-  renderConnectorGeometry(document, runtime, descriptor, geometry, native, patches, diagnostics, id);
-  return { id, kind: "edge", element: primary, marker: primary, descriptor };
+  const routes = renderConnectorGeometry(document, runtime, descriptor, geometry, native, patches, diagnostics, id);
+  const follow = routes === undefined || live === undefined ? undefined : connectorFollow(runtime, routes, live, patches);
+  return { id, kind: "edge", element: primary, marker: primary, descriptor, ...(follow === undefined ? {} : { follow }) };
 }
 
 function applyNode(
@@ -1110,8 +1322,8 @@ export class SourceRenderer {
   private renderedItems: RenderedItem[] = [];
   private diagnosticList: readonly string[] = [];
   private readonly document: Document | undefined;
-  /** Observer keeping each rotation on its element between refreshes. */
-  private rotationWatch: unknown;
+  /** Observer keeping rotations and redrawn edges in place between refreshes. */
+  private liveWatch: unknown;
 
   public constructor(private readonly host: SourceRendererHost, document?: Document) {
     this.document = document ?? defaultDocument();
@@ -1179,10 +1391,37 @@ export class SourceRenderer {
       }
     }
     // A connector must end on what the host drew, not on what the file says a
-    // collapsed group would occupy if it were open.
-    const geometry = buildCanvasAnchorGeometry(sourceDocument, measureNodes(sourceDocument, runtimeNodes, scene));
-    const signature = safeSignature({ descriptors: [...descriptors], order: scene.order, preview, geometry, diagnostics });
-    if (signature !== undefined && signature === this.lastSignature && this.decorationsIntact(descriptors.size)) {
+    // collapsed group would occupy if it were open - and on a node being
+    // turned, at the angle it is shown at, not the one it will be saved with.
+    const measured = measureNodes(sourceDocument, runtimeNodes, scene);
+    const geometry = buildCanvasAnchorGeometry(sourceDocument, preview === undefined ? measured : {
+      ...measured, [preview.id]: { ...measured[preview.id], rotation: preview.rotation },
+    });
+    // Native edges on a turned or shaped node, which the host draws to the
+    // middle of a side of the upright box.
+    const rectangle = shapeOutline("rectangle");
+    const routeNode = (nodeId: unknown): RouteNode | undefined => {
+      if (typeof nodeId !== "string") return undefined;
+      const rect = geometry.nodes?.[nodeId];
+      if (rect === undefined) return undefined;
+      const outline = shapeOutline(scene.items.get(nodeId)?.shape);
+      return { rect, outline: outline === rectangle ? undefined : outline };
+    };
+    const reshaped = (nodeId: unknown): boolean => {
+      const node = routeNode(nodeId);
+      return node !== undefined && ((node.rect.rotation ?? 0) !== 0 || node.outline !== undefined);
+    };
+    const nativeRoutes = new Map<string, unknown>();
+    for (const [id, edge] of nativeEdges) {
+      if (!descriptors.has(id) && (reshaped(safeGet(edge, "fromNode")) || reshaped(safeGet(edge, "toNode")))) {
+        nativeRoutes.set(id, edge);
+      }
+    }
+    const signature = safeSignature({
+      descriptors: [...descriptors], routes: [...nativeRoutes.keys()], order: scene.order, preview, geometry, diagnostics,
+    });
+    if (signature !== undefined && signature === this.lastSignature
+      && this.decorationsIntact(descriptors.size + nativeRoutes.size)) {
       return this.diagnosticList;
     }
     this.restoreOwnedPatches();
@@ -1200,7 +1439,10 @@ export class SourceRenderer {
             diagnostics.push(`connector-runtime-missing: ${id}.`);
             continue;
           }
-          const item = applyConnector(this.document, geometry.edges?.[id], nativeEdges.get(id), runtime, id, descriptor, nextPatches, diagnostics);
+          const routed = descriptor.sourceId !== undefined || isObject(safeGet(safeGet(overrides, id), "connector"));
+          const live = liveConnectorGeometry(sourceDocument, id, runtime, nativeEdges.get(id), routeNode,
+            routed ? descriptor.connector?.shape : undefined);
+          const item = applyConnector(this.document, geometry.edges?.[id], nativeEdges.get(id), runtime, id, descriptor, nextPatches, diagnostics, live);
           if (item !== undefined) rendered.push(item);
         } else {
           const runtime = nodes.get(id);
@@ -1222,9 +1464,18 @@ export class SourceRenderer {
         }
       }
       applyOrdering(scene, rendered, nextPatches, diagnostics);
+      for (const [id, native] of nativeRoutes) {
+        const runtime = edges.get(id);
+        if (runtime === undefined) {
+          diagnostics.push(`connector-runtime-missing: ${id}.`);
+          continue;
+        }
+        const item = applyNativeRoute(runtime, id, native, routeNode, nextPatches, diagnostics);
+        if (item !== undefined) rendered.push(item);
+      }
       this.patches = nextPatches;
       this.renderedItems = rendered;
-      this.watchRotations();
+      this.watchLive();
     } catch {
       for (let index = nextPatches.length - 1; index >= 0; index -= 1) {
         try { nextPatches[index]!(); } catch { /* fail closed */ }
@@ -1246,8 +1497,13 @@ export class SourceRenderer {
   private decorationsIntact(expectedItems: number): boolean {
     if (this.renderedItems.length !== expectedItems) return false;
     for (const item of this.renderedItems) {
+      if (safeGet(item.marker, "isConnected") === false) return false;
+      if (item.intact !== undefined) {
+        if (!item.intact()) return false;
+        continue;
+      }
       const marker = safeCall(item.marker, "getAttribute", ["data-miro-source-kind"]);
-      if (safeGet(item.marker, "isConnected") === false || typeof marker !== "string") return false;
+      if (typeof marker !== "string") return false;
       for (const expectedRotation of item.expectedRotations ?? []) {
         const transform = readStyle(expectedRotation.element, "transform");
         if (transform === undefined || !endsWithRotation(transform, expectedRotation.rotation)) return false;
@@ -1260,38 +1516,45 @@ export class SourceRenderer {
   }
 
   /**
-   * Keep each rotation on its element while the host rewrites the transform.
+   * Keep rotations and redrawn edges in place while the host rewrites them.
    *
    * Native Canvas writes a node's whole transform whenever it moves, resizes
-   * or reselects it, which drops the rotation appended to it.  Waiting for the
-   * next refresh would leave a dragged node upright for most of the drag.  A
-   * mutation callback runs before the frame is painted, so the rotation is
-   * back before it could be seen missing.  Without an observer the refresh
-   * still restores it, only later.
+   * or reselects it, which drops the rotation appended to it, and redraws
+   * every edge of a node that moves, back to the upright box.  Waiting for the
+   * next refresh would leave a dragged node upright and its edges behind for
+   * most of the drag.  A mutation callback runs before the frame is painted,
+   * so both are back before they could be seen missing.  Without an observer
+   * the refresh still restores them, only later.
    */
-  private watchRotations(): void {
-    const targets = new Map<unknown, number>();
+  private watchLive(): void {
+    const keepers = new Map<unknown, { readonly attribute: string; readonly keep: () => void }>();
     for (const item of this.renderedItems) {
-      for (const expected of item.expectedRotations ?? []) targets.set(expected.element, expected.rotation);
+      for (const expected of item.expectedRotations ?? []) {
+        keepers.set(expected.element, { attribute: "style", keep: () => keepRotation(expected.element, expected.rotation) });
+      }
+      if (item.follow !== undefined) {
+        keepers.set(item.follow.element, { attribute: item.follow.attribute, keep: item.follow.apply });
+      }
     }
-    if (targets.size === 0) return;
+    if (keepers.size === 0) return;
     const Observer = safeGet(safeGet(this.document, "defaultView"), "MutationObserver");
     if (typeof Observer !== "function") return;
     try {
       const observer: unknown = Reflect.construct(Observer, [(records: unknown) => {
         if (!Array.isArray(records)) return;
+        const due = new Set<() => void>();
         for (const record of records) {
-          const target = safeGet(record, "target");
-          const angle = targets.get(target);
-          if (angle !== undefined && isElement(target)) keepRotation(target, angle);
+          const keeper = keepers.get(safeGet(record, "target"));
+          if (keeper !== undefined) due.add(keeper.keep);
         }
+        for (const keep of due) keep();
       }]);
-      for (const element of targets.keys()) {
-        safeCall(observer, "observe", [element, { attributes: true, attributeFilter: ["style"] }]);
+      for (const [element, keeper] of keepers) {
+        safeCall(observer, "observe", [element, { attributes: true, attributeFilter: [keeper.attribute] }]);
       }
-      this.rotationWatch = observer;
+      this.liveWatch = observer;
     } catch {
-      this.rotationWatch = undefined;
+      this.liveWatch = undefined;
     }
   }
 
@@ -1303,9 +1566,9 @@ export class SourceRenderer {
 
   private restoreOwnedPatches(): void {
     // Stop watching first: the restores below must not be answered by
-    // putting the rotation straight back.
-    safeCall(this.rotationWatch, "disconnect");
-    this.rotationWatch = undefined;
+    // putting a rotation or an edge straight back.
+    safeCall(this.liveWatch, "disconnect");
+    this.liveWatch = undefined;
     const current = this.patches;
     this.patches = [];
     for (let index = current.length - 1; index >= 0; index -= 1) {

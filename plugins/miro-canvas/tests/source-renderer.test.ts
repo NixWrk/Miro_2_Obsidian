@@ -128,6 +128,13 @@ describe("reversible source geometry DOM", () => {
     f.data.nodes[0].x = 20; f.data.nodes[0].width = 200;
     f.renderer.refresh(); expect(f.path.getAttribute("d")).toMatch(/^M 144 140 /);
   });
+  it("aims anchored connectors at the angle a node is being turned to", () => {
+    const f = fixture();
+    f.renderer.refresh(); expect(f.path.getAttribute("d")).toMatch(/^M 100 16 /);
+    // Mid-gesture the node is shown at the preview angle; its connectors must be too.
+    f.preview = { id: "a", rotation: 90 };
+    f.renderer.refresh(); expect(f.path.getAttribute("d")).toMatch(/^M 74 90 /);
+  });
   it("retains newer native DOM changes during disposal", () => {
     const f = fixture(); f.renderer.refresh(); f.path.setAttribute("d", "M 1 2 L 3 4");
     f.path.style.setProperty("stroke", "new-native"); f.renderer.dispose();
@@ -592,7 +599,7 @@ describe("rotation and a node the host is moving", () => {
     f.nodeEl.style.setProperty("transform", "translate(10px, 20px)");
     f.renderer.refresh();
     const observer = observers[observers.length - 1]!;
-    expect(observer.targets).toEqual([f.nodeEl]);
+    expect(observer.targets).toContain(f.nodeEl);
     // Native Canvas writes the whole transform on every step of a drag; the
     // node must not stand upright until the next refresh.
     f.nodeEl.style.setProperty("transform", "translate(300px, 400px)");
@@ -741,5 +748,145 @@ describe("the point a node turns about", () => {
     f.renderer.dispose();
     expect(f.nodeEl.values.get("transform-origin")).toBe("0 0");
     expect(f.nodeEl.priorities.get("transform-origin")).toBe("important");
+  });
+});
+
+/** A native edge from node a's right side to node b's left, as Obsidian holds it. */
+function routeFixture({ rotation = 0, shape, observe = false }: { rotation?: number; shape?: string; observe?: boolean } = {}) {
+  const observers: Array<{ callback: (records: unknown[]) => void; connected: boolean }> = [];
+  class FakeObserver {
+    public connected = true;
+    public constructor(public readonly callback: (records: unknown[]) => void) { observers.push(this); }
+    public observe(): void {}
+    public disconnect(): void { this.connected = false; }
+  }
+  const document = observe
+    ? { ...(dom as unknown as object), defaultView: { MutationObserver: FakeObserver } } as unknown as Document
+    : dom;
+  const data: any = {
+    nodes: [{ id: "a", type: "text", text: "", x: 0, y: 0, width: 100, height: 80 }, { id: "b", type: "text", text: "", x: 300, y: 200, width: 100, height: 80 }],
+    edges: [{ id: "n1", fromNode: "a", fromSide: "right", toNode: "b", toSide: "left" }],
+    ...(shape === undefined ? {} : { miroSource: { items: [{ id: "a", type: "shape", data: { shape } }] } }),
+    miroCanvas: { schemaVersion: 1, localOverrides: rotation === 0 ? {} : { a: { rotation } } },
+  };
+  const node = (id: string, x: number, y: number) => {
+    const nodeEl = new Element("div"), contentEl = new Element("div"); nodeEl.appendChild(contentEl);
+    return { id, nodeEl, contentEl, x, y, width: 100, height: 80 };
+  };
+  const a = node("a", 0, 0), b = node("b", 300, 200);
+  const lineGroupEl = new Element("g"), lineEndGroupEl = new Element("g"), head = new Element("g");
+  const display = new Element("path"), interaction = new Element("path");
+  interaction.classList.add("canvas-interaction-path");
+  lineGroupEl.appendChild(interaction); lineGroupEl.appendChild(display); lineEndGroupEl.appendChild(head);
+  const NATIVE = "native route";
+  const edge = {
+    id: "n1", lineGroupEl, lineEndGroupEl,
+    from: { node: a, side: "right", end: "none" },
+    to: { node: b, side: "left", end: "arrow" },
+    fromLineEnd: null, toLineEnd: { el: head, type: "arrow" },
+    redraws: 0,
+    // The host's own redraw: back to the middle of a side of the upright box.
+    updatePath() {
+      this.redraws += 1;
+      display.setAttribute("d", NATIVE); interaction.setAttribute("d", NATIVE);
+      head.style.setProperty("transform", "translate(300px, 240px) rotate(90deg)");
+    },
+  };
+  edge.updatePath(); edge.redraws = 0;
+  const renderer = new SourceRenderer({
+    getDocument: () => data,
+    getNodes: () => [a, b],
+    getEdges: () => [edge],
+  }, document);
+  const numbers = (value: string | null) => (value ?? "").match(/-?\d+(?:\.\d+)?/gu)!.map(Number);
+  return { renderer, data, a, b, edge, display, interaction, head, NATIVE, observers, numbers };
+}
+
+describe("native edges on turned and shaped nodes", () => {
+  it("turns a native edge with the node it leaves, keeping the host's own arrowhead", () => {
+    const f = routeFixture({ rotation: 90 });
+    f.renderer.refresh();
+    const d = f.display.getAttribute("d")!;
+    // The right side of a node turned a quarter faces down: the edge leaves
+    // its middle (50, 90), runs the 7 units native Canvas keeps for a head,
+    // then curves away downwards before bending towards b.
+    expect(d.startsWith("M 50 90 L 50 97 M 50 97 C 50 ")).toBe(true);
+    const [, , , , , , c1x, c1y, c2x, c2y, endX, endY] = f.numbers(d);
+    expect(c1x).toBe(50);
+    expect(c1y).toBeGreaterThan(97 + 70 - 0.001);
+    expect(c2y).toBe(240);
+    expect(c2x).toBeLessThan(293);
+    expect([endX, endY]).toEqual([293, 240]);
+    expect(f.interaction.getAttribute("d")).toBe(d);
+    // b is upright: its arrowhead stays on its left side, turned as the host turns it.
+    expect(f.head.style.getPropertyValue("transform")).toBe("translate(300px, 240px) rotate(90deg)");
+    f.renderer.dispose();
+    // The host redraws its own edge rather than being handed a stale copy.
+    expect(f.edge.redraws).toBe(1);
+    expect(f.display.getAttribute("d")).toBe(f.NATIVE);
+  });
+
+  it("turns the arrowhead on the turned node it points at", () => {
+    const f = routeFixture({ rotation: 90 });
+    f.edge.from.node = f.b; f.edge.to.node = f.a;
+    f.data.edges[0] = { id: "n1", fromNode: "b", fromSide: "left", toNode: "a", toSide: "right" };
+    f.edge.from.side = "left"; f.edge.to.side = "right";
+    f.renderer.refresh();
+    // Native angle for a right side is 270; the node adds its own 90.
+    expect(f.head.style.getPropertyValue("transform")).toBe("translate(50px, 90px) rotate(360deg)");
+    expect(f.display.getAttribute("d")!.endsWith("50 97")).toBe(true);
+  });
+
+  it("follows the host when it redraws the edge of a node being dragged", () => {
+    const f = routeFixture({ rotation: 90, observe: true });
+    f.renderer.refresh();
+    const observer = f.observers[f.observers.length - 1]!;
+    // Native Canvas moves the node and redraws the edge to the upright box.
+    f.a.x = 100;
+    f.edge.updatePath();
+    expect(f.display.getAttribute("d")).toBe(f.NATIVE);
+    observer.callback([{ type: "attributes", attributeName: "d", target: f.display }]);
+    expect(f.display.getAttribute("d")!.startsWith("M 150 90 L 150 97 ")).toBe(true);
+    // Its own write comes back as a record too, and changes nothing.
+    const followed = f.display.getAttribute("d");
+    observer.callback([{ type: "attributes", attributeName: "d", target: f.display }]);
+    expect(f.display.getAttribute("d")).toBe(followed);
+    f.renderer.dispose();
+    expect(observer.connected).toBe(false);
+  });
+
+  it("meets a shape's contour where the host would stop at its box", () => {
+    const f = routeFixture({ shape: "triangle" });
+    f.renderer.refresh();
+    // A triangle's right flank crosses the middle of the box a quarter in.
+    expect(f.display.getAttribute("d")!.startsWith("M 75 40 L 82 40 M 82 40 C ")).toBe(true);
+  });
+
+  it("leaves the edges of an upright rectangle to the host", () => {
+    const f = routeFixture();
+    f.renderer.refresh();
+    expect(f.display.getAttribute("d")).toBe(f.NATIVE);
+    expect(f.edge.redraws).toBe(0);
+  });
+
+  it("keeps a precisely anchored connector on its anchors while its node is dragged", () => {
+    const f = routeFixture({ observe: true });
+    f.data.miroCanvas.localOverrides.n1 = { connectorAnchors: {
+      from: { type: "node", nodeId: "a", u: 1, v: 0.25 },
+      to: { type: "node", nodeId: "b", u: 0, v: 0.75 },
+    } };
+    f.renderer.refresh();
+    expect(f.display.getAttribute("d")).toBe("M 100 20 L 300 260");
+    const observer = f.observers[f.observers.length - 1]!;
+    f.a.x = 100;
+    f.edge.updatePath();
+    observer.callback([{ type: "attributes", attributeName: "d", target: f.display }]);
+    // The anchor rides along with the node instead of the host's side middle.
+    expect(f.display.getAttribute("d")).toBe("M 200 20 L 300 260");
+    expect(f.interaction.getAttribute("d")).toBe("M 200 20 L 300 260");
+    f.renderer.dispose();
+    // The route no longer matches what was captured, so the host redraws its own.
+    expect(f.edge.redraws).toBe(2);
+    expect(f.display.getAttribute("d")).toBe(f.NATIVE);
   });
 });
