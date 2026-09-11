@@ -298,6 +298,61 @@ describe("native paint markers", () => {
     expect(f.renderer.refresh().some((item) => item.startsWith("connector-endcap-fallback"))).toBe(true);
   });
 
+  it("does not rebuild everything while one item has no runtime or is scrolled away", () => {
+    const f = fixture("rectangle");
+    // Metadata for a node the host does not hold, as a deleted item leaves behind.
+    f.data.miroCanvas.localOverrides.b = { rotation: 15 };
+    expect(f.renderer.refresh()).toContain("node-runtime-missing: b.");
+    let writes = 0;
+    const setProperty = f.nodeEl.style.setProperty;
+    f.nodeEl.style.setProperty = (name: string, value: string, priority = "") => {
+      writes += 1;
+      setProperty.call(f.nodeEl.style, name, value, priority);
+    };
+    expect(f.renderer.refresh()).toContain("node-runtime-missing: b.");
+    expect(writes).toBe(0);
+    // Native Canvas detaches a node outside the viewport; it keeps its decoration.
+    (f.nodeEl as unknown as { isConnected: boolean }).isConnected = false;
+    f.renderer.refresh();
+    expect(writes).toBe(0);
+    expect(f.nodeEl.getAttribute("data-miro-source-kind")).toBe("shape");
+  });
+
+  it("renders again when a runtime appears, builds its content, or is replaced", () => {
+    const data: any = {
+      nodes: [{ id: "a", type: "text", text: "", x: 0, y: 0, width: 100, height: 80 }],
+      edges: [],
+      miroCanvas: { schemaVersion: 1, localOverrides: { a: { rotation: 20 } } },
+    };
+    let runtime: Record<string, unknown> | undefined;
+    const renderer = new SourceRenderer({ getDocument: () => data, getNodes: () => runtime === undefined ? [] : [runtime], getEdges: () => [] }, dom);
+    expect(renderer.refresh()).toContain("node-runtime-missing: a.");
+    const first = new Element("div");
+    runtime = { id: "a", nodeEl: first, initialized: false };
+    renderer.refresh();
+    expect(first.style.getPropertyValue("transform")).toBe("rotate(20deg)");
+    let writes = 0;
+    const setProperty = first.style.setProperty;
+    first.style.setProperty = (name: string, value: string, priority = "") => {
+      writes += 1;
+      setProperty.call(first.style, name, value, priority);
+    };
+    renderer.refresh();
+    expect(writes).toBe(0);
+    // Native Canvas builds a node's container the first time it is shown.
+    const container = new Element("div"); first.appendChild(container);
+    runtime = { ...runtime, containerEl: container, initialized: true };
+    renderer.refresh();
+    expect(writes).toBeGreaterThan(0);
+    expect(first.style.getPropertyValue("transform")).toBe("rotate(20deg)");
+    // A host that swaps the element for a new one gets the decoration moved over.
+    const second = new Element("div");
+    runtime = { id: "a", nodeEl: second, initialized: true };
+    renderer.refresh();
+    expect(second.style.getPropertyValue("transform")).toBe("rotate(20deg)");
+    expect(first.style.getPropertyValue("transform")).toBe("");
+  });
+
   it("leaves an upright node unmarked", () => {
     const f = fixture("rectangle");
     f.renderer.refresh();

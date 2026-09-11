@@ -27,6 +27,8 @@ interface RenderedItem {
   readonly ownedChildren?: readonly DomElementLike[];
   readonly expectedRotations?: readonly { readonly element: DomElementLike; readonly rotation: number }[];
   readonly descriptor: SourceItemDescriptor;
+  /** The host element this item decorates, and the runtime properties that expose it. */
+  readonly anchor: { readonly keys: readonly string[]; readonly element: DomElementLike };
   /** Replaces the marker check for an item that puts no marker on the host. */
   readonly intact?: () => boolean;
   /** Draws the item again after the host redrew the element it decorates. */
@@ -37,6 +39,10 @@ type RestorePatch = () => void;
 
 const OWNED_CLASS = "miro-source-rendered";
 const DECORATION_CLASS = "miro-source-decoration";
+/** Where a runtime node exposes the element this module marks, first match wins. */
+const NODE_SHELL_KEYS = ["nodeEl", "containerEl", "contentEl", "el"] as const;
+/** Where a runtime edge exposes the element this module marks, first match wins. */
+const EDGE_TARGET_KEYS = ["edgeEl", "lineGroupEl", "lineEndGroupEl", "el"] as const;
 const MAX_RUNTIME_ITEMS = 100_000;
 const MAX_Z_INDEX = 2_147_483_647;
 
@@ -962,7 +968,7 @@ function applyNativeRoute(
   const group = elementFor(runtime, ["lineGroupEl"]);
   const paths = group === undefined ? [] : queryAll(group, "path").filter((path) => !safeCall(path, "closest", ["defs, marker"]));
   const display = paths.find((path) => safeCall(safeGet(path, "classList"), "contains", ["canvas-interaction-path"]) !== true);
-  if (display === undefined) {
+  if (group === undefined || display === undefined) {
     diagnostics.push(`connector-geometry-fallback: ${id}.`);
     return undefined;
   }
@@ -1022,6 +1028,7 @@ function applyNativeRoute(
     element: display,
     marker: display,
     descriptor: { kind: "connector", rotation: 0, css: {} },
+    anchor: { keys: ["lineGroupEl"], element: group },
     intact: () => readAttribute(display, "d") === drawn,
     follow: {
       element: display,
@@ -1043,7 +1050,7 @@ function applyConnector(
   diagnostics: string[],
   live?: () => AnchorEdgeGeometry | undefined,
 ): RenderedItem | undefined {
-  const targets = allElementsFor(runtime, ["edgeEl", "lineGroupEl", "lineEndGroupEl", "el"]);
+  const targets = allElementsFor(runtime, EDGE_TARGET_KEYS);
   if (targets.length === 0) {
     diagnostics.push(`connector-dom-inaccessible: ${id}.`);
     return undefined;
@@ -1080,7 +1087,11 @@ function applyConnector(
   }
   const routes = renderConnectorGeometry(document, runtime, descriptor, geometry, native, patches, diagnostics, id);
   const follow = routes === undefined || live === undefined ? undefined : connectorFollow(runtime, routes, live, patches);
-  return { id, kind: "edge", element: primary, marker: primary, descriptor, ...(follow === undefined ? {} : { follow }) };
+  return {
+    id, kind: "edge", element: primary, marker: primary, descriptor,
+    anchor: { keys: EDGE_TARGET_KEYS, element: primary },
+    ...(follow === undefined ? {} : { follow }),
+  };
 }
 
 function applyNode(
@@ -1251,7 +1262,10 @@ function applyNode(
   const expectedRotations = applyRotation(runtime, shell, rotation, patches, diagnostics, id)
     .map((element) => ({ element, rotation }));
   const ownedChildren = [layer, tagLayer].filter((item): item is DomElementLike => item !== undefined);
-  return { id, kind: "node", element: primary, marker: shell, ownedChildren, expectedRotations, descriptor };
+  return {
+    id, kind: "node", element: primary, marker: shell, ownedChildren, expectedRotations, descriptor,
+    anchor: { keys: NODE_SHELL_KEYS, element: shell },
+  };
 }
 
 function itemById(values: readonly unknown[]): ReadonlyMap<string, unknown> {
@@ -1417,18 +1431,30 @@ export class SourceRenderer {
         nativeRoutes.set(id, edge);
       }
     }
+    const nodes = itemById(runtimeNodes);
+    const edges = itemById(runtimeEdges);
+    const runtimeOf = (kind: "node" | "edge", id: string): unknown => (kind === "edge" ? edges : nodes).get(id);
+    // Which items the host can show right now.  A runtime that appears, or
+    // builds its content on first view, changes this list and so renders
+    // again; one that stays missing does not rebuild everything else on every
+    // refresh.
+    const ready = [
+      ...[...descriptors].map(([id, descriptor]) => [id, descriptor.kind === "connector" ? "edge" : "node"] as const),
+      ...[...nativeRoutes.keys()].map((id) => [id, "edge"] as const),
+    ].flatMap(([id, kind]) => {
+      const runtime = runtimeOf(kind, id);
+      return runtime === undefined ? [] : [`${id}:${safeGet(runtime, "initialized") === false ? "new" : "ready"}`];
+    });
     const signature = safeSignature({
-      descriptors: [...descriptors], routes: [...nativeRoutes.keys()], order: scene.order, preview, geometry, diagnostics,
+      descriptors: [...descriptors], routes: [...nativeRoutes.keys()], ready, order: scene.order, preview, geometry, diagnostics,
     });
     if (signature !== undefined && signature === this.lastSignature
-      && this.decorationsIntact(descriptors.size + nativeRoutes.size)) {
+      && this.decorationsIntact((item) => runtimeOf(item.kind, item.id))) {
       return this.diagnosticList;
     }
     this.restoreOwnedPatches();
     this.renderedItems = [];
     this.lastSignature = signature;
-    const nodes = itemById(runtimeNodes);
-    const edges = itemById(runtimeEdges);
     const nextPatches: RestorePatch[] = [];
     const rendered: RenderedItem[] = [];
     try {
@@ -1494,10 +1520,20 @@ export class SourceRenderer {
     this.diagnosticList = Object.freeze([]);
   }
 
-  private decorationsIntact(expectedItems: number): boolean {
-    if (this.renderedItems.length !== expectedItems) return false;
+  /**
+   * Whether every rendered item still stands on the host.
+   *
+   * An element native Canvas scrolled out of view is detached, not replaced:
+   * it keeps every decoration and comes back with it, so being disconnected
+   * is not damage.  Treating it as damage rebuilt the whole projection on
+   * every refresh whenever one decorated item was off-screen - rewriting the
+   * transform of every turned node each time.  What does count is the host
+   * holding a different element, or none, for the item.
+   */
+  private decorationsIntact(runtimeOf: (item: RenderedItem) => unknown): boolean {
     for (const item of this.renderedItems) {
-      if (safeGet(item.marker, "isConnected") === false) return false;
+      const runtime = runtimeOf(item);
+      if (runtime === undefined || elementFor(runtime, item.anchor.keys) !== item.anchor.element) return false;
       if (item.intact !== undefined) {
         if (!item.intact()) return false;
         continue;
