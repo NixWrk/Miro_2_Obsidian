@@ -491,6 +491,13 @@ function writeTransform(element: DomElementLike, value: string): void {
   if (style !== undefined) safeCall(style, "removeProperty", ["transform"]);
 }
 
+/** Put the rotation back after the host rewrote the transform it owns. */
+function keepRotation(element: DomElementLike, angle: number): void {
+  const current = readStyle(element, "transform");
+  if (current === undefined || endsWithRotation(current, angle)) return;
+  setStyleRaw(element, "transform", withRotation(current, angle));
+}
+
 /**
  * Clear an independent `rotate` an earlier build of this plugin left behind.
  *
@@ -1103,6 +1110,8 @@ export class SourceRenderer {
   private renderedItems: RenderedItem[] = [];
   private diagnosticList: readonly string[] = [];
   private readonly document: Document | undefined;
+  /** Observer keeping each rotation on its element between refreshes. */
+  private rotationWatch: unknown;
 
   public constructor(private readonly host: SourceRendererHost, document?: Document) {
     this.document = document ?? defaultDocument();
@@ -1215,6 +1224,7 @@ export class SourceRenderer {
       applyOrdering(scene, rendered, nextPatches, diagnostics);
       this.patches = nextPatches;
       this.renderedItems = rendered;
+      this.watchRotations();
     } catch {
       for (let index = nextPatches.length - 1; index >= 0; index -= 1) {
         try { nextPatches[index]!(); } catch { /* fail closed */ }
@@ -1249,6 +1259,42 @@ export class SourceRenderer {
     return true;
   }
 
+  /**
+   * Keep each rotation on its element while the host rewrites the transform.
+   *
+   * Native Canvas writes a node's whole transform whenever it moves, resizes
+   * or reselects it, which drops the rotation appended to it.  Waiting for the
+   * next refresh would leave a dragged node upright for most of the drag.  A
+   * mutation callback runs before the frame is painted, so the rotation is
+   * back before it could be seen missing.  Without an observer the refresh
+   * still restores it, only later.
+   */
+  private watchRotations(): void {
+    const targets = new Map<unknown, number>();
+    for (const item of this.renderedItems) {
+      for (const expected of item.expectedRotations ?? []) targets.set(expected.element, expected.rotation);
+    }
+    if (targets.size === 0) return;
+    const Observer = safeGet(safeGet(this.document, "defaultView"), "MutationObserver");
+    if (typeof Observer !== "function") return;
+    try {
+      const observer: unknown = Reflect.construct(Observer, [(records: unknown) => {
+        if (!Array.isArray(records)) return;
+        for (const record of records) {
+          const target = safeGet(record, "target");
+          const angle = targets.get(target);
+          if (angle !== undefined && isElement(target)) keepRotation(target, angle);
+        }
+      }]);
+      for (const element of targets.keys()) {
+        safeCall(observer, "observe", [element, { attributes: true, attributeFilter: ["style"] }]);
+      }
+      this.rotationWatch = observer;
+    } catch {
+      this.rotationWatch = undefined;
+    }
+  }
+
   private resetRenderedState(): void {
     this.restoreOwnedPatches();
     this.renderedItems = [];
@@ -1256,6 +1302,10 @@ export class SourceRenderer {
   }
 
   private restoreOwnedPatches(): void {
+    // Stop watching first: the restores below must not be answered by
+    // putting the rotation straight back.
+    safeCall(this.rotationWatch, "disconnect");
+    this.rotationWatch = undefined;
     const current = this.patches;
     this.patches = [];
     for (let index = current.length - 1; index >= 0; index -= 1) {

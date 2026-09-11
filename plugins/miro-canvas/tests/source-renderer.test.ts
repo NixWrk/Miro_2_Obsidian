@@ -33,7 +33,7 @@ class Element {
   }
 }
 const dom = { createElement: (tag: string) => new Element(tag), createElementNS: (_ns: string, tag: string) => new Element(tag) } as unknown as Document;
-function fixture(shape = "triangle", routing = "straight") {
+function fixture(shape = "triangle", routing = "straight", document: Document = dom) {
   let data: any = {
     nodes: [{ id: "a", type: "text", x: 0, y: 0, width: 100, height: 80 }, { id: "b", type: "text", x: 300, y: 200, width: 100, height: 80 }],
     edges: [{ id: "e", fromNode: "a", fromSide: "right", toNode: "b", toSide: "left", future: { keep: true } }],
@@ -56,7 +56,7 @@ function fixture(shape = "triangle", routing = "straight") {
     getNodes: () => nodesVisible ? [{ id: "a", nodeEl, contentEl }] : [],
     getEdges: () => [{ id: "e", edgeEl, lineGroupEl, lineEndGroupEl }],
     getRotationPreview: () => preview,
-  }, dom);
+  }, document);
   return {
     renderer, nodeEl, contentEl, path, hit, lineGroupEl, lineEndGroupEl,
     get data() { return data; }, set data(value: any) { data = value; },
@@ -575,6 +575,45 @@ describe("rotation and a node the host is moving", () => {
     expect(f.nodeEl.values.get("transform")).toBe("translate(300px, 400px) rotate(24deg)");
     f.renderer.dispose();
     expect(f.nodeEl.values.get("transform")).toBe("translate(300px, 400px)");
+  });
+
+  it("puts the rotation back as soon as the host rewrites the transform", () => {
+    const observers: FakeObserver[] = [];
+    class FakeObserver {
+      public readonly targets: unknown[] = [];
+      public connected = true;
+      public constructor(public readonly callback: (records: unknown[]) => void) { observers.push(this); }
+      public observe(target: unknown): void { this.targets.push(target); }
+      public disconnect(): void { this.connected = false; }
+    }
+    const watched = { ...(dom as unknown as object), defaultView: { MutationObserver: FakeObserver } } as unknown as Document;
+    const f = fixture("rectangle", "straight", watched);
+    f.data.miroCanvas = { schemaVersion: 1, settings: {}, localOverrides: { a: { rotation: 24 } } };
+    f.nodeEl.style.setProperty("transform", "translate(10px, 20px)");
+    f.renderer.refresh();
+    const observer = observers[observers.length - 1]!;
+    expect(observer.targets).toEqual([f.nodeEl]);
+    // Native Canvas writes the whole transform on every step of a drag; the
+    // node must not stand upright until the next refresh.
+    f.nodeEl.style.setProperty("transform", "translate(300px, 400px)");
+    observer.callback([{ type: "attributes", attributeName: "style", target: f.nodeEl }]);
+    expect(f.nodeEl.style.getPropertyValue("transform")).toBe("translate(300px, 400px) rotate(24deg)");
+    // Its own write comes back as a record too, and changes nothing.
+    observer.callback([{ type: "attributes", attributeName: "style", target: f.nodeEl }]);
+    expect(f.nodeEl.style.getPropertyValue("transform")).toBe("translate(300px, 400px) rotate(24deg)");
+
+    // A new angle replaces the watch instead of fighting it.
+    f.preview = { id: "a", rotation: 40 };
+    f.renderer.refresh();
+    expect(observer.connected).toBe(false);
+    const next = observers[observers.length - 1]!;
+    f.nodeEl.style.setProperty("transform", "translate(310px, 400px)");
+    next.callback([{ type: "attributes", attributeName: "style", target: f.nodeEl }]);
+    expect(f.nodeEl.style.getPropertyValue("transform")).toBe("translate(310px, 400px) rotate(40deg)");
+
+    f.renderer.dispose();
+    expect(next.connected).toBe(false);
+    expect(f.nodeEl.style.getPropertyValue("transform")).toBe("translate(310px, 400px)");
   });
 });
 
