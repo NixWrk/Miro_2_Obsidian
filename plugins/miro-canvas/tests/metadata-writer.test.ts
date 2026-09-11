@@ -169,6 +169,8 @@ describe("MetadataWriter", () => {
 
 		expect(write.status).toBe("rejected");
 		expect(write.diagnostics.map((item) => item.code)).toContain("host-commit-verification-failed");
+		expect(write.diagnostics.find((item) => item.code === "host-commit-verification-failed")?.message)
+			.toContain("(miroSource changed)");
 		expect(store.current).toEqual(before);
 		expect(store.commits).toHaveLength(1);
 	});
@@ -195,6 +197,8 @@ describe("MetadataWriter", () => {
 		});
 
 		expect(write.status).toBe("rejected");
+		expect(write.diagnostics.find((item) => item.code === "host-commit-verification-failed")?.message)
+			.toContain("(root keys changed)");
 		expect(store.current).toEqual(before);
 		expect(writer.undoDepth).toBe(0);
 	});

@@ -749,11 +749,18 @@ export class MetadataWriter {
 			}
 		}
 
+		// Name the check that failed: a bare refusal gave no way to tell a
+		// host that rebuilt the graph from one that lost the metadata.
+		const failed = observed === undefined ? "unreadable"
+			: !sourceIsUnchanged(before, observed) ? "miroSource changed"
+				: !structurallyEqual(observed.document.miroCanvas, after.document.miroCanvas) ? "miroCanvas changed"
+					: !graphIsUnchanged(observed.document, after.document) ? "graph changed"
+						: "root keys changed";
 		addDiagnostic(
 			diagnostics,
 			"commit",
 			"host-commit-verification-failed",
-			"The host transaction could not be verified as the exact requested document; rollback was attempted.",
+			`The host transaction could not be verified as the exact requested document (${failed}); rollback was attempted.`,
 		);
 		if (observed === undefined) {
 			addDiagnostic(
