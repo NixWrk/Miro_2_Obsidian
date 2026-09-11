@@ -949,8 +949,140 @@ describe("native root metadata rebuilds", () => {
 		const runtime = new UnknownAddingHost(initial);
 		const result = createCanvasAuthoring({ canvas: runtime }).createShape(action({ id: "must-rollback" }));
 		expect(result.status).toBe("rejected");
+		expect(result.diagnostics.find((item) => item.code === "native-import-verification-failed")?.message)
+			.toContain("nodes existing gained futureHostMutation");
 		expect(runtime.requestSaveSpy).not.toHaveBeenCalled();
 		expect(runtime.getData()).toEqual(initial);
+	});
+});
+
+/**
+ * Obsidian 1.13.7's Canvas, as its own code behaves:
+ *
+ * - getData() spreads the root data it holds and lists nodes by z-index;
+ * - importData() rebuilds nodes and edges only - root keys keep whatever the
+ *   canvas held before - rounds node geometry and gives a new node the top
+ *   z-index;
+ * - an edge leaves out an end equal to the default (none at the start, an
+ *   arrow at the end), and a node or edge leaves out an empty colour;
+ * - requestSave() takes getData() as the new root data.
+ */
+class ObsidianCanvas {
+	public data: CanvasDocument;
+	public readonly nodes = new Map<string, { zIndex: number; fields: CanvasDocument }>();
+	public readonly edges = new Map<string, CanvasDocument>();
+	public readonly history: CanvasDocument[] = [];
+	public readonly requestSaveSpy = vi.fn();
+	private zIndexCounter = 0;
+
+	public constructor(document: CanvasDocument) {
+		this.data = clone(document);
+		this.importData(clone(document), true);
+		this.history.push(this.getData());
+	}
+
+	public getData(): CanvasDocument {
+		const nodes = [...this.nodes.values()].sort((a, b) => a.zIndex - b.zIndex).map((node) => {
+			const { color, ...rest } = node.fields;
+			return clone({ ...rest, ...(color ? { color } : {}) });
+		});
+		const edges = [...this.edges.values()].map((edge) => {
+			const { fromEnd, toEnd, color, label, ...rest } = edge;
+			return clone({
+				...rest,
+				...(fromEnd !== undefined && fromEnd !== "none" ? { fromEnd } : {}),
+				...(toEnd !== undefined && toEnd !== "arrow" ? { toEnd } : {}),
+				...(color ? { color } : {}),
+				...(label ? { label } : {}),
+			});
+		});
+		return { ...clone(this.data), nodes, edges };
+	}
+
+	public importData(document: CanvasDocument, clear: boolean): void {
+		const seen = new Set<string>();
+		let last = 0;
+		for (const item of document.nodes as CanvasDocument[]) {
+			const id = String(item.id);
+			let node = this.nodes.get(id);
+			if (node === undefined) {
+				node = { zIndex: -1, fields: {} };
+				this.nodes.set(id, node);
+			}
+			const round = (value: unknown): unknown => typeof value === "number" ? Math.round(value) : value;
+			node.fields = { ...clone(item), x: round(item.x), y: round(item.y), width: round(item.width), height: round(item.height) };
+			seen.add(id);
+			if (node.zIndex < last) node.zIndex = ++this.zIndexCounter;
+			last = node.zIndex;
+		}
+		if (clear) for (const id of [...this.nodes.keys()]) if (!seen.has(id)) this.nodes.delete(id);
+		const kept = new Set<string>();
+		for (const item of document.edges as CanvasDocument[]) {
+			const id = String(item.id);
+			if (!this.nodes.has(String(item.fromNode)) || !this.nodes.has(String(item.toNode))) {
+				this.edges.delete(id);
+				continue;
+			}
+			this.edges.set(id, clone(item));
+			kept.add(id);
+		}
+		if (clear) for (const id of [...this.edges.keys()]) if (!kept.has(id)) this.edges.delete(id);
+	}
+
+	public requestSave(addHistory?: boolean): void {
+		this.requestSaveSpy(addHistory);
+		this.data = this.getData();
+		if (addHistory === true) this.history.push(clone(this.data));
+	}
+}
+
+describe("Obsidian's own import semantics", () => {
+	it("creates a connected node and its connector although import keeps the old root metadata", () => {
+		const initial: CanvasDocument = {
+			...endpointDocument(),
+			miroCanvas: { schemaVersion: 1, localOverrides: { a: { rotation: 12 } } },
+		};
+		const canvas = new ObsidianCanvas(initial);
+		const authoring = createCanvasAuthoring({ canvas });
+		// Geometry off the pixel grid, as a node placed beside a rotated one gets.
+		const shape = authoring.createShape(action({ id: "beside", x: 520.4, y: -0.6, width: 100.2, height: 79.7 }));
+		expect(shape.status).toBe("applied");
+		expect(shape.diagnostics.map((item) => item.code)).toContain("native-import-root-metadata-restored");
+		const connector = authoring.createConnector({
+			fromNode: "c", toNode: "beside",
+			fromAnchor: { type: "node", nodeId: "c", u: 1, v: 0.5 },
+		});
+		expect(connector.status).toBe("applied");
+
+		const data = canvas.getData();
+		expect((data.nodes as CanvasDocument[]).find((node) => node.id === "beside"))
+			.toMatchObject({ x: 520, y: -1, width: 100, height: 80 });
+		// The host stores the default arrow end by leaving it out.
+		expect((data.edges as CanvasDocument[]).find((edge) => edge.id === connector.edgeId))
+			.toEqual({ id: connector.edgeId, fromNode: "c", fromSide: "right", toNode: "beside", toSide: "left" });
+		expect(data).toHaveProperty("miroCanvas.localOverrides.beside.shape.kind", "diamond");
+		expect(data).toHaveProperty("miroCanvas.localOverrides.a.rotation", 12);
+		expect(data).toHaveProperty(`miroCanvas.localOverrides.${connector.edgeId}.connectorAnchors.from.u`, 1);
+		expect(data.miroSource).toEqual(initial.miroSource);
+		// One history entry per transaction, each carrying its metadata.
+		expect(canvas.history).toHaveLength(3);
+		expect(canvas.history[1]).toHaveProperty("miroCanvas.localOverrides.beside.shape.kind", "diamond");
+	});
+
+	it("names the field a host changed instead of refusing without a reason", () => {
+		class TextRewritingCanvas extends ObsidianCanvas {
+			public override importData(document: CanvasDocument, clear: boolean): void {
+				super.importData(document, clear);
+				const created = this.nodes.get("rewritten");
+				if (created !== undefined) created.fields.text = "something else";
+			}
+		}
+		const canvas = new TextRewritingCanvas(endpointDocument());
+		const result = createCanvasAuthoring({ canvas }).createShape(action({ id: "rewritten" }));
+		expect(result.status).toBe("rejected");
+		expect(result.diagnostics.find((item) => item.code === "native-import-verification-failed")?.message)
+			.toContain("(nodes rewritten changed text)");
+		expect(canvas.getData().nodes).toHaveLength(3);
 	});
 });
 

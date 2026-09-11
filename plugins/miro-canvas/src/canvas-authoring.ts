@@ -672,64 +672,122 @@ function nativeDefaultAllowed(kind: "nodes" | "edges", key: string, value: unkno
 	return typeof value === "string" || value === null;
 }
 
-/** Native import may add only its documented optional defaults to graph items. */
-function graphItemsMatchNativeNormalization(observed: unknown, requested: unknown, kind: "nodes" | "edges"): boolean {
-	if (!Array.isArray(observed) || !Array.isArray(requested) || observed.length !== requested.length) return false;
+/**
+ * Requested values native Canvas stores as "not set" and so leaves out of
+ * getData().  Obsidian writes an edge end only when it differs from the
+ * default - nothing at the start, an arrow at the end - and a colour or label
+ * only when one is set.  A field carrying exactly that default comes back
+ * missing, and that is the host keeping it, not losing it.
+ */
+const NATIVE_OMITTED_DEFAULTS: Readonly<Record<"nodes" | "edges", Readonly<Record<string, unknown>>>> = {
+	nodes: { color: "" },
+	edges: { fromEnd: "none", toEnd: "arrow", color: "", label: "" },
+};
+
+/** Native Canvas rounds node geometry to whole pixels as it stores it. */
+const NATIVE_ROUNDED_GEOMETRY = new Set(["x", "y", "width", "height"]);
+
+function nativeKeepsRequested(kind: "nodes" | "edges", key: string, observed: ReadResult, requested: unknown): boolean {
+	if (!observed.ok) {
+		const omitted = NATIVE_OMITTED_DEFAULTS[kind];
+		return hasOwn(omitted, key) && omitted[key] === requested;
+	}
+	if (structurallyEqual(observed.value, requested)) return true;
+	return kind === "nodes" && NATIVE_ROUNDED_GEOMETRY.has(key)
+		&& isFiniteNumber(requested) && observed.value === Math.round(requested);
+}
+
+/**
+ * Why native import did not keep the requested graph items, if it did not.
+ *
+ * The host may add its documented optional defaults, leave out a field that
+ * carries its own default, and round node geometry; anything else is named by
+ * kind, id and field - never by value, which can be user content.
+ */
+function graphItemsNativeMismatch(observed: unknown, requested: unknown, kind: "nodes" | "edges"): string | undefined {
+	if (!Array.isArray(observed) || !Array.isArray(requested)) return `${kind} unreadable`;
+	if (observed.length !== requested.length) return `${kind} count ${requested.length} -> ${observed.length}`;
 	for (let index = 0; index < requested.length; index += 1) {
 		const actual = observed[index];
 		const wanted = requested[index];
-		if (!isPlainObject(actual) || !isPlainObject(wanted)) return false;
+		if (!isPlainObject(actual) || !isPlainObject(wanted)) return `${kind}[${index}] unreadable`;
 		const actualKeys = ownKeys(actual);
 		const wantedKeys = ownKeys(wanted);
-		if (actualKeys === undefined || wantedKeys === undefined) return false;
+		if (actualKeys === undefined || wantedKeys === undefined) return `${kind}[${index}] unreadable`;
+		const wantedId = safeRead(wanted, "id");
+		const id = wantedId.ok && typeof wantedId.value === "string" ? wantedId.value : `[${index}]`;
+		const actualId = safeRead(actual, "id");
+		if (!actualId.ok || !wantedId.ok || !structurallyEqual(actualId.value, wantedId.value)) {
+			return `${kind} ${id} not at its requested position`;
+		}
 		for (const key of wantedKeys) {
-			const actualValue = safeRead(actual, key);
 			const wantedValue = safeRead(wanted, key);
-			if (!actualValue.ok || !wantedValue.ok || !structurallyEqual(actualValue.value, wantedValue.value)) return false;
+			if (!wantedValue.ok) return `${kind} ${id} unreadable`;
+			const actualValue: ReadResult = hasOwn(actual, key) ? safeRead(actual, key) : { ok: false };
+			if (hasOwn(actual, key) && !actualValue.ok) return `${kind} ${id} unreadable`;
+			if (!nativeKeepsRequested(kind, key, actualValue, wantedValue.value)) {
+				return `${kind} ${id} ${actualValue.ok ? "changed" : "lost"} ${key}`;
+			}
 		}
 		for (const key of actualKeys) {
 			if (hasOwn(wanted, key)) continue;
 			const value = safeRead(actual, key);
-			if (!value.ok || !nativeDefaultAllowed(kind, key, value.value)) return false;
+			if (!value.ok || !nativeDefaultAllowed(kind, key, value.value)) return `${kind} ${id} gained ${key}`;
 		}
 	}
-	return true;
-}
-
-/** Permit host-added defaults only inside nodes/edges, never in plugin/source roots. */
-function matchesNativeGraphNormalization(observed: UnknownRecord, requested: UnknownRecord): boolean {
-	const observedKeys = ownKeys(observed);
-	const requestedKeys = ownKeys(requested);
-	if (observedKeys === undefined || requestedKeys === undefined
-		|| observedKeys.length !== requestedKeys.length
-		|| requestedKeys.some((key) => !hasOwn(observed, key))) return false;
-	for (const key of requestedKeys) {
-		const actual = safeRead(observed, key);
-		const wanted = safeRead(requested, key);
-		if (!actual.ok || !wanted.ok) return false;
-		const matches = key === "nodes" || key === "edges"
-			? graphItemsMatchNativeNormalization(actual.value, wanted.value, key)
-			: structurallyEqual(actual.value, wanted.value);
-		if (!matches) return false;
-	}
-	return true;
+	return undefined;
 }
 
 /**
- * Restore only root metadata when native Canvas rebuilt the requested graph
- * but discarded keys it does not understand. Requested node and edge content
- * must remain intact; only additive native defaults are accepted.
+ * Why an imported document is not the requested one, if it is not.  Host
+ * defaults are accepted only inside nodes and edges, never in plugin or
+ * source roots.
+ */
+function nativeGraphMismatch(observed: UnknownRecord, requested: UnknownRecord): string | undefined {
+	const observedKeys = ownKeys(observed);
+	const requestedKeys = ownKeys(requested);
+	if (observedKeys === undefined || requestedKeys === undefined) return "document unreadable";
+	const missing = requestedKeys.find((key) => !hasOwn(observed, key));
+	if (missing !== undefined) return `${missing} missing`;
+	const added = observedKeys.find((key) => !hasOwn(requested, key));
+	if (added !== undefined) return `${added} added`;
+	for (const key of requestedKeys) {
+		const actual = safeRead(observed, key);
+		const wanted = safeRead(requested, key);
+		if (!actual.ok || !wanted.ok) return `${key} unreadable`;
+		if (key === "nodes" || key === "edges") {
+			const reason = graphItemsNativeMismatch(actual.value, wanted.value, key);
+			if (reason !== undefined) return reason;
+		} else if (!structurallyEqual(actual.value, wanted.value)) {
+			return `${key} changed`;
+		}
+	}
+	return undefined;
+}
+
+/**
+ * Write the root metadata a native import left behind.
+ *
+ * Obsidian's importData rebuilds nodes and edges only.  Every other root key
+ * keeps whatever the canvas held before, and the next save writes that back,
+ * so a transaction that also changes plugin metadata - the shape of a new
+ * node, the anchors of a new connector - has to put it on the canvas data
+ * itself.  Only a key the host dropped, or still holds at its value from
+ * `prior`, is written: a value that changed in between is someone else's
+ * write, and the transaction fails rather than overwrite it.
  */
 function restoreDiscardedRootMetadata(
 	host: NativeHost,
 	imported: InternalSnapshot,
 	requested: UnknownRecord,
 	diagnostics: CanvasAuthoringDiagnostic[],
+	/** The document whose root values the host may still be holding. */
+	prior?: UnknownRecord,
 ): InternalSnapshot | undefined {
 	const requestedSnapshot = makeSnapshot(requested, diagnostics);
 	if (requestedSnapshot === undefined
-		|| !graphItemsMatchNativeNormalization(imported.nodes, requestedSnapshot.nodes, "nodes")
-		|| !graphItemsMatchNativeNormalization(imported.edges, requestedSnapshot.edges, "edges")) {
+		|| graphItemsNativeMismatch(imported.nodes, requestedSnapshot.nodes, "nodes") !== undefined
+		|| graphItemsNativeMismatch(imported.edges, requestedSnapshot.edges, "edges") !== undefined) {
 		return imported;
 	}
 	let candidate: UnknownRecord;
@@ -744,10 +802,11 @@ function restoreDiscardedRootMetadata(
 		const current = optionalValue(candidate, key);
 		const wanted = optionalValue(requested, key);
 		if (current.present === wanted.present && structurallyEqual(current.value, wanted.value)) continue;
-		// Repair omission only. A present but changed value may be a concurrent
-		// host/plugin write and must make the transaction fail rather than be
-		// overwritten.
-		if (current.present || !wanted.present) return imported;
+		if (!wanted.present) return imported;
+		const held = prior === undefined ? undefined : optionalValue(prior, key);
+		const untouched = !current.present
+			|| (held !== undefined && held.present && structurallyEqual(current.value, held.value));
+		if (!untouched) return imported;
 		let value: unknown;
 		try {
 			value = cloneJson(wanted.value);
@@ -759,7 +818,7 @@ function restoreDiscardedRootMetadata(
 	}
 	// Extra or graph-level host changes are not metadata loss and remain a hard
 	// verification failure.
-	if (repairs.length === 0 || !matchesNativeGraphNormalization(candidate, requested)) return imported;
+	if (repairs.length === 0 || nativeGraphMismatch(candidate, requested) !== undefined) return imported;
 	const data = safeRead(host.runtime, "data");
 	if (!data.ok || !isPlainObject(data.value)) return imported;
 	try {
@@ -768,12 +827,12 @@ function restoreDiscardedRootMetadata(
 		return imported;
 	}
 	const repaired = readSnapshotFromHost(host, diagnostics);
-	if (repaired !== undefined && matchesNativeGraphNormalization(repaired.document, requested)) {
+	if (repaired !== undefined && nativeGraphMismatch(repaired.document, requested) === undefined) {
 		addDiagnostic(
 			diagnostics,
 			"native-import-root-metadata-restored",
 			"info",
-			`Native Canvas discarded root metadata during import; restored and verified: ${repairs.map(([key]) => key).join(", ")}.`,
+			`Native Canvas import does not apply root metadata; written and verified: ${repairs.map(([key]) => key).join(", ")}.`,
 		);
 	}
 	return repaired;
@@ -1481,7 +1540,13 @@ function invokeMutation(
 	return true;
 }
 
-function restoreGraph(host: NativeHost, before: InternalSnapshot, diagnostics: CanvasAuthoringDiagnostic[]): boolean {
+function restoreGraph(
+	host: NativeHost,
+	before: InternalSnapshot,
+	diagnostics: CanvasAuthoringDiagnostic[],
+	/** The document the failed transaction tried, whose root metadata may already be written. */
+	attempted?: UnknownRecord,
+): boolean {
 	// importData is the only verified graph rebuild primitive.  Even when a
 	// legacy setData/applyHistory host was selected for forward compatibility,
 	// prefer importData for rollback if it exists and is callable.
@@ -1494,10 +1559,11 @@ function restoreGraph(host: NativeHost, before: InternalSnapshot, diagnostics: C
 	}
 	let restored = readSnapshotFromHost(host, diagnostics);
 	if (restored !== undefined && !structurallyEqual(restored.document, before.document)) {
-		restored = restoreDiscardedRootMetadata(host, restored, before.document, diagnostics);
+		restored = restoreDiscardedRootMetadata(host, restored, before.document, diagnostics, attempted);
 	}
-	if (restored === undefined || !matchesNativeGraphNormalization(restored.document, before.document)) {
-		addDiagnostic(diagnostics, "rollback-verification-failed", "error", "Native Canvas rollback could not be verified.");
+	const mismatch = restored === undefined ? "unreadable" : nativeGraphMismatch(restored.document, before.document);
+	if (mismatch !== undefined) {
+		addDiagnostic(diagnostics, "rollback-verification-failed", "error", `Native Canvas rollback could not be verified (${mismatch}).`);
 		return false;
 	}
 	return true;
@@ -2058,29 +2124,33 @@ export class CanvasAuthoring {
 			return undefined;
 		}
 		if (!invokeMutation(this.host, document, diagnostics, "import")) {
-			restoreGraph(this.host, before, diagnostics);
+			restoreGraph(this.host, before, diagnostics, document);
 			return undefined;
 		}
 		let imported = readSnapshotFromHost(this.host, diagnostics);
 		if (imported !== undefined && !structurallyEqual(imported.document, document)) {
-			imported = restoreDiscardedRootMetadata(this.host, imported, document, diagnostics);
+			imported = restoreDiscardedRootMetadata(this.host, imported, document, diagnostics, before.document);
 		}
-		if (imported === undefined || !matchesNativeGraphNormalization(imported.document, document)) {
-			addDiagnostic(diagnostics, "native-import-verification-failed", "error", "The imported Canvas graph did not match the requested document; history was not requested.");
-			restoreGraph(this.host, before, diagnostics);
+		const importMismatch = imported === undefined ? "unreadable" : nativeGraphMismatch(imported.document, document);
+		if (imported === undefined || importMismatch !== undefined) {
+			addDiagnostic(diagnostics, "native-import-verification-failed", "error",
+				`The imported Canvas graph did not match the requested document (${importMismatch}); history was not requested.`);
+			restoreGraph(this.host, before, diagnostics, document);
 			return undefined;
 		}
 		if (!structurallyEqual(imported.document, document)) {
 			addDiagnostic(diagnostics, "native-graph-normalized", "info", "Native Canvas added optional graph defaults; every requested field and source value was verified unchanged.");
 		}
 		if (this.host.mode === "importData" && !invokeMutation(this.host, document, diagnostics, "history")) {
-			restoreGraph(this.host, before, diagnostics);
+			restoreGraph(this.host, before, diagnostics, document);
 			return undefined;
 		}
 		const verified = readSnapshotFromHost(this.host, diagnostics);
-		if (verified === undefined || !matchesNativeGraphNormalization(verified.document, document)) {
-			addDiagnostic(diagnostics, "native-history-verification-failed", "error", "The native history/save boundary did not preserve the requested Canvas graph.");
-			restoreGraph(this.host, before, diagnostics);
+		const historyMismatch = verified === undefined ? "unreadable" : nativeGraphMismatch(verified.document, document);
+		if (verified === undefined || historyMismatch !== undefined) {
+			addDiagnostic(diagnostics, "native-history-verification-failed", "error",
+				`The native history/save boundary did not preserve the requested Canvas graph (${historyMismatch}).`);
+			restoreGraph(this.host, before, diagnostics, document);
 			return undefined;
 		}
 		return verified;
