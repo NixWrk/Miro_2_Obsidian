@@ -209,11 +209,21 @@ function readStylePriority(element: DomElementLike, property: string): string | 
   return typeof result === "string" ? result : undefined;
 }
 
-function setStyleRaw(element: DomElementLike, property: string, value: string, priority = ""): boolean {
+/**
+ * Write one declaration and return the value the engine stored for it.
+ *
+ * Chromium keeps a declaration in its own spelling - numbers cut to six
+ * significant digits, colours as rgb(), shorthands compressed - so the stored
+ * value is often not the string written.  Requiring the two to be equal
+ * reported ordinary writes as refused: the style still landed, but no restore
+ * was recorded for it, and it outlived dispose.  Callers compare against the
+ * stored value instead, which is what a later restore must recognise.
+ */
+function setStyleRaw(element: DomElementLike, property: string, value: string, priority = ""): string | undefined {
   const style = styleObject(element);
-  if (style === undefined || typeof safeGet(style, "setProperty") !== "function") return false;
+  if (style === undefined || typeof safeGet(style, "setProperty") !== "function") return undefined;
   safeCall(style, "setProperty", [property, value, priority]);
-  return readStyle(element, property) === value;
+  return readStyle(element, property);
 }
 
 function patchStyle(
@@ -229,34 +239,15 @@ function patchStyle(
   const restored = restoreValue ?? before;
   const restoredPriority = restoreValue === undefined ? beforePriority : "";
   if (before === value && beforePriority === "" && restored === before) return true;
-  if ((before !== value || beforePriority !== "") && !setStyleRaw(element, property, value)) return false;
+  let owned = before;
+  if (before !== value || beforePriority !== "") {
+    const stored = setStyleRaw(element, property, value);
+    if (stored === undefined) return false;
+    owned = stored;
+  }
   patches.push(() => {
-    const current = readStyle(element, property);
-    const currentPriority = readStylePriority(element, property) ?? "";
-    if (current !== value || currentPriority !== "") {
-      // Native Canvas may update its translate while our trailing rotation is
-      // active. Remove only that exact owned suffix so refresh cannot
-      // accumulate rotations and the newer native transform remains intact.
-      if (property === "transform" && current !== undefined && currentPriority === "") {
-        const ownedSuffix = restored.trim().length === 0 || restored.trim() === "none"
-          ? value.trim()
-          : value.startsWith(`${restored} `) ? value.slice(restored.length + 1).trim() : "";
-        const marker = ` ${ownedSuffix}`;
-        if (ownedSuffix.length > 0 && (current === ownedSuffix || current.endsWith(marker))) {
-          let retained = current;
-          while (retained === ownedSuffix || retained.endsWith(marker)) {
-            retained = retained === ownedSuffix ? "" : retained.slice(0, -marker.length);
-          }
-          if (retained.length === 0) {
-            const currentStyle = styleObject(element);
-            if (currentStyle !== undefined) safeCall(currentStyle, "removeProperty", [property]);
-          } else {
-            setStyleRaw(element, property, retained);
-          }
-        }
-      }
-      return;
-    }
+    // A value the host wrote since is the host's, and stays.
+    if (readStyle(element, property) !== owned || (readStylePriority(element, property) ?? "") !== "") return;
     if (restored.length === 0) {
       const currentStyle = styleObject(element);
       if (currentStyle !== undefined) safeCall(currentStyle, "removeProperty", [property]);
@@ -444,8 +435,83 @@ function isContained(outer: DomElementLike, inner: DomElementLike): boolean {
 
 const OWNED_ROTATION_ATTRIBUTE = "data-miro-source-owned-rotation";
 
-function rotationStyle(rotation: number): string {
-  return `${rotation}deg`;
+/**
+ * The angle as written to the DOM.
+ *
+ * Three decimals keep any angle in [-180, 180) within the six significant
+ * digits Chromium stores, so the transform read back carries exactly the
+ * rotation written and stays recognisable as this module's own.  A thousandth
+ * of a degree moves the corner of even a very large node by a fraction of a
+ * pixel.
+ */
+function cssAngle(rotation: number): number {
+  if (!Number.isFinite(rotation)) return 0;
+  const rounded = Math.round(rotation * 1000) / 1000;
+  return Object.is(rounded, -0) ? 0 : rounded;
+}
+
+function rotationStyle(angle: number): string {
+  return `rotate(${angle}deg)`;
+}
+
+const TRAILING_ROTATION = /(?:^|\s)rotate\(\s*(-?(?:\d+(?:\.\d*)?|\.\d+)(?:e[-+]?\d+)?)deg\s*\)$/iu;
+
+/** The rotate() a transform ends with, in degrees. */
+function trailingRotation(transform: string): number | undefined {
+  const match = TRAILING_ROTATION.exec(transform.trim());
+  const angle = match === null ? Number.NaN : Number(match[1]);
+  return Number.isFinite(angle) ? angle : undefined;
+}
+
+function endsWithRotation(transform: string, angle: number): boolean {
+  const trailing = trailingRotation(transform);
+  return trailing !== undefined && Math.abs(trailing - angle) < 0.0005;
+}
+
+/** The transform with this module's rotation as its last function, once. */
+function withRotation(transform: string, angle: number): string {
+  const trimmed = transform.trim();
+  if (endsWithRotation(trimmed, angle)) return trimmed;
+  const base = trimmed === "none" ? "" : trimmed;
+  return base.length === 0 ? rotationStyle(angle) : `${base} ${rotationStyle(angle)}`;
+}
+
+/** The transform without this module's trailing rotation, when it has one. */
+function withoutRotation(transform: string, angle: number): string {
+  const trimmed = transform.trim();
+  return endsWithRotation(trimmed, angle) ? trimmed.replace(/\s*rotate\([^()]*\)$/u, "").trim() : trimmed;
+}
+
+function writeTransform(element: DomElementLike, value: string): void {
+  if (value.length > 0) {
+    setStyleRaw(element, "transform", value);
+    return;
+  }
+  const style = styleObject(element);
+  if (style !== undefined) safeCall(style, "removeProperty", ["transform"]);
+}
+
+/**
+ * Clear an independent `rotate` an earlier build of this plugin left behind.
+ *
+ * Those builds turned a node with that property and checked the write by
+ * string equality.  Chromium stores the angle to six significant digits, so
+ * most gesture angles failed the check: the property stayed on the node with
+ * no restore recorded, and the failure let a transform fallback turn the node
+ * a second time.  Neither Obsidian nor this build writes the property, so a
+ * bare angle on a node's own elements is that leftover.  It goes, together
+ * with the matching rotation at the end of the transform.
+ */
+function clearLeakedRotateProperty(element: DomElementLike): void {
+  const leaked = readStyle(element, "rotate")?.trim() ?? "";
+  if (!/^-?(?:\d+(?:\.\d*)?|\.\d+)(?:e[-+]?\d+)?deg$/iu.test(leaked)) return;
+  const style = styleObject(element);
+  if (style === undefined) return;
+  safeCall(style, "removeProperty", ["rotate"]);
+  const transform = readStyle(element, "transform");
+  if (transform === undefined) return;
+  const repaired = withoutRotation(transform, Number(leaked.slice(0, -3)));
+  if (repaired !== transform.trim()) writeTransform(element, repaired);
 }
 
 /** Repair a transform suffix left by a previous plugin build, when ownership is proven. */
@@ -463,20 +529,13 @@ function clearLegacyOwnedTransformRotation(element: DomElementLike, patches: Res
   safeCall(element, "removeAttribute", [OWNED_ROTATION_ATTRIBUTE]);
 }
 
-/** A transform with this module's trailing rotation removed, if it has one. */
-function strippedRotation(value: string): string {
-  const trimmed = value.trim();
-  if (trimmed.length === 0 || trimmed === "none") return "";
-  return trimmed.replace(/\s*rotate\([^()]*\)\s*$/u, "").trim();
-}
-
 /**
  * Write a declaration that must win over the host's own rule.
  *
  * An ordinary inline write loses to a host stylesheet rule marked important,
- * and losing that contest for the rotation centre puts the node somewhere its
- * geometry does not describe.  This one declaration therefore carries the same
- * weight, and restores the host's value and priority exactly.
+ * and losing that contest for the rotation centre would turn the node about
+ * some other point.  This one declaration therefore carries the same weight,
+ * and restores the host's value and priority exactly.
  */
 function setStyleWithPriority(
   element: DomElementLike, property: string, value: string, patches: RestorePatch[],
@@ -485,9 +544,10 @@ function setStyleWithPriority(
   const beforePriority = readStylePriority(element, property) ?? "";
   if (before === undefined) return false;
   if (before === value && beforePriority === "important") return true;
-  if (!setStyleRaw(element, property, value, "important")) return false;
+  const stored = setStyleRaw(element, property, value, "important");
+  if (stored === undefined || readStylePriority(element, property) !== "important") return false;
   patches.push(() => {
-    if (readStyle(element, property) !== value) return;
+    if (readStyle(element, property) !== stored) return;
     if (before.length === 0) {
       const style = styleObject(element);
       if (style !== undefined) safeCall(style, "removeProperty", [property]);
@@ -498,80 +558,74 @@ function setStyleWithPriority(
   return true;
 }
 
+/**
+ * Turn one element about its own centre.
+ *
+ * The rotation is the last function of the element's `transform`, after the
+ * translate native Canvas positions every node with.  The independent `rotate`
+ * property looks cleaner but composes the other way round: CSS applies it on
+ * top of the whole transform, so it turned the node's translate too and swung
+ * the node about the canvas origin.  The further a node sat from that origin,
+ * the further it landed from its own geometry, while the handles and every
+ * connector stayed at its real centre.
+ */
 function applyElementRotation(
   element: DomElementLike,
-  rotation: number,
+  angle: number,
   patches: RestorePatch[],
   /** Collects elements whose rotation centre the host would not let go of. */
   originRefused: DomElementLike[] = [],
 ): boolean {
-  if (!Number.isFinite(rotation) || rotation === 0) return false;
+  if (!Number.isFinite(angle) || angle === 0) return false;
   clearLegacyOwnedTransformRotation(element, patches);
-  const owned = (): boolean => {
-    // A node must turn about its own centre.  The host may hold the origin at
-    // a corner for its own positioning, and a rotation about a corner swings
-    // the node away from where its geometry says it is - which is what made
-    // the picture and the model disagree.  The centre is asserted with the
-    // priority an author rule carries, and a host that still refuses it is
-    // named rather than left to rotate about the wrong point.
-    if (!setStyleWithPriority(element, "transform-origin", "50% 50%", patches)) {
-      originRefused.push(element);
-    }
-    patchAttribute(element, OWNED_ROTATION_ATTRIBUTE, String(rotation), patches);
-    return true;
-  };
-  if (patchStyle(element, "rotate", rotationStyle(rotation), patches)) return owned();
-  // The independent `rotate` property is the clean way to turn a node without
-  // touching the transform the host owns, but a host that does not accept it
-  // leaves the node upright and reports only that the DOM was inaccessible.
-  // Composing onto `transform` reaches the same result anywhere.  The base is
-  // recovered by dropping a trailing rotate, so repeated refreshes cannot
-  // accumulate and an element an earlier build already turned is repaired.
+  clearLeakedRotateProperty(element);
   const before = readStyle(element, "transform");
   if (before === undefined) return false;
-  const base = strippedRotation(before);
-  const composed = base.length === 0 ? `rotate(${rotation}deg)` : `${base} rotate(${rotation}deg)`;
-  if (!setStyleRaw(element, "transform", composed)) return false;
-  // The restore re-derives instead of writing back the string captured here.
-  // Native Canvas rewrites this transform as it moves a node, so replaying a
-  // captured value pinned the node at the position it held when the rotation
-  // was first applied: it stayed put on screen while the document, the
-  // handles and every connector moved on without it.
+  const stored = setStyleRaw(element, "transform", withRotation(before, angle));
+  if (stored === undefined) return false;
+  // The restore re-derives from the transform it finds instead of writing
+  // back the one captured here.  Native Canvas rewrites the transform as it
+  // moves a node, so replaying a captured value pinned the node where it was
+  // first turned: it stayed put while the document, the handles and every
+  // connector moved on.
   patches.push(() => {
     const current = readStyle(element, "transform");
     if (current === undefined) return;
-    const restored = strippedRotation(current);
-    if (restored === current.trim()) return;
-    if (restored.length === 0) {
-      const style = styleObject(element);
-      if (style !== undefined) safeCall(style, "removeProperty", ["transform"]);
-      return;
-    }
-    setStyleRaw(element, "transform", restored);
+    const restored = withoutRotation(current, angle);
+    if (restored !== current.trim()) writeTransform(element, restored);
   });
-  return owned();
+  if (!endsWithRotation(stored, angle)) return false;
+  // Composed after the translate, the rotation pivots on the transform origin
+  // of the node's own box, so that origin has to be the box's centre.  It is
+  // asserted with the priority an author rule carries, and a host that still
+  // refuses it is named rather than left to turn the node about another point.
+  if (!setStyleWithPriority(element, "transform-origin", "50% 50%", patches)) originRefused.push(element);
+  patchAttribute(element, OWNED_ROTATION_ATTRIBUTE, String(angle), patches);
+  return true;
 }
 
-function applyInteractionRotation(runtime: unknown, primary: DomElementLike, rotation: number, patches: RestorePatch[]): void {
+function applyInteractionRotation(runtime: unknown, primary: DomElementLike, angle: number, patches: RestorePatch[]): DomElementLike[] {
+  const rotated: DomElementLike[] = [];
   const interactionElements = allElementsFor(runtime, ["hitboxEl", "interactionEl", "resizerEl", "resizeEl", "selectionEl", "bboxEl"]);
   for (const element of interactionElements) {
     if (element === primary || isContained(primary, element) || isContained(element, primary)) continue;
-    applyElementRotation(element, rotation, patches);
+    if (applyElementRotation(element, angle, patches)) rotated.push(element);
   }
+  return rotated;
 }
 
-function applyRotation(runtime: unknown, primary: DomElementLike, rotation: number, patches: RestorePatch[], diagnostics: string[], id: string): boolean {
-  if (!Number.isFinite(rotation) || rotation === 0) return false;
+/** Rotates the node and returns every element now carrying the rotation. */
+function applyRotation(runtime: unknown, primary: DomElementLike, angle: number, patches: RestorePatch[], diagnostics: string[], id: string): DomElementLike[] {
+  if (!Number.isFinite(angle) || angle === 0) return [];
   const originRefused: DomElementLike[] = [];
-  if (!applyElementRotation(primary, rotation, patches, originRefused)) {
+  if (!applyElementRotation(primary, angle, patches, originRefused)) {
     diagnostics.push(`rotation-dom-inaccessible: ${id}.`);
-    return false;
+    return [];
   }
   if (originRefused.includes(primary)) {
     diagnostics.push(`rotation-centre-unavailable: ${id} turns about the point its host chose.`);
   }
-  applyInteractionRotation(runtime, primary, rotation, patches);
-  return true;
+  return [primary, ...applyInteractionRotation(runtime, primary, angle, patches)];
 }
 
 function normalizedZIndex(value: number | undefined): string | undefined {
@@ -953,17 +1007,19 @@ function applyNode(
       patchStyle(element, "box-shadow", "none", patches);
     }
   }
-  const rotation = previewRotation ?? descriptor.rotation;
+  const rotation = cssAngle(previewRotation ?? descriptor.rotation);
   for (const element of [shell, containerEl, contentEl, content].filter(
     (item, index, all): item is DomElementLike => item !== undefined && all.indexOf(item) === index,
-  )) clearLegacyOwnedTransformRotation(element, patches);
-  if (Number.isFinite(rotation) && rotation !== 0) {
+  )) {
+    clearLegacyOwnedTransformRotation(element, patches);
+    clearLeakedRotateProperty(element);
+  }
+  if (rotation !== 0) {
     // Marks the node for the stylesheet: which descendant actually paints the
     // native rectangle differs between Obsidian builds, so clearing the few
     // elements this module can name is not enough on its own.
     patchAttribute(shell, "data-miro-source-rotated", "true", patches);
   }
-  const expectedRotations: Array<{ readonly element: DomElementLike; readonly rotation: number }> = [];
   if (descriptor.kind === "shape" && layer !== undefined && rotation !== 0) {
     // A stacking context forces Chromium to rasterize the subtree before it is
     // rotated. Keep the contour and text as ordinary descendants so both stay
@@ -973,7 +1029,8 @@ function applyNode(
     )) patchStyle(parent, "overflow", "visible", patches);
     patchStyle(content, "text-rendering", "geometricPrecision", patches);
   }
-  if (applyRotation(runtime, shell, rotation, patches, diagnostics, id)) expectedRotations.push({ element: shell, rotation });
+  const expectedRotations = applyRotation(runtime, shell, rotation, patches, diagnostics, id)
+    .map((element) => ({ element, rotation }));
   const ownedChildren = [layer, tagLayer].filter((item): item is DomElementLike => item !== undefined);
   return { id, kind: "node", element: primary, marker: shell, ownedChildren, expectedRotations, descriptor };
 }
@@ -1182,7 +1239,8 @@ export class SourceRenderer {
       const marker = safeCall(item.marker, "getAttribute", ["data-miro-source-kind"]);
       if (safeGet(item.marker, "isConnected") === false || typeof marker !== "string") return false;
       for (const expectedRotation of item.expectedRotations ?? []) {
-        if (readStyle(expectedRotation.element, "rotate") !== rotationStyle(expectedRotation.rotation)) return false;
+        const transform = readStyle(expectedRotation.element, "transform");
+        if (transform === undefined || !endsWithRotation(transform, expectedRotation.rotation)) return false;
       }
       for (const child of item.ownedChildren ?? []) {
         if (safeGet(child, "parentNode") !== item.marker) return false;

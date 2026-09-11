@@ -175,7 +175,7 @@ describe("shape text insets", () => {
 });
 
 describe("native paint markers", () => {
-  it("rotates the complete shape once while preserving the host transform", () => {
+  it("rotates the complete shape once, after the host transform", () => {
     const f = fixture("rectangle");
     f.nodeEl.style.setProperty("transform", "translate(10px, 20px)");
     const data = f.data;
@@ -184,10 +184,12 @@ describe("native paint markers", () => {
     f.renderer.refresh();
     const decoration = f.nodeEl.children.find((item) => item.getAttribute("data-miro-source-decoration") === "shape")!;
     expect(f.nodeEl.getAttribute("data-miro-source-rotated")).toBe("true");
-    expect(f.nodeEl.style.getPropertyValue("transform")).toBe("translate(10px, 20px)");
-    expect(f.nodeEl.style.getPropertyValue("rotate")).toBe("24deg");
-    expect(decoration.style.getPropertyValue("rotate")).toBe("");
-    expect(f.contentEl.style.getPropertyValue("rotate")).toBe("");
+    // After the translate, so the node turns about its own centre; the
+    // independent rotate property would turn the translate as well.
+    expect(f.nodeEl.style.getPropertyValue("transform")).toBe("translate(10px, 20px) rotate(24deg)");
+    expect(f.nodeEl.style.getPropertyValue("rotate")).toBe("");
+    expect(decoration.style.getPropertyValue("transform")).toBe("");
+    expect(f.contentEl.style.getPropertyValue("transform")).toBe("");
     expect(f.nodeEl.style.getPropertyValue("isolation")).toBe("");
     expect(f.contentEl.style.getPropertyValue("text-rendering")).toBe("geometricPrecision");
     f.renderer.dispose();
@@ -200,13 +202,13 @@ describe("native paint markers", () => {
     const f = fixture("rectangle");
     f.data.miroCanvas = { schemaVersion: 1, settings: {}, localOverrides: { a: { rotation: 10 } } };
     f.renderer.refresh();
-    expect(f.nodeEl.style.getPropertyValue("rotate")).toBe("10deg");
+    expect(f.nodeEl.style.getPropertyValue("transform")).toBe("rotate(10deg)");
     f.preview = { id: "a", rotation: 55 };
     f.renderer.refresh();
-    expect(f.nodeEl.style.getPropertyValue("rotate")).toBe("55deg");
+    expect(f.nodeEl.style.getPropertyValue("transform")).toBe("rotate(55deg)");
     f.preview = undefined;
     f.renderer.refresh();
-    expect(f.nodeEl.style.getPropertyValue("rotate")).toBe("10deg");
+    expect(f.nodeEl.style.getPropertyValue("transform")).toBe("rotate(10deg)");
   });
 
   it("uses the same whole-node rotation for a plain local text node", () => {
@@ -214,8 +216,8 @@ describe("native paint markers", () => {
     delete f.data.miroSource;
     f.data.miroCanvas.localOverrides.a = { rotation: 31 };
     f.renderer.refresh();
-    expect(f.nodeEl.style.getPropertyValue("rotate")).toBe("31deg");
-    expect(f.contentEl.style.getPropertyValue("rotate")).toBe("");
+    expect(f.nodeEl.style.getPropertyValue("transform")).toBe("rotate(31deg)");
+    expect(f.contentEl.style.getPropertyValue("transform")).toBe("");
     expect(f.nodeEl.style.getPropertyValue("isolation")).toBe("");
   });
 
@@ -227,9 +229,8 @@ describe("native paint markers", () => {
     for (let selection = 0; selection < 5; selection += 1) {
       f.nodeEl.style.setProperty("transform", `translate(${30 + selection}px, 40px)`);
       f.renderer.refresh();
-      expect(f.nodeEl.style.getPropertyValue("transform")).toBe(`translate(${30 + selection}px, 40px)`);
-      expect(f.nodeEl.style.getPropertyValue("rotate")).toBe("24deg");
-      expect(f.contentEl.style.getPropertyValue("rotate")).toBe("");
+      expect(f.nodeEl.style.getPropertyValue("transform")).toBe(`translate(${30 + selection}px, 40px) rotate(24deg)`);
+      expect(f.contentEl.style.getPropertyValue("transform")).toBe("");
     }
   });
 
@@ -240,13 +241,15 @@ describe("native paint markers", () => {
     f.contentEl.style.setProperty("transform", "rotate(24deg) rotate(24deg)");
     f.contentEl.setAttribute("data-miro-source-owned-rotation", "24");
     f.renderer.refresh();
-    expect(f.nodeEl.style.getPropertyValue("transform")).toBe("translate(10px, 20px) rotate(90deg)");
-    expect(f.nodeEl.style.getPropertyValue("rotate")).toBe("24deg");
+    expect(f.nodeEl.style.getPropertyValue("transform")).toBe("translate(10px, 20px) rotate(90deg) rotate(24deg)");
     expect(f.contentEl.style.getPropertyValue("transform")).toBe("");
     expect(f.contentEl.getAttribute("data-miro-source-owned-rotation")).toBe(null);
-    for (let pass = 0; pass < 5; pass += 1) f.renderer.refresh();
-    expect(f.nodeEl.style.getPropertyValue("transform")).toBe("translate(10px, 20px) rotate(90deg)");
-    expect(f.nodeEl.style.getPropertyValue("rotate")).toBe("24deg");
+    // Each pass renders again: the preview changes the signature every time.
+    for (let pass = 0; pass < 5; pass += 1) {
+      f.preview = pass % 2 === 0 ? { id: "a", rotation: 24 } : undefined;
+      f.renderer.refresh();
+    }
+    expect(f.nodeEl.style.getPropertyValue("transform")).toBe("translate(10px, 20px) rotate(90deg) rotate(24deg)");
     f.renderer.dispose();
     expect(f.nodeEl.style.getPropertyValue("transform")).toBe("translate(10px, 20px) rotate(90deg)");
     expect(f.contentEl.style.getPropertyValue("transform")).toBe("");
@@ -561,27 +564,130 @@ describe("rotation and a node the host is moving", () => {
     const data = f.data;
     data.miroCanvas = { schemaVersion: 1, settings: {}, localOverrides: { a: { rotation: 24 } } };
     f.data = data;
-    // This host does not accept the independent rotate property, so the
-    // rotation is composed onto the transform it owns.
-    (f.nodeEl.style as unknown as { setProperty(name: string, value: string, priority?: string): void }).setProperty =
-      function (this: never, name: string, value: string, priority = "") {
-        if (name === "rotate") return;
-        f.nodeEl.values.set(name, value);
-        f.nodeEl.priorities.set(name, priority);
-      };
     f.nodeEl.style.setProperty("transform", "translate(10px, 20px)");
     f.renderer.refresh();
     expect(f.nodeEl.values.get("transform")).toBe("translate(10px, 20px) rotate(24deg)");
-    // The host drags the node: it rewrites its own transform under us.
-    f.nodeEl.style.setProperty("transform", "translate(300px, 400px) rotate(24deg)");
+    // The host drags the node: it writes its own transform, with no rotation.
+    f.nodeEl.style.setProperty("transform", "translate(300px, 400px)");
     f.renderer.refresh();
     // Replaying the captured value would put the node back at 10,20 while the
     // document, the handles and every connector had moved on.
     expect(f.nodeEl.values.get("transform")).toBe("translate(300px, 400px) rotate(24deg)");
+    f.renderer.dispose();
+    expect(f.nodeEl.values.get("transform")).toBe("translate(300px, 400px)");
   });
 });
 
+type Matrix = readonly [number, number, number, number, number, number];
+const multiply = (m: Matrix, n: Matrix): Matrix => [
+  m[0] * n[0] + m[2] * n[1], m[1] * n[0] + m[3] * n[1],
+  m[0] * n[2] + m[2] * n[3], m[1] * n[2] + m[3] * n[3],
+  m[0] * n[4] + m[2] * n[5] + m[4], m[1] * n[4] + m[3] * n[5] + m[5],
+];
+const shift = (x: number, y: number): Matrix => [1, 0, 0, 1, x, y];
+const turn = (degrees: number): Matrix => {
+  const radians = degrees * Math.PI / 180;
+  return [Math.cos(radians), Math.sin(radians), -Math.sin(radians), Math.cos(radians), 0, 0];
+};
+
+/**
+ * Where CSS paints a point of an element's own box, following CSS Transforms 2:
+ * origin, then the independent rotate property, then the transform list, then
+ * the origin taken back off.
+ */
+function painted(element: Element, width: number, height: number, point: { x: number; y: number }): { x: number; y: number } {
+  const origin = (element.style.getPropertyValue("transform-origin") || "50% 50%").split(/\s+/u)
+    .map((part, index) => part.endsWith("%") ? parseFloat(part) / 100 * (index === 0 ? width : height) : parseFloat(part));
+  let matrix = shift(origin[0]!, origin[1]!);
+  const property = element.style.getPropertyValue("rotate");
+  if (property.length > 0) matrix = multiply(matrix, turn(parseFloat(property)));
+  for (const [, name, args] of element.style.getPropertyValue("transform").matchAll(/(\w+)\(([^)]*)\)/gu)) {
+    const values = args!.split(",").map((item) => parseFloat(item));
+    if (name === "translate") matrix = multiply(matrix, shift(values[0]!, values[1] ?? 0));
+    else if (name === "rotate") matrix = multiply(matrix, turn(values[0]!));
+    else throw new Error(`unsupported transform function ${name}`);
+  }
+  matrix = multiply(matrix, shift(-origin[0]!, -origin[1]!));
+  return { x: matrix[0] * point.x + matrix[2] * point.y + matrix[4], y: matrix[1] * point.x + matrix[3] * point.y + matrix[5] };
+}
+
+/** Store a value the way Chromium serializes it: six significant digits, colours as rgb(). */
+function storeLikeChromium(element: Element): void {
+  element.style.setProperty = (name: string, value: string, priority = "") => {
+    const stored = value
+      .replace(/#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})\b/giu,
+        (_match, r: string, g: string, b: string) => `rgb(${parseInt(r, 16)}, ${parseInt(g, 16)}, ${parseInt(b, 16)})`)
+      .replace(/-?(?:\d+(?:\.\d*)?|\.\d+)/gu, (number) => String(Number(Number(number).toPrecision(6))));
+    element.values.set(name, stored);
+    element.priorities.set(name, priority);
+  };
+}
+
 describe("the point a node turns about", () => {
+  it("turns every node about its own centre, however far from the origin the host placed it", () => {
+    const radians = 24 * Math.PI / 180;
+    for (const [x, y] of [[0, 0], [600, 400], [-2500, 1800]] as const) {
+      const f = fixture("rectangle");
+      f.data.miroCanvas = { schemaVersion: 1, settings: {}, localOverrides: { a: { rotation: 24 } } };
+      // Native Canvas positions every node with a translate on its element.
+      f.nodeEl.style.setProperty("transform", `translate(${x}px, ${y}px)`);
+      f.renderer.refresh();
+      // The 100x80 node keeps its centre where its geometry puts it...
+      const centre = painted(f.nodeEl, 100, 80, { x: 50, y: 40 });
+      expect(centre.x).toBeCloseTo(x + 50, 6);
+      expect(centre.y).toBeCloseTo(y + 40, 6);
+      // ...and really turns about it.
+      const corner = painted(f.nodeEl, 100, 80, { x: 0, y: 0 });
+      expect(corner.x).toBeCloseTo(x + 50 - 50 * Math.cos(radians) + 40 * Math.sin(radians), 6);
+      expect(corner.y).toBeCloseTo(y + 40 - 50 * Math.sin(radians) - 40 * Math.cos(radians), 6);
+    }
+  });
+
+  it("rotates, stays intact and restores exactly when the engine rewrites angles and colours", () => {
+    const f = fixture("rectangle");
+    for (const element of [f.nodeEl, f.contentEl, f.path]) storeLikeChromium(element);
+    f.nodeEl.style.setProperty("transform", "translate(600px, 400px)");
+    f.data.miroCanvas.localOverrides.a = { rotation: -9.636363636363637 };
+    const diagnostics = f.renderer.refresh();
+    expect(diagnostics.filter((item) => item.startsWith("rotation-"))).toEqual([]);
+    expect(f.nodeEl.style.getPropertyValue("transform")).toBe("translate(600px, 400px) rotate(-9.636deg)");
+    expect(f.nodeEl.style.getPropertyValue("rotate")).toBe("");
+    expect(f.path.style.getPropertyValue("stroke")).toBe("rgb(34, 51, 68)");
+    // An intact projection is left alone rather than rebuilt on every refresh.
+    let writes = 0;
+    const store = f.nodeEl.style.setProperty;
+    f.nodeEl.style.setProperty = (name: string, value: string, priority = "") => { writes += 1; store(name, value, priority); };
+    f.renderer.refresh();
+    expect(writes).toBe(0);
+    // Every write was recorded against the value the engine stored, so every
+    // one is undone - none outlives dispose.
+    f.renderer.dispose();
+    expect(f.nodeEl.style.getPropertyValue("transform")).toBe("translate(600px, 400px)");
+    expect(f.nodeEl.style.getPropertyValue("transform-origin")).toBe("");
+    expect(f.path.style.getPropertyValue("stroke")).toBe("native-stroke");
+    expect(f.path.style.getPropertyPriority("stroke")).toBe("important");
+  });
+
+  it("clears the rotate property an earlier build left behind", () => {
+    const turned = fixture("rectangle");
+    turned.data.miroCanvas.localOverrides.a = { rotation: -9.636363636363637 };
+    // What that build left: the property, and the fallback's matching suffix.
+    turned.nodeEl.style.setProperty("rotate", "-9.63636deg");
+    turned.nodeEl.style.setProperty("transform", "translate(600px, 400px) rotate(-9.63636deg)");
+    turned.renderer.refresh();
+    expect(turned.nodeEl.style.getPropertyValue("rotate")).toBe("");
+    expect(turned.nodeEl.style.getPropertyValue("transform")).toBe("translate(600px, 400px) rotate(-9.636deg)");
+    turned.renderer.dispose();
+    expect(turned.nodeEl.style.getPropertyValue("transform")).toBe("translate(600px, 400px)");
+
+    const upright = fixture("rectangle");
+    upright.nodeEl.style.setProperty("rotate", "15deg");
+    upright.nodeEl.style.setProperty("transform", "translate(1px, 2px) rotate(15deg)");
+    upright.renderer.refresh();
+    expect(upright.nodeEl.style.getPropertyValue("rotate")).toBe("");
+    expect(upright.nodeEl.style.getPropertyValue("transform")).toBe("translate(1px, 2px)");
+  });
+
   it("asserts the node's own centre over a host that holds the origin elsewhere", () => {
     const f = fixture("rectangle");
     const data = f.data;
