@@ -1,6 +1,6 @@
 import {
-  buildCanvasAnchorGeometry, nativeAnchorEnd, nativeEdgeEnd, nativeEdgeRoute, roundCoordinate, routeConnector,
-  type NodeMeasurements,
+  buildCanvasAnchorGeometry, nativeAnchorEnd, nativeEdgeEnd, nativeEdgeRoute, nativeFreeEnd, roundCoordinate,
+  routeConnector, type NativeEdgeEnd, type NodeMeasurements,
 } from "./connector-endpoints";
 import { SHAPE_CLIP_PATHS, inscribedInsets, shapeOutline, type ShapePoint } from "./shape-geometry";
 import { normalizeAnchor, resolveAnchor, type AnchorEdgeGeometry, type AnchorPoint, type AnchorRect } from "./anchors";
@@ -932,31 +932,39 @@ interface RouteNode {
 }
 
 /** Where a plain connector's ends sit on their nodes; a missing end uses its native side. */
+type RouteEnd =
+  | { readonly kind: "node"; readonly nodeId: string; readonly u: number; readonly v: number }
+  | { readonly kind: "free"; readonly x: number; readonly y: number };
+
 interface RouteAnchors {
-  readonly from?: { readonly nodeId: string; readonly u: number; readonly v: number };
-  readonly to?: { readonly nodeId: string; readonly u: number; readonly v: number };
+  readonly from?: RouteEnd;
+  readonly to?: RouteEnd;
 }
 
 /**
  * The precise anchors of a connector this plugin can draw the native way.
  *
- * A connector with its own style, or with an end anchored to something other
- * than a node, keeps the styled renderer.  An anchor on a node the edge no
- * longer names - native Canvas reattached that end - is stale, and the end
- * follows its native side instead.
+ * A connector with its own style, or with an end anchored to another
+ * connector or an image crop, keeps the styled renderer.  An anchor on a node
+ * the edge no longer names - native Canvas reattached that end - is stale,
+ * and the end follows its native side instead.
  */
 function plainRouteAnchors(override: unknown, edge: unknown): RouteAnchors | undefined {
   if (isObject(safeGet(override, "connector"))) return undefined;
   const stored = safeGet(override, "connectorAnchors");
-  const anchors: { from?: RouteAnchors["from"]; to?: RouteAnchors["to"] } = {};
+  const anchors: { from?: RouteEnd; to?: RouteEnd } = {};
   for (const end of ["from", "to"] as const) {
     const raw = safeGet(stored, end);
     if (raw === undefined) continue;
     const normalized = normalizeAnchor(raw);
     const anchor = normalized.valid ? normalized.anchor : undefined;
+    if (anchor?.type === "free") {
+      anchors[end] = { kind: "free", x: anchor.x, y: anchor.y };
+      continue;
+    }
     if (anchor?.type !== "node") return undefined;
     if (anchor.nodeId !== safeGet(edge, `${end}Node`)) continue;
-    anchors[end] = { nodeId: anchor.nodeId, u: anchor.u, v: anchor.v };
+    anchors[end] = { kind: "node", nodeId: anchor.nodeId, u: anchor.u, v: anchor.v };
   }
   return anchors;
 }
@@ -1004,24 +1012,34 @@ function applyNativeRoute(
     diagnostics.push(`connector-geometry-fallback: ${id}.`);
     return undefined;
   }
-  const end = (which: "from" | "to") => {
+  // A node end is placed on its own; a free end faces wherever the other end is.
+  const end = (which: "from" | "to", other?: AnchorPoint) => {
     const live = safeGet(runtime, which);
+    const anchor = anchors[which];
+    const kind = safeGet(live, "end") ?? safeGet(native, `${which}End`) ?? (which === "from" ? "none" : "arrow");
+    const head = safeGet(safeGet(runtime, `${which}LineEnd`), "el");
+    const result = (geometry: NativeEdgeEnd | undefined) =>
+      geometry === undefined ? undefined : { geometry, arrow: kind === "arrow", head: isElement(head) ? head : undefined };
+    if (anchor?.kind === "free") return result(nativeFreeEnd(anchor, other));
     const liveNode = safeGet(live, "node");
     const liveId = readCanvasElementId(liveNode);
-    const anchor = anchors[which];
     const nodeId = anchor?.nodeId ?? liveId ?? safeGet(native, `${which}Node`);
     const known = nodeOf(nodeId);
     if (known === undefined) return undefined;
     const rect = liveId === nodeId ? liveRect(liveNode, known.rect) : known.rect;
-    const kind = safeGet(live, "end") ?? safeGet(native, `${which}End`) ?? (which === "from" ? "none" : "arrow");
-    const geometry = anchor === undefined
+    return result(anchor === undefined
       ? nativeEdgeEnd(rect, safeGet(live, "side") ?? safeGet(native, `${which}Side`), known.outline)
-      : nativeAnchorEnd(rect, anchor.u, anchor.v, known.outline);
-    const head = safeGet(safeGet(runtime, `${which}LineEnd`), "el");
-    return geometry === undefined ? undefined : { geometry, arrow: kind === "arrow", head: isElement(head) ? head : undefined };
+      : nativeAnchorEnd(rect, anchor.u, anchor.v, known.outline));
   };
   const draw = (): string | undefined => {
-    const from = end("from"), to = end("to");
+    const fixedFrom = anchors.from?.kind === "free" ? undefined : end("from");
+    const fixedTo = anchors.to?.kind === "free" ? undefined : end("to");
+    const freePoint = (which: "from" | "to") => {
+      const anchor = anchors[which];
+      return anchor?.kind === "free" ? { x: anchor.x, y: anchor.y } : undefined;
+    };
+    const from = fixedFrom ?? end("from", fixedTo?.geometry.point ?? freePoint("to"));
+    const to = fixedTo ?? end("to", from?.geometry.point);
     if (from === undefined || to === undefined) return undefined;
     const d = nativeEdgeRoute(from.geometry, from.arrow, to.geometry, to.arrow);
     for (const path of paths) {

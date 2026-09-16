@@ -117,9 +117,9 @@ describe("reversible source geometry DOM", () => {
     f.renderer.refresh(); expect(f.path.getAttribute("d")).toMatch(/^M 100 16 L 107 16 M 107 16 C .* 325 267$/);
     const change = updateConnectorEndpoint(f.data, { edgeId: "e", end: "from", anchor: { type: "free", x: 13, y: 19 } });
     expect(change.ok).toBe(true); const after = change.document!;
-    f.data = after; f.renderer.refresh(); expect(f.path.getAttribute("d")).toBe("M 13 19 L 325 260");
+    f.data = after; f.renderer.refresh(); expect(f.path.getAttribute("d")).toMatch(/^M 13 19 L 18.54 23.279 M 18.54 23.279 C .* 325 267$/);
     f.data = before; f.renderer.refresh(); expect(f.path.getAttribute("d")).toMatch(/^M 100 16 L 107 16 M 107 16 C .* 325 267$/);
-    f.data = after; f.renderer.refresh(); expect(f.path.getAttribute("d")).toBe("M 13 19 L 325 260");
+    f.data = after; f.renderer.refresh(); expect(f.path.getAttribute("d")).toMatch(/^M 13 19 L 18.54 23.279 M 18.54 23.279 C .* 325 267$/);
     expect(f.data.unknown).toEqual({ deep: 1 }); expect(f.data.edges[0].future).toEqual({ keep: true });
   });
   it("recomputes moved, resized and rotated anchor targets", () => {

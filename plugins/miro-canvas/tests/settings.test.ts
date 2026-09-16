@@ -31,6 +31,17 @@ describe("plugin settings", () => {
     expect(stored.maxZoom).toBe(DEFAULT_SETTINGS.maxZoom);
   });
 
+  it("keeps the connector magnet and snap distances within their range", () => {
+    expect(DEFAULT_SETTINGS.connectorMagnet).toBe(24);
+    expect(DEFAULT_SETTINGS.connectorSnap).toBe(16);
+    const stored = normalizeSettings({ connectorMagnet: 40, connectorSnap: 0 });
+    expect(stored.connectorMagnet).toBe(40);
+    expect(stored.connectorSnap).toBe(0);
+    const clamped = normalizeSettings({ connectorMagnet: 500, connectorSnap: -3 });
+    expect(clamped.connectorMagnet).toBe(SETTING_BOUNDS.connectorMagnet.max);
+    expect(clamped.connectorSnap).toBe(SETTING_BOUNDS.connectorSnap.min);
+  });
+
   it("clamps out-of-range numbers instead of refusing to open a board", () => {
     const clamped = normalizeSettings({ zoomStep: 99, panStep: -50, fastPanMultiplier: 0 });
     expect(clamped.zoomStep).toBe(SETTING_BOUNDS.zoomStep.max);

@@ -47,6 +47,11 @@ export interface SelectionHandlesState {
 
 export type ConnectorEnd = "from" | "to";
 
+/** A connector gesture in progress, as the host needs it to place the end being dragged. */
+export type ConnectorGesture =
+  | { readonly kind: "connect"; readonly sourceId: string; readonly side: HandleSide; readonly position: HandlePosition }
+  | { readonly kind: "end"; readonly edgeId: string; readonly end: ConnectorEnd };
+
 export interface SelectionHandlesActions {
   /** Called continuously while dragging, then once with `commit` true. */
   readonly onRotate: (degrees: number, commit: boolean) => void;
@@ -63,6 +68,15 @@ export interface SelectionHandlesActions {
   readonly onCreateConnected: (sourceId: string, side: HandleSide, position: HandlePosition) => void;
   /** An end of the selected connector was dragged and released at a viewport point. */
   readonly onMoveEndpoint?: (edgeId: string, end: ConnectorEnd, point: { readonly x: number; readonly y: number }) => void;
+  /**
+   * Where the end being dragged would land for a viewport point - attached to
+   * a nearby outline, snapped to a key point, or free.  The preview draws the
+   * end there, so what the drag shows is what the drop does.
+   */
+  readonly previewEnd?: (
+    gesture: ConnectorGesture,
+    point: { readonly x: number; readonly y: number },
+  ) => { readonly x: number; readonly y: number } | undefined;
 }
 
 export interface SelectionHandlesOptions {
@@ -371,13 +385,18 @@ export class SelectionHandles {
   /** The host forwards document-level pointer events so a drag can leave the grip. */
   public handlePointerMove(event: unknown): void {
     const point = pointOf(event);
-    if (point !== undefined && this.dragSide !== undefined && this.dragOrigin !== undefined) {
+    if (point !== undefined && this.dragSide !== undefined && this.dragOrigin !== undefined
+      && this.dragSourceId !== undefined && this.dragPosition !== undefined) {
       const moved = Math.hypot(point.x - this.dragOrigin.x, point.y - this.dragOrigin.y);
-      this.showPreview(moved < this.dragThreshold ? undefined : this.dragStart, this.local(point));
+      const landed = moved < this.dragThreshold ? undefined : this.actions.previewEnd?.(
+        { kind: "connect", sourceId: this.dragSourceId, side: this.dragSide, position: this.dragPosition }, point,
+      ) ?? point;
+      this.showPreview(landed === undefined ? undefined : this.dragStart, landed === undefined ? undefined : this.local(landed));
     }
     if (point !== undefined && this.endDrag !== undefined) {
       const grip = this.refs?.ends[this.endDrag.end];
-      const local = this.local(point);
+      const landed = this.actions.previewEnd?.({ kind: "end", edgeId: this.endDrag.edgeId, end: this.endDrag.end }, point) ?? point;
+      const local = this.local(landed);
       if (grip !== undefined) {
         grip.style.left = `${local.x}px`;
         grip.style.top = `${local.y}px`;

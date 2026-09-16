@@ -24,6 +24,10 @@ export interface MiroCanvasSettings {
   readonly panStep: number;
   /** Multiplier applied while Shift is held during a keyboard pan. */
   readonly fastPanMultiplier: number;
+  /** Screen pixels within which a connector end attaches to a node's outline. */
+  readonly connectorMagnet: number;
+  /** Screen pixels within which a connector end snaps onto a standard point. */
+  readonly connectorSnap: number;
   readonly minimapVisible: boolean;
   readonly selectionToolbarEnabled: boolean;
   readonly showDiagnostics: boolean;
@@ -36,7 +40,7 @@ interface NumberBound {
 }
 
 export const SETTING_BOUNDS: Readonly<Record<
-  "zoomStep" | "minZoom" | "maxZoom" | "panStep" | "fastPanMultiplier",
+  "zoomStep" | "minZoom" | "maxZoom" | "panStep" | "fastPanMultiplier" | "connectorMagnet" | "connectorSnap",
   NumberBound
 >> = Object.freeze({
   zoomStep: { min: 1.02, max: 2, step: 0.01 },
@@ -44,6 +48,8 @@ export const SETTING_BOUNDS: Readonly<Record<
   maxZoom: { min: 1, max: 64, step: 0.5 },
   panStep: { min: 8, max: 512, step: 8 },
   fastPanMultiplier: { min: 1, max: 10, step: 0.5 },
+  connectorMagnet: { min: 0, max: 96, step: 2 },
+  connectorSnap: { min: 0, max: 64, step: 2 },
 });
 
 export const WHEEL_ZOOM_MODIFIERS: readonly WheelZoomModifier[] = ["none", "ctrl", "shift", "alt"];
@@ -57,6 +63,8 @@ export const DEFAULT_SETTINGS: MiroCanvasSettings = Object.freeze({
   wheelZoomModifier: "ctrl",
   panStep: 64,
   fastPanMultiplier: 4,
+  connectorMagnet: 24,
+  connectorSnap: 16,
   minimapVisible: true,
   selectionToolbarEnabled: true,
   showDiagnostics: true,
@@ -101,6 +109,8 @@ export function normalizeSettings(value: unknown): MiroCanvasSettings {
       : DEFAULT_SETTINGS.wheelZoomModifier,
     panStep: readNumber(value, "panStep", DEFAULT_SETTINGS.panStep),
     fastPanMultiplier: readNumber(value, "fastPanMultiplier", DEFAULT_SETTINGS.fastPanMultiplier),
+    connectorMagnet: readNumber(value, "connectorMagnet", DEFAULT_SETTINGS.connectorMagnet),
+    connectorSnap: readNumber(value, "connectorSnap", DEFAULT_SETTINGS.connectorSnap),
     minimapVisible: readBoolean(value, "minimapVisible", DEFAULT_SETTINGS.minimapVisible),
     selectionToolbarEnabled: readBoolean(value, "selectionToolbarEnabled", DEFAULT_SETTINGS.selectionToolbarEnabled),
     showDiagnostics: readBoolean(value, "showDiagnostics", DEFAULT_SETTINGS.showDiagnostics),

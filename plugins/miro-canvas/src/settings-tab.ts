@@ -74,6 +74,15 @@ export class MiroCanvasSettingTab extends PluginSettingTab {
     this.slider(containerEl, "Fast pan multiplier", "Applied while Shift is held.",
       "fastPanMultiplier", (value) => `${value}×`);
 
+    new Setting(containerEl).setName("Connectors").setHeading();
+
+    this.slider(containerEl, "Magnet distance",
+      "How close a connector end has to come to a node, in screen pixels, to attach to its outline. Farther away the end stays where it is dropped.",
+      "connectorMagnet", (value) => `${value} px`);
+    this.slider(containerEl, "Key point snap distance",
+      "How close a connector end has to come to a node's standard connection point, in screen pixels, to snap onto it.",
+      "connectorSnap", (value) => `${value} px`);
+
     new Setting(containerEl)
       .setName("Keyboard shortcuts")
       .setDesc("Pan, zoom, minimap, review mode and lock are commands. Assign keys to them in Settings → Hotkeys, filtered by \"Miro Canvas\". No keys are bound by default, so nothing is taken from another plugin.")

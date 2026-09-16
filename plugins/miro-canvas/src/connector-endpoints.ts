@@ -494,28 +494,30 @@ export function nodeBoundaryAnchor(
   toward: AnchorPoint,
 ): CanvasAnchor | undefined {
   const rect = buildCanvasAnchorGeometry(document).nodes?.[nodeId];
-  if (rect === undefined || !(rect.width > 0) || !(rect.height > 0)
-    || !Number.isFinite(toward.x) || !Number.isFinite(toward.y)) return undefined;
+  if (rect === undefined) return undefined;
+  return boundaryAnchorOnRect(nodeId, rect, shapeOutline(buildSourceScene(document).items.get(nodeId)?.shape), toward);
+}
+
+/** The point of a node's outline closest to a board point, for a node box already known. */
+export function boundaryAnchorOnRect(
+  nodeId: string,
+  rect: AnchorRect,
+  outline: readonly ShapePoint[] | undefined,
+  toward: AnchorPoint,
+): CanvasAnchor | undefined {
+  if (!(rect.width > 0) || !(rect.height > 0) || !Number.isFinite(toward.x) || !Number.isFinite(toward.y)) return undefined;
   const center = { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 };
-  const angle = Number.isFinite(rect.rotation) ? -(rect.rotation ?? 0) * Math.PI / 180 : 0;
-  const dx = toward.x - center.x;
-  const dy = toward.y - center.y;
-  const local = {
-    x: center.x + dx * Math.cos(angle) - dy * Math.sin(angle),
-    y: center.y + dx * Math.sin(angle) + dy * Math.cos(angle),
-  };
-  const target = {
-    x: 50 + ((local.x - center.x) / rect.width) * 100,
-    y: 50 + ((local.y - center.y) / rect.height) * 100,
-  };
-  const descriptor = buildSourceScene(document).items.get(nodeId);
-	const point = closestContourPoint(
-		shapeOutline(descriptor?.shape) ?? shapeOutline("rectangle"),
-		target,
-		{ x: rect.width / 100, y: rect.height / 100 },
-	);
+  const local = turn({ x: toward.x - center.x, y: toward.y - center.y }, -rectRotation(rect));
+  const target = { x: 50 + (local.x / rect.width) * 100, y: 50 + (local.y / rect.height) * 100 };
+  const point = closestContourPoint(outline ?? shapeOutline("rectangle"), target, { x: rect.width / 100, y: rect.height / 100 });
   const clamp = (value: number): number => Math.max(0, Math.min(1, value / 100));
   return { type: "node", nodeId, u: clamp(point.x), v: clamp(point.y) };
+}
+
+/** Whether a board point lies within a node's turned box. */
+export function insideRect(rect: AnchorRect, point: AnchorPoint): boolean {
+  const local = turn({ x: point.x - (rect.x + rect.width / 2), y: point.y - (rect.y + rect.height / 2) }, -rectRotation(rect));
+  return Math.abs(local.x) <= rect.width / 2 && Math.abs(local.y) <= rect.height / 2;
 }
 
 /** Resolve a dragged handle to the real local silhouette, including non-rectangular shapes. */
@@ -526,15 +528,24 @@ export function nodeBoundaryAnchorAtSide(
   position: number,
 ): CanvasAnchor | undefined {
   const rect = buildCanvasAnchorGeometry(document).nodes?.[nodeId];
-  if (rect === undefined || !(rect.width > 0) || !(rect.height > 0)
-    || !Number.isFinite(position) || position < 0 || position > 1) return undefined;
+  if (rect === undefined || !(rect.width > 0) || !(rect.height > 0)) return undefined;
+  return sideAnchorOnOutline(nodeId, shapeOutline(buildSourceScene(document).items.get(nodeId)?.shape), side, position);
+}
+
+/** A point along one side of a node, pulled onto its outline. */
+export function sideAnchorOnOutline(
+  nodeId: string,
+  outline: readonly ShapePoint[] | undefined,
+  side: NodeBoundarySide,
+  position: number,
+): CanvasAnchor | undefined {
+  if (!Number.isFinite(position) || position < 0 || position > 1) return undefined;
   const along = position * 100;
   const target: ShapePoint = side === "top" ? { x: along, y: 0 }
     : side === "right" ? { x: 100, y: along }
       : side === "bottom" ? { x: along, y: 100 }
         : { x: 0, y: along };
-  const descriptor = buildSourceScene(document).items.get(nodeId);
-  const point = contourPoint(shapeOutline(descriptor?.shape) ?? shapeOutline("rectangle"), target);
+  const point = contourPoint(outline ?? shapeOutline("rectangle"), target);
   const clamp = (value: number): number => Math.max(0, Math.min(1, value / 100));
   return { type: "node", nodeId, u: clamp(point.x), v: clamp(point.y) };
 }
@@ -668,12 +679,28 @@ export function nativeAnchorEnd(rect: AnchorRect, u: number, v: number, outline?
 /** The side of a node that faces a board point, judged in the node's own turned frame. */
 export function facingSide(document: unknown, nodeId: string, toward: AnchorPoint): NodeBoundarySide | undefined {
   const rect = buildCanvasAnchorGeometry(document).nodes?.[nodeId];
-  if (rect === undefined || !(rect.width > 0) || !(rect.height > 0)
-    || !Number.isFinite(toward.x) || !Number.isFinite(toward.y)) return undefined;
+  return rect === undefined ? undefined : facingSideOfRect(rect, toward);
+}
+
+/** The side of a node box that faces a board point, judged in the box's own turned frame. */
+export function facingSideOfRect(rect: AnchorRect, toward: AnchorPoint): NodeBoundarySide | undefined {
+  if (!(rect.width > 0) || !(rect.height > 0) || !Number.isFinite(toward.x) || !Number.isFinite(toward.y)) return undefined;
   const local = turn({ x: toward.x - (rect.x + rect.width / 2), y: toward.y - (rect.y + rect.height / 2) }, -rectRotation(rect));
   const across = local.x / rect.width, down = local.y / rect.height;
   if (Math.abs(across) >= Math.abs(down)) return across >= 0 ? "right" : "left";
   return down >= 0 ? "bottom" : "top";
+}
+
+/**
+ * An edge end left in free space.  It has no outline to leave, so it faces
+ * the other end, and its arrowhead points along the line arriving there.
+ */
+export function nativeFreeEnd(point: AnchorPoint, toward: AnchorPoint | undefined): NativeEdgeEnd | undefined {
+  if (!Number.isFinite(point.x) || !Number.isFinite(point.y)) return undefined;
+  const dx = (toward?.x ?? point.x) - point.x, dy = (toward?.y ?? point.y + 1) - point.y;
+  const length = Math.hypot(dx, dy);
+  const normal = length <= 1e-9 ? { x: 0, y: 1 } : { x: dx / length, y: dy / length };
+  return { point: { x: point.x, y: point.y }, normal, arrowAngle: arrowAngleFor(normal) };
 }
 
 /** The outward direction of a side of a node, turned with the node. */

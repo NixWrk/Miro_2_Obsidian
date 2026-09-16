@@ -1,8 +1,13 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  boundaryAnchorOnRect,
   buildCanvasAnchorGeometry,
   facingSide,
+  facingSideOfRect,
+  insideRect,
+  nativeFreeEnd,
+  sideAnchorOnOutline,
   nativeAnchorEnd,
   nativeEdgeEnd,
   nodeBoundaryAnchor,
@@ -476,5 +481,32 @@ describe("native-looking connector ends", () => {
     const upsideDown = sideDirection("left", 180);
     expect(upsideDown.x).toBeCloseTo(1);
     expect(upsideDown.y).toBeCloseTo(0);
+  });
+});
+
+describe("placing a connector end on a known box", () => {
+  const rect = { x: 100, y: 100, width: 200, height: 100 };
+
+  it("finds the closest outline point and whether a point is inside", () => {
+    expect(boundaryAnchorOnRect("n", rect, undefined, { x: 250, y: 90 })).toEqual({ type: "node", nodeId: "n", u: 0.75, v: 0 });
+    expect(insideRect(rect, { x: 150, y: 150 })).toBe(true);
+    expect(insideRect(rect, { x: 90, y: 150 })).toBe(false);
+    // A box turned a quarter reaches 100 above and below its centre.
+    expect(insideRect({ ...rect, rotation: 90 }, { x: 200, y: 60 })).toBe(true);
+    expect(insideRect({ ...rect, rotation: 90 }, { x: 110, y: 150 })).toBe(false);
+  });
+
+  it("puts a side's point on the outline and finds the side facing a point", () => {
+    expect(sideAnchorOnOutline("n", shapeOutline("triangle"), "right", 0.5)).toEqual({ type: "node", nodeId: "n", u: 0.75, v: 0.5 });
+    expect(sideAnchorOnOutline("n", undefined, "top", 2)).toBeUndefined();
+    expect(facingSideOfRect(rect, { x: 200, y: 400 })).toBe("bottom");
+  });
+
+  it("points a free end's arrowhead along the line arriving at it", () => {
+    const free = nativeFreeEnd({ x: 0, y: 0 }, { x: 0, y: -50 })!;
+    // The line arrives from above, so the head points down with its base up.
+    expect(free.normal).toEqual({ x: 0, y: -1 });
+    expect(free.arrowAngle).toBe(180);
+    expect(nativeFreeEnd({ x: Number.NaN, y: 0 }, undefined)).toBeUndefined();
   });
 });

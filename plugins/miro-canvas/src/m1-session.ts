@@ -32,6 +32,7 @@ import { CANVAS_SHAPE_KINDS, createCanvasAuthoring, type CanvasAuthoring, type C
 import {
 	SelectionHandles,
 	normalizeAngle,
+	type ConnectorGesture,
 	type HandleRect,
 	type HandleSide,
 	type SelectionHandlesState,
@@ -86,18 +87,22 @@ import {
 	CONNECTOR_CAPS,
 	CONNECTOR_ROUTES,
 	CONNECTOR_STROKES,
+	type SourceScene,
 } from "./source-model";
 import { CommentMarkers } from "./comment-markers";
 import { listCommentThreads, type CommentOrigin } from "./local-comments";
 import {
+	boundaryAnchorOnRect,
 	buildCanvasAnchorGeometry,
 	facingSide,
-	nodeBoundaryAnchor,
+	facingSideOfRect,
+	insideRect,
 	nodeBoundaryAnchorAtSide,
+	sideAnchorOnOutline,
 	sideDirection,
 	snapToStandardPoint,
 } from "./connector-endpoints";
-import { resolveAnchor, type CanvasAnchor } from "./anchors";
+import { resolveAnchor, type AnchorGeometry, type CanvasAnchor } from "./anchors";
 import { shapeOutline } from "./shape-geometry";
 
 export interface M1SessionOptions {
@@ -126,12 +131,6 @@ export interface M1SessionSnapshot {
 
 type UnknownRecord = Record<string, unknown>;
 
-/** Pixels of slack around a node when a connection is released near it. */
-const CONNECT_REACH = 24;
-/** A dropped connector end within this many pixels of a standard point snaps onto it. */
-const SNAP_DISTANCE = 16;
-/** A connector end dropped farther than this inside a node takes the standard point facing the other end. */
-const EDGE_BAND = 24;
 const PANEL_SELECTOR = ".miro-canvas-panel, .miro-canvas-toolbar, .miro-canvas-comment-markers, .miro-canvas-handles, .miro-canvas-minimap";
 const DEFAULT_TOOLBAR_FONT = "Inter";
 const DEFAULT_TOOLBAR_FONT_SIZE = 16;
@@ -582,6 +581,8 @@ export class M1CanvasSession {
 	private rotationGestureTarget: string | undefined;
 	/** What the last rotation gesture actually did, for the selection dump. */
 	private lastRotationAttempt = "none";
+	/** Geometry for placing connector ends, kept while the document is the same object. */
+	private landingCache: { readonly document: unknown; readonly geometry: AnchorGeometry; readonly scene: SourceScene } | undefined;
 	private lastToolbarSignature = "";
 	private minimapDragStart: MinimapPoint | undefined;
 	private minimapDragViewport: ViewportTransform | undefined;
@@ -647,6 +648,7 @@ export class M1CanvasSession {
 			onConnect: (sourceId, side, position, point) => this.applyHandleConnection(sourceId, side, position, point),
 			onCreateConnected: (sourceId, side, position) => this.createConnectedNode(sourceId, side, position),
 			onMoveEndpoint: (edgeId, end, point) => this.moveConnectorEnd(edgeId, end, point),
+			previewEnd: (gesture, point) => this.previewLanding(gesture, point),
 		}, { document: controlDocument });
 		this.commentMarkers = controlDocument === undefined ? undefined : new CommentMarkers({
 			onOpenThread: (threadId, origin) => this.options.onOpenCommentThread?.(threadId, origin),
@@ -718,20 +720,27 @@ export class M1CanvasSession {
 		this.refresh();
 	}
 
-	/** A connection released over another node becomes a native edge. */
+	/** A connection released on the board: onto a node, or into free space. */
 	private applyHandleConnection(
 		sourceId: string,
 		side: HandleSide,
 		position: number,
 		point: { readonly x: number; readonly y: number },
 	): void {
-		const toNode = this.nodeAtPoint(point, sourceId);
-		if (toNode === undefined) {
-			this.addDiagnostic("Release a connection over another Canvas node to connect it.");
+		this.readInteractionState();
+		const landing = this.connectorLanding(point, sourceId, this.pulledFrom(sourceId, side, position));
+		if (landing === undefined) {
+			this.addDiagnostic("The connector could not be placed at that point.");
 			this.refresh();
 			return;
 		}
-		this.createEdge(sourceId, toNode, side, point, undefined, position);
+		// A native Canvas edge joins two nodes, so a connector dropped in free
+		// space brings its node along - as native Canvas and Miro both offer.
+		if (landing.nodeId === undefined) {
+			this.createConnectedNode(sourceId, side, position, landing.board);
+			return;
+		}
+		this.createEdge(sourceId, landing.nodeId, side, position, landing.anchor);
 	}
 
 	/** The board point under a viewport point. */
@@ -740,41 +749,125 @@ export class M1CanvasSession {
 		return this.viewport.screenToBoard({ x: point.x - (rootRect?.left ?? 0), y: point.y - (rootRect?.top ?? 0) });
 	}
 
-	/**
-	 * Where a connector dropped on a node attaches.
-	 *
-	 * Dropped near the outline it stays where it was dropped - snapped onto a
-	 * standard point when one is close - so an end can sit anywhere on the
-	 * perimeter.  Dropped deep inside, it takes the standard point facing the
-	 * other end, as native Canvas does.
-	 */
-	private dropAnchor(
-		document: unknown,
-		nodeId: string,
-		drop: { readonly x: number; readonly y: number },
-		toward: { readonly x: number; readonly y: number } | undefined,
-	): CanvasAnchor | undefined {
-		const geometry = buildCanvasAnchorGeometry(document);
-		const rect = geometry.nodes?.[nodeId];
-		const closest = nodeBoundaryAnchor(document, nodeId, drop);
-		if (rect === undefined || closest === undefined) return closest;
-		const zoom = finite(readRuntime(this.viewport.getViewport(), "zoom")) ?? 1;
-		const point = resolveAnchor(closest, geometry).point;
-		if ((point === undefined || Math.hypot(point.x - drop.x, point.y - drop.y) > EDGE_BAND / zoom) && toward !== undefined) {
-			const side = facingSide(document, nodeId, toward);
-			if (side !== undefined) return nodeBoundaryAnchorAtSide(document, nodeId, side, 0.5) ?? closest;
+	/** The viewport point over a board point. */
+	private viewportPoint(point: { readonly x: number; readonly y: number }): { readonly x: number; readonly y: number } | undefined {
+		const rootRect = boundingRect(this.root);
+		const screen = this.viewport.boardToScreen(point);
+		return screen === undefined ? undefined : { x: screen.x + (rootRect?.left ?? 0), y: screen.y + (rootRect?.top ?? 0) };
+	}
+
+	/** Node boxes, silhouettes and routes of the current document, measured once per document. */
+	private landingGeometry(): { readonly geometry: AnchorGeometry; readonly scene: SourceScene } {
+		const document = this.currentRawDocument;
+		let cache = this.landingCache;
+		if (cache === undefined || cache.document !== document) {
+			cache = { document, geometry: buildCanvasAnchorGeometry(document), scene: buildSourceScene(document) };
+			this.landingCache = cache;
 		}
-		const outline = shapeOutline(buildSourceScene(document).items.get(nodeId)?.shape);
-		return snapToStandardPoint(closest, rect, outline, SNAP_DISTANCE / zoom);
+		return cache;
+	}
+
+	/** The board point a connector pulled from a selection point starts at. */
+	private pulledFrom(nodeId: string, side: HandleSide, position: number): { readonly x: number; readonly y: number } | undefined {
+		const { geometry, scene } = this.landingGeometry();
+		const rect = geometry.nodes?.[nodeId];
+		const anchor = rect === undefined ? undefined : sideAnchorOnOutline(nodeId, shapeOutline(scene.items.get(nodeId)?.shape), side, position);
+		return anchor === undefined || rect === undefined ? undefined : resolveAnchor(anchor, { nodes: { [nodeId]: rect } }).point;
+	}
+
+	/**
+	 * Where a connector end lands for a viewport point.
+	 *
+	 * Within the magnet distance of a node's outline - or anywhere inside the
+	 * node - the end attaches to it: at the closest outline point, snapped onto
+	 * a standard point within the snap distance, or, dropped deep inside, at
+	 * the standard point facing the other end.  Anywhere else it stays free
+	 * where it was dropped.  The live preview and the drop both ask here, so
+	 * an end lands exactly where it was shown.
+	 */
+	private connectorLanding(
+		point: { readonly x: number; readonly y: number },
+		exclude: string | undefined,
+		toward: { readonly x: number; readonly y: number } | undefined,
+	): { readonly board: { readonly x: number; readonly y: number }; readonly anchor: CanvasAnchor; readonly nodeId?: string } | undefined {
+		const board = this.boardPoint(point);
+		if (board === undefined) return undefined;
+		const { geometry, scene } = this.landingGeometry();
+		const zoom = finite(readRuntime(this.viewport.getViewport(), "zoom")) ?? 1;
+		const magnet = this.settings.connectorMagnet / zoom;
+		const snap = this.settings.connectorSnap / zoom;
+		let best: {
+			readonly nodeId: string; readonly anchor: CanvasAnchor;
+			readonly distance: number; readonly inside: boolean; readonly area: number;
+		} | undefined;
+		for (const [nodeId, rect] of Object.entries(geometry.nodes ?? {})) {
+			if (nodeId === exclude || !(rect.width > 0) || !(rect.height > 0)) continue;
+			const reach = Math.hypot(rect.width, rect.height) / 2 + magnet;
+			if (Math.hypot(board.x - (rect.x + rect.width / 2), board.y - (rect.y + rect.height / 2)) > reach) continue;
+			const outline = shapeOutline(scene.items.get(nodeId)?.shape);
+			const closest = boundaryAnchorOnRect(nodeId, rect, outline, board);
+			const at = closest === undefined ? undefined : resolveAnchor(closest, { nodes: { [nodeId]: rect } }).point;
+			if (closest === undefined || at === undefined) continue;
+			const distance = Math.hypot(at.x - board.x, at.y - board.y);
+			const inside = insideRect(rect, board);
+			if (!inside && distance > magnet) continue;
+			const facing = inside && distance > magnet && toward !== undefined ? facingSideOfRect(rect, toward) : undefined;
+			const anchor = facing === undefined
+				? snapToStandardPoint(closest, rect, outline, snap)
+				: sideAnchorOnOutline(nodeId, outline, facing, 0.5) ?? closest;
+			const area = rect.width * rect.height;
+			// The node the pointer is in wins over a neighbour it is only near,
+			// and the smallest such node over a group around it.
+			if (best === undefined || (inside && !best.inside)
+				|| (inside === best.inside && (inside ? area < best.area : distance < best.distance))) {
+				best = { nodeId, anchor, distance, inside, area };
+			}
+		}
+		if (best === undefined) return { board, anchor: { type: "free", x: board.x, y: board.y } };
+		const rect = geometry.nodes![best.nodeId]!;
+		const at = resolveAnchor(best.anchor, { nodes: { [best.nodeId]: rect } }).point;
+		return { board: at === undefined ? board : { x: at.x, y: at.y }, anchor: best.anchor, nodeId: best.nodeId };
+	}
+
+	/** The node and point at the end of a connector opposite `end`. */
+	private oppositeEnd(edgeId: string, end: "from" | "to"): { readonly nodeId?: string; readonly point?: { readonly x: number; readonly y: number } } {
+		const other = end === "from" ? "to" : "from";
+		const document = this.currentRawDocument;
+		const edges = readRuntime(document, "edges");
+		const edge = Array.isArray(edges) ? (edges as readonly unknown[]).find((item) => readRuntime(item, "id") === edgeId) : undefined;
+		const stored = readRuntime(readRuntime(readRuntime(readRuntime(document, "miroCanvas"), "localOverrides"), edgeId), "connectorAnchors");
+		const free = readRuntime(readRuntime(stored, other), "type") === "free";
+		const nodeId = readRuntime(edge, `${other}Node`);
+		const route = this.landingGeometry().geometry.edges?.[edgeId];
+		const point = other === "to" ? route?.end : route?.start;
+		return {
+			...(free || typeof nodeId !== "string" ? {} : { nodeId }),
+			...(point === undefined ? {} : { point }),
+		};
+	}
+
+	/** Where a pulled connector or a dragged end would land, for the live preview. */
+	private previewLanding(
+		gesture: ConnectorGesture,
+		point: { readonly x: number; readonly y: number },
+	): { readonly x: number; readonly y: number } | undefined {
+		let landing: ReturnType<M1CanvasSession["connectorLanding"]>;
+		if (gesture.kind === "connect") {
+			landing = this.connectorLanding(point, gesture.sourceId, this.pulledFrom(gesture.sourceId, gesture.side, gesture.position));
+		} else {
+			const other = this.oppositeEnd(gesture.edgeId, gesture.end);
+			landing = this.connectorLanding(point, other.nodeId, other.point);
+		}
+		return landing === undefined ? undefined : this.viewportPoint(landing.board);
 	}
 
 	private createEdge(
 		fromNode: string,
 		toNode: string,
 		side: HandleSide,
-		dropPoint?: { readonly x: number; readonly y: number },
-		documentOverride?: unknown,
 		position = 0.5,
+		toAnchor?: CanvasAnchor,
+		documentOverride?: unknown,
 	): void {
 		this.readInteractionState();
 		this.authoring ??= createCanvasAuthoring(this.view);
@@ -783,12 +876,10 @@ export class M1CanvasSession {
 		// The connector leaves exactly where it was pulled from.
 		const fromAnchor = nodeBoundaryAnchorAtSide(anchorDocument, fromNode, side, position);
 		const fromPoint = fromAnchor === undefined ? undefined : resolveAnchor(fromAnchor, geometry).point;
-		const droppedOnBoard = dropPoint === undefined ? undefined : this.boardPoint(dropPoint);
 		const facing = fromPoint === undefined ? undefined : facingSide(anchorDocument, toNode, fromPoint);
-		const toAnchor = droppedOnBoard !== undefined
-			? this.dropAnchor(anchorDocument, toNode, droppedOnBoard, fromPoint)
-			: facing === undefined ? undefined : nodeBoundaryAnchorAtSide(anchorDocument, toNode, facing, 0.5);
-		if (fromAnchor === undefined || toAnchor === undefined) {
+		const target = toAnchor
+			?? (facing === undefined ? undefined : nodeBoundaryAnchorAtSide(anchorDocument, toNode, facing, 0.5));
+		if (fromAnchor === undefined || target === undefined) {
 			this.addDiagnostic(`A connector endpoint could not be measured on the node outline (${fromAnchor === undefined ? fromNode : toNode}).`);
 		}
 		const nativeSide = (anchor: CanvasAnchor | undefined, fallback: HandleSide): ConnectorSide => {
@@ -801,9 +892,9 @@ export class M1CanvasSession {
 		const result = this.authoring.createConnector({
 			fromNode, toNode,
 			fromSide: nativeSide(fromAnchor, side),
-			toSide: nativeSide(toAnchor, side === "top" ? "bottom" : side === "bottom" ? "top" : side === "left" ? "right" : "left"),
+			toSide: nativeSide(target, side === "top" ? "bottom" : side === "bottom" ? "top" : side === "left" ? "right" : "left"),
 			...(fromAnchor === undefined ? {} : { fromAnchor }),
-			...(toAnchor === undefined ? {} : { toAnchor }),
+			...(target === undefined ? {} : { toAnchor: target }),
 		});
 		if (!result.ok) {
 			this.addDiagnostic(firstProblem(result.diagnostics) ?? "Canvas rejected the new connector.");
@@ -811,63 +902,24 @@ export class M1CanvasSession {
 		this.refresh();
 	}
 
-	private nodeAtPoint(point: { readonly x: number; readonly y: number }, exclude: string | undefined): string | undefined {
-		let nearest: { readonly id: string; readonly distance: number } | undefined;
-		for (const element of this.adapter.getNodes() ?? []) {
-			const id = readCanvasElementId(element);
-			if (id === undefined || id === exclude) {
-				continue;
-			}
-			const rect = boundingRect(readCanvasElementDom(element));
-			if (rect === undefined) {
-				continue;
-			}
-			if (point.x >= rect.left && point.x <= rect.right && point.y >= rect.top && point.y <= rect.bottom) {
-				return id;
-			}
-			// Releasing a connection a few pixels outside a node is still an
-			// attempt to connect it, so the nearest node within a small reach
-			// wins rather than the gesture being refused.
-			const distance = Math.hypot(
-				Math.max(rect.left - point.x, 0, point.x - rect.right),
-				Math.max(rect.top - point.y, 0, point.y - rect.bottom),
-			);
-			if (distance <= CONNECT_REACH && (nearest === undefined || distance < nearest.distance)) {
-				nearest = { id, distance };
-			}
-		}
-		return nearest?.id;
-	}
-
 	/**
 	 * Move one end of a connector to where it was dropped.
 	 *
-	 * The end lands on the node under the pointer - anywhere on its outline,
-	 * snapped to a standard point when one is close - and never on the node the
-	 * other end already holds.
+	 * Near or on a node the end attaches to its outline; anywhere else it is
+	 * left free at that point, while the edge keeps its node as the native
+	 * fallback.  It never lands on the node the other end already holds.
 	 */
 	private moveConnectorEnd(edgeId: string, end: "from" | "to", point: { readonly x: number; readonly y: number }): void {
 		this.readInteractionState();
-		const document = this.currentRawDocument;
-		const edges = readRuntime(document, "edges");
-		const edge = Array.isArray(edges) ? (edges as readonly unknown[]).find((item) => readRuntime(item, "id") === edgeId) : undefined;
-		const other = readRuntime(edge, end === "from" ? "toNode" : "fromNode");
-		const nodeId = this.nodeAtPoint(point, typeof other === "string" ? other : undefined);
-		const drop = this.boardPoint(point);
-		if (edge === undefined || nodeId === undefined || drop === undefined) {
-			this.addDiagnostic("Drop a connector end on a node other than the one its other end is on.");
-			this.refresh();
-			return;
-		}
-		const route = buildCanvasAnchorGeometry(document).edges?.[edgeId];
-		const anchor = this.dropAnchor(document, nodeId, drop, end === "from" ? route?.end : route?.start);
-		if (anchor === undefined) {
-			this.addDiagnostic(`A connector end could not be measured on the outline of ${nodeId}.`);
+		const other = this.oppositeEnd(edgeId, end);
+		const landing = this.connectorLanding(point, other.nodeId, other.point);
+		if (landing === undefined) {
+			this.addDiagnostic("The connector end could not be placed at that point.");
 			this.refresh();
 			return;
 		}
 		this.authoring ??= createCanvasAuthoring(this.view);
-		const result = this.authoring.updateConnectorEndpoint({ edgeId, end, anchor });
+		const result = this.authoring.updateConnectorEndpoint({ edgeId, end, anchor: landing.anchor });
 		if (!result.ok) {
 			this.addDiagnostic(firstProblem(result.diagnostics) ?? "Canvas rejected the connector end.");
 		}
@@ -877,19 +929,26 @@ export class M1CanvasSession {
 	/** Where a selected connector's ends are, in the handle overlay's coordinates. */
 	private connectorEnds(edgeId: string): SelectionHandlesState["endpoints"] {
 		const route = buildCanvasAnchorGeometry(this.currentRawDocument).edges?.[edgeId];
-		const root = boundingRect(this.root);
 		const overlay = this.overlayOrigin();
-		if (route?.start === undefined || route.end === undefined || root === undefined || overlay === undefined) return undefined;
+		if (route?.start === undefined || route.end === undefined || overlay === undefined) return undefined;
 		const local = (point: { readonly x: number; readonly y: number }) => {
-			const screen = this.viewport.boardToScreen(point);
-			return screen === undefined ? undefined : { x: screen.x + root.left - overlay.left, y: screen.y + root.top - overlay.top };
+			const screen = this.viewportPoint(point);
+			return screen === undefined ? undefined : { x: screen.x - overlay.left, y: screen.y - overlay.top };
 		};
 		const from = local(route.start), to = local(route.end);
 		return from === undefined || to === undefined ? undefined : { from, to };
 	}
 
-	/** Place a node beside the selection and connect it, in that order. */
-	private createConnectedNode(fromNode: string, side: HandleSide, position: number = 0.5): void {
+	/**
+	 * Place a node beside the selection, or where a pulled connector was
+	 * dropped, and connect it, in that order.
+	 */
+	private createConnectedNode(
+		fromNode: string,
+		side: HandleSide,
+		position: number = 0.5,
+		at?: { readonly x: number; readonly y: number },
+	): void {
 		// The gesture pins its source across native selection changes, but the
 		// node must still exist in the live document when the click commits.
 		this.readInteractionState();
@@ -905,16 +964,16 @@ export class M1CanvasSession {
 			this.addDiagnostic("The selected node has no usable geometry; a connected node was not created.");
 			return;
 		}
-		// The new node goes the way the point faces now, not the way the side
-		// faced before the node was turned: an upside-down node's top point
-		// creates below it.  The new node itself stays upright.
+		// Beside the node, the new node goes the way the point faces now, not
+		// the way the side faced before the node was turned: an upside-down
+		// node's top point creates below it.  The new node itself stays upright.
 		const gap = 80;
 		const rotation = buildSourceScene(this.currentRawDocument).items.get(fromNode)?.rotation ?? this.rotationFor(fromNode);
 		const direction = sideDirection(side, rotation);
 		const reach = (side === "left" || side === "right" ? width : height) / 2
 			+ gap + (Math.abs(direction.x) * width + Math.abs(direction.y) * height) / 2;
-		const centerX = x + width / 2 + direction.x * reach;
-		const centerY = y + height / 2 + direction.y * reach;
+		const centerX = at?.x ?? x + width / 2 + direction.x * reach;
+		const centerY = at?.y ?? y + height / 2 + direction.y * reach;
 		this.authoring ??= createCanvasAuthoring(this.view);
 		const created = this.authoring.createShape({
 			shape: "rectangle", text: "", width, height,
@@ -925,7 +984,7 @@ export class M1CanvasSession {
 			this.refresh();
 			return;
 		}
-		this.createEdge(fromNode, created.nodeId, side, undefined, created.document, position);
+		this.createEdge(fromNode, created.nodeId, side, position, undefined, created.document);
 	}
 
 	private applyElementStyle(patch: SelectionStylePatch): void {

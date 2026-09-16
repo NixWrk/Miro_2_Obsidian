@@ -398,3 +398,23 @@ describe("rotation controls", () => {
     expect(rightAngleStep(-180, 1)).toBe(-90);
   });
 });
+
+describe("where a dragged end lands", () => {
+  it("draws the dragged end where the host would place it, not under the pointer", () => {
+    const landings: unknown[] = [];
+    const handles = new SelectionHandles({
+      onRotate: () => {}, onCancelRotation: () => {}, onConnect: () => {}, onCreateConnected: () => {},
+      onMoveEndpoint: () => {},
+      previewEnd: (gesture, point) => { landings.push(gesture); return { x: point.x - 7, y: 300 }; },
+    }, { document: new FakeDocument() as unknown as Document });
+    const endpoints = { from: { x: 120, y: 80 }, to: { x: 420, y: 160 } };
+    handles.update({ rotation: 0, editable: true, isEdge: true, selectedIds: ["e1"], endpoints });
+    const root = handles.element as unknown as FakeElement;
+    const grip = descendants(root).find((item) => item.attributes.get("data-connector-end") === "to")!;
+    grip.dispatch("pointerdown", { clientX: 420, clientY: 160, pointerId: 41 });
+    handles.handlePointerMove({ clientX: 500, clientY: 205 });
+    expect(grip.style.left).toBe("493px");
+    expect(grip.style.top).toBe("300px");
+    expect(landings).toEqual([{ kind: "end", edgeId: "e1", end: "to" }]);
+  });
+});
