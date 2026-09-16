@@ -41,4 +41,20 @@ describe("effective selection toolbar presentation", () => {
       endCap: "erd_many", width: 5, color: "#123456",
     });
   });
+
+  it("shows a plain Canvas edge with the ends Obsidian draws for it", () => {
+    const document = {
+      nodes: [{ id: "a", type: "text", text: "", x: 0, y: 0, width: 10, height: 10 },
+        { id: "b", type: "text", text: "", x: 50, y: 0, width: 10, height: 10 }],
+      edges: [
+        { id: "plain", fromNode: "a", toNode: "b" },
+        { id: "both", fromNode: "a", toNode: "b", fromEnd: "arrow", toEnd: "arrow" },
+        { id: "bare", fromNode: "a", toNode: "b", toEnd: "none" },
+      ],
+    };
+    expect(resolveSelectionToolbarPresentation(document, "plain").style.connector).toMatchObject({ startCap: "none", endCap: "arrow" });
+    expect(resolveSelectionToolbarPresentation(document, "both").style.connector).toMatchObject({ startCap: "arrow", endCap: "arrow" });
+    expect(resolveSelectionToolbarPresentation(document, "bare").style.connector).toMatchObject({ startCap: "none", endCap: "none" });
+    expect(resolveSelectionToolbarPresentation(document, "a").style.connector).toBeUndefined();
+  });
 });

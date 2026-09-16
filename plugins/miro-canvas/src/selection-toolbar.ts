@@ -7,10 +7,13 @@
  * separately because only `CanvasAuthoring` can write them.  The toolbar owns
  * no geometry: the host supplies an already-resolved viewport placement.
  *
- * The layout follows Miro: one compact row of icon buttons, each opening a
- * popover, with everything rare behind an overflow menu.  Controls that do not
- * apply to the current selection are removed from the row rather than shown
- * disabled.
+ * The layout follows Miro's logic in Obsidian's own look: one compact row of
+ * small pictures, each opening a popover of further pictures, with the words
+ * kept for hover hints.  A node and a connector get different rows, and a
+ * control that does not apply to the selection is removed rather than shown
+ * disabled.  Interface icons come from Obsidian through the host's `setIcon`;
+ * shapes, line ends and line kinds are drawn here, because no icon set has
+ * them.
  */
 
 import {
@@ -22,6 +25,19 @@ import {
   type TypographySettings,
   type VerticalAlign,
 } from "./appearance";
+import {
+  CAP_LABELS,
+  CAP_PATHS,
+  ROUTE_ICON_PATHS,
+  ROUTE_LABELS,
+  STROKE_LABELS,
+  capFilled,
+  capReach,
+  strokeDash,
+  type ConnectorCap,
+  type ConnectorRoute,
+  type ConnectorStroke,
+} from "./connector-style";
 import {
   SHAPE_CATALOG,
   shapeCatalogEntry,
@@ -40,7 +56,7 @@ import {
 
 export type SelectionKind = "shape" | "text" | "sticky" | "edge" | "frame" | "media";
 export type BorderStyle = "solid" | "dashed" | "dotted" | "none";
-export type { ShapeKind } from "./shape-catalog";
+export type { ShapeKind };
 
 /** Viewport pixels for the top-center of the selection, resolved by the host. */
 export interface SelectionToolbarPlacement {
@@ -83,44 +99,70 @@ export interface SelectionToolbarOptions {
   readonly document?: Document;
   readonly className?: string;
   readonly title?: string;
+  /** Draws a named Obsidian icon into an element; without it buttons fall back to glyphs. */
+  readonly setIcon?: (element: HTMLElement, icon: string) => void;
 }
 
 const MIN_FONT_SIZE = 6;
 const MAX_FONT_SIZE = 256;
 const MAX_BORDER_WIDTH = 100;
+/** The border and line sliders cover the widths people pick. */
+const BORDER_SLIDER_MAX = 20;
+const LINE_SLIDER_MAX = 24;
 const FONT_FAMILIES = [
   "Open Sans", "Inter", "Roboto", "Noto Sans", "Arial", "Georgia",
   "Times New Roman", "Courier New", "system-ui", "sans-serif",
 ] as const;
-const ALIGNMENTS: readonly TextAlignment[] = ["left", "center", "right", "justify"];
-const VERTICAL_ALIGNMENTS: readonly VerticalAlign[] = ["top", "center", "bottom"];
-const BORDER_STYLES: readonly BorderStyle[] = ["solid", "dashed", "dotted", "none"];
-const FORMATS = ["bold", "italic", "underline", "strike"] as const;
-const FORMAT_LABELS: Readonly<Record<(typeof FORMATS)[number], string>> = Object.freeze({
-  bold: "B", italic: "I", underline: "U", strike: "S",
-});
-/** Shapes are picked by their picture; the words are in the hover text. */
+const ALIGNMENTS: readonly { readonly value: TextAlignment; readonly icon: string; readonly label: string }[] = [
+  { value: "left", icon: "align-left", label: "Align left" },
+  { value: "center", icon: "align-center", label: "Align center" },
+  { value: "right", icon: "align-right", label: "Align right" },
+  { value: "justify", icon: "align-justify", label: "Justify" },
+];
+const VERTICAL_ALIGNMENTS: readonly { readonly value: VerticalAlign; readonly icon: string; readonly label: string }[] = [
+  { value: "top", icon: "align-vertical-justify-start", label: "Align top" },
+  { value: "center", icon: "align-vertical-justify-center", label: "Align middle" },
+  { value: "bottom", icon: "align-vertical-justify-end", label: "Align bottom" },
+];
+const FORMATS: readonly {
+  readonly format: "bold" | "italic" | "underline" | "strike";
+  readonly icon: string;
+  readonly glyph: string;
+  readonly label: string;
+}[] = [
+  { format: "bold", icon: "bold", glyph: "B", label: "Bold" },
+  { format: "italic", icon: "italic", glyph: "I", label: "Italic" },
+  { format: "underline", icon: "underline", glyph: "U", label: "Underline" },
+  { format: "strike", icon: "strikethrough", glyph: "S", label: "Strikethrough" },
+];
+const BORDER_STYLES: readonly { readonly value: BorderStyle; readonly label: string }[] = [
+  { value: "solid", label: "Solid border" },
+  { value: "dashed", label: "Dashed border" },
+  { value: "dotted", label: "Dotted border" },
+  { value: "none", label: "No border" },
+];
 const SHAPE_SECTIONS: readonly { readonly section: ShapeSection; readonly title: string }[] = [
   { section: "basic", title: "Basic" },
   { section: "flowchart", title: "Flowchart" },
 ];
 /** Hover text for a picture should not make a person wait a second for it. */
-const SHAPE_TOOLTIP_DELAY = "150";
+const PICTURE_TOOLTIP_DELAY = "150";
+const BUTTON_TOOLTIP_DELAY = "400";
 const SVG_NS = "http://www.w3.org/2000/svg";
-const COLOR_BUTTONS: readonly {
-  readonly slot: ColorSlot; readonly label: string; readonly glyph: string; readonly forEdge: boolean;
-}[] = [
-  { slot: "text", label: "Text color", glyph: "A", forEdge: false },
-  { slot: "fill", label: "Fill color", glyph: "▨", forEdge: false },
-  { slot: "border", label: "Border color", glyph: "◯", forEdge: false },
-  { slot: "edge", label: "Line color", glyph: "◯", forEdge: true },
-];
 
-/** Token labels are derived so a new Miro kind never needs a parallel table. */
-function tokenLabel(token: string): string {
-  const words = token.replace(/^flow_chart_/u, "").replace(/^erd?_/u, "").split("_").join(" ").trim();
-  return words.length === 0 ? token : words.charAt(0).toUpperCase() + words.slice(1);
-}
+/** Colour popovers: which appearance slot each one writes and how its button looks. */
+const COLOR_SLOTS: readonly {
+  readonly slot: ColorSlot;
+  readonly label: string;
+  readonly valueLabel: string;
+  readonly look: "text" | "fill" | "ring";
+  readonly forEdge: boolean;
+}[] = [
+  { slot: "text", label: "Text color", valueLabel: "Text color", look: "text", forEdge: false },
+  { slot: "fill", label: "Fill color", valueLabel: "Fill color", look: "fill", forEdge: false },
+  { slot: "border", label: "Border", valueLabel: "Border color", look: "ring", forEdge: false },
+  { slot: "edge", label: "Line color", valueLabel: "Line color", look: "fill", forEdge: true },
+];
 
 function hasDocument(value: unknown): value is Document {
   return value !== null && typeof value === "object"
@@ -145,53 +187,20 @@ function make<K extends keyof HTMLElementTagNameMap>(
  * Only `aria-label` is set: Obsidian renders its own tooltip from it, so a
  * `title` on the same element would show a second, native tooltip beside it.
  */
-function makeButton(document: Document, label: string, title: string, className = ""): HTMLButtonElement {
-  const button = make(document, "button", `miro-canvas-toolbar__button ${className}`.trim(), label);
+function makeButton(document: Document, title: string, className = ""): HTMLButtonElement {
+  const button = make(document, "button", `miro-canvas-toolbar__button ${className}`.trim());
   button.type = "button";
   button.setAttribute("aria-label", title);
+  button.setAttribute("data-tooltip-delay", BUTTON_TOOLTIP_DELAY);
   return button;
 }
 
-function makeSelect(document: Document, title: string, values: readonly string[], className = ""): HTMLSelectElement {
-  const select = make(document, "select", `miro-canvas-toolbar__select ${className}`.trim());
-  select.setAttribute("aria-label", title);
-  for (const value of values) {
-    const option = make(document, "option", undefined, tokenLabel(value));
-    option.value = value;
-    append(select, option);
-  }
-  return select;
-}
-
-/** An outline picture of a catalogue entry, or undefined where the document cannot draw SVG. */
-function makeShapeIcon(document: Document, item: ShapeCatalogEntry): Element | undefined {
-  const d = shapePath(item.kind);
-  if (d === undefined || typeof document.createElementNS !== "function") return undefined;
-  const svg = document.createElementNS(SVG_NS, "svg");
-  svg.setAttribute("class", `miro-canvas-shape-icon miro-canvas-shape-icon--${item.aspect}`);
-  // Some outlines bulge a little past the 0..100 box, as a cloud does.
-  svg.setAttribute("viewBox", "-10 -10 120 120");
-  svg.setAttribute("preserveAspectRatio", "none");
-  svg.setAttribute("aria-hidden", "true");
-  const path = document.createElementNS(SVG_NS, "path");
-  path.setAttribute("d", d);
-  path.setAttribute("vector-effect", "non-scaling-stroke");
-  svg.appendChild(path);
-  return svg;
-}
-
-/** Show one picture inside a button, falling back to its name. */
-function showShapeIcon(document: Document, button: HTMLButtonElement, item: ShapeCatalogEntry, fallback: string): void {
-  if (button.getAttribute("data-shape-icon") === item.kind) return;
-  button.setAttribute("data-shape-icon", item.kind);
-  while (button.firstChild !== null) button.removeChild(button.firstChild);
-  const icon = makeShapeIcon(document, item);
-  if (icon === undefined) {
-    button.textContent = fallback;
-  } else {
-    button.textContent = "";
-    button.appendChild(icon);
-  }
+/** One choice among several: it carries its value and shows whether it is the current one. */
+function makeChoice(document: Document, title: string, value: string, className = ""): HTMLButtonElement {
+  const button = makeButton(document, title, className);
+  button.setAttribute("data-value", value);
+  button.setAttribute("aria-pressed", "false");
+  return button;
 }
 
 function makeNumber(
@@ -199,6 +208,16 @@ function makeNumber(
 ): HTMLInputElement {
   const input = make(document, "input", `miro-canvas-toolbar__number ${className}`.trim());
   input.type = "number";
+  input.min = String(min);
+  input.max = String(max);
+  input.step = "1";
+  input.setAttribute("aria-label", title);
+  return input;
+}
+
+function makeRange(document: Document, title: string, min: number, max: number): HTMLInputElement {
+  const input = make(document, "input", "miro-canvas-toolbar__range");
+  input.type = "range";
   input.min = String(min);
   input.max = String(max);
   input.step = "1";
@@ -219,10 +238,118 @@ function finiteNumber(value: unknown): number | undefined {
   return Number.isFinite(parsed) ? parsed : undefined;
 }
 
+function empty(element: Element): void {
+  while (element.firstChild !== null) element.removeChild(element.firstChild);
+}
+
+/** Press the one choice carrying `value` and release the rest. */
+function pressWhere(options: readonly HTMLElement[], value: string): void {
+  for (const option of options) {
+    option.setAttribute("aria-pressed", option.getAttribute("data-value") === value ? "true" : "false");
+  }
+}
+
+/** A small drawing, or undefined where the document cannot draw SVG. */
+function makeSvg(document: Document, className: string, viewBox: string): SVGSVGElement | undefined {
+  if (typeof document.createElementNS !== "function") return undefined;
+  const svg = document.createElementNS(SVG_NS, "svg");
+  svg.setAttribute("class", className);
+  svg.setAttribute("viewBox", viewBox);
+  svg.setAttribute("aria-hidden", "true");
+  return svg;
+}
+
+function addPath(document: Document, svg: SVGSVGElement, d: string, attributes: Readonly<Record<string, string>> = {}): void {
+  const path = document.createElementNS(SVG_NS, "path");
+  path.setAttribute("d", d);
+  for (const [key, value] of Object.entries(attributes)) path.setAttribute(key, value);
+  svg.appendChild(path);
+}
+
+/** An outline picture of a catalogue entry. */
+function shapePicture(document: Document, item: ShapeCatalogEntry): SVGSVGElement | undefined {
+  const d = shapePath(item.kind);
+  if (d === undefined) return undefined;
+  // Some outlines bulge a little past the 0..100 box, as a cloud does.
+  const svg = makeSvg(document, `miro-canvas-shape-icon miro-canvas-shape-icon--${item.aspect}`, "-10 -10 120 120");
+  if (svg === undefined) return undefined;
+  svg.setAttribute("preserveAspectRatio", "none");
+  addPath(document, svg, d, { "vector-effect": "non-scaling-stroke" });
+  return svg;
+}
+
+/** A short line ending in a cap, drawn at the right end or, for a start, at the left. */
+function capPicture(document: Document, cap: string, at: "start" | "end"): SVGSVGElement | undefined {
+  const svg = makeSvg(document, "miro-canvas-line-icon", "0 0 32 16");
+  if (svg === undefined) return undefined;
+  const tip = at === "end" ? 28 : 4;
+  const back = capReach(cap) * 0.9;
+  addPath(document, svg, at === "end" ? `M4 8H${tip - back}` : `M${tip + back} 8H28`);
+  const d = CAP_PATHS[cap];
+  if (d !== undefined) {
+    addPath(document, svg, d, {
+      transform: `translate(${tip} 8) scale(${at === "end" ? 0.9 : -0.9} 0.9)`,
+      class: capFilled(cap) ? "is-filled" : "is-outline",
+      "vector-effect": "non-scaling-stroke",
+    });
+  }
+  return svg;
+}
+
+function routePicture(document: Document, route: ConnectorRoute): SVGSVGElement | undefined {
+  const svg = makeSvg(document, "miro-canvas-line-icon miro-canvas-line-icon--square", "0 0 24 24");
+  if (svg !== undefined) addPath(document, svg, ROUTE_ICON_PATHS[route]);
+  return svg;
+}
+
+function strokePicture(document: Document, stroke: ConnectorStroke): SVGSVGElement | undefined {
+  const svg = makeSvg(document, "miro-canvas-line-icon", "0 0 32 16");
+  if (svg !== undefined) {
+    addPath(document, svg, "M3 8H29", { "stroke-dasharray": stroke === "dotted" ? "0.5 4" : strokeDash(stroke) });
+  }
+  return svg;
+}
+
+function borderPicture(document: Document, style: BorderStyle): SVGSVGElement | undefined {
+  const svg = makeSvg(document, "miro-canvas-line-icon miro-canvas-line-icon--square", "0 0 24 24");
+  if (svg === undefined) return undefined;
+  if (style === "none") {
+    addPath(document, svg, "M5 5H19V19H5Z", { class: "is-faint", "stroke-dasharray": "2 3" });
+    addPath(document, svg, "M4 20L20 4");
+    return svg;
+  }
+  addPath(document, svg, "M5 5H19V19H5Z", {
+    "stroke-dasharray": style === "dotted" ? "0.5 3.5" : style === "dashed" ? "4 3" : "none",
+  });
+  return svg;
+}
+
+/** Put one drawing in a button, replacing what it showed; without a drawing the glyph stays. */
+function showPicture(button: HTMLElement, key: string, picture: () => Element | undefined, glyph: string): void {
+  if (button.getAttribute("data-picture") === key) return;
+  button.setAttribute("data-picture", key);
+  empty(button);
+  const drawn = picture();
+  if (drawn === undefined) {
+    button.textContent = glyph;
+    return;
+  }
+  button.textContent = "";
+  button.appendChild(drawn);
+}
+
 interface Popover {
   readonly host: HTMLElement;
   readonly button: HTMLButtonElement;
   readonly panel: HTMLElement;
+}
+
+interface ColorRefs {
+  readonly popover: Popover;
+  readonly input: HTMLInputElement;
+  readonly clear: HTMLButtonElement;
+  readonly swatches: HTMLElement;
+  readonly recent: HTMLElement;
 }
 
 interface ToolbarRefs {
@@ -231,34 +358,35 @@ interface ToolbarRefs {
   /** One button per catalogue entry, keyed by the entry's kind. */
   readonly shapeOptions: Readonly<Record<string, HTMLButtonElement>>;
   readonly textGroup: HTMLElement;
-  readonly fontFamily: HTMLSelectElement;
+  readonly font: Popover;
+  readonly fontOptions: readonly HTMLButtonElement[];
   readonly fontSize: HTMLInputElement;
   readonly fontSizeDown: HTMLButtonElement;
   readonly fontSizeUp: HTMLButtonElement;
-  readonly bold: HTMLButtonElement;
+  readonly format: Popover;
+  readonly formats: Readonly<Record<string, HTMLButtonElement>>;
   readonly align: Popover;
-  readonly alignment: HTMLSelectElement;
-  readonly verticalAlign: HTMLSelectElement;
-  readonly colors: Readonly<Record<string, Popover>>;
-  readonly colorInputs: Readonly<Record<string, HTMLInputElement>>;
-  readonly colorClears: Readonly<Record<string, HTMLButtonElement>>;
-  readonly colorSwatches: Readonly<Record<string, HTMLElement>>;
-  readonly colorRecent: Readonly<Record<string, HTMLElement>>;
+  readonly alignments: readonly HTMLButtonElement[];
+  readonly verticalAlignments: readonly HTMLButtonElement[];
+  readonly lineHeight: HTMLInputElement;
+  readonly edgeGroup: HTMLElement;
+  readonly startCap: Popover;
+  readonly endCap: Popover;
+  readonly startCaps: readonly HTMLButtonElement[];
+  readonly endCaps: readonly HTMLButtonElement[];
+  readonly swapEnds: HTMLButtonElement;
+  readonly line: Popover;
+  readonly routes: readonly HTMLButtonElement[];
+  readonly strokes: readonly HTMLButtonElement[];
+  readonly lineWidth: HTMLInputElement;
+  readonly lineWidthValue: HTMLElement;
+  readonly colors: Readonly<Record<string, ColorRefs>>;
+  readonly borderStyles: readonly HTMLButtonElement[];
+  readonly borderWidth: HTMLInputElement;
+  readonly borderWidthValue: HTMLElement;
   readonly lock: HTMLButtonElement;
   /** Where the host puts the native Canvas menu, so a selection has one menu. */
   readonly nativeSlot: HTMLElement;
-  readonly more: Popover;
-  readonly formats: Readonly<Record<(typeof FORMATS)[number], HTMLButtonElement>>;
-  readonly lineHeight: HTMLInputElement;
-  readonly borderGroup: HTMLElement;
-  readonly borderStyle: HTMLSelectElement;
-  readonly borderWidth: HTMLInputElement;
-  readonly connectorGroup: HTMLElement;
-  readonly route: HTMLSelectElement;
-  readonly strokeStyle: HTMLSelectElement;
-  readonly startCap: HTMLSelectElement;
-  readonly endCap: HTMLSelectElement;
-  readonly connectorWidth: HTMLInputElement;
   readonly status: HTMLElement;
 }
 
@@ -266,6 +394,7 @@ export class SelectionToolbar {
   public readonly element: HTMLElement;
   private readonly document: Document | undefined;
   private readonly actions: SelectionToolbarActions;
+  private readonly setIcon: SelectionToolbarOptions["setIcon"];
   private readonly refs: ToolbarRefs | undefined;
   private readonly listeners: Array<() => void> = [];
   private readonly popovers: Popover[] = [];
@@ -274,6 +403,7 @@ export class SelectionToolbar {
 
   public constructor(actions: SelectionToolbarActions, options: SelectionToolbarOptions = {}) {
     this.actions = actions;
+    this.setIcon = options.setIcon;
     this.document = options.document ?? (typeof document !== "undefined" ? document : undefined);
     if (!hasDocument(this.document)) {
       this.element = {} as HTMLElement;
@@ -293,11 +423,26 @@ export class SelectionToolbar {
     return this.refs?.nativeSlot;
   }
 
+  /** Draw an Obsidian icon, or a glyph where the host has none to give. */
+  private icon(element: HTMLElement, name: string, glyph: string): void {
+    if (element.getAttribute("data-icon") === name) return;
+    element.setAttribute("data-icon", name);
+    if (this.setIcon !== undefined) {
+      try {
+        this.setIcon(element, name);
+        return;
+      } catch {
+        // A host that cannot draw the icon still gets a readable button.
+      }
+    }
+    element.textContent = glyph;
+  }
+
   /** A popover is a button plus a panel that only this toolbar can open. */
-  private makePopover(parent: HTMLElement, glyph: string, title: string, className = ""): Popover {
+  private makePopover(parent: HTMLElement, title: string, className = ""): Popover {
     const document = this.document!;
     const host = append(parent, make(document, "span", "miro-canvas-toolbar__popover"));
-    const button = append(host, makeButton(document, glyph, title, className));
+    const button = append(host, makeButton(document, title, className));
     button.setAttribute("aria-haspopup", "true");
     button.setAttribute("aria-expanded", "false");
     const panel = append(host, make(document, "div", "miro-canvas-toolbar__panel"));
@@ -323,95 +468,160 @@ export class SelectionToolbar {
     }
   }
 
+  /** A block inside a panel, under an optional small heading. */
+  private block(panel: HTMLElement, title: string | undefined, className = "miro-canvas-toolbar__row"): HTMLElement {
+    const document = this.document!;
+    if (title !== undefined) append(panel, make(document, "div", "miro-canvas-toolbar__heading", title));
+    return append(panel, make(document, "div", className));
+  }
+
+  /** A row of choices drawn as pictures. */
+  private choices<T extends string>(
+    parent: HTMLElement,
+    values: readonly T[],
+    label: (value: T) => string,
+    picture: (value: T) => Element | undefined,
+    glyph: (value: T) => string,
+  ): HTMLButtonElement[] {
+    return values.map((value) => {
+      const option = append(parent, makeChoice(this.document!, label(value), value, "miro-canvas-toolbar__button--picture"));
+      option.setAttribute("data-tooltip-delay", PICTURE_TOOLTIP_DELAY);
+      showPicture(option, value, () => picture(value), glyph(value));
+      return option;
+    });
+  }
+
   private build(root: HTMLElement): ToolbarRefs {
     const document = this.document!;
     const bar = append(root, make(document, "div", "miro-canvas-toolbar__bar"));
 
-    const shape = this.makePopover(bar, "", "Shape", "miro-canvas-toolbar__button--shape");
+    // A node's shape: pictures only, every picture once.
+    const shape = this.makePopover(bar, "Shape", "miro-canvas-toolbar__button--shape");
     shape.panel.className = `${shape.panel.className} miro-canvas-toolbar__panel--shapes`;
-    showShapeIcon(document, shape.button, SHAPE_CATALOG[0]!, "▭");
-    // Every picture appears once: a flowchart symbol drawn like a basic shape
-    // is that basic shape, and its meaning is in the basic shape's hover text.
+    showPicture(shape.button, SHAPE_CATALOG[0]!.kind, () => shapePicture(document, SHAPE_CATALOG[0]!), "▭");
     const shapeOptions: Record<string, HTMLButtonElement> = {};
     for (const { section, title } of SHAPE_SECTIONS) {
-      append(shape.panel, make(document, "div", "miro-canvas-toolbar__heading", title));
-      const grid = append(shape.panel, make(document, "div", "miro-canvas-toolbar__shapes"));
-      for (const item of SHAPE_CATALOG.filter((entry) => entry.section === section)) {
-        const option = append(grid, makeButton(
-          document, "", shapeCatalogLabel(item), "miro-canvas-toolbar__button--shape-option",
-        ));
-        option.setAttribute("data-shape", item.kind);
-        option.setAttribute("data-tooltip-delay", SHAPE_TOOLTIP_DELAY);
-        option.setAttribute("aria-pressed", "false");
-        showShapeIcon(document, option, item, item.name);
-        shapeOptions[item.kind] = option;
+      const grid = this.block(shape.panel, title, "miro-canvas-toolbar__pictures miro-canvas-toolbar__pictures--shapes");
+      const items = SHAPE_CATALOG.filter((entry) => entry.section === section);
+      const buttons = this.choices(
+        grid, items.map((item) => item.kind), (kind) => shapeCatalogLabel(shapeCatalogEntry(kind)!),
+        (kind) => shapePicture(document, shapeCatalogEntry(kind)!), (kind) => shapeCatalogEntry(kind)!.name,
+      );
+      for (const button of buttons) {
+        const kind = button.getAttribute("data-value")!;
+        button.setAttribute("data-shape", kind);
+        shapeOptions[kind] = button;
       }
     }
 
+    // A node's text: family and size, then how the text is set.
     const textGroup = append(bar, make(document, "span", "miro-canvas-toolbar__group"));
-    const fontFamily = append(textGroup, makeSelect(document, "Font family", FONT_FAMILIES));
+    const font = this.makePopover(textGroup, "Font", "miro-canvas-toolbar__button--font");
+    const fontList = this.block(font.panel, undefined, "miro-canvas-toolbar__list");
+    const fontOptions = FONT_FAMILIES.map((family) => {
+      const option = append(fontList, makeChoice(document, family, family, "miro-canvas-toolbar__button--font-option"));
+      option.textContent = family;
+      // Each family is shown in its own face, so the list is its own preview.
+      option.style.setProperty?.("font-family", family);
+      return option;
+    });
     const stepper = append(textGroup, make(document, "span", "miro-canvas-toolbar__stepper"));
     const fontSize = append(stepper, makeNumber(document, "Font size", MIN_FONT_SIZE, MAX_FONT_SIZE));
     const steps = append(stepper, make(document, "span", "miro-canvas-toolbar__stepper-buttons"));
-    const fontSizeUp = append(steps, makeButton(document, "⌃", "Increase font size", "miro-canvas-toolbar__button--step"));
-    const fontSizeDown = append(steps, makeButton(document, "⌄", "Decrease font size", "miro-canvas-toolbar__button--step"));
-    const bold = append(textGroup, makeButton(document, "B", "Toggle bold", "miro-canvas-toolbar__button--bold"));
-    bold.setAttribute("aria-pressed", "false");
-    const align = this.makePopover(textGroup, "≡", "Alignment");
-    const alignment = append(align.panel, makeSelect(document, "Text alignment", ALIGNMENTS));
-    const verticalAlign = append(align.panel, makeSelect(document, "Vertical alignment", VERTICAL_ALIGNMENTS));
+    const fontSizeUp = append(steps, makeButton(document, "Increase font size", "miro-canvas-toolbar__button--step"));
+    const fontSizeDown = append(steps, makeButton(document, "Decrease font size", "miro-canvas-toolbar__button--step"));
+    this.icon(fontSizeUp, "chevron-up", "⌃");
+    this.icon(fontSizeDown, "chevron-down", "⌄");
 
-    const colors: Record<string, Popover> = {};
-    const colorInputs: Record<string, HTMLInputElement> = {};
-    const colorClears: Record<string, HTMLButtonElement> = {};
-    const colorSwatches: Record<string, HTMLElement> = {};
-    const colorRecent: Record<string, HTMLElement> = {};
-    for (const { slot, label, glyph } of COLOR_BUTTONS) {
-      const popover = this.makePopover(bar, glyph, label, `miro-canvas-toolbar__button--color-${slot}`);
+    const format = this.makePopover(textGroup, "Text style");
+    this.icon(format.button, "bold", "B");
+    const formatRow = this.block(format.panel, undefined);
+    const formats: Record<string, HTMLButtonElement> = {};
+    for (const { format: value, icon, glyph, label } of FORMATS) {
+      const toggle = append(formatRow, makeChoice(document, label, value));
+      this.icon(toggle, icon, glyph);
+      formats[value] = toggle;
+    }
+
+    const align = this.makePopover(textGroup, "Alignment");
+    this.icon(align.button, ALIGNMENTS[0]!.icon, "≡");
+    const alignRow = this.block(align.panel, undefined);
+    const alignments = ALIGNMENTS.map(({ value, icon, label }) => {
+      const toggle = append(alignRow, makeChoice(document, label, value));
+      this.icon(toggle, icon, value.charAt(0).toUpperCase());
+      return toggle;
+    });
+    const verticalRow = this.block(align.panel, undefined);
+    const verticalAlignments = VERTICAL_ALIGNMENTS.map(({ value, icon, label }) => {
+      const toggle = append(verticalRow, makeChoice(document, label, value));
+      this.icon(toggle, icon, value.charAt(0).toUpperCase());
+      return toggle;
+    });
+    const spacingRow = this.block(align.panel, "Line height");
+    const lineHeight = append(spacingRow, makeNumber(document, "Line height", 1, 10));
+    lineHeight.step = "0.1";
+
+    // A connector: its two ends and the kind of line between them.
+    const edgeGroup = append(bar, make(document, "span", "miro-canvas-toolbar__group"));
+    const startCap = this.makePopover(edgeGroup, "Line start", "miro-canvas-toolbar__button--cap");
+    const swapEnds = append(edgeGroup, makeButton(document, "Swap line ends"));
+    this.icon(swapEnds, "arrow-left-right", "⇄");
+    const endCap = this.makePopover(edgeGroup, "Line end", "miro-canvas-toolbar__button--cap");
+    const caps = (popover: Popover, at: "start" | "end"): HTMLButtonElement[] => this.choices(
+      this.block(popover.panel, undefined, "miro-canvas-toolbar__pictures miro-canvas-toolbar__pictures--caps"),
+      CONNECTOR_CAPS, (cap) => CAP_LABELS[cap], (cap) => capPicture(document, cap, at), (cap) => (cap === "none" ? "—" : cap),
+    );
+    const startCaps = caps(startCap, "start");
+    const endCaps = caps(endCap, "end");
+    const line = this.makePopover(edgeGroup, "Line", "miro-canvas-toolbar__button--line");
+    const routes = this.choices(
+      this.block(line.panel, undefined), CONNECTOR_ROUTES, (route) => ROUTE_LABELS[route],
+      (route) => routePicture(document, route), (route) => route.charAt(0).toUpperCase(),
+    );
+    const strokes = this.choices(
+      this.block(line.panel, undefined), CONNECTOR_STROKES, (stroke) => STROKE_LABELS[stroke],
+      (stroke) => strokePicture(document, stroke), (stroke) => stroke.charAt(0).toUpperCase(),
+    );
+    const lineWidthRow = this.block(line.panel, "Thickness", "miro-canvas-toolbar__row miro-canvas-toolbar__slider");
+    const lineWidth = append(lineWidthRow, makeRange(document, "Line thickness", 1, LINE_SLIDER_MAX));
+    const lineWidthValue = append(lineWidthRow, make(document, "span", "miro-canvas-toolbar__value"));
+
+    // Colours: text, fill and border for a node, the line colour for a connector.
+    const colorGroup = append(bar, make(document, "span", "miro-canvas-toolbar__group"));
+    const colors: Record<string, ColorRefs> = {};
+    for (const { slot, label, valueLabel, look } of COLOR_SLOTS) {
+      const popover = this.makePopover(colorGroup, label, `miro-canvas-toolbar__button--color miro-canvas-toolbar__button--color-${slot}`);
       popover.host.setAttribute("data-color-slot", slot);
-      // The palette belongs beside the picker, the way Miro shows it.
-      const swatches = append(popover.panel, make(document, "div", "miro-canvas-toolbar__grid miro-canvas-toolbar__palette"));
+      popover.button.setAttribute("data-look", look);
+      if (look === "text") this.icon(popover.button, "baseline", "A");
+      else append(popover.button, make(document, "span", "miro-canvas-toolbar__swatch-mark"));
+      const swatches = this.block(popover.panel, undefined, "miro-canvas-toolbar__pictures miro-canvas-toolbar__palette");
       swatches.setAttribute("data-color-palette", slot);
-      const recent = append(popover.panel, make(document, "div", "miro-canvas-toolbar__grid miro-canvas-toolbar__palette miro-canvas-toolbar__palette--recent"));
+      const recent = this.block(popover.panel, undefined, "miro-canvas-toolbar__pictures miro-canvas-toolbar__palette miro-canvas-toolbar__palette--recent");
       recent.setAttribute("data-color-recent", slot);
-      const input = append(popover.panel, make(document, "input", "miro-canvas-toolbar__swatch"));
+      const custom = this.block(popover.panel, undefined);
+      const input = append(custom, make(document, "input", "miro-canvas-toolbar__swatch"));
       input.type = "color";
       // Distinct from the popover button's own label so assistive technology
       // and tests can address the value control unambiguously.
-      input.setAttribute("aria-label", `${label} value`);
-      const clear = append(popover.panel, makeButton(document, "Clear", `Clear ${label.toLowerCase()}`, "miro-canvas-toolbar__button--wide"));
-      colors[slot] = popover;
-      colorInputs[slot] = input;
-      colorClears[slot] = clear;
-      colorSwatches[slot] = swatches;
-      colorRecent[slot] = recent;
+      input.setAttribute("aria-label", `Custom ${valueLabel.toLowerCase()}`);
+      const clear = append(custom, makeButton(document, `Clear ${valueLabel.toLowerCase()}`));
+      this.icon(clear, "ban", "∅");
+      colors[slot] = { popover, input, clear, swatches, recent };
     }
+    const borderPanel = colors.border!.popover.panel;
+    const borderStyles = this.choices(
+      this.block(borderPanel, "Border style"), BORDER_STYLES.map((item) => item.value),
+      (value) => BORDER_STYLES.find((item) => item.value === value)!.label,
+      (value) => borderPicture(document, value), (value) => value.charAt(0).toUpperCase(),
+    );
+    const borderWidthRow = this.block(borderPanel, "Border width", "miro-canvas-toolbar__row miro-canvas-toolbar__slider");
+    const borderWidth = append(borderWidthRow, makeRange(document, "Border width", 0, BORDER_SLIDER_MAX));
+    const borderWidthValue = append(borderWidthRow, make(document, "span", "miro-canvas-toolbar__value"));
 
-    const lock = append(bar, makeButton(document, "🔓", "Lock selection", "miro-canvas-toolbar__button--lock"));
+    const lock = append(bar, makeButton(document, "Lock selection", "miro-canvas-toolbar__button--lock"));
     lock.setAttribute("aria-pressed", "false");
     const nativeSlot = append(bar, make(document, "span", "miro-canvas-toolbar__native"));
-
-    const more = this.makePopover(bar, "⋮", "More settings");
-    const formatGroup = append(more.panel, make(document, "div", "miro-canvas-toolbar__grid"));
-    const formats = { bold } as Record<(typeof FORMATS)[number], HTMLButtonElement>;
-    for (const format of FORMATS.filter((value) => value !== "bold")) {
-      const button = append(formatGroup, makeButton(
-        document, FORMAT_LABELS[format], `Toggle ${format}`, `miro-canvas-toolbar__button--${format}`,
-      ));
-      button.setAttribute("aria-pressed", "false");
-      formats[format] = button;
-    }
-    const lineHeight = append(more.panel, makeNumber(document, "Line height", 1, 10));
-    lineHeight.step = "0.1";
-    const borderGroup = append(more.panel, make(document, "div", "miro-canvas-toolbar__grid"));
-    const borderStyle = append(borderGroup, makeSelect(document, "Border style", BORDER_STYLES));
-    const borderWidth = append(borderGroup, makeNumber(document, "Border width", 0, MAX_BORDER_WIDTH));
-    const connectorGroup = append(more.panel, make(document, "div", "miro-canvas-toolbar__grid"));
-    const route = append(connectorGroup, makeSelect(document, "Connector route", CONNECTOR_ROUTES));
-    const strokeStyle = append(connectorGroup, makeSelect(document, "Connector line style", CONNECTOR_STROKES));
-    const startCap = append(connectorGroup, makeSelect(document, "Start cap", CONNECTOR_CAPS));
-    const endCap = append(connectorGroup, makeSelect(document, "End cap", CONNECTOR_CAPS));
-    const connectorWidth = append(connectorGroup, makeNumber(document, "Connector width", 1, MAX_BORDER_WIDTH));
 
     const status = append(root, make(document, "p", "miro-canvas-toolbar__status"));
     status.setAttribute("role", "status");
@@ -419,18 +629,18 @@ export class SelectionToolbar {
 
     const refs: ToolbarRefs = {
       bar, shape, shapeOptions,
-      textGroup, fontFamily, fontSize, fontSizeDown, fontSizeUp, bold,
-      align, alignment, verticalAlign,
-      colors, colorInputs, colorClears, colorSwatches, colorRecent, lock, nativeSlot, more,
-      formats: formats as ToolbarRefs["formats"], lineHeight,
-      borderGroup, borderStyle, borderWidth,
-      connectorGroup, route, strokeStyle, startCap, endCap, connectorWidth, status,
+      textGroup, font, fontOptions, fontSize, fontSizeDown, fontSizeUp,
+      format, formats, align, alignments, verticalAlignments, lineHeight,
+      edgeGroup, startCap, endCap, startCaps, endCaps, swapEnds, line, routes, strokes, lineWidth, lineWidthValue,
+      colors, borderStyles, borderWidth, borderWidthValue,
+      lock, nativeSlot, status,
     };
     this.wire(refs);
     return refs;
   }
 
   private wire(refs: ToolbarRefs): void {
+    const valueOf = (option: HTMLElement): string => option.getAttribute("data-value") ?? "";
     for (const item of SHAPE_CATALOG) {
       this.listen(refs.shapeOptions[item.kind]!, "click", () => {
         // The node already shows this picture, maybe under a flowchart name.
@@ -438,63 +648,79 @@ export class SelectionToolbar {
         this.style({ shape: item.kind });
       });
     }
-    this.listen(refs.fontFamily, "change", () => this.appearance({
-      type: APPEARANCE_ACTIONS.setFontFamily, fontFamily: refs.fontFamily.value,
-    }));
+    for (const option of refs.fontOptions) {
+      this.listen(option, "click", () => this.appearance({ type: APPEARANCE_ACTIONS.setFontFamily, fontFamily: valueOf(option) }));
+    }
     this.listen(refs.fontSize, "change", () => {
       const size = finiteNumber(refs.fontSize.value);
       if (size !== undefined) this.appearance({ type: APPEARANCE_ACTIONS.setFontSize, fontSize: this.clampFontSize(size) });
     });
     this.listen(refs.fontSizeDown, "click", () => this.stepFontSize(-1));
     this.listen(refs.fontSizeUp, "click", () => this.stepFontSize(1));
-    for (const format of FORMATS) {
-      this.listen(refs.formats[format], "click", () => this.appearance({
+    for (const { format } of FORMATS) {
+      this.listen(refs.formats[format]!, "click", () => this.appearance({
         type: APPEARANCE_ACTIONS.setFormat,
         format: { [format]: this.state?.typography.format[format] !== true },
       }));
     }
-    this.listen(refs.alignment, "change", () => this.appearance({
-      type: APPEARANCE_ACTIONS.setAlignment, alignment: refs.alignment.value,
-    }));
-    this.listen(refs.verticalAlign, "change", () => this.appearance({
-      type: APPEARANCE_ACTIONS.setTypography, typography: { verticalAlign: refs.verticalAlign.value },
-    }));
+    for (const option of refs.alignments) {
+      this.listen(option, "click", () => this.appearance({ type: APPEARANCE_ACTIONS.setAlignment, alignment: valueOf(option) }));
+    }
+    for (const option of refs.verticalAlignments) {
+      this.listen(option, "click", () => this.appearance({
+        type: APPEARANCE_ACTIONS.setTypography, typography: { verticalAlign: valueOf(option) },
+      }));
+    }
     this.listen(refs.lineHeight, "change", () => {
       const value = finiteNumber(refs.lineHeight.value);
       if (value !== undefined && value > 0 && value <= 10) {
         this.appearance({ type: APPEARANCE_ACTIONS.setTypography, typography: { lineHeight: value } });
       }
     });
-    for (const { slot } of COLOR_BUTTONS) {
-      this.listen(refs.colorInputs[slot]!, "change", () => {
-        const color = normalizedHex(refs.colorInputs[slot]!.value);
-        if (color !== undefined) this.appearance({ type: APPEARANCE_ACTIONS.setColor, slot, color });
-      });
-      this.listen(refs.colorClears[slot]!, "click", () => this.appearance({
-        type: APPEARANCE_ACTIONS.setColor, slot, color: null,
-      }));
+    for (const [key, options] of [["startCap", refs.startCaps], ["endCap", refs.endCaps]] as const) {
+      for (const option of options) {
+        this.listen(option, "click", () => this.style({
+          connector: { [key]: valueOf(option) as ConnectorCap } as LocalConnectorSettings,
+        }));
+      }
     }
+    this.listen(refs.swapEnds, "click", () => {
+      const { start, end } = this.caps();
+      if (start !== end) this.style({ connector: { startCap: end, endCap: start } });
+    });
+    for (const option of refs.routes) {
+      this.listen(option, "click", () => this.style({ connector: { route: valueOf(option) as ConnectorRoute } }));
+    }
+    for (const option of refs.strokes) {
+      this.listen(option, "click", () => this.style({ connector: { strokeStyle: valueOf(option) as ConnectorStroke } }));
+    }
+    // A slider shows its value while it moves and writes once, when it is let go.
+    this.listen(refs.lineWidth, "input", () => { refs.lineWidthValue.textContent = refs.lineWidth.value; });
+    this.listen(refs.lineWidth, "change", () => {
+      const width = finiteNumber(refs.lineWidth.value);
+      if (width !== undefined && width > 0 && width <= MAX_BORDER_WIDTH) this.style({ connector: { width } });
+    });
+    for (const { slot } of COLOR_SLOTS) {
+      const color = refs.colors[slot]!;
+      this.listen(color.input, "change", () => {
+        const value = normalizedHex(color.input.value);
+        if (value !== undefined) this.appearance({ type: APPEARANCE_ACTIONS.setColor, slot, color: value });
+      });
+      this.listen(color.clear, "click", () => this.appearance({ type: APPEARANCE_ACTIONS.setColor, slot, color: null }));
+    }
+    for (const option of refs.borderStyles) {
+      this.listen(option, "click", () => this.style({ borderStyle: valueOf(option) as BorderStyle }));
+    }
+    this.listen(refs.borderWidth, "input", () => { refs.borderWidthValue.textContent = refs.borderWidth.value; });
+    this.listen(refs.borderWidth, "change", () => {
+      const width = finiteNumber(refs.borderWidth.value);
+      if (width !== undefined && width >= 0 && width <= MAX_BORDER_WIDTH) this.style({ borderWidth: width });
+    });
     // The lock toggle is the one control that stays live on a locked selection,
     // otherwise an accidental lock could never be undone from here.
     this.listen(refs.lock, "click", () => {
       if (this.state === undefined || this.state.reviewMode) return;
       this.actions.onLock(!this.state.locked);
-    });
-    this.listen(refs.borderStyle, "change", () => this.style({ borderStyle: refs.borderStyle.value as BorderStyle }));
-    this.listen(refs.borderWidth, "change", () => {
-      const width = finiteNumber(refs.borderWidth.value);
-      if (width !== undefined && width >= 0 && width <= MAX_BORDER_WIDTH) this.style({ borderWidth: width });
-    });
-    const connectorSelects = [
-      ["route", refs.route], ["strokeStyle", refs.strokeStyle],
-      ["startCap", refs.startCap], ["endCap", refs.endCap],
-    ] as const;
-    for (const [key, select] of connectorSelects) {
-      this.listen(select, "change", () => this.style({ connector: { [key]: select.value } as LocalConnectorSettings }));
-    }
-    this.listen(refs.connectorWidth, "change", () => {
-      const width = finiteNumber(refs.connectorWidth.value);
-      if (width !== undefined && width > 0 && width <= MAX_BORDER_WIDTH) this.style({ connector: { width } });
     });
     this.listen(this.element, "keydown", (event) => {
       if ((event as KeyboardEvent).key === "Escape") this.closePopovers();
@@ -515,6 +741,14 @@ export class SelectionToolbar {
     this.appearance({ type: APPEARANCE_ACTIONS.setFontSize, fontSize: this.clampFontSize(current + delta) });
   }
 
+  /** The ends a connector shows: no start and an arrow at the end unless it says otherwise. */
+  private caps(): { readonly start: ConnectorCap; readonly end: ConnectorCap } {
+    return {
+      start: this.state?.connector?.startCap ?? "none",
+      end: this.state?.connector?.endCap ?? "arrow",
+    };
+  }
+
   /** Every emitter funnels through these two guards so an inert toolbar stays inert. */
   private appearance(action: AppearanceAction): void {
     if (this.state?.editable !== true) return;
@@ -530,11 +764,12 @@ export class SelectionToolbar {
     this.state = state;
     const refs = this.refs;
     if (refs === undefined) return;
+    const document = this.document!;
     const root = this.element;
     const visible = state.selectedIds.length > 0 && state.placement !== undefined;
     root.hidden = !visible;
     // A popover must never outlive the selection it was opened for.
-    const selectionKey = state.selectedIds.join(" ");
+    const selectionKey = state.selectedIds.join("\u0000");
     if (!visible || selectionKey !== this.selectionKey) {
       this.selectionKey = selectionKey;
       this.closePopovers();
@@ -548,42 +783,66 @@ export class SelectionToolbar {
     const hasEdge = state.kinds.includes("edge");
     const hasNode = state.kinds.some((kind) => kind !== "edge");
     refs.shape.host.hidden = !state.kinds.includes("shape");
-    refs.borderGroup.hidden = !hasNode;
-    refs.connectorGroup.hidden = !hasEdge;
-    for (const { slot, forEdge } of COLOR_BUTTONS) {
-      refs.colors[slot]!.host.hidden = forEdge ? !hasEdge : !hasNode;
+    // A connector's label keeps native editing; the text row belongs to nodes.
+    refs.textGroup.hidden = !hasNode;
+    refs.edgeGroup.hidden = !hasEdge;
+    for (const { slot, forEdge } of COLOR_SLOTS) {
+      refs.colors[slot]!.popover.host.hidden = forEdge ? !hasEdge : !hasNode;
     }
 
-    refs.fontFamily.value = state.typography.fontFamily;
-    refs.fontSize.value = String(state.typography.fontSize);
-    for (const format of FORMATS) {
-      refs.formats[format].setAttribute("aria-pressed", state.typography.format[format] === true ? "true" : "false");
-    }
-    refs.alignment.value = state.typography.alignment;
-    refs.verticalAlign.value = state.typography.verticalAlign ?? "top";
-    refs.lineHeight.value = state.typography.lineHeight === undefined ? "" : String(state.typography.lineHeight);
-    for (const { slot } of COLOR_BUTTONS) {
-      const color = normalizedHex(state.colors[slot]);
-      refs.colorInputs[slot]!.value = color ?? "#000000";
-      refs.colors[slot]!.button.setAttribute("data-color-unset", color === undefined ? "true" : "false");
-      refs.colors[slot]!.button.style.setProperty?.("--miro-canvas-swatch", color ?? "transparent");
-      this.renderSwatches(refs.colorSwatches[slot]!, slot, state.palette.map((entry) => entry.color), state.editable);
-      this.renderSwatches(refs.colorRecent[slot]!, slot, state.recentColors, state.editable);
-    }
     const shape = shapeCatalogEntry(state.shape);
     for (const item of SHAPE_CATALOG) {
       refs.shapeOptions[item.kind]!.setAttribute("aria-pressed", item === shape ? "true" : "false");
     }
-    showShapeIcon(this.document!, refs.shape.button, shape ?? SHAPE_CATALOG[0]!, "▭");
-    refs.borderStyle.value = state.borderStyle ?? "solid";
-    refs.borderWidth.value = state.borderWidth === undefined ? "" : String(state.borderWidth);
-    refs.route.value = state.connector?.route ?? "straight";
-    refs.strokeStyle.value = state.connector?.strokeStyle ?? "solid";
-    refs.startCap.value = state.connector?.startCap ?? "none";
-    refs.endCap.value = state.connector?.endCap ?? "arrow";
-    refs.connectorWidth.value = state.connector?.width === undefined ? "" : String(state.connector.width);
+    const shown = shape ?? SHAPE_CATALOG[0]!;
+    showPicture(refs.shape.button, shown.kind, () => shapePicture(document, shown), "▭");
 
-    refs.lock.textContent = state.locked ? "🔒" : "🔓";
+    const typography = state.typography;
+    refs.font.button.textContent = typography.fontFamily;
+    refs.font.button.style.setProperty?.("font-family", typography.fontFamily);
+    pressWhere(refs.fontOptions, typography.fontFamily);
+    refs.fontSize.value = String(typography.fontSize);
+    let styled = false;
+    for (const { format } of FORMATS) {
+      const on = typography.format[format] === true;
+      styled ||= on;
+      refs.formats[format]!.setAttribute("aria-pressed", on ? "true" : "false");
+    }
+    refs.format.button.setAttribute("data-active", styled ? "true" : "false");
+    pressWhere(refs.alignments, typography.alignment);
+    pressWhere(refs.verticalAlignments, typography.verticalAlign ?? "top");
+    const alignment = ALIGNMENTS.find((item) => item.value === typography.alignment) ?? ALIGNMENTS[0]!;
+    this.icon(refs.align.button, alignment.icon, "≡");
+    refs.lineHeight.value = typography.lineHeight === undefined ? "" : String(typography.lineHeight);
+
+    const { start, end } = this.caps();
+    const route = state.connector?.route ?? "curved";
+    pressWhere(refs.startCaps, start);
+    pressWhere(refs.endCaps, end);
+    pressWhere(refs.routes, route);
+    pressWhere(refs.strokes, state.connector?.strokeStyle ?? "solid");
+    showPicture(refs.startCap.button, `start:${start}`, () => capPicture(document, start, "start"), start === "none" ? "—" : "←");
+    showPicture(refs.endCap.button, `end:${end}`, () => capPicture(document, end, "end"), end === "none" ? "—" : "→");
+    showPicture(refs.line.button, `route:${route}`, () => routePicture(document, route), "╱");
+    const lineWidth = state.connector?.width;
+    refs.lineWidth.value = String(Math.min(LINE_SLIDER_MAX, lineWidth ?? 2));
+    refs.lineWidthValue.textContent = String(lineWidth ?? 2);
+
+    for (const { slot } of COLOR_SLOTS) {
+      const color = normalizedHex(state.colors[slot]);
+      const slotRefs = refs.colors[slot]!;
+      slotRefs.input.value = color ?? "#000000";
+      slotRefs.popover.button.setAttribute("data-color-unset", color === undefined ? "true" : "false");
+      slotRefs.popover.button.style.setProperty?.("--miro-canvas-swatch", color ?? "transparent");
+      this.renderSwatches(slotRefs.swatches, slot, state.palette.map((entry) => entry.color), state.editable, color);
+      this.renderSwatches(slotRefs.recent, slot, state.recentColors, state.editable, color);
+      slotRefs.recent.hidden = state.recentColors.length === 0;
+    }
+    pressWhere(refs.borderStyles, state.borderStyle ?? "solid");
+    refs.borderWidth.value = String(Math.min(BORDER_SLIDER_MAX, state.borderWidth ?? 1));
+    refs.borderWidthValue.textContent = state.borderWidth === undefined ? "" : String(state.borderWidth);
+
+    this.icon(refs.lock, state.locked ? "lock" : "lock-open", state.locked ? "🔒" : "🔓");
     refs.lock.setAttribute("aria-pressed", state.locked ? "true" : "false");
     refs.lock.setAttribute("aria-label", state.locked ? "Unlock selection" : "Lock selection");
     refs.lock.disabled = state.reviewMode;
@@ -596,33 +855,35 @@ export class SelectionToolbar {
   }
 
   /** Swatches are rebuilt only when the palette they show actually changed. */
-  private renderSwatches(container: HTMLElement, slot: ColorSlot, colors: readonly string[], editable: boolean): void {
+  private renderSwatches(
+    container: HTMLElement, slot: ColorSlot, colors: readonly string[], editable: boolean, current: string | undefined,
+  ): void {
     const wanted = colors.map((color) => normalizedHex(color)).filter((color): color is string => color !== undefined);
     if (container.getAttribute("data-colors") !== wanted.join(",")) {
       container.setAttribute("data-colors", wanted.join(","));
-      while (container.firstChild !== null) container.removeChild(container.firstChild);
+      empty(container);
       for (const color of wanted) {
-        const button = append(container, makeButton(this.document!, "", color, "miro-canvas-toolbar__button--swatch"));
+        const button = append(container, makeButton(this.document!, color, "miro-canvas-toolbar__button--swatch"));
         button.setAttribute("data-color", color);
-        button.style.setProperty?.("background-color", color);
+        button.setAttribute("data-tooltip-delay", PICTURE_TOOLTIP_DELAY);
         button.style.setProperty?.("--miro-canvas-swatch", color);
         this.listen(button, "click", () => this.appearance({ type: APPEARANCE_ACTIONS.setColor, slot, color }));
       }
     }
     for (const child of Array.from(container.children ?? []) as HTMLButtonElement[]) {
       child.disabled = !editable;
+      child.setAttribute("aria-pressed", child.getAttribute("data-color") === current ? "true" : "false");
     }
   }
 
-  private controls(refs: ToolbarRefs): readonly (HTMLButtonElement | HTMLInputElement | HTMLSelectElement)[] {
+  private controls(refs: ToolbarRefs): readonly (HTMLButtonElement | HTMLInputElement)[] {
     return [
       ...Object.values(refs.shapeOptions),
-      refs.fontFamily, refs.fontSize, refs.fontSizeDown, refs.fontSizeUp,
-      ...FORMATS.map((format) => refs.formats[format]),
-      refs.alignment, refs.verticalAlign, refs.lineHeight,
-      ...Object.values(refs.colorInputs), ...Object.values(refs.colorClears),
-      refs.borderStyle, refs.borderWidth,
-      refs.route, refs.strokeStyle, refs.startCap, refs.endCap, refs.connectorWidth,
+      ...refs.fontOptions, refs.fontSize, refs.fontSizeDown, refs.fontSizeUp,
+      ...Object.values(refs.formats), ...refs.alignments, ...refs.verticalAlignments, refs.lineHeight,
+      ...refs.startCaps, ...refs.endCaps, refs.swapEnds, ...refs.routes, ...refs.strokes, refs.lineWidth,
+      ...Object.values(refs.colors).flatMap((color) => [color.input, color.clear]),
+      ...refs.borderStyles, refs.borderWidth,
     ];
   }
 

@@ -114,6 +114,8 @@ export interface M1SessionOptions {
 	readonly settings?: MiroCanvasSettings;
 	/** Why persistence is unavailable, when the host could not build a store. */
 	readonly persistenceProblem?: string;
+	/** Draws a named Obsidian icon; the toolbar falls back to glyphs without it. */
+	readonly setIcon?: (element: HTMLElement, icon: string) => void;
 	readonly onOpenCommentThread?: (threadId: string, origin: CommentOrigin) => void;
 }
 
@@ -236,10 +238,20 @@ export function resolveSelectionToolbarPresentation(
 		? connector.shape : undefined;
 	const strokeStyle = connector?.strokeStyle !== undefined && (CONNECTOR_STROKES as readonly string[]).includes(connector.strokeStyle)
 		? connector.strokeStyle : undefined;
+	// A plain Canvas edge keeps its ends natively: an arrow or nothing.
+	const edges = readRuntime(document, "edges");
+	const edge = id === undefined || !Array.isArray(edges)
+		? undefined
+		: (edges as readonly unknown[]).find((item) => readRuntime(item, "id") === id);
+	const nativeEnd = (key: "fromEnd" | "toEnd"): "none" | "arrow" | undefined => {
+		if (edge === undefined) return undefined;
+		const value = readRuntime(edge, key);
+		return value === "arrow" || value === "none" ? value : key === "toEnd" ? "arrow" : "none";
+	};
 	const startCap = connector?.startCap !== undefined && (CONNECTOR_CAPS as readonly string[]).includes(connector.startCap)
-		? connector.startCap as NonNullable<SelectionToolbarStyle["connector"]>["startCap"] : undefined;
+		? connector.startCap as NonNullable<SelectionToolbarStyle["connector"]>["startCap"] : nativeEnd("fromEnd");
 	const endCap = connector?.endCap !== undefined && (CONNECTOR_CAPS as readonly string[]).includes(connector.endCap)
-		? connector.endCap as NonNullable<SelectionToolbarStyle["connector"]>["endCap"] : undefined;
+		? connector.endCap as NonNullable<SelectionToolbarStyle["connector"]>["endCap"] : nativeEnd("toEnd");
 	const width = cssNumber(css["stroke-width"]);
 	const connectorStyle: NonNullable<SelectionToolbarStyle["connector"]> = {
 		...(route === undefined ? {} : { route }),
@@ -668,7 +680,10 @@ export class M1CanvasSession {
 			onAppearance: (action) => this.applyAppearance(action),
 			onStyle: (patch) => this.applyElementStyle(patch),
 			onLock: (locked) => (locked ? this.lockSelection() : this.unlockSelection()),
-		}, { document: controlDocument });
+		}, {
+			...(controlDocument === undefined ? {} : { document: controlDocument }),
+			...(options.setIcon === undefined ? {} : { setIcon: options.setIcon }),
+		});
 		this.handles = new SelectionHandles({
 			onRotate: (degrees, commit) => this.applyHandleRotation(degrees, commit),
 			onCancelRotation: () => this.cancelHandleRotation(),

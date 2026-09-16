@@ -807,13 +807,17 @@
   }
 }
 
-/* Contextual formatting toolbar.  One compact row of icon buttons floats over
-   the Canvas root at a host-resolved placement; everything else lives in a
-   popover.  Every selector is namespaced, so an ordinary Canvas without an
-   active session is never restyled. */
+/* Contextual formatting toolbar.  One compact row of small pictures floats
+   over the Canvas root at a host-resolved placement; every choice lives in a
+   popover of further pictures, and words appear only as hover hints.  The
+   look is Obsidian's own: flat icon buttons, muted until hovered.  Selectors
+   are doubled where Obsidian styles every button, and every selector is
+   namespaced, so an ordinary Canvas without an active session is never
+   restyled. */
 .miro-canvas-toolbar {
   --miro-canvas-toolbar-bg: var(--background-primary);
   --miro-canvas-toolbar-border: var(--background-modifier-border);
+  --miro-canvas-toolbar-size: 28px;
   position: absolute;
   z-index: 101;
   /* The host reports the top-center of the selection; the toolbar sits above it. */
@@ -822,13 +826,13 @@
   flex-direction: column;
   gap: 4px;
   box-sizing: border-box;
-  padding: 4px;
+  padding: 3px;
   color: var(--text-normal);
   background: var(--miro-canvas-toolbar-bg);
   border: 1px solid var(--miro-canvas-toolbar-border);
-  border-radius: var(--radius-m, 10px);
+  border-radius: var(--radius-m, 8px);
   box-shadow: var(--shadow-s, 0 6px 22px rgb(0 0 0 / 22%));
-  font-size: var(--font-ui-smaller, 11px);
+  font-size: var(--font-ui-small, 13px);
 }
 
 /* Author `display` rules outrank the browser's `[hidden]` rule, so the plugin
@@ -857,78 +861,126 @@
   position: relative;
 }
 
-.miro-canvas-toolbar__group + .miro-canvas-toolbar__popover::before,
-.miro-canvas-toolbar__popover + .miro-canvas-toolbar__group::before {
-  content: "";
-  width: 1px;
-  height: 18px;
-  margin: 0 4px;
-  background: var(--miro-canvas-toolbar-border);
+/* A thin rule separates each visible group from what comes before it. */
+.miro-canvas-toolbar__bar > :not([hidden]) ~ .miro-canvas-toolbar__group,
+.miro-canvas-toolbar__bar > :not([hidden]) ~ .miro-canvas-toolbar__button--lock,
+.miro-canvas-toolbar__bar > :not([hidden]) ~ .miro-canvas-toolbar__native {
+  margin-left: 3px;
+  padding-left: 5px;
+  border-left: 1px solid var(--miro-canvas-toolbar-border);
+  border-radius: 0;
 }
 
-.miro-canvas-toolbar__button,
-.miro-canvas-toolbar__select,
-.miro-canvas-toolbar__number {
-  min-height: 28px;
-  padding: 2px 6px;
-  color: inherit;
-  background: transparent;
-  border: 0;
-  border-radius: 6px;
-  font-size: inherit;
-}
-
-.miro-canvas-toolbar__button {
-  min-width: 28px;
-  cursor: pointer;
-  line-height: 1;
-}
-
-.miro-canvas-toolbar__button:hover:not(:disabled),
-.miro-canvas-toolbar__select:hover:not(:disabled) {
-  background: var(--background-modifier-hover);
-}
-
-.miro-canvas-toolbar__button[aria-expanded="true"] {
-  background: var(--background-modifier-active-hover, var(--background-modifier-hover));
-}
-
-.miro-canvas-toolbar__button[aria-pressed="true"] {
-  background: var(--interactive-accent);
-  color: var(--text-on-accent);
-}
-
-/* A pressed toggle stays pressed under the pointer. */
-.miro-canvas-toolbar__button[aria-pressed="true"]:hover:not(:disabled) {
-  background: var(--interactive-accent-hover, var(--interactive-accent));
-}
-
-.miro-canvas-toolbar__button--bold { font-weight: 700; }
-.miro-canvas-toolbar__button--italic { font-style: italic; }
-.miro-canvas-toolbar__button--underline { text-decoration: underline; }
-.miro-canvas-toolbar__button--strike { text-decoration: line-through; }
-.miro-canvas-toolbar__button--shape,
-.miro-canvas-toolbar__button--shape-option {
+.miro-canvas-toolbar .miro-canvas-toolbar__button {
+  position: relative;
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  box-sizing: border-box;
+  min-width: var(--miro-canvas-toolbar-size);
+  height: var(--miro-canvas-toolbar-size);
+  margin: 0;
+  padding: 0 5px;
+  color: var(--icon-color, var(--text-muted));
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-s, 4px);
+  box-shadow: none;
+  cursor: pointer;
+  font-size: inherit;
+  line-height: 1;
 }
 
-/* A color button carries its current value as an underline, like Miro. */
-.miro-canvas-toolbar__button--color-text,
-.miro-canvas-toolbar__button--color-fill,
-.miro-canvas-toolbar__button--color-border,
-.miro-canvas-toolbar__button--color-edge {
-  border-bottom: 3px solid var(--miro-canvas-swatch, transparent);
-  border-radius: 6px 6px 2px 2px;
+.miro-canvas-toolbar .miro-canvas-toolbar__button > .svg-icon {
+  width: var(--icon-s, 16px);
+  height: var(--icon-s, 16px);
+  stroke-width: var(--icon-s-stroke-width, 2px);
 }
 
-.miro-canvas-toolbar__button[data-color-unset="true"] {
-  border-bottom-color: var(--background-modifier-border);
+.miro-canvas-toolbar .miro-canvas-toolbar__button:hover:not(:disabled) {
+  color: var(--icon-color-hover, var(--text-normal));
+  background: var(--background-modifier-hover);
+}
+
+.miro-canvas-toolbar .miro-canvas-toolbar__button[aria-expanded="true"] {
+  color: var(--text-normal);
+  background: var(--background-modifier-active-hover, var(--background-modifier-hover));
+}
+
+/* The current choice is marked the way Obsidian marks an active icon. */
+.miro-canvas-toolbar .miro-canvas-toolbar__button[aria-pressed="true"],
+.miro-canvas-toolbar .miro-canvas-toolbar__button[data-active="true"] {
+  color: var(--interactive-accent);
+  background: var(--background-modifier-active-hover, var(--background-modifier-hover));
+}
+
+.miro-canvas-toolbar .miro-canvas-toolbar__button:disabled,
+.miro-canvas-toolbar__number:disabled,
+.miro-canvas-toolbar__range:disabled,
+.miro-canvas-toolbar__swatch:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+/* Font family: the button names it, the list shows each family in its face. */
+.miro-canvas-toolbar .miro-canvas-toolbar__button--font {
+  justify-content: flex-start;
+  max-width: 112px;
+  padding: 0 8px;
+  overflow: hidden;
+  color: var(--text-normal);
+  text-overflow: ellipsis;
+}
+
+.miro-canvas-toolbar__list {
+  display: flex;
+  flex-direction: column;
+  min-width: 168px;
+}
+
+.miro-canvas-toolbar .miro-canvas-toolbar__button--font-option {
+  justify-content: flex-start;
+  width: 100%;
+  height: 30px;
+  padding: 0 8px;
+  color: var(--text-normal);
+  font-size: 14px;
 }
 
 .miro-canvas-toolbar__stepper {
   gap: 0;
+}
+
+.miro-canvas-toolbar .miro-canvas-toolbar__number {
+  box-sizing: border-box;
+  width: 40px;
+  height: var(--miro-canvas-toolbar-size);
+  padding: 0 2px;
+  color: var(--text-normal);
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-s, 4px);
+  font-size: inherit;
+  text-align: center;
+  -moz-appearance: textfield;
+}
+
+.miro-canvas-toolbar__number::-webkit-inner-spin-button,
+.miro-canvas-toolbar__number::-webkit-outer-spin-button {
+  margin: 0;
+  -webkit-appearance: none;
+}
+
+.miro-canvas-toolbar .miro-canvas-toolbar__number:hover:not(:disabled),
+.miro-canvas-toolbar .miro-canvas-toolbar__number:focus {
+  background: var(--background-modifier-hover);
+  box-shadow: none;
+}
+
+.miro-canvas-toolbar .miro-canvas-toolbar__panel .miro-canvas-toolbar__number {
+  width: 56px;
+  background: var(--background-modifier-form-field, var(--background-secondary));
+  border: 1px solid var(--miro-canvas-toolbar-border);
 }
 
 .miro-canvas-toolbar__stepper-buttons {
@@ -936,56 +988,76 @@
   flex-direction: column;
 }
 
-.miro-canvas-toolbar__button--step {
+.miro-canvas-toolbar .miro-canvas-toolbar__button--step {
   min-width: 16px;
-  min-height: 13px;
+  height: 14px;
   padding: 0;
-  font-size: 9px;
 }
 
-.miro-canvas-toolbar__number {
-  width: 46px;
-  text-align: center;
+.miro-canvas-toolbar .miro-canvas-toolbar__button--step > .svg-icon {
+  width: 12px;
+  height: 12px;
+}
+
+/* Colour buttons show the colour they hold: a bar under the text icon, a
+   dot for a fill or a line, a ring for a border. */
+.miro-canvas-toolbar .miro-canvas-toolbar__button[data-look="text"]::after {
+  content: "";
+  position: absolute;
+  left: 7px;
+  right: 7px;
+  bottom: 3px;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--miro-canvas-swatch, transparent);
+}
+
+.miro-canvas-toolbar__swatch-mark {
+  box-sizing: border-box;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--miro-canvas-swatch, transparent);
+  box-shadow: inset 0 0 0 1px var(--background-modifier-border-hover, var(--miro-canvas-toolbar-border));
+}
+
+.miro-canvas-toolbar__button[data-look="ring"] > .miro-canvas-toolbar__swatch-mark {
+  background: transparent;
+  border: 3px solid var(--miro-canvas-swatch, transparent);
+}
+
+.miro-canvas-toolbar__button[data-look="fill"][data-color-unset="true"] > .miro-canvas-toolbar__swatch-mark {
+  background: linear-gradient(135deg, transparent 45%, var(--text-faint) 45%, var(--text-faint) 55%, transparent 55%);
+}
+
+.miro-canvas-toolbar__button[data-look="ring"][data-color-unset="true"] > .miro-canvas-toolbar__swatch-mark {
+  border-color: var(--text-faint);
+  box-shadow: none;
+}
+
+.miro-canvas-toolbar__button[data-look="text"][data-color-unset="true"]::after {
+  background: var(--text-faint);
 }
 
 /* Popover panels are the only place a long list is allowed to appear. */
 .miro-canvas-toolbar__panel {
   position: absolute;
-  top: calc(100% + 6px);
-  left: 0;
+  top: calc(100% + 8px);
+  left: -4px;
   z-index: 1;
   display: flex;
   flex-direction: column;
   gap: 6px;
-  min-width: 168px;
-  max-width: 260px;
-  max-height: 320px;
+  min-width: max-content;
+  max-height: 380px;
   overflow-y: auto;
-  padding: 6px;
+  padding: 8px;
   background: var(--miro-canvas-toolbar-bg);
   border: 1px solid var(--miro-canvas-toolbar-border);
-  border-radius: var(--radius-m, 10px);
+  border-radius: var(--radius-m, 8px);
   box-shadow: var(--shadow-s, 0 6px 22px rgb(0 0 0 / 22%));
   white-space: normal;
-}
-
-.miro-canvas-toolbar__panel .miro-canvas-toolbar__select,
-.miro-canvas-toolbar__panel .miro-canvas-toolbar__number {
-  width: 100%;
-  background: var(--background-secondary);
-  border: 1px solid var(--miro-canvas-toolbar-border);
-}
-
-.miro-canvas-toolbar__grid {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 2px;
-}
-
-/* Shapes are picked by picture alone; names and meanings are hover text. */
-.miro-canvas-toolbar__panel--shapes {
-  max-width: none;
-  max-height: 380px;
+  cursor: default;
 }
 
 .miro-canvas-toolbar__heading {
@@ -994,20 +1066,64 @@
   font-size: var(--font-ui-smaller, 12px);
 }
 
-.miro-canvas-toolbar__shapes {
+.miro-canvas-toolbar__row {
+  display: flex;
+  gap: 2px;
+  align-items: center;
+}
+
+.miro-canvas-toolbar__row + .miro-canvas-toolbar__row {
+  padding-top: 6px;
+  border-top: 1px solid var(--miro-canvas-toolbar-border);
+}
+
+.miro-canvas-toolbar__slider {
+  gap: 8px;
+}
+
+.miro-canvas-toolbar__range {
+  flex: 1;
+  min-width: 128px;
+}
+
+.miro-canvas-toolbar__value {
+  min-width: 2ch;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+/* Grids of pictures: shapes, line ends, swatches. */
+.miro-canvas-toolbar__pictures {
   display: grid;
   grid-template-columns: repeat(7, 32px);
   gap: 2px;
 }
 
-.miro-canvas-toolbar__button--shape-option {
+.miro-canvas-toolbar__pictures--caps {
+  grid-template-columns: repeat(2, 48px);
+}
+
+.miro-canvas-toolbar .miro-canvas-toolbar__button--picture {
   width: 32px;
   height: 32px;
   padding: 0;
 }
 
-.miro-canvas-toolbar__button--shape-option:hover:not(:disabled):not([aria-pressed="true"]) {
+.miro-canvas-toolbar__pictures--caps .miro-canvas-toolbar__button--picture {
+  width: 48px;
+}
+
+.miro-canvas-toolbar .miro-canvas-toolbar__button--picture:hover:not(:disabled):not([aria-pressed="true"]) {
   color: var(--interactive-accent);
+}
+
+.miro-canvas-toolbar__button--picture > svg {
+  transition: transform 80ms ease-out;
+}
+
+.miro-canvas-toolbar__button--picture:hover:not(:disabled) > svg {
+  transform: scale(1.15);
 }
 
 .miro-canvas-shape-icon {
@@ -1017,63 +1133,98 @@
   stroke-width: 1.5;
   stroke-linejoin: round;
   stroke-linecap: round;
-  transition: transform 80ms ease-out;
-}
-
-.miro-canvas-toolbar__button--shape-option:hover:not(:disabled) .miro-canvas-shape-icon {
-  transform: scale(1.15);
 }
 
 .miro-canvas-shape-icon--square { width: 18px; height: 18px; }
 .miro-canvas-shape-icon--wide { width: 22px; height: 15px; }
 .miro-canvas-shape-icon--tall { width: 13px; height: 20px; }
 
-.miro-canvas-toolbar__button--wide {
-  grid-column: 1 / -1;
-  min-height: 26px;
-  text-align: left;
+.miro-canvas-line-icon {
+  width: 32px;
+  height: 16px;
+  overflow: visible;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
-.miro-canvas-toolbar__swatch {
-  width: 100%;
-  height: 30px;
-  padding: 2px;
-  background: var(--background-secondary);
-  border: 1px solid var(--miro-canvas-toolbar-border);
-  border-radius: 6px;
+.miro-canvas-line-icon--square {
+  width: 18px;
+  height: 18px;
+}
+
+.miro-canvas-line-icon .is-filled {
+  fill: currentColor;
+}
+
+.miro-canvas-line-icon .is-faint {
+  opacity: 0.45;
+}
+
+.miro-canvas-toolbar .miro-canvas-toolbar__button--cap {
+  min-width: 38px;
+}
+
+.miro-canvas-toolbar__button--cap > .miro-canvas-line-icon {
+  width: 28px;
+  height: 14px;
+}
+
+.miro-canvas-toolbar__palette {
+  grid-template-columns: repeat(8, 22px);
+  gap: 5px;
+}
+
+.miro-canvas-toolbar .miro-canvas-toolbar__button--swatch {
+  width: 22px;
+  min-width: 22px;
+  height: 22px;
+  padding: 0;
+  background: var(--miro-canvas-swatch, transparent);
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 1px rgb(0 0 0 / 15%);
+}
+
+.miro-canvas-toolbar .miro-canvas-toolbar__button--swatch:hover:not(:disabled) {
+  background: var(--miro-canvas-swatch, transparent);
+  box-shadow: inset 0 0 0 1px rgb(0 0 0 / 15%), 0 0 0 2px var(--background-modifier-border-hover, var(--miro-canvas-toolbar-border));
+}
+
+.miro-canvas-toolbar .miro-canvas-toolbar__button--swatch[aria-pressed="true"] {
+  background: var(--miro-canvas-swatch, transparent);
+  box-shadow: inset 0 0 0 1px rgb(0 0 0 / 15%), 0 0 0 2px var(--miro-canvas-toolbar-bg), 0 0 0 3px var(--interactive-accent);
+}
+
+/* The custom colour picker is one more, wider swatch at the end. */
+.miro-canvas-toolbar .miro-canvas-toolbar__swatch {
+  box-sizing: border-box;
+  width: 48px;
+  height: 22px;
+  padding: 0;
+  background: none;
+  border: 0;
+  border-radius: 11px;
+  box-shadow: inset 0 0 0 1px rgb(0 0 0 / 15%);
   cursor: pointer;
 }
 
-.miro-canvas-toolbar__button:disabled,
-.miro-canvas-toolbar__select:disabled,
-.miro-canvas-toolbar__number:disabled,
-.miro-canvas-toolbar__swatch:disabled {
-  cursor: not-allowed;
-  opacity: 0.45;
+.miro-canvas-toolbar__swatch::-webkit-color-swatch-wrapper {
+  padding: 0;
+}
+
+.miro-canvas-toolbar__swatch::-webkit-color-swatch {
+  border: 0;
+  border-radius: 11px;
 }
 
 .miro-canvas-toolbar__status {
   margin: 0;
   padding: 0 4px 2px;
   color: var(--text-muted);
+  font-size: var(--font-ui-smaller, 12px);
   white-space: normal;
-}
-
-.miro-canvas-toolbar__palette {
-  grid-template-columns: repeat(8, 1fr);
-}
-
-.miro-canvas-toolbar__palette--recent:empty {
-  display: none;
-}
-
-.miro-canvas-toolbar__button--swatch {
-  min-width: 18px;
-  min-height: 18px;
-  padding: 0;
-  background: var(--miro-canvas-swatch, transparent);
-  border: 1px solid var(--miro-canvas-toolbar-border);
-  border-radius: 4px;
 }
 
 /* Zoom and the minimap toggle sit in the dock beside the map they navigate. */
@@ -1229,7 +1380,8 @@
 .miro-canvas-handle--right { left: 100%; top: var(--miro-handle-position); }
 
 /* The native Canvas menu lives inside the toolbar, so a selection has one menu.
-   Its colour button is hidden: the toolbar's palettes hold the Canvas colours. */
+   Its colour and line direction buttons are hidden: the toolbar's palettes
+   hold the Canvas colours and its line end pictures hold the directions. */
 .miro-canvas-toolbar__native {
   display: flex;
   align-items: center;
@@ -1246,7 +1398,8 @@
   box-shadow: none;
 }
 
-.miro-canvas-toolbar__native > .canvas-menu > button:has(> .lucide-palette) {
+.miro-canvas-toolbar__native > .canvas-menu > button:has(> .lucide-palette),
+.miro-canvas-toolbar__native > .canvas-menu > button:has(> .lucide-arrow-right) {
   display: none;
 }
 

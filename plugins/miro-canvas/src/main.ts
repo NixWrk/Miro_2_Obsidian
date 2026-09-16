@@ -1,4 +1,4 @@
-import { Modal, Notice, Plugin, TFile, type WorkspaceLeaf } from "obsidian";
+import { Modal, Notice, Plugin, TFile, setIcon, type WorkspaceLeaf } from "obsidian";
 
 import {
   inspectAdvancedCanvas,
@@ -282,6 +282,7 @@ export default class MiroCanvasPlugin extends Plugin {
     this.m1Session = new M1CanvasSession(view, this.metadataWriter, {
       onNotice: (message) => new Notice(message),
       onStateChange: () => this.updateStatus(true),
+      setIcon: (element, icon) => setIcon(element, icon),
       onOpenCommentThread: (threadId, origin) => {
         const session = this.activeM1Session();
         if (session !== null) this.openLocalTools(session, { threadId, origin });

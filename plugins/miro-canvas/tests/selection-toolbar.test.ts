@@ -6,6 +6,7 @@ import { CONNECTOR_CAPS } from "../src/source-model";
 import {
   SelectionToolbar,
   type SelectionStylePatch,
+  type SelectionToolbarOptions,
   type SelectionToolbarState,
 } from "../src/selection-toolbar";
 
@@ -102,8 +103,23 @@ function byLabel(root: FakeElement, label: string): FakeElement {
   return matches[0]!;
 }
 
-function optionValues(select: FakeElement): string[] {
-  return descendants(select).filter((item) => item.tagName === "option").map((item) => item.value);
+/** The panel a popover button owns is its sibling inside the popover host. */
+function panelOf(root: FakeElement, buttonLabel: string): FakeElement {
+  const host = byLabel(root, buttonLabel).parentElement!;
+  return host.children.find((child) => child.className.includes("__panel"))!;
+}
+
+/** The choice carrying a value inside one popover. */
+function choice(root: FakeElement, popover: string, value: string): FakeElement {
+  const matches = descendants(panelOf(root, popover)).filter((item) => item.attributes.get("data-value") === value);
+  if (matches.length !== 1) throw new Error(`expected one ${value} in ${popover}, found ${matches.length}`);
+  return matches[0]!;
+}
+
+function pressed(root: FakeElement, popover: string): string[] {
+  return descendants(panelOf(root, popover))
+    .filter((item) => item.attributes.has("data-value") && item.attributes.get("aria-pressed") === "true")
+    .map((item) => item.attributes.get("data-value")!);
 }
 
 function shapeOption(root: FakeElement, kind: string): FakeElement {
@@ -118,10 +134,12 @@ function pressedShapes(root: FakeElement): string[] {
     .map((item) => item.attributes.get("data-shape")!);
 }
 
-/** The panel a popover button owns is its sibling inside the popover host. */
-function panelOf(root: FakeElement, buttonLabel: string): FakeElement {
-  const host = byLabel(root, buttonLabel).parentElement!;
-  return host.children.find((child) => child.className.includes("__panel"))!;
+/** A control is on screen when neither it nor anything it sits in is hidden. */
+function shown(element: FakeElement): boolean {
+  for (let item: FakeElement | undefined = element; item !== undefined; item = item.parentNode) {
+    if (item.hidden) return false;
+  }
+  return true;
 }
 
 const TYPOGRAPHY = {
@@ -132,7 +150,9 @@ const TYPOGRAPHY = {
   verticalAlign: "center",
 } as const;
 
-function build(overrides: Partial<SelectionToolbarState> = {}): {
+const EDGE = { kinds: ["edge"], selectedIds: ["e1"] } as const;
+
+function build(overrides: Partial<SelectionToolbarState> = {}, options: SelectionToolbarOptions = {}): {
   readonly toolbar: SelectionToolbar;
   readonly root: FakeElement;
   readonly appearance: AppearanceAction[];
@@ -147,7 +167,7 @@ function build(overrides: Partial<SelectionToolbarState> = {}): {
     onAppearance: (action) => { appearance.push(action); },
     onStyle: (patch) => { styles.push(patch); },
     onLock: (locked) => { locks.push(locked); },
-  }, { document: new FakeDocument() as unknown as Document });
+  }, { document: new FakeDocument() as unknown as Document, ...options });
   const base: SelectionToolbarState = {
     selectedIds: ["n1"],
     kinds: ["shape"],
@@ -170,35 +190,52 @@ describe("selection toolbar", () => {
   it("keeps one compact row and hides every popover until it is opened", () => {
     const { root } = build();
     const bar = root.children.find((child) => child.className.includes("__bar"))!;
-    // Shape, three color buttons, lock, the native menu's slot and overflow
-    // sit beside one text group.
-    expect(bar.children.length).toBeLessThanOrEqual(9);
+    // Shape, the text group, the connector group, the colour group, the lock
+    // and the native menu's slot.
+    expect(bar.children.length).toBeLessThanOrEqual(6);
     for (const panel of descendants(root).filter((item) => item.className.includes("__panel"))) {
       expect(panel.hidden).toBe(true);
     }
     expect(byLabel(root, "Shape").getAttribute("aria-expanded")).toBe("false");
   });
 
-  it("keeps a slot for the native Canvas menu between the lock and the overflow", () => {
+  it("keeps a slot for the native Canvas menu right after the lock", () => {
     const { root, toolbar } = build();
     const bar = root.children.find((child) => child.className.includes("__bar"))!;
     const slot = toolbar.nativeSlot as unknown as FakeElement;
     expect(slot.className).toBe("miro-canvas-toolbar__native");
-    const order = bar.children.map((child) => child.getAttribute("aria-label") ?? child.className);
     const slotIndex = bar.children.indexOf(slot);
-    expect(order[slotIndex - 1]).toBe("Lock selection");
-    expect(bar.children[slotIndex + 1]!.className).toContain("popover");
+    expect(bar.children[slotIndex - 1]!.getAttribute("aria-label")).toBe("Lock selection");
+    expect(slotIndex).toBe(bar.children.length - 1);
+  });
+
+  it("draws interface icons through the host and falls back to glyphs", () => {
+    const drawn: string[] = [];
+    const { root } = build({}, {
+      setIcon: (element, icon) => {
+        drawn.push(icon);
+        (element as unknown as FakeElement).textContent = "";
+      },
+    });
+    for (const icon of ["bold", "italic", "align-center", "align-vertical-justify-end", "baseline", "arrow-left-right", "lock-open", "chevron-up", "ban"]) {
+      expect(drawn, icon).toContain(icon);
+    }
+    expect(byLabel(root, "Text style").getAttribute("data-icon")).toBe("bold");
+    expect(byLabel(root, "Text style").textContent).toBe("");
+    const plain = build();
+    expect(byLabel(plain.root, "Text style").textContent).toBe("B");
+    expect(byLabel(plain.root, "Lock selection").textContent).toBe("🔓");
   });
 
   it("opens one popover at a time and closes it on Escape", () => {
     const { root } = build();
     byLabel(root, "Shape").dispatch("click");
     expect(panelOf(root, "Shape").hidden).toBe(false);
-    byLabel(root, "More settings").dispatch("click");
+    byLabel(root, "Alignment").dispatch("click");
     expect(panelOf(root, "Shape").hidden).toBe(true);
-    expect(panelOf(root, "More settings").hidden).toBe(false);
+    expect(panelOf(root, "Alignment").hidden).toBe(false);
     root.dispatch("keydown", { key: "Escape" });
-    expect(panelOf(root, "More settings").hidden).toBe(true);
+    expect(panelOf(root, "Alignment").hidden).toBe(true);
   });
 
   it("offers every shape once, as a picture named on hover", () => {
@@ -232,105 +269,156 @@ describe("selection toolbar", () => {
     expect(pressedShapes(root)).toEqual(["rhombus"]);
     const button = byLabel(root, "Shape");
     expect(button.children[0]!.getAttribute("class")).toContain("miro-canvas-shape-icon");
-    expect(button.getAttribute("data-shape-icon")).toBe("rhombus");
+    expect(button.getAttribute("data-picture")).toBe("rhombus");
     // Picking the picture the node already shows writes nothing.
     shapeOption(root, "rhombus").dispatch("click");
     expect(styles).toEqual([]);
     update({ shape: "ellipse" });
     expect(pressedShapes(root)).toEqual(["circle"]);
-    expect(button.getAttribute("data-shape-icon")).toBe("circle");
+    expect(button.getAttribute("data-picture")).toBe("circle");
     expect(button.children).toHaveLength(1);
     update({ shape: undefined });
     expect(pressedShapes(root)).toEqual([]);
   });
 
-  it("keeps every connector cap available in the overflow menu", () => {
-    const { root, styles } = build({ kinds: ["edge"], selectedIds: ["e1"] });
-    expect(optionValues(byLabel(root, "Start cap"))).toEqual([...CONNECTOR_CAPS]);
-    const endCap = byLabel(root, "End cap");
-    endCap.value = "erd_many";
-    endCap.dispatch("change");
-    expect(styles).toEqual([{ connector: { endCap: "erd_many" } }]);
+  it("shows a node's row for a node and a connector's row for a connector", () => {
+    const { root, update } = build();
+    const visible = (label: string): boolean => shown(byLabel(root, label));
+    expect(["Shape", "Font", "Text style", "Alignment", "Text color", "Fill color", "Border"].every(visible)).toBe(true);
+    expect(["Line start", "Swap line ends", "Line end", "Line", "Line color"].some(visible)).toBe(false);
+    update(EDGE);
+    expect(["Line start", "Swap line ends", "Line end", "Line", "Line color", "Lock selection"].every(visible)).toBe(true);
+    expect(["Shape", "Font", "Text style", "Alignment", "Text color", "Fill color", "Border"].some(visible)).toBe(false);
+    update({ kinds: ["text"] });
+    expect(visible("Shape")).toBe(false);
+    expect(visible("Font")).toBe(true);
   });
 
-  it("hides on an empty selection and when no placement is resolved", () => {
-    const { root, update } = build();
-    expect(root.hidden).toBe(false);
-    expect(root.style.left).toBe("120px");
-    update({ selectedIds: [] });
-    expect(root.hidden).toBe(true);
-    update({ placement: undefined });
-    expect(root.hidden).toBe(true);
-    update();
-    expect(root.hidden).toBe(false);
-  });
-
-  it("closes an open popover when the selection is cleared or replaced", () => {
-    const { root, update } = build();
-    byLabel(root, "Shape").dispatch("click");
-    expect(panelOf(root, "Shape").hidden).toBe(false);
-    update({ selectedIds: [] });
-    expect(panelOf(root, "Shape").hidden).toBe(true);
-    update();
-    byLabel(root, "Shape").dispatch("click");
-    update({ selectedIds: ["n2"] });
-    expect(panelOf(root, "Shape").hidden).toBe(true);
-  });
-
-  it("shows connector settings for an edge and shape settings for a node", () => {
-    const { root, update } = build();
-    const shapeHost = byLabel(root, "Shape").parentElement!;
-    const connectorGroup = byLabel(root, "Connector route").parentElement!;
-    const borderGroup = byLabel(root, "Border style").parentElement!;
-    expect(shapeHost.hidden).toBe(false);
-    expect(connectorGroup.hidden).toBe(true);
-    expect(borderGroup.hidden).toBe(false);
-    expect(byLabel(root, "Fill color").parentElement!.hidden).toBe(false);
-    expect(byLabel(root, "Line color").parentElement!.hidden).toBe(true);
-    update({ kinds: ["edge"], selectedIds: ["e1"] });
-    expect(shapeHost.hidden).toBe(true);
-    expect(connectorGroup.hidden).toBe(false);
-    expect(borderGroup.hidden).toBe(true);
-    expect(byLabel(root, "Fill color").parentElement!.hidden).toBe(true);
-    expect(byLabel(root, "Line color").parentElement!.hidden).toBe(false);
+  it("sets text style, alignment and font from pictures and shows the current ones", () => {
+    const { root, appearance } = build();
+    expect(pressed(root, "Text style")).toEqual(["bold"]);
+    expect(byLabel(root, "Text style").getAttribute("data-active")).toBe("true");
+    expect(pressed(root, "Alignment")).toEqual(["center", "center"]);
+    expect(byLabel(root, "Alignment").getAttribute("data-icon")).toBe("align-center");
+    expect(pressed(root, "Font")).toEqual(["Inter"]);
+    expect(byLabel(root, "Font").textContent).toBe("Inter");
+    byLabel(root, "Italic").dispatch("click");
+    byLabel(root, "Bold").dispatch("click");
+    byLabel(root, "Align right").dispatch("click");
+    byLabel(root, "Align bottom").dispatch("click");
+    choice(root, "Font", "Georgia").dispatch("click");
+    expect(appearance).toEqual([
+      { type: APPEARANCE_ACTIONS.setFormat, format: { italic: true } },
+      { type: APPEARANCE_ACTIONS.setFormat, format: { bold: false } },
+      { type: APPEARANCE_ACTIONS.setAlignment, alignment: "right" },
+      { type: APPEARANCE_ACTIONS.setTypography, typography: { verticalAlign: "bottom" } },
+      { type: APPEARANCE_ACTIONS.setFontFamily, fontFamily: "Georgia" },
+    ]);
   });
 
   it("reflects the selected element state", () => {
     const { root } = build({ shape: "hexagon", borderStyle: "dashed", borderWidth: 4 });
     expect(byLabel(root, "Font size").value).toBe("18");
-    expect(byLabel(root, "Toggle bold").getAttribute("aria-pressed")).toBe("true");
-    expect(byLabel(root, "Toggle italic").getAttribute("aria-pressed")).toBe("false");
-    expect(byLabel(root, "Text alignment").value).toBe("center");
-    expect(byLabel(root, "Fill color value").value).toBe("#abcdef");
+    expect(byLabel(root, "Custom fill color").value).toBe("#abcdef");
     expect(byLabel(root, "Fill color").getAttribute("data-color-unset")).toBe("false");
     expect(byLabel(root, "Text color").getAttribute("data-color-unset")).toBe("true");
     expect(pressedShapes(root)).toEqual(["hexagon"]);
-    expect(byLabel(root, "Border style").value).toBe("dashed");
+    expect(pressed(root, "Border")).toContain("dashed");
     expect(byLabel(root, "Border width").value).toBe("4");
   });
 
-  it("emits appearance actions for typography and colors", () => {
+  it("emits appearance actions for size and colours", () => {
     const { root, appearance } = build();
     byLabel(root, "Increase font size").dispatch("click");
     byLabel(root, "Decrease font size").dispatch("click");
-    byLabel(root, "Toggle bold").dispatch("click");
-    const fill = byLabel(root, "Fill color value");
+    const fill = byLabel(root, "Custom fill color");
     fill.value = "#123456";
     fill.dispatch("change");
     byLabel(root, "Clear fill color").dispatch("click");
+    byLabel(root, "Clear border color").dispatch("click");
     expect(appearance).toEqual([
       { type: APPEARANCE_ACTIONS.setFontSize, fontSize: 19 },
       { type: APPEARANCE_ACTIONS.setFontSize, fontSize: 17 },
-      { type: APPEARANCE_ACTIONS.setFormat, format: { bold: false } },
       { type: APPEARANCE_ACTIONS.setColor, slot: "fill", color: "#123456" },
       { type: APPEARANCE_ACTIONS.setColor, slot: "fill", color: null },
+      { type: APPEARANCE_ACTIONS.setColor, slot: "border", color: null },
     ]);
+  });
+
+  it("sets a border's style from pictures and its width from a slider", () => {
+    const { root, styles } = build();
+    expect(pressed(root, "Border")).toContain("solid");
+    choice(root, "Border", "dotted").dispatch("click");
+    const width = byLabel(root, "Border width");
+    width.value = "6";
+    width.dispatch("input");
+    expect(styles).toEqual([{ borderStyle: "dotted" }]);
+    const value = descendants(panelOf(root, "Border")).find((item) => item.className === "miro-canvas-toolbar__value")!;
+    expect(value.textContent).toBe("6");
+    width.dispatch("change");
+    expect(styles).toEqual([{ borderStyle: "dotted" }, { borderWidth: 6 }]);
+  });
+
+  it("offers every line end as a picture at either end", () => {
+    const { root, styles } = build(EDGE);
+    for (const popover of ["Line start", "Line end"]) {
+      const options = descendants(panelOf(root, popover)).filter((item) => item.attributes.has("data-value"));
+      expect(options.map((item) => item.attributes.get("data-value"))).toEqual([...CONNECTOR_CAPS]);
+      for (const option of options) expect(option.children[0]!.tagName).toBe("svg");
+    }
+    expect(choice(root, "Line start", "erd_zero_or_many").getAttribute("aria-label"))
+      .toBe("Zero or many\nEntity relationship: any number, possibly none");
+    choice(root, "Line start", "filled_diamond").dispatch("click");
+    choice(root, "Line end", "none").dispatch("click");
+    expect(styles).toEqual([
+      { connector: { startCap: "filled_diamond" } },
+      { connector: { endCap: "none" } },
+    ]);
+  });
+
+  it("shows a connector's ends on their buttons and swaps them", () => {
+    const { root, styles, update } = build({ ...EDGE, connector: { startCap: "erd_many", endCap: "none" } });
+    expect(byLabel(root, "Line start").getAttribute("data-picture")).toBe("start:erd_many");
+    expect(byLabel(root, "Line end").getAttribute("data-picture")).toBe("end:none");
+    expect(pressed(root, "Line start")).toEqual(["erd_many"]);
+    byLabel(root, "Swap line ends").dispatch("click");
+    expect(styles).toEqual([{ connector: { startCap: "none", endCap: "erd_many" } }]);
+    // Without its own ends a connector shows an arrow at the end only.
+    update({ connector: undefined });
+    expect(byLabel(root, "Line end").getAttribute("data-picture")).toBe("end:arrow");
+    byLabel(root, "Swap line ends").dispatch("click");
+    expect(styles[1]).toEqual({ connector: { startCap: "arrow", endCap: "none" } });
+    update({ connector: { startCap: "arrow", endCap: "arrow" } });
+    byLabel(root, "Swap line ends").dispatch("click");
+    expect(styles).toHaveLength(2);
+  });
+
+  it("picks the kind of line, its dash and its thickness", () => {
+    const { root, styles, update } = build(EDGE);
+    expect(pressed(root, "Line")).toEqual(["curved", "solid"]);
+    expect(byLabel(root, "Line").getAttribute("data-picture")).toBe("route:curved");
+    byLabel(root, "Elbowed line").dispatch("click");
+    byLabel(root, "Dashed line").dispatch("click");
+    const width = byLabel(root, "Line thickness");
+    width.value = "5";
+    width.dispatch("change");
+    width.value = "0";
+    width.dispatch("change");
+    expect(styles).toEqual([
+      { connector: { route: "elbowed" } },
+      { connector: { strokeStyle: "dashed" } },
+      { connector: { width: 5 } },
+    ]);
+    update({ connector: { route: "straight", strokeStyle: "dotted", width: 3 } });
+    expect(pressed(root, "Line")).toEqual(["straight", "dotted"]);
+    expect(byLabel(root, "Line").getAttribute("data-picture")).toBe("route:straight");
+    expect(width.value).toBe("3");
   });
 
   it("marks no picture for an unsupported shape token and rejects an out-of-range width", () => {
     const { root, styles } = build({ shape: "not_a_miro_shape" as never });
     expect(pressedShapes(root)).toEqual([]);
-    expect(byLabel(root, "Shape").getAttribute("data-shape-icon")).toBe("rectangle");
+    expect(byLabel(root, "Shape").getAttribute("data-picture")).toBe("rectangle");
     const border = byLabel(root, "Border width");
     border.value = "1000";
     border.dispatch("change");
@@ -345,8 +433,10 @@ describe("selection toolbar", () => {
     expect(lock.disabled).toBe(false);
     expect(lock.getAttribute("aria-pressed")).toBe("true");
     expect(shapeOption(root, "rectangle").disabled).toBe(true);
+    expect(byLabel(root, "Swap line ends").disabled).toBe(true);
     byLabel(root, "Increase font size").dispatch("click");
     shapeOption(root, "rectangle").dispatch("click");
+    byLabel(root, "Italic").dispatch("click");
     expect(appearance).toEqual([]);
     expect(styles).toEqual([]);
     lock.dispatch("click");
@@ -367,9 +457,13 @@ describe("selection toolbar", () => {
     expect(recent.children.map((item) => item.attributes.get("data-color"))).toEqual(["#123456"]);
     palette.children[0]!.dispatch("click");
     expect(appearance).toEqual([{ type: APPEARANCE_ACTIONS.setColor, slot: "fill", color: "#f24726" }]);
+    // The colour the element has is the pressed swatch.
+    update({ colors: { fill: "#f24726" } });
+    expect(palette.children[0]!.getAttribute("aria-pressed")).toBe("true");
     // Swatches follow the palette without leaving stale buttons behind.
-    update({ palette: [] });
+    update({ palette: [], recentColors: [] });
     expect(palette.children).toHaveLength(0);
+    expect(recent.hidden).toBe(true);
   });
 
   it("removes its listeners on dispose", () => {
