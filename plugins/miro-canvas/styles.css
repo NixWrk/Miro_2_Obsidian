@@ -1113,6 +1113,28 @@
 .miro-canvas-handle--left { left: 0; top: var(--miro-handle-position); }
 .miro-canvas-handle--right { left: 100%; top: var(--miro-handle-position); }
 
+/* The native Canvas menu lives inside the toolbar, so a selection has one menu.
+   Its colour button is hidden: the toolbar's palettes hold the Canvas colours. */
+.miro-canvas-toolbar__native {
+  display: flex;
+  align-items: center;
+}
+
+.miro-canvas-toolbar__native:has(> .canvas-menu:empty) {
+  display: none;
+}
+
+.miro-canvas-toolbar__native > .canvas-menu {
+  padding: 0;
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+}
+
+.miro-canvas-toolbar__native > .canvas-menu > button:has(> .lucide-palette) {
+  display: none;
+}
+
 /* Rotation controls wrap the lower left corner of the node as an L, clear of
    the formatting toolbar above it: the free grip in the corner, the
    clockwise turn above it, the anticlockwise turn beside it. */

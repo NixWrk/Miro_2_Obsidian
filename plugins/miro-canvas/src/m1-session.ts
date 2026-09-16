@@ -1199,7 +1199,7 @@ export class M1CanvasSession {
 		try {
 			this.root.appendChild(this.controls.element);
 			this.root.appendChild(this.controls.minimapElement);
-			if (isElement(this.toolbar.element)) {
+			if (isElement(this.toolbar.element) && this.settings.selectionToolbarEnabled) {
 				this.root.appendChild(this.toolbar.element);
 			}
 			if (isElement(this.handles.element)) {
@@ -1218,6 +1218,7 @@ export class M1CanvasSession {
 			this.refresh();
 			return false;
 		}
+		this.adoptNativeMenu();
 		this.attachGuards();
 		this.attachMinimapHandlers();
 		this.attachResizeObserver();
@@ -1503,6 +1504,37 @@ export class M1CanvasSession {
 		}
 	}
 
+	/**
+	 * Put the native Canvas menu inside this plugin's toolbar.
+	 *
+	 * Native Canvas floats its own menu - delete, colour, zoom, group, align,
+	 * edit - over every selection, so a selected node carried two menus.  The
+	 * menu element is moved, not copied: native Canvas keeps filling it with
+	 * its own buttons and submenus on every selection change.  Only its colour
+	 * button is hidden, because the toolbar's palettes already hold the Canvas
+	 * colours.  Disposal puts the element back where native Canvas keeps it.
+	 */
+	private adoptNativeMenu(): void {
+		if (!this.settings.selectionToolbarEnabled) return;
+		const slot = this.toolbar.nativeSlot;
+		const menu = readRuntime(this.nativeCanvas(), "menu");
+		const menuEl = readRuntime(menu, "menuEl");
+		const container = readRuntime(menu, "containerEl");
+		if (!isElement(slot) || !isElement(menuEl) || !isElement(container) || menuEl.parentElement === slot) return;
+		try {
+			slot.appendChild(menuEl);
+		} catch {
+			return;
+		}
+		this.disposers.push(() => {
+			try {
+				if (menuEl.parentElement === slot) container.prepend(menuEl);
+			} catch {
+				// A container native Canvas has already destroyed needs nothing back.
+			}
+		});
+	}
+
 	/** The native Canvas runtime this session drives, found the way the adapter finds it. */
 	private nativeCanvas(): UnknownRecord | undefined {
 		const observed = this.adapter.read("getData");
@@ -1665,7 +1697,10 @@ export class M1CanvasSession {
 			if (id === undefined || !this.selectedIds.includes(id)) {
 				continue;
 			}
-			const rect = boundingRect(readCanvasElementDom(element));
+			// An edge has no HTML element, only its SVG line group; without it a
+			// selected connector had no toolbar - and, with the native menu
+			// adopted into the toolbar, no menu at all.
+			const rect = boundingRect(readCanvasElementDom(element) ?? readRuntime(element, "lineGroupEl"));
 			if (rect === undefined) {
 				continue;
 			}

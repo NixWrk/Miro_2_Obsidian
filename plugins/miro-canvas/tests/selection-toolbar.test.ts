@@ -153,12 +153,24 @@ describe("selection toolbar", () => {
   it("keeps one compact row and hides every popover until it is opened", () => {
     const { root } = build();
     const bar = root.children.find((child) => child.className.includes("__bar"))!;
-    // Shape, three color buttons, lock and overflow sit beside one text group.
-    expect(bar.children.length).toBeLessThanOrEqual(8);
+    // Shape, three color buttons, lock, the native menu's slot and overflow
+    // sit beside one text group.
+    expect(bar.children.length).toBeLessThanOrEqual(9);
     for (const panel of descendants(root).filter((item) => item.className.includes("__panel"))) {
       expect(panel.hidden).toBe(true);
     }
     expect(byLabel(root, "Shape").getAttribute("aria-expanded")).toBe("false");
+  });
+
+  it("keeps a slot for the native Canvas menu between the lock and the overflow", () => {
+    const { root, toolbar } = build();
+    const bar = root.children.find((child) => child.className.includes("__bar"))!;
+    const slot = toolbar.nativeSlot as unknown as FakeElement;
+    expect(slot.className).toBe("miro-canvas-toolbar__native");
+    const order = bar.children.map((child) => child.getAttribute("aria-label") ?? child.className);
+    const slotIndex = bar.children.indexOf(slot);
+    expect(order[slotIndex - 1]).toBe("Lock selection");
+    expect(bar.children[slotIndex + 1]!.className).toContain("popover");
   });
 
   it("opens one popover at a time and closes it on Escape", () => {

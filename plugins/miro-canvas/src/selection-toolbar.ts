@@ -221,6 +221,8 @@ interface ToolbarRefs {
   readonly colorSwatches: Readonly<Record<string, HTMLElement>>;
   readonly colorRecent: Readonly<Record<string, HTMLElement>>;
   readonly lock: HTMLButtonElement;
+  /** Where the host puts the native Canvas menu, so a selection has one menu. */
+  readonly nativeSlot: HTMLElement;
   readonly more: Popover;
   readonly formats: Readonly<Record<(typeof FORMATS)[number], HTMLButtonElement>>;
   readonly lineHeight: HTMLInputElement;
@@ -260,6 +262,11 @@ export class SelectionToolbar {
     root.hidden = true;
     this.element = root;
     this.refs = this.build(root);
+  }
+
+  /** The place in the toolbar reserved for the native Canvas menu. */
+  public get nativeSlot(): HTMLElement | undefined {
+    return this.refs?.nativeSlot;
   }
 
   /** A popover is a button plus a panel that only this toolbar can open. */
@@ -347,6 +354,7 @@ export class SelectionToolbar {
 
     const lock = append(bar, makeButton(document, "🔓", "Lock selection", "miro-canvas-toolbar__button--lock"));
     lock.setAttribute("aria-pressed", "false");
+    const nativeSlot = append(bar, make(document, "span", "miro-canvas-toolbar__native"));
 
     const more = this.makePopover(bar, "⋮", "More settings");
     const formatGroup = append(more.panel, make(document, "div", "miro-canvas-toolbar__grid"));
@@ -378,7 +386,7 @@ export class SelectionToolbar {
       bar, shape, shapeCommon, shapeMore, shapeAll,
       textGroup, fontFamily, fontSize, fontSizeDown, fontSizeUp, bold,
       align, alignment, verticalAlign,
-      colors, colorInputs, colorClears, colorSwatches, colorRecent, lock, more,
+      colors, colorInputs, colorClears, colorSwatches, colorRecent, lock, nativeSlot, more,
       formats: formats as ToolbarRefs["formats"], lineHeight,
       borderGroup, borderStyle, borderWidth,
       connectorGroup, route, strokeStyle, startCap, endCap, connectorWidth, status,
