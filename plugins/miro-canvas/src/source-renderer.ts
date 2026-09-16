@@ -2,7 +2,7 @@ import {
   buildCanvasAnchorGeometry, nativeAnchorEnd, nativeEdgeEnd, nativeEdgeRoute, nativeFreeEnd, roundCoordinate,
   routeConnector, type NativeEdgeEnd, type NodeMeasurements,
 } from "./connector-endpoints";
-import { SHAPE_CLIP_PATHS, inscribedInsets, shapeOutline, type ShapePoint } from "./shape-geometry";
+import { SHAPE_CLIP_PATHS, inscribedInsets, shapeOutline, shapePath, type ShapePoint } from "./shape-geometry";
 import { normalizeAnchor, resolveAnchor, type AnchorEdgeGeometry, type AnchorPoint, type AnchorRect } from "./anchors";
 import { readCanvasElementId } from "./canvas-elements";
 import { buildSourceScene, type SourceItemDescriptor, type SourceScene } from "./source-model";
@@ -78,51 +78,6 @@ const CONNECTOR_ATTRIBUTE_CSS: Readonly<Record<string, string>> = Object.freeze(
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 let markerSequence = 0;
-
-// Normalized contours; inner strokes are separate subpaths, never a clipped
-// rectangular border. Unknown shapes deliberately retain native rendering.
-const SHAPE_PATHS: Readonly<Record<string, string>> = Object.freeze({
-  rectangle: "M0 0H100V100H0Z",
-  round_rectangle: "M12 0H88Q100 0 100 12V88Q100 100 88 100H12Q0 100 0 88V12Q0 0 12 0Z",
-  circle: "M50 0A50 50 0 1 1 50 100A50 50 0 1 1 50 0Z",
-  ellipse: "M50 0A50 50 0 1 1 50 100A50 50 0 1 1 50 0Z",
-  cloud: "M15 75C-5 75 -5 45 12 42C0 20 25 5 40 18C50 -8 82 -3 85 22C110 20 113 55 94 62C110 90 75 110 61 91C42 111 17 100 15 75Z",
-  can: "M0 15C0 -5 100 -5 100 15V85C100 105 0 105 0 85ZM0 15C0 35 100 35 100 15",
-  wedge_round_rectangle_callout: "M12 0H88Q100 0 100 12V68Q100 80 88 80H45L25 100V80H12Q0 80 0 68V12Q0 0 12 0Z",
-  left_brace: "M80 0Q40 0 40 25V35Q40 50 10 50Q40 50 40 65V75Q40 100 80 100",
-  right_brace: "M20 0Q60 0 60 25V35Q60 50 90 50Q60 50 60 65V75Q60 100 20 100",
-  flow_chart_delay: "M0 0H50A50 50 0 0 1 50 100H0Z",
-  flow_chart_display: "M20 0H75Q125 50 75 100H20L0 50Z",
-  flow_chart_document: "M0 0H100V85C65 60 35 110 0 85Z",
-  flow_chart_multidocuments: "M15 0H100V72M8 8H92V80M0 16H84V85C55 65 30 110 0 85Z",
-  flow_chart_internal_storage: "M0 0H100V100H0ZM15 0V100M0 15H100",
-  flow_chart_note_square: "M80 0H15V100H80",
-  flow_chart_predefined_process: "M0 0H100V100H0ZM15 0V100M85 0V100",
-  flow_chart_predefined_process_2: "M0 0H100V100H0ZM15 0V100M85 0V100M0 15H100M0 85H100",
-  flow_chart_online_storage: "M15 0H100C80 15 80 85 100 100H15C-5 85 -5 15 15 0Z",
-  flow_chart_magnetic_drum: "M15 0H85C105 0 105 100 85 100H15C-5 100 -5 0 15 0ZM85 0C65 0 65 100 85 100",
-  flow_chart_terminator: "M25 0H75C108 0 108 100 75 100H25C-8 100 -8 0 25 0Z",
-});
-
-
-function shapePath(shape: string | undefined): string | undefined {
-  if (shape === undefined) return undefined;
-  const aliases: Record<string, string> = {
-    flow_chart_process: "rectangle", flow_chart_connector: "circle",
-    flow_chart_note_curly_left: "left_brace", flow_chart_note_curly_right: "right_brace",
-    flow_chart_magnetic_disk: "can",
-  };
-  const base = aliases[shape] ?? shape;
-  if (base === "flow_chart_or" || base === "flow_chart_summing_junction") {
-    return SHAPE_PATHS.circle + (base === "flow_chart_or" ? "M0 50H100M50 0V100" : "M15 15L85 85M85 15L15 85");
-  }
-  const polygon = SHAPE_CLIP_PATHS[base];
-  if (polygon !== undefined) {
-    const points = polygon.match(/[\d.]+/g)!;
-    return `M${points[0]} ${points[1]}` + points.slice(2).reduce((text, n, i) => text + (i % 2 === 0 ? `L${n}` : ` ${n}`), "") + "Z";
-  }
-  return SHAPE_PATHS[base];
-}
 
 function createSvg(document: Document | undefined, tag: string): DomElementLike | undefined {
   const element = safeCall(document, "createElementNS", [SVG_NS, tag]);
