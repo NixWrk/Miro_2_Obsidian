@@ -104,6 +104,29 @@ describe("inscribed insets", () => {
     expect(top).toBeLessThan(30);
   });
 
+  it("keeps text out of the gap between a star's legs", () => {
+    const [top, right, bottom, left] = inscribedInsets(shapeOutline("star"))!;
+    // Below its inner vertex at 72% the star is only its two legs.
+    expect(100 - bottom).toBeLessThanOrEqual(72.5);
+    expect(top).toBeGreaterThan(0);
+    expect(left).toBeCloseTo(right, 0);
+    // Every corner of the reserved box lies inside the star.
+    const inside = (x: number, y: number): boolean => {
+      const outline = shapeOutline("star")!;
+      let crossings = 0;
+      for (let index = 0; index < outline.length; index += 1) {
+        const from = outline[index]!, to = outline[(index + 1) % outline.length]!;
+        if ((from.y <= y && to.y > y) || (to.y <= y && from.y > y)) {
+          if (x < from.x + ((y - from.y) / (to.y - from.y)) * (to.x - from.x)) crossings += 1;
+        }
+      }
+      return crossings % 2 === 1;
+    };
+    for (const [x, y] of [[left, top], [100 - right, top], [left, 100 - bottom], [100 - right, 100 - bottom]] as const) {
+      expect(inside(x + (x < 50 ? 1 : -1), y + (y < 50 ? 1 : -1))).toBe(true);
+    }
+  });
+
   it("returns nothing without a usable outline", () => {
     expect(inscribedInsets(undefined)).toBeUndefined();
     expect(inscribedInsets([{ x: 0, y: 0 }, { x: 1, y: 1 }])).toBeUndefined();

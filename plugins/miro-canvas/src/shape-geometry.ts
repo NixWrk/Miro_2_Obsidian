@@ -260,7 +260,17 @@ function insideSpan(outline: readonly ShapePoint[], y: number): { readonly left:
     return undefined;
   }
   crossings.sort((left, right) => left - right);
-  return { left: crossings[0]!, right: crossings[crossings.length - 1]! };
+  // A row of a non-convex shape can be inside in several stretches - a
+  // star's legs, with empty space between them.  Taking the outermost
+  // crossings called that gap inside and let text sit outside the star.  The
+  // stretch around the centre is the one text is laid out in.
+  let widest: { readonly left: number; readonly right: number } | undefined;
+  for (let index = 0; index + 1 < crossings.length; index += 2) {
+    const stretch = { left: crossings[index]!, right: crossings[index + 1]! };
+    if (stretch.left <= 50 && stretch.right >= 50) return stretch;
+    if (widest === undefined || stretch.right - stretch.left > widest.right - widest.left) widest = stretch;
+  }
+  return widest;
 }
 
 /**
