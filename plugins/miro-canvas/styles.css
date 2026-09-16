@@ -1129,6 +1129,40 @@
   cursor: grabbing;
 }
 
+/* The two ends of a selected connector, dragged along any node's outline. */
+.miro-canvas-handle--endpoint {
+  width: 12px;
+  height: 12px;
+  transform: translate(-50%, -50%);
+  background: var(--background-primary);
+  border-color: var(--interactive-accent);
+  cursor: move;
+}
+
+.miro-canvas-handle--endpoint:hover,
+.miro-canvas-handles[data-miro-canvas-moving-end] .miro-canvas-handle--endpoint {
+  width: 16px;
+  height: 16px;
+  background: var(--interactive-accent);
+}
+
+/* The line a connector follows while it is being pulled. */
+.miro-canvas-handles__preview {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.miro-canvas-handles__preview path {
+  fill: none;
+  stroke: var(--interactive-accent);
+  stroke-width: 2px;
+  stroke-dasharray: 6 4;
+}
+
 
 .miro-canvas-handles[data-miro-canvas-editable="false"] .miro-canvas-handle {
   display: none;

@@ -41,7 +41,11 @@ export interface SelectionHandlesState {
   readonly shape?: string;
   /** Viewport position of the overlay origin; pointer events use window coordinates. */
   readonly origin?: ShapePointLike;
+  /** Overlay-local ends of a selected connector, where its end grips sit. */
+  readonly endpoints?: { readonly from?: ShapePointLike; readonly to?: ShapePointLike };
 }
+
+export type ConnectorEnd = "from" | "to";
 
 export interface SelectionHandlesActions {
   /** Called continuously while dragging, then once with `commit` true. */
@@ -57,6 +61,8 @@ export interface SelectionHandlesActions {
   ) => void;
   /** A connection point was clicked rather than dragged. */
   readonly onCreateConnected: (sourceId: string, side: HandleSide, position: HandlePosition) => void;
+  /** An end of the selected connector was dragged and released at a viewport point. */
+  readonly onMoveEndpoint?: (edgeId: string, end: ConnectorEnd, point: { readonly x: number; readonly y: number }) => void;
 }
 
 export interface SelectionHandlesOptions {
@@ -154,6 +160,35 @@ interface HandleRefs {
   readonly frame: HTMLElement;
   readonly rotate: HTMLButtonElement;
   readonly connectors: readonly HTMLButtonElement[];
+  readonly ends: Readonly<Record<ConnectorEnd, HTMLButtonElement>>;
+  /** The line drawn while a connector or one of its ends is being pulled. */
+  readonly preview?: SVGPathElement;
+}
+
+const SVG_NAMESPACE = "http://www.w3.org/2000/svg";
+
+function makePreview(document: Document, root: HTMLElement): SVGPathElement | undefined {
+  if (typeof (document as { createElementNS?: unknown }).createElementNS !== "function") return undefined;
+  const svg = document.createElementNS(SVG_NAMESPACE, "svg");
+  svg.setAttribute("class", "miro-canvas-handles__preview");
+  const path = document.createElementNS(SVG_NAMESPACE, "path");
+  svg.appendChild(path);
+  root.appendChild(svg as unknown as HTMLElement);
+  return path;
+}
+
+/** The viewport centre of an element, when the host can measure it. */
+function centreOf(element: unknown): ShapePointLike | undefined {
+  const measure = (element as { getBoundingClientRect?: () => DOMRect } | null)?.getBoundingClientRect;
+  if (typeof measure !== "function") return undefined;
+  try {
+    const rect = measure.call(element);
+    return Number.isFinite(rect.left) && Number.isFinite(rect.top)
+      ? { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 }
+      : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 export class SelectionHandles {
@@ -172,6 +207,10 @@ export class SelectionHandles {
   private dragPosition: HandlePosition | undefined;
   private dragSourceId: string | undefined;
   private dragOrigin: { readonly x: number; readonly y: number } | undefined;
+  /** Overlay-local point the pulled connector starts from, for its preview. */
+  private dragStart: ShapePointLike | undefined;
+  /** The end of the selected connector being moved, if one is. */
+  private endDrag: { readonly edgeId: string; readonly end: ConnectorEnd; readonly origin: ShapePointLike } | undefined;
 
   public constructor(actions: SelectionHandlesActions, options: SelectionHandlesOptions = {}) {
     this.actions = actions;
@@ -209,7 +248,21 @@ export class SelectionHandles {
     }
     const rotate = frame.appendChild(makeGrip(document, "miro-canvas-handle--rotate", "↻", "Rotate"));
     this.listen(rotate, "pointerdown", (event) => this.beginRotate(event));
-    return { frame, rotate, connectors };
+    const end = (which: ConnectorEnd): HTMLButtonElement => {
+      const grip = root.appendChild(makeGrip(
+        document,
+        "miro-canvas-handle--endpoint",
+        "",
+        "Drag to move this end anywhere on a node's outline",
+      ));
+      grip.setAttribute("data-connector-end", which);
+      grip.hidden = true;
+      this.listen(grip, "pointerdown", (event) => this.beginEndDrag(which, event));
+      return grip;
+    };
+    const ends = { from: end("from"), to: end("to") };
+    const preview = makePreview(document, root);
+    return { frame, rotate, connectors, ends, ...(preview === undefined ? {} : { preview }) };
   }
 
   private listen(target: EventTarget, type: string, handler: EventListener): void {
@@ -256,14 +309,52 @@ export class SelectionHandles {
     this.dragPosition = position;
     this.dragSourceId = sourceId;
     this.dragOrigin = pointOf(event);
+    const start = centreOf((event as { currentTarget?: unknown; target?: unknown }).currentTarget
+      ?? (event as { target?: unknown }).target) ?? this.dragOrigin;
+    this.dragStart = start === undefined ? undefined : this.local(start);
     this.element.setAttribute("data-miro-canvas-connecting", side);
+  }
+
+  private beginEndDrag(end: ConnectorEnd, event: unknown): void {
+    const edgeId = this.state.selectedIds[0];
+    const origin = pointOf(event);
+    if (!this.state.editable || !this.state.isEdge || edgeId === undefined || origin === undefined) return;
+    (event as Event).preventDefault?.();
+    this.capture(event);
+    this.endDrag = { edgeId, end, origin };
+    this.element.setAttribute("data-miro-canvas-moving-end", end);
+  }
+
+  /** Draw the line a pulled connector would follow, or hide it. */
+  private showPreview(from: ShapePointLike | undefined, to: ShapePointLike | undefined): void {
+    const path = this.refs?.preview;
+    if (path === undefined) return;
+    if (from === undefined || to === undefined) {
+      path.removeAttribute("d");
+      return;
+    }
+    path.setAttribute("d", `M ${from.x} ${from.y} L ${to.x} ${to.y}`);
   }
 
   /** The host forwards document-level pointer events so a drag can leave the grip. */
   public handlePointerMove(event: unknown): void {
+    const point = pointOf(event);
+    if (point !== undefined && this.dragSide !== undefined && this.dragOrigin !== undefined) {
+      const moved = Math.hypot(point.x - this.dragOrigin.x, point.y - this.dragOrigin.y);
+      this.showPreview(moved < this.dragThreshold ? undefined : this.dragStart, this.local(point));
+    }
+    if (point !== undefined && this.endDrag !== undefined) {
+      const grip = this.refs?.ends[this.endDrag.end];
+      const local = this.local(point);
+      if (grip !== undefined) {
+        grip.style.left = `${local.x}px`;
+        grip.style.top = `${local.y}px`;
+      }
+      const other = this.state.endpoints?.[this.endDrag.end === "from" ? "to" : "from"];
+      this.showPreview(other, local);
+    }
     const rect = this.state.rect;
     if (!this.rotating || rect === undefined) return;
-    const point = pointOf(event);
     if (point === undefined) return;
     const shift = (event as { shiftKey?: unknown }).shiftKey === true;
     const degrees = normalizeAngle(pointerAngle(rect, this.local(point)) + this.rotationOffset, shift ? this.snapDegrees : 0);
@@ -294,6 +385,15 @@ export class SelectionHandles {
       if (moved < this.dragThreshold) this.actions.onCreateConnected(this.dragSourceId, this.dragSide, this.dragPosition);
       else if (point !== undefined) this.actions.onConnect(this.dragSourceId, this.dragSide, this.dragPosition, point);
     }
+    const endDrag = this.endDrag;
+    if (endDrag !== undefined) {
+      const point = pointOf(event);
+      // A press on an end that never moved leaves it where it is.
+      if (point !== undefined && Math.hypot(point.x - endDrag.origin.x, point.y - endDrag.origin.y) >= this.dragThreshold) {
+        this.endDrag = undefined;
+        this.actions.onMoveEndpoint?.(endDrag.edgeId, endDrag.end, point);
+      }
+    }
     this.cancelGesture();
   }
 
@@ -307,12 +407,34 @@ export class SelectionHandles {
     this.dragPosition = undefined;
     this.dragSourceId = undefined;
     this.dragOrigin = undefined;
+    this.dragStart = undefined;
+    const endDrag = this.endDrag;
+    this.endDrag = undefined;
+    this.showPreview(undefined, undefined);
     this.element.removeAttribute?.("data-miro-canvas-rotating");
     this.element.removeAttribute?.("data-miro-canvas-connecting");
+    this.element.removeAttribute?.("data-miro-canvas-moving-end");
+    // A dragged end grip that was not committed goes back where the end is.
+    if (endDrag !== undefined) this.placeEnds(this.state);
   }
 
   public get gestureActive(): boolean {
-    return this.rotating || this.dragSide !== undefined;
+    return this.rotating || this.dragSide !== undefined || this.endDrag !== undefined;
+  }
+
+  /** Show and place the end grips of a selected connector. */
+  private placeEnds(state: SelectionHandlesState): void {
+    const refs = this.refs;
+    if (refs === undefined) return;
+    const shown = state.isEdge && state.editable && state.selectedIds.length === 1;
+    for (const end of ["from", "to"] as const) {
+      const grip = refs.ends[end];
+      const at = state.endpoints?.[end];
+      grip.hidden = !shown || at === undefined;
+      if (at === undefined) continue;
+      grip.style.left = `${at.x}px`;
+      grip.style.top = `${at.y}px`;
+    }
   }
 
   /** Position and size the frame over the node it belongs to. */
@@ -339,6 +461,7 @@ export class SelectionHandles {
           selectedIds: state.selectedIds.length > 0 ? state.selectedIds : previous.selectedIds,
           shape: state.shape ?? previous.shape,
           origin: state.origin ?? previous.origin,
+          endpoints: state.endpoints ?? previous.endpoints,
         }
       : state;
     const refs = this.refs;
@@ -352,16 +475,22 @@ export class SelectionHandles {
       refs.frame.style.transform = this.state.rotation === 0 ? "none" : `rotate(${this.state.rotation}deg)`;
       return;
     }
-    const visible = state.rect !== undefined && state.selectedIds.length === 1;
-    this.element.hidden = !visible;
+    // The dragged end grip stays under the pointer until the drag ends.
+    if (this.endDrag !== undefined) return;
+    const single = state.selectedIds.length === 1;
+    const visible = state.rect !== undefined && single && !state.isEdge;
+    const endsVisible = state.isEdge && single && state.endpoints !== undefined;
+    this.element.hidden = !visible && !endsVisible;
+    refs.frame.hidden = !visible;
+    this.placeEnds(state);
+    this.element.setAttribute("data-miro-canvas-editable", state.editable ? "true" : "false");
+    refs.rotate.hidden = state.isEdge || !state.editable;
+    for (const connector of refs.connectors) connector.hidden = state.isEdge || !state.editable;
     if (!visible || state.rect === undefined) return;
     this.placeFrame(refs.frame, state.rect);
     refs.frame.style.transform = state.rotation === 0 ? "none" : `rotate(${state.rotation}deg)`;
-    this.element.setAttribute("data-miro-canvas-editable", state.editable ? "true" : "false");
-    refs.rotate.hidden = state.isEdge || !state.editable;
     const outline = shapeOutline(state.shape);
     for (const connector of refs.connectors) {
-      connector.hidden = state.isEdge || !state.editable;
       const side = connector.getAttribute("data-handle-side") as HandleSide | null;
       const position = Number(connector.getAttribute("data-handle-position"));
       if (side === null || !Number.isFinite(position)) continue;

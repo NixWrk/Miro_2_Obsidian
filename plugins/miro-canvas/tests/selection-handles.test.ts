@@ -90,18 +90,20 @@ function build(overrides: Partial<SelectionHandlesState> = {}, options: Record<s
   let cancellations = 0;
   const connects: Array<{ sourceId: string; side: HandleSide; position: HandlePosition; point: { x: number; y: number } }> = [];
   const creates: Array<{ sourceId: string; side: HandleSide; position: HandlePosition }> = [];
+  const moves: Array<{ edgeId: string; end: string; point: { x: number; y: number } }> = [];
   const handles = new SelectionHandles({
     onRotate: (degrees, commit) => { rotations.push({ degrees, commit }); },
     onCancelRotation: () => { cancellations += 1; },
     onConnect: (sourceId, side, position, point) => { connects.push({ sourceId, side, position, point: { x: point.x, y: point.y } }); },
     onCreateConnected: (sourceId, side, position) => { creates.push({ sourceId, side, position }); },
+    onMoveEndpoint: (edgeId, end, point) => { moves.push({ edgeId, end, point: { x: point.x, y: point.y } }); },
   }, { document: new FakeDocument() as unknown as Document, ...options });
   const base: SelectionHandlesState = {
     rect: RECT, rotation: 0, editable: true, isEdge: false, selectedIds: ["n1"], ...overrides,
   };
   const update = (patch: Partial<SelectionHandlesState> = {}): void => handles.update({ ...base, ...patch });
   update();
-  return { handles, root: handles.element as unknown as FakeElement, rotations, connects, creates, update, cancellations: () => cancellations };
+  return { handles, root: handles.element as unknown as FakeElement, rotations, connects, creates, moves, update, cancellations: () => cancellations };
 }
 
 describe("selection handle geometry", () => {
@@ -299,5 +301,48 @@ describe("selection handles", () => {
     bySide(root, "right").dispatch("pointerdown", { clientX: 300, clientY: 150, pointerId: 7 });
     handles.handlePointerUp({ clientX: 300, clientY: 150 });
     expect(creates).toEqual([]);
+  });
+});
+
+describe("connector end grips", () => {
+  const byEnd = (root: FakeElement, end: string): FakeElement =>
+    descendants(root).find((item) => item.attributes.get("data-connector-end") === end)!;
+  const endpoints = { from: { x: 120, y: 80 }, to: { x: 420, y: 160 } };
+
+  it("puts a grip on each end of a selected connector and none on a node", () => {
+    const { root, update } = build({ isEdge: true, rect: undefined, selectedIds: ["e1"], endpoints });
+    expect(root.hidden).toBe(false);
+    expect(root.children[0]!.hidden).toBe(true);
+    expect(byEnd(root, "from").hidden).toBe(false);
+    expect(byEnd(root, "from").style.left).toBe("120px");
+    expect(byEnd(root, "to").style.top).toBe("160px");
+    update({ isEdge: false, rect: RECT, selectedIds: ["n1"], endpoints: undefined });
+    expect(byEnd(root, "from").hidden).toBe(true);
+    expect(root.children[0]!.hidden).toBe(false);
+    update({ isEdge: true, rect: undefined, selectedIds: ["e1"], endpoints, editable: false });
+    expect(byEnd(root, "to").hidden).toBe(true);
+  });
+
+  it("moves an end with the pointer and reports where it was dropped", () => {
+    const { root, moves, handles, update } = build({ isEdge: true, rect: undefined, selectedIds: ["e1"], endpoints });
+    byEnd(root, "to").dispatch("pointerdown", { clientX: 420, clientY: 160, pointerId: 31 });
+    expect(handles.gestureActive).toBe(true);
+    handles.handlePointerMove({ clientX: 500, clientY: 200 });
+    expect(byEnd(root, "to").style.left).toBe("500px");
+    // A refresh mid-drag does not snap the grip back.
+    update({ isEdge: true, rect: undefined, selectedIds: ["e1"], endpoints });
+    expect(byEnd(root, "to").style.left).toBe("500px");
+    handles.handlePointerUp({ clientX: 510, clientY: 205 });
+    expect(moves).toEqual([{ edgeId: "e1", end: "to", point: { x: 510, y: 205 } }]);
+    expect(handles.gestureActive).toBe(false);
+  });
+
+  it("leaves an end alone when it was only pressed", () => {
+    const { root, moves, handles } = build({ isEdge: true, rect: undefined, selectedIds: ["e1"], endpoints });
+    byEnd(root, "from").dispatch("pointerdown", { clientX: 120, clientY: 80, pointerId: 32 });
+    handles.handlePointerMove({ clientX: 121, clientY: 81 });
+    handles.handlePointerUp({ clientX: 121, clientY: 81 });
+    expect(moves).toEqual([]);
+    expect(byEnd(root, "from").style.left).toBe("120px");
   });
 });
