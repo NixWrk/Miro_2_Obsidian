@@ -91,8 +91,6 @@ export interface SelectionHandlesOptions {
 const SIDES: readonly HandleSide[] = ["top", "right", "bottom", "left"];
 const DEFAULT_SNAP = 15;
 const DEFAULT_DRAG_THRESHOLD = 4;
-/** Pixels between the lowest point of a turned node and its rotation controls. */
-const ROTATE_BAR_GAP = 28;
 /** Each connection point becomes an arrow pointing away from the node. */
 const SIDE_ARROWS: Readonly<Record<HandleSide, string>> = Object.freeze({
   top: "↑", right: "→", bottom: "↓", left: "←",
@@ -280,11 +278,17 @@ export class SelectionHandles {
     }
     // The rotation controls live outside the turning frame: turned with the
     // node, a grip at one corner ended up under the formatting toolbar once
-    // the node was upside down.
+    // the node was upside down.  They wrap the lower left corner as an L -
+    // the free grip in the corner, a clockwise turn above it, an
+    // anticlockwise turn beside it.
     const rotateBar = root.appendChild(make(document, "div", "miro-canvas-handles__rotate-bar"));
-    const turnBack = rotateBar.appendChild(makeGrip(document, "miro-canvas-handle--turn", "↶", "Turn to the previous right angle"));
+    const turnOn = rotateBar.appendChild(makeGrip(
+      document, "miro-canvas-handle--turn miro-canvas-handle--turn-next", "↷", "Turn to the next right angle",
+    ));
     const rotate = rotateBar.appendChild(makeGrip(document, "miro-canvas-handle--rotate", "↻", "Rotate"));
-    const turnOn = rotateBar.appendChild(makeGrip(document, "miro-canvas-handle--turn", "↷", "Turn to the next right angle"));
+    const turnBack = rotateBar.appendChild(makeGrip(
+      document, "miro-canvas-handle--turn miro-canvas-handle--turn-back", "↶", "Turn to the previous right angle",
+    ));
     this.listen(rotate, "pointerdown", (event) => this.beginRotate(event));
     this.listen(turnBack, "click", () => this.turn(-1));
     this.listen(turnOn, "click", () => this.turn(1));
@@ -489,15 +493,17 @@ export class SelectionHandles {
   }
 
   /**
-   * Centre the rotation controls just below the lowest point of the turned
-   * node.  The formatting toolbar sits above the node, so they never meet,
-   * whatever the angle.
+   * Pin the rotation controls to the lower left corner of the box the turned
+   * node covers on screen.  That corner never turns and never reaches the
+   * formatting toolbar above the node, whatever the angle.
    */
   private placeRotateBar(bar: HTMLElement, rect: HandleRect, rotation: number): void {
     const radians = rotation * Math.PI / 180;
-    const halfHeight = (Math.abs(rect.width * Math.sin(radians)) + Math.abs(rect.height * Math.cos(radians))) / 2;
-    bar.style.left = `${rect.left + rect.width / 2}px`;
-    bar.style.top = `${rect.top + rect.height / 2 + halfHeight + ROTATE_BAR_GAP}px`;
+    const cos = Math.abs(Math.cos(radians)), sin = Math.abs(Math.sin(radians));
+    const halfWidth = (rect.width * cos + rect.height * sin) / 2;
+    const halfHeight = (rect.width * sin + rect.height * cos) / 2;
+    bar.style.left = `${rect.left + rect.width / 2 - halfWidth}px`;
+    bar.style.top = `${rect.top + rect.height / 2 + halfHeight}px`;
   }
 
   /** Position and size the frame over the node it belongs to. */

@@ -1113,19 +1113,33 @@
 .miro-canvas-handle--left { left: 0; top: var(--miro-handle-position); }
 .miro-canvas-handle--right { left: 100%; top: var(--miro-handle-position); }
 
-/* Rotation controls stay upright below the turned node, clear of the
-   formatting toolbar above it: a turn back, the free rotation grip, a turn on. */
+/* Rotation controls wrap the lower left corner of the node as an L, clear of
+   the formatting toolbar above it: the free grip in the corner, the
+   clockwise turn above it, the anticlockwise turn beside it. */
 .miro-canvas-handles__rotate-bar {
   position: absolute;
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  transform: translateX(-50%);
-  pointer-events: auto;
+  width: 0;
+  height: 0;
+  pointer-events: none;
 }
 
 .miro-canvas-handles__rotate-bar .miro-canvas-handle {
-  position: static;
+  transform: translate(-50%, -50%);
+}
+
+.miro-canvas-handles__rotate-bar .miro-canvas-handle--rotate {
+  left: -20px;
+  top: 20px;
+}
+
+.miro-canvas-handles__rotate-bar .miro-canvas-handle--turn-next {
+  left: -20px;
+  top: -12px;
+}
+
+.miro-canvas-handles__rotate-bar .miro-canvas-handle--turn-back {
+  left: 12px;
+  top: 20px;
 }
 
 .miro-canvas-handle--rotate,

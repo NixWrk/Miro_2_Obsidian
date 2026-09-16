@@ -352,21 +352,28 @@ describe("rotation controls", () => {
   const byClass = (root: FakeElement, name: string): FakeElement =>
     descendants(root).find((item) => item.className.split(" ").includes(name))!;
 
-  it("sit upright below the lowest point of the node, whatever its angle", () => {
+  it("wrap the lower left corner of the box the node covers, whatever its angle", () => {
     const { root, update } = build();
     const bar = byClass(root, "miro-canvas-handles__rotate-bar");
     // Not inside the frame, which turns with the node.
     expect(bar.parentNode).toBe(root);
     expect(bar.hidden).toBe(false);
-    // RECT is 200 x 100 centred on (200, 150): its bottom is at 200.
-    expect(bar.style.left).toBe("200px");
-    expect(bar.style.top).toBe("228px");
-    // Turned a quarter, the node reaches 100 below its centre.
+    // RECT is 200 x 100 at (100, 100): its lower left corner is (100, 200).
+    expect(bar.style.left).toBe("100px");
+    expect(bar.style.top).toBe("200px");
+    // The free grip sits in the corner, the clockwise turn above it and the
+    // other turn beside it.
+    expect(bar.children.map((child) => child.getAttribute("aria-label"))).toEqual([
+      "Turn to the next right angle", "Rotate", "Turn to the previous right angle",
+    ]);
+    // Turned a quarter, the node covers 100 x 200 around (200, 150).
     update({ rotation: 90 });
-    expect(Number.parseFloat(bar.style.top)).toBeCloseTo(278);
-    // Upside down it is as low as upright - not up by the toolbar.
+    expect(Number.parseFloat(bar.style.left)).toBeCloseTo(150);
+    expect(Number.parseFloat(bar.style.top)).toBeCloseTo(250);
+    // Upside down the corner is where it was upright - not up by the toolbar.
     update({ rotation: 180 });
-    expect(Number.parseFloat(bar.style.top)).toBeCloseTo(228);
+    expect(Number.parseFloat(bar.style.left)).toBeCloseTo(100);
+    expect(Number.parseFloat(bar.style.top)).toBeCloseTo(200);
     update({ editable: false });
     expect(bar.hidden).toBe(true);
     update({ isEdge: true, rect: undefined, selectedIds: ["e1"], endpoints: { from: { x: 1, y: 1 }, to: { x: 2, y: 2 } } });
