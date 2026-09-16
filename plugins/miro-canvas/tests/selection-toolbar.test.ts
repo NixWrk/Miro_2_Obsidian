@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import { APPEARANCE_ACTIONS, type AppearanceAction } from "../src/appearance";
-import { CONNECTOR_CAPS, LOCAL_SHAPE_KINDS } from "../src/source-model";
+import { SHAPE_CATALOG } from "../src/shape-catalog";
+import { CONNECTOR_CAPS } from "../src/source-model";
 import {
   SelectionToolbar,
   type SelectionStylePatch,
@@ -83,6 +84,10 @@ class FakeDocument {
   public createElement(tagName: string): FakeElement {
     return new FakeElement(tagName);
   }
+
+  public createElementNS(_namespace: string, tagName: string): FakeElement {
+    return new FakeElement(tagName);
+  }
 }
 
 function descendants(root: FakeElement): FakeElement[] {
@@ -99,6 +104,18 @@ function byLabel(root: FakeElement, label: string): FakeElement {
 
 function optionValues(select: FakeElement): string[] {
   return descendants(select).filter((item) => item.tagName === "option").map((item) => item.value);
+}
+
+function shapeOption(root: FakeElement, kind: string): FakeElement {
+  const matches = descendants(root).filter((item) => item.attributes.get("data-shape") === kind);
+  if (matches.length !== 1) throw new Error(`expected one option for ${kind}, found ${matches.length}`);
+  return matches[0]!;
+}
+
+function pressedShapes(root: FakeElement): string[] {
+  return descendants(root)
+    .filter((item) => item.attributes.has("data-shape") && item.attributes.get("aria-pressed") === "true")
+    .map((item) => item.attributes.get("data-shape")!);
 }
 
 /** The panel a popover button owns is its sibling inside the popover host. */
@@ -184,16 +201,47 @@ describe("selection toolbar", () => {
     expect(panelOf(root, "More settings").hidden).toBe(true);
   });
 
-  it("offers common shapes up front and the full Miro set behind More shapes", () => {
+  it("offers every shape once, as a picture named on hover", () => {
     const { root, styles } = build();
     byLabel(root, "Shape").dispatch("click");
-    byLabel(root, "Rectangle").dispatch("click");
-    expect(styles).toEqual([{ shape: "rectangle" }]);
-    const all = byLabel(root, "All shapes");
-    expect(all.hidden).toBe(true);
-    byLabel(root, "More shapes").dispatch("click");
-    expect(all.hidden).toBe(false);
-    expect(optionValues(all).sort()).toEqual([...LOCAL_SHAPE_KINDS].sort());
+    const panel = panelOf(root, "Shape");
+    const options = descendants(panel).filter((item) => item.attributes.has("data-shape"));
+    expect(options.map((item) => item.attributes.get("data-shape"))).toEqual(SHAPE_CATALOG.map((item) => item.kind));
+    expect(descendants(panel).filter((item) => item.className === "miro-canvas-toolbar__heading")
+      .map((item) => item.textContent)).toEqual(["Basic", "Flowchart"]);
+    for (const option of options) {
+      // Only a picture is shown; the words are hover text.
+      expect(option.textContent).toBe("");
+      const icon = option.children[0]!;
+      expect(icon.tagName).toBe("svg");
+      expect(icon.children[0]!.getAttribute("d")).toMatch(/^M/u);
+      expect(option.getAttribute("data-tooltip-delay")).not.toBeNull();
+    }
+    // A basic shape's hover text carries what it means in a flowchart.
+    expect(byLabel(root, "Rhombus\nDecision: a question that branches the flow")).toBe(shapeOption(root, "rhombus"));
+    expect(shapeOption(root, "star").getAttribute("aria-label")).toBe("Star");
+    expect(descendants(panel).some((item) => item.attributes.get("data-shape") === "flow_chart_decision")).toBe(false);
+    shapeOption(root, "rectangle").dispatch("click");
+    shapeOption(root, "flow_chart_terminator").dispatch("click");
+    expect(styles).toEqual([{ shape: "rectangle" }, { shape: "flow_chart_terminator" }]);
+    expect(panel.hidden).toBe(false);
+  });
+
+  it("marks the picture a node shows, whichever name the node uses for it", () => {
+    const { root, styles, update } = build({ shape: "flow_chart_decision" });
+    expect(pressedShapes(root)).toEqual(["rhombus"]);
+    const button = byLabel(root, "Shape");
+    expect(button.children[0]!.getAttribute("class")).toContain("miro-canvas-shape-icon");
+    expect(button.getAttribute("data-shape-icon")).toBe("rhombus");
+    // Picking the picture the node already shows writes nothing.
+    shapeOption(root, "rhombus").dispatch("click");
+    expect(styles).toEqual([]);
+    update({ shape: "ellipse" });
+    expect(pressedShapes(root)).toEqual(["circle"]);
+    expect(button.getAttribute("data-shape-icon")).toBe("circle");
+    expect(button.children).toHaveLength(1);
+    update({ shape: undefined });
+    expect(pressedShapes(root)).toEqual([]);
   });
 
   it("keeps every connector cap available in the overflow menu", () => {
@@ -256,7 +304,7 @@ describe("selection toolbar", () => {
     expect(byLabel(root, "Fill color value").value).toBe("#abcdef");
     expect(byLabel(root, "Fill color").getAttribute("data-color-unset")).toBe("false");
     expect(byLabel(root, "Text color").getAttribute("data-color-unset")).toBe("true");
-    expect(byLabel(root, "All shapes").value).toBe("hexagon");
+    expect(pressedShapes(root)).toEqual(["hexagon"]);
     expect(byLabel(root, "Border style").value).toBe("dashed");
     expect(byLabel(root, "Border width").value).toBe("4");
   });
@@ -279,11 +327,10 @@ describe("selection toolbar", () => {
     ]);
   });
 
-  it("rejects an unsupported shape token and an out-of-range width", () => {
-    const { root, styles } = build();
-    const all = byLabel(root, "All shapes");
-    all.value = "not_a_miro_shape";
-    all.dispatch("change");
+  it("marks no picture for an unsupported shape token and rejects an out-of-range width", () => {
+    const { root, styles } = build({ shape: "not_a_miro_shape" as never });
+    expect(pressedShapes(root)).toEqual([]);
+    expect(byLabel(root, "Shape").getAttribute("data-shape-icon")).toBe("rectangle");
     const border = byLabel(root, "Border width");
     border.value = "1000";
     border.dispatch("change");
@@ -297,9 +344,9 @@ describe("selection toolbar", () => {
     const lock = byLabel(root, "Unlock selection");
     expect(lock.disabled).toBe(false);
     expect(lock.getAttribute("aria-pressed")).toBe("true");
-    expect(byLabel(root, "All shapes").disabled).toBe(true);
+    expect(shapeOption(root, "rectangle").disabled).toBe(true);
     byLabel(root, "Increase font size").dispatch("click");
-    byLabel(root, "Rectangle").dispatch("click");
+    shapeOption(root, "rectangle").dispatch("click");
     expect(appearance).toEqual([]);
     expect(styles).toEqual([]);
     lock.dispatch("click");

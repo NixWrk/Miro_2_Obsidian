@@ -23,16 +23,24 @@ import {
   type VerticalAlign,
 } from "./appearance";
 import {
+  SHAPE_CATALOG,
+  shapeCatalogEntry,
+  shapeCatalogLabel,
+  type ShapeCatalogEntry,
+  type ShapeKind,
+  type ShapeSection,
+} from "./shape-catalog";
+import { shapePath } from "./shape-geometry";
+import {
   CONNECTOR_CAPS,
   CONNECTOR_ROUTES,
   CONNECTOR_STROKES,
-  LOCAL_SHAPE_KINDS,
   type LocalConnectorSettings,
 } from "./source-model";
 
 export type SelectionKind = "shape" | "text" | "sticky" | "edge" | "frame" | "media";
 export type BorderStyle = "solid" | "dashed" | "dotted" | "none";
-export type ShapeKind = (typeof LOCAL_SHAPE_KINDS)[number];
+export type { ShapeKind } from "./shape-catalog";
 
 /** Viewport pixels for the top-center of the selection, resolved by the host. */
 export interface SelectionToolbarPlacement {
@@ -91,14 +99,14 @@ const FORMATS = ["bold", "italic", "underline", "strike"] as const;
 const FORMAT_LABELS: Readonly<Record<(typeof FORMATS)[number], string>> = Object.freeze({
   bold: "B", italic: "I", underline: "U", strike: "S",
 });
-/** Miro keeps a short list up front and hides the long tail behind "More shapes". */
-const COMMON_SHAPES: readonly ShapeKind[] = [
-  "rectangle", "round_rectangle", "circle", "triangle", "rhombus", "star", "cloud", "hexagon",
+/** Shapes are picked by their picture; the words are in the hover text. */
+const SHAPE_SECTIONS: readonly { readonly section: ShapeSection; readonly title: string }[] = [
+  { section: "basic", title: "Basic" },
+  { section: "flowchart", title: "Flowchart" },
 ];
-const SHAPE_GLYPHS: Readonly<Record<string, string>> = Object.freeze({
-  rectangle: "▭", round_rectangle: "▢", circle: "◯", triangle: "△",
-  rhombus: "◇", star: "☆", cloud: "☁", hexagon: "⬡",
-});
+/** Hover text for a picture should not make a person wait a second for it. */
+const SHAPE_TOOLTIP_DELAY = "150";
+const SVG_NS = "http://www.w3.org/2000/svg";
 const COLOR_BUTTONS: readonly {
   readonly slot: ColorSlot; readonly label: string; readonly glyph: string; readonly forEdge: boolean;
 }[] = [
@@ -144,29 +152,46 @@ function makeButton(document: Document, label: string, title: string, className 
   return button;
 }
 
-function makeSelect(
-  document: Document, title: string, values: readonly string[], className = "",
-  groups?: readonly { readonly label: string; readonly match: (value: string) => boolean }[],
-): HTMLSelectElement {
+function makeSelect(document: Document, title: string, values: readonly string[], className = ""): HTMLSelectElement {
   const select = make(document, "select", `miro-canvas-toolbar__select ${className}`.trim());
   select.setAttribute("aria-label", title);
-  const addOption = (parent: HTMLElement, value: string): void => {
+  for (const value of values) {
     const option = make(document, "option", undefined, tokenLabel(value));
     option.value = value;
-    append(parent, option);
-  };
-  if (groups === undefined) {
-    for (const value of values) addOption(select, value);
-    return select;
-  }
-  for (const group of groups) {
-    const matched = values.filter((value) => group.match(value));
-    if (matched.length === 0) continue;
-    const optgroup = append(select, make(document, "optgroup"));
-    optgroup.label = group.label;
-    for (const value of matched) addOption(optgroup, value);
+    append(select, option);
   }
   return select;
+}
+
+/** An outline picture of a catalogue entry, or undefined where the document cannot draw SVG. */
+function makeShapeIcon(document: Document, item: ShapeCatalogEntry): Element | undefined {
+  const d = shapePath(item.kind);
+  if (d === undefined || typeof document.createElementNS !== "function") return undefined;
+  const svg = document.createElementNS(SVG_NS, "svg");
+  svg.setAttribute("class", `miro-canvas-shape-icon miro-canvas-shape-icon--${item.aspect}`);
+  // Some outlines bulge a little past the 0..100 box, as a cloud does.
+  svg.setAttribute("viewBox", "-10 -10 120 120");
+  svg.setAttribute("preserveAspectRatio", "none");
+  svg.setAttribute("aria-hidden", "true");
+  const path = document.createElementNS(SVG_NS, "path");
+  path.setAttribute("d", d);
+  path.setAttribute("vector-effect", "non-scaling-stroke");
+  svg.appendChild(path);
+  return svg;
+}
+
+/** Show one picture inside a button, falling back to its name. */
+function showShapeIcon(document: Document, button: HTMLButtonElement, item: ShapeCatalogEntry, fallback: string): void {
+  if (button.getAttribute("data-shape-icon") === item.kind) return;
+  button.setAttribute("data-shape-icon", item.kind);
+  while (button.firstChild !== null) button.removeChild(button.firstChild);
+  const icon = makeShapeIcon(document, item);
+  if (icon === undefined) {
+    button.textContent = fallback;
+  } else {
+    button.textContent = "";
+    button.appendChild(icon);
+  }
 }
 
 function makeNumber(
@@ -203,9 +228,8 @@ interface Popover {
 interface ToolbarRefs {
   readonly bar: HTMLElement;
   readonly shape: Popover;
-  readonly shapeCommon: HTMLElement;
-  readonly shapeMore: HTMLButtonElement;
-  readonly shapeAll: HTMLSelectElement;
+  /** One button per catalogue entry, keyed by the entry's kind. */
+  readonly shapeOptions: Readonly<Record<string, HTMLButtonElement>>;
   readonly textGroup: HTMLElement;
   readonly fontFamily: HTMLSelectElement;
   readonly fontSize: HTMLInputElement;
@@ -303,15 +327,26 @@ export class SelectionToolbar {
     const document = this.document!;
     const bar = append(root, make(document, "div", "miro-canvas-toolbar__bar"));
 
-    const shape = this.makePopover(bar, "▭", "Shape", "miro-canvas-toolbar__button--shape");
-    const shapeCommon = append(shape.panel, make(document, "div", "miro-canvas-toolbar__grid"));
-    const shapeMore = append(shape.panel, makeButton(document, "More shapes", "More shapes", "miro-canvas-toolbar__button--wide"));
-    shapeMore.setAttribute("aria-expanded", "false");
-    const shapeAll = append(shape.panel, makeSelect(document, "All shapes", LOCAL_SHAPE_KINDS, "", [
-      { label: "Basic", match: (value) => !value.startsWith("flow_chart_") },
-      { label: "Flowchart", match: (value) => value.startsWith("flow_chart_") },
-    ]));
-    shapeAll.hidden = true;
+    const shape = this.makePopover(bar, "", "Shape", "miro-canvas-toolbar__button--shape");
+    shape.panel.className = `${shape.panel.className} miro-canvas-toolbar__panel--shapes`;
+    showShapeIcon(document, shape.button, SHAPE_CATALOG[0]!, "▭");
+    // Every picture appears once: a flowchart symbol drawn like a basic shape
+    // is that basic shape, and its meaning is in the basic shape's hover text.
+    const shapeOptions: Record<string, HTMLButtonElement> = {};
+    for (const { section, title } of SHAPE_SECTIONS) {
+      append(shape.panel, make(document, "div", "miro-canvas-toolbar__heading", title));
+      const grid = append(shape.panel, make(document, "div", "miro-canvas-toolbar__shapes"));
+      for (const item of SHAPE_CATALOG.filter((entry) => entry.section === section)) {
+        const option = append(grid, makeButton(
+          document, "", shapeCatalogLabel(item), "miro-canvas-toolbar__button--shape-option",
+        ));
+        option.setAttribute("data-shape", item.kind);
+        option.setAttribute("data-tooltip-delay", SHAPE_TOOLTIP_DELAY);
+        option.setAttribute("aria-pressed", "false");
+        showShapeIcon(document, option, item, item.name);
+        shapeOptions[item.kind] = option;
+      }
+    }
 
     const textGroup = append(bar, make(document, "span", "miro-canvas-toolbar__group"));
     const fontFamily = append(textGroup, makeSelect(document, "Font family", FONT_FAMILIES));
@@ -383,7 +418,7 @@ export class SelectionToolbar {
     status.hidden = true;
 
     const refs: ToolbarRefs = {
-      bar, shape, shapeCommon, shapeMore, shapeAll,
+      bar, shape, shapeOptions,
       textGroup, fontFamily, fontSize, fontSizeDown, fontSizeUp, bold,
       align, alignment, verticalAlign,
       colors, colorInputs, colorClears, colorSwatches, colorRecent, lock, nativeSlot, more,
@@ -396,21 +431,13 @@ export class SelectionToolbar {
   }
 
   private wire(refs: ToolbarRefs): void {
-    const document = this.document!;
-    for (const kind of COMMON_SHAPES) {
-      const button = append(refs.shapeCommon, makeButton(
-        document, SHAPE_GLYPHS[kind] ?? "▭", tokenLabel(kind), "miro-canvas-toolbar__button--shape-option",
-      ));
-      this.listen(button, "click", () => this.style({ shape: kind }));
+    for (const item of SHAPE_CATALOG) {
+      this.listen(refs.shapeOptions[item.kind]!, "click", () => {
+        // The node already shows this picture, maybe under a flowchart name.
+        if (shapeCatalogEntry(this.state?.shape) === item) return;
+        this.style({ shape: item.kind });
+      });
     }
-    this.listen(refs.shapeMore, "click", () => {
-      refs.shapeAll.hidden = !refs.shapeAll.hidden;
-      refs.shapeMore.setAttribute("aria-expanded", refs.shapeAll.hidden ? "false" : "true");
-    });
-    this.listen(refs.shapeAll, "change", () => {
-      const shape = refs.shapeAll.value;
-      if ((LOCAL_SHAPE_KINDS as readonly string[]).includes(shape)) this.style({ shape: shape as ShapeKind });
-    });
     this.listen(refs.fontFamily, "change", () => this.appearance({
       type: APPEARANCE_ACTIONS.setFontFamily, fontFamily: refs.fontFamily.value,
     }));
@@ -543,10 +570,11 @@ export class SelectionToolbar {
       this.renderSwatches(refs.colorSwatches[slot]!, slot, state.palette.map((entry) => entry.color), state.editable);
       this.renderSwatches(refs.colorRecent[slot]!, slot, state.recentColors, state.editable);
     }
-    if (state.shape !== undefined) {
-      refs.shapeAll.value = state.shape;
-      refs.shape.button.textContent = SHAPE_GLYPHS[state.shape] ?? "▭";
+    const shape = shapeCatalogEntry(state.shape);
+    for (const item of SHAPE_CATALOG) {
+      refs.shapeOptions[item.kind]!.setAttribute("aria-pressed", item === shape ? "true" : "false");
     }
+    showShapeIcon(this.document!, refs.shape.button, shape ?? SHAPE_CATALOG[0]!, "▭");
     refs.borderStyle.value = state.borderStyle ?? "solid";
     refs.borderWidth.value = state.borderWidth === undefined ? "" : String(state.borderWidth);
     refs.route.value = state.connector?.route ?? "straight";
@@ -588,8 +616,7 @@ export class SelectionToolbar {
 
   private controls(refs: ToolbarRefs): readonly (HTMLButtonElement | HTMLInputElement | HTMLSelectElement)[] {
     return [
-      refs.shapeMore, refs.shapeAll,
-      ...(Array.from(refs.shapeCommon.children ?? []) as HTMLButtonElement[]),
+      ...Object.values(refs.shapeOptions),
       refs.fontFamily, refs.fontSize, refs.fontSizeDown, refs.fontSizeUp,
       ...FORMATS.map((format) => refs.formats[format]),
       refs.alignment, refs.verticalAlign, refs.lineHeight,

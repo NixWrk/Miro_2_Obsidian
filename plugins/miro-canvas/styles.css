@@ -898,11 +898,21 @@
   color: var(--text-on-accent);
 }
 
+/* A pressed toggle stays pressed under the pointer. */
+.miro-canvas-toolbar__button[aria-pressed="true"]:hover:not(:disabled) {
+  background: var(--interactive-accent-hover, var(--interactive-accent));
+}
+
 .miro-canvas-toolbar__button--bold { font-weight: 700; }
 .miro-canvas-toolbar__button--italic { font-style: italic; }
 .miro-canvas-toolbar__button--underline { text-decoration: underline; }
 .miro-canvas-toolbar__button--strike { text-decoration: line-through; }
-.miro-canvas-toolbar__button--shape { font-size: 15px; }
+.miro-canvas-toolbar__button--shape,
+.miro-canvas-toolbar__button--shape-option {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
 
 /* A color button carries its current value as an underline, like Miro. */
 .miro-canvas-toolbar__button--color-text,
@@ -972,9 +982,51 @@
   gap: 2px;
 }
 
-.miro-canvas-toolbar__button--shape-option {
-  font-size: 16px;
+/* Shapes are picked by picture alone; names and meanings are hover text. */
+.miro-canvas-toolbar__panel--shapes {
+  max-width: none;
+  max-height: 380px;
 }
+
+.miro-canvas-toolbar__heading {
+  padding: 0 2px;
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller, 12px);
+}
+
+.miro-canvas-toolbar__shapes {
+  display: grid;
+  grid-template-columns: repeat(7, 32px);
+  gap: 2px;
+}
+
+.miro-canvas-toolbar__button--shape-option {
+  width: 32px;
+  height: 32px;
+  padding: 0;
+}
+
+.miro-canvas-toolbar__button--shape-option:hover:not(:disabled):not([aria-pressed="true"]) {
+  color: var(--interactive-accent);
+}
+
+.miro-canvas-shape-icon {
+  overflow: visible;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+  transition: transform 80ms ease-out;
+}
+
+.miro-canvas-toolbar__button--shape-option:hover:not(:disabled) .miro-canvas-shape-icon {
+  transform: scale(1.15);
+}
+
+.miro-canvas-shape-icon--square { width: 18px; height: 18px; }
+.miro-canvas-shape-icon--wide { width: 22px; height: 15px; }
+.miro-canvas-shape-icon--tall { width: 13px; height: 20px; }
 
 .miro-canvas-toolbar__button--wide {
   grid-column: 1 / -1;

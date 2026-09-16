@@ -7,18 +7,15 @@ import {
 } from "./local-comments";
 import { readCanvasElementFile, readCanvasElementId, readCanvasElementType } from "./canvas-elements";
 import { createCanvasAuthoring, type CanvasAuthoring } from "./canvas-authoring";
-import { LOCAL_SHAPE_KINDS } from "./source-model";
+import { SHAPE_CATALOG } from "./shape-catalog";
 import { buildCanvasAnchorGeometry } from "./connector-endpoints";
 import { DocumentControls } from "./document-controls";
 import type { DocumentHost } from "./document-viewer";
 
 const IMAGE_EXTENSIONS = new Set(["png", "jpg", "jpeg", "gif", "webp", "bmp", "avif"]);
 const LOCAL_COMMENT_AUTHOR = Object.freeze({ name: "Local user" });
-/** Every kind the renderer can draw, labelled from its own token. */
-const SHAPE_OPTIONS: readonly (readonly [string, string])[] = LOCAL_SHAPE_KINDS.map((kind) => {
-  const words = kind.replace(/_/gu, " ");
-  return [kind, words.charAt(0).toUpperCase() + words.slice(1)] as const;
-});
+/** Every picture the renderer can draw, once, under the picker's names. */
+const SHAPE_OPTIONS: readonly (readonly [string, string])[] = SHAPE_CATALOG.map((item) => [item.kind, item.name] as const);
 
 type AnchorPickKind = "free" | "selection" | "node" | "image" | "edge";
 
