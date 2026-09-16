@@ -484,7 +484,10 @@ function endpoint(value: unknown, nodes: ReadonlyMap<string, MinimapRect>): Mini
 	if (!isObject(value)) {
 		return undefined;
 	}
-	const id = readString(value, ["nodeId", "id", "source", "target"]);
+	// A native Canvas edge holds each end as `{ node, side, end }`, with the
+	// node object itself rather than its ID.
+	const id = readString(value, ["nodeId", "id", "source", "target"])
+		?? readString(safeRead(value, "node"), ["id"]);
 	if (id !== undefined) {
 		const rect = nodes.get(id);
 		if (rect !== undefined) {

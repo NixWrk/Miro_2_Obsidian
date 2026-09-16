@@ -29,6 +29,22 @@ describe("MinimapModel", () => {
 		expect(model.viewportRect?.width).toBeGreaterThan(0);
 	});
 
+	it("draws native runtime edges, whose ends hold the node objects themselves", () => {
+		const a = { id: "a", x: 0, y: 0, width: 100, height: 80 };
+		const b = { id: "b", x: 300, y: 200, width: 100, height: 80 };
+		const model = buildMinimapModel(
+			{
+				nodes: [a, b],
+				edges: [{ id: "edge", from: { node: a, side: "right", end: "none" }, to: { node: b, side: "left", end: "arrow" } }],
+			},
+			{ x: 0, y: 0, zoom: 1, width: 800, height: 600 },
+			{ width: 400, height: 200, padding: 0 },
+		);
+
+		expect(model.edgeItems).toHaveLength(1);
+		expect(model.diagnostics.map((item) => item.message)).not.toContain("A scene edge had no finite endpoints.");
+	});
+
 	it("maps viewport transforms exactly and keeps zoom for click/drag navigation", () => {
 		const model = new MinimapModel(
 			[{ x: 0, y: 0, width: 1000, height: 1000 }],
