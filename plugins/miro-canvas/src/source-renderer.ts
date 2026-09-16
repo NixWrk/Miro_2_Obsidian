@@ -3,6 +3,7 @@ import {
   routeConnector, type NativeEdgeEnd, type NodeMeasurements,
 } from "./connector-endpoints";
 import { SHAPE_CLIP_PATHS, inscribedInsets, shapeOutline, shapePath, type ShapePoint } from "./shape-geometry";
+import { CAP_PATHS, capFilled, strokeDash } from "./connector-style";
 import { normalizeAnchor, resolveAnchor, type AnchorEdgeGeometry, type AnchorPoint, type AnchorRect } from "./anchors";
 import { readCanvasElementId } from "./canvas-elements";
 import { buildSourceScene, type SourceItemDescriptor, type SourceScene } from "./source-model";
@@ -610,25 +611,6 @@ function normalizedZIndex(value: number | undefined): string | undefined {
   return String(integer);
 }
 
-const CAP_PATHS: Readonly<Record<string, string>> = Object.freeze({
-  rounded_stealth: "M-10 -5Q-2 -2 0 0Q-2 2 -10 5L-7 0Z",
-  filled_oval: "M-5 -5A5 5 0 1 1 -5 5A5 5 0 1 1 -5 -5Z",
-  erd_one: "M-5 -6V6",
-  erd_many: "M-10 -6L0 0L-10 6M-10 0H0",
-  erd_one_or_many: "M-10 -6L0 0L-10 6M-10 0H0M-13 -6V6",
-  erd_only_one: "M-5 -6V6M-10 -6V6",
-  erd_zero_or_many: "M-8 -6L0 0L-8 6M-8 0H0M-12 -3A3 3 0 1 1 -12 3A3 3 0 1 1 -12 -3Z",
-  erd_zero_or_one: "M-5 -6V6M-11 -3A3 3 0 1 1 -11 3A3 3 0 1 1 -11 -3Z",
-  arrow: "M-10 -5L0 0L-10 5", triangle: "M-10 -5L0 0L-10 5Z",
-  stealth: "M-10 -5L0 0L-10 5L-7 0Z", diamond: "M-12 0L-6 -5L0 0L-6 5Z",
-  circle: "M-5 -5A5 5 0 1 1 -5 5A5 5 0 1 1 -5 -5Z",
-  oval: "M-5 -5A5 5 0 1 1 -5 5A5 5 0 1 1 -5 -5Z",
-  filled_triangle: "M-10 -5L0 0L-10 5Z", filled_diamond: "M-12 0L-6 -5L0 0L-6 5Z",
-  filled_circle: "M-5 -5A5 5 0 1 1 -5 5A5 5 0 1 1 -5 -5Z",
-  er_one: "M-5 -6V6", er_many: "M-10 -6L0 0L-10 6M-10 0H0",
-  er_one_or_many: "M-10 -6L0 0L-10 6M-10 0H0M-13 -6V6",
-});
-
 function domSize(element: DomElementLike | undefined): { readonly width: number; readonly height: number } | undefined {
   const measure = safeGet(element, "getBoundingClientRect");
   if (typeof measure !== "function") return undefined;
@@ -722,7 +704,7 @@ function marker(document: Document | undefined, cap: string, color: string, patc
   for (const [key, value] of Object.entries({ id, viewBox: "-16 -8 18 16", refX: "0", refY: "0", markerWidth: "18", markerHeight: "16", markerUnits: "strokeWidth", orient: "auto-start-reverse" })) {
     setOwnedElementAttribute(mark, key, value);
   }
-  const filled = cap.startsWith("filled_") || cap === "stealth" || cap === "rounded_stealth";
+  const filled = capFilled(cap);
   for (const [key, value] of Object.entries({ d, fill: filled ? color : "none", stroke: color, "stroke-width": "1", "stroke-linejoin": "round" })) setOwnedElementAttribute(path, key, value);
   safeCall(mark, "appendChild", [path]);
   safeCall(defs, "appendChild", [mark]);
@@ -782,7 +764,7 @@ function renderConnectorGeometry(document: Document | undefined, runtime: unknow
     if (safeCall(safeGet(path, "classList"), "contains", ["canvas-interaction-path"]) === true) continue;
     const values = { fill: "none", stroke: color, "stroke-width": descriptor.css["stroke-width"] ?? "2",
       "stroke-opacity": descriptor.css["stroke-opacity"] ?? "1",
-      "stroke-dasharray": descriptor.connector?.strokeStyle === "dashed" ? "8 6" : descriptor.connector?.strokeStyle === "dotted" ? "2 5" : "none",
+      "stroke-dasharray": strokeDash(descriptor.connector?.strokeStyle),
       "stroke-linecap": descriptor.connector?.strokeStyle === "dotted" ? "round" : "butt",
       "marker-start": startMarker, "marker-end": endMarker };
     for (const [key, value] of Object.entries(values)) {
@@ -1085,7 +1067,7 @@ function applyConnector(
       patchClass(target, `miro-source-connector-${descriptor.connector.shape}`, patches);
     }
     if (descriptor.connector?.strokeStyle !== undefined) {
-      const dash = descriptor.connector.strokeStyle === "dashed" ? "8 6" : descriptor.connector.strokeStyle === "dotted" ? "2 5" : "none";
+      const dash = strokeDash(descriptor.connector.strokeStyle);
       patchAttribute(target, "stroke-dasharray", dash, patches);
       patchAttribute(target, "data-miro-source-stroke-style", descriptor.connector.strokeStyle, patches);
     }
