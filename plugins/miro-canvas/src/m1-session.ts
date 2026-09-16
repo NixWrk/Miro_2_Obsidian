@@ -598,6 +598,13 @@ export class M1CanvasSession {
 	/** Geometry for placing connector ends, kept while the document is the same object. */
 	private landingCache: { readonly document: unknown; readonly geometry: AnchorGeometry; readonly scene: SourceScene } | undefined;
 	private lastToolbarSignature = "";
+	private lastToolbarState: SelectionToolbarState | undefined;
+	/** Observer moving the overlays with native pans, zooms and drags between refreshes. */
+	private followObserver: { observe(target: unknown, options: unknown): void; disconnect(): void } | undefined;
+	private followTargets: readonly unknown[] = [];
+	/** Shape kind of each selected element, kept while the document is the same object. */
+	private shapeCache: { readonly document: unknown; readonly shapes: Map<string, string | undefined> } | undefined;
+	private commentThreadCache: { readonly document: unknown; readonly threads: ReturnType<typeof listCommentThreads> } | undefined;
 	private minimapDragStart: MinimapPoint | undefined;
 	private minimapDragViewport: ViewportTransform | undefined;
 	private refreshTimer: ReturnType<typeof setInterval> | undefined;
@@ -942,7 +949,7 @@ export class M1CanvasSession {
 
 	/** Where a selected connector's ends are, in the handle overlay's coordinates. */
 	private connectorEnds(edgeId: string): SelectionHandlesState["endpoints"] {
-		const route = buildCanvasAnchorGeometry(this.currentRawDocument).edges?.[edgeId];
+		const route = this.landingGeometry().geometry.edges?.[edgeId];
 		const overlay = this.overlayOrigin();
 		if (route?.start === undefined || route.end === undefined || overlay === undefined) return undefined;
 		const local = (point: { readonly x: number; readonly y: number }) => {
@@ -1350,12 +1357,7 @@ export class M1CanvasSession {
 		for (const diagnostic of this.sourceRenderer?.refresh() ?? []) {
 			diagnostics.push(diagnostic);
 		}
-		const markerModel = this.commentMarkers?.update({
-			threads: listCommentThreads(this.currentRawDocument, { includeResolved: true }),
-			includeResolved: true,
-			geometry: buildCanvasAnchorGeometry(this.currentRawDocument),
-			boardToViewport: (point) => this.viewport.boardToScreen(point) ?? point,
-		});
+		const markerModel = this.updateCommentMarkers();
 		for (const diagnostic of markerModel?.diagnostics ?? []) {
 			diagnostics.push(`Comment ${diagnostic.threadId}: ${diagnostic.message}`);
 		}
@@ -1410,31 +1412,139 @@ export class M1CanvasSession {
 			this.lastToolbarSignature = toolbarSignature;
 			this.toolbar.update(toolbarState);
 		}
+		this.lastToolbarState = toolbarState;
 		this.handles.update(this.handlesState(toolbarState.editable));
+		this.retargetFollow();
+	}
+
+	private updateCommentMarkers(): ReturnType<CommentMarkers["update"]> | undefined {
+		const document = this.currentRawDocument;
+		let cache = this.commentThreadCache;
+		if (cache === undefined || cache.document !== document) {
+			cache = { document, threads: listCommentThreads(document, { includeResolved: true }) };
+			this.commentThreadCache = cache;
+		}
+		return this.commentMarkers?.update({
+			threads: cache.threads,
+			includeResolved: true,
+			geometry: this.landingGeometry().geometry,
+			boardToViewport: (point) => this.viewport.boardToScreen(point) ?? point,
+		});
+	}
+
+	/**
+	 * Move the selection overlays with the canvas between refreshes.
+	 *
+	 * Native Canvas pans, zooms and drags by rewriting transforms every frame,
+	 * while the overlays were only placed on a refresh - up to a polling
+	 * interval later - so handles, the toolbar and comment markers were left
+	 * behind wherever the node had been.  A mutation callback runs before the
+	 * frame is painted; placing them there keeps them on the nodes.  Only
+	 * positions are recomputed, from measurements cached per document.
+	 */
+	private followViewport(): void {
+		if (this.disposed) {
+			return;
+		}
+		const previous = this.lastToolbarState;
+		if (previous !== undefined) {
+			const placement = this.selectionPlacement();
+			const { placement: _old, ...rest } = previous;
+			const next: SelectionToolbarState = placement === undefined ? rest : { ...rest, placement };
+			const signature = safeSignature(next);
+			if (signature !== this.lastToolbarSignature) {
+				this.lastToolbarSignature = signature;
+				this.lastToolbarState = next;
+				this.toolbar.update(next);
+			}
+		}
+		this.handles.update(this.handlesState(previous?.editable ?? false));
+		this.updateCommentMarkers();
+	}
+
+	/** Watch the canvas transform and the selected elements, and nothing else. */
+	private retargetFollow(): void {
+		const canvasEl = readRuntime(this.nativeCanvas(), "canvasEl");
+		const selected = [...(this.adapter.getNodes() ?? []), ...(this.adapter.getEdges() ?? [])]
+			.filter((item) => {
+				const id = readCanvasElementId(item);
+				return id !== undefined && this.selectedIds.includes(id);
+			})
+			.map((item) => readCanvasElementDom(item));
+		const targets = [canvasEl, ...selected].filter((item) => isElement(item));
+		if (targets.length === this.followTargets.length && targets.every((item, index) => item === this.followTargets[index])) {
+			return;
+		}
+		this.followTargets = targets;
+		if (this.followObserver === undefined) {
+			const Observer = readRuntime(readRuntime(ownerDocument(this.root), "defaultView"), "MutationObserver");
+			if (typeof Observer !== "function") {
+				return;
+			}
+			try {
+				this.followObserver = Reflect.construct(Observer, [() => this.followViewport()]) as NonNullable<M1CanvasSession["followObserver"]>;
+			} catch {
+				return;
+			}
+			this.disposers.push(() => {
+				this.followObserver?.disconnect();
+				this.followObserver = undefined;
+			});
+		}
+		const observer = this.followObserver;
+		if (observer === undefined) return;
+		observer.disconnect();
+		for (const target of targets) {
+			try {
+				observer.observe(target, { attributes: true, attributeFilter: ["style"] });
+			} catch {
+				// An element the host has already dropped needs no watching.
+			}
+		}
+	}
+
+	/** The native Canvas runtime this session drives, found the way the adapter finds it. */
+	private nativeCanvas(): UnknownRecord | undefined {
+		const observed = this.adapter.read("getData");
+		const canvas = [this.view, ...["canvas", "_canvas", "canvasView", "canvasRuntime"]
+			.map((key) => readRuntime(this.view, key))]
+			.find((candidate) => isObject(candidate) && observed !== undefined && readRuntime(candidate, "getData") === observed);
+		return isObject(canvas) ? canvas as UnknownRecord : undefined;
 	}
 
 	private handlesState(editable: boolean): SelectionHandlesState {
 		const id = this.selectedIds[0];
-		const edgeIds = new Set(collectCanvasElementIds(this.adapter.getEdges() ?? []));
+		const { geometry, scene } = this.landingGeometry();
 		return {
 			selectedIds: this.selectedIds,
 			rotation: id === undefined
 				? 0
 				: this.rotationPreview?.id === id
 					? this.rotationPreview.rotation
-					: buildSourceScene(this.currentRawDocument).items.get(id)?.rotation ?? this.rotationFor(id),
+					: scene.items.get(id)?.rotation ?? this.rotationFor(id),
 			editable,
-			isEdge: id !== undefined && edgeIds.has(id),
+			isEdge: id !== undefined && geometry.edges?.[id] !== undefined,
 			...(() => {
 				const origin = this.overlayOrigin();
 				return origin === undefined ? {} : { origin: { x: origin.left, y: origin.top } };
 			})(),
-			...(id === undefined
-				? {}
-				: { shape: resolveSelectionToolbarPresentation(this.currentRawDocument, id).style.shape }),
+			...(id === undefined ? {} : { shape: this.selectedShape(id) }),
 			...(id === undefined ? {} : { rect: this.handleRect(id) }),
-			...(id === undefined || !edgeIds.has(id) ? {} : { endpoints: this.connectorEnds(id) }),
+			...(id === undefined || geometry.edges?.[id] === undefined ? {} : { endpoints: this.connectorEnds(id) }),
 		};
+	}
+
+	private selectedShape(id: string): string | undefined {
+		const document = this.currentRawDocument;
+		let cache = this.shapeCache;
+		if (cache === undefined || cache.document !== document) {
+			cache = { document, shapes: new Map() };
+			this.shapeCache = cache;
+		}
+		if (!cache.shapes.has(id)) {
+			cache.shapes.set(id, resolveSelectionToolbarPresentation(document, id).style.shape);
+		}
+		return cache.shapes.get(id);
 	}
 
 	private rotationFor(id: string): number {
@@ -2557,11 +2667,8 @@ export class M1CanvasSession {
 		// The adapter accepts several runtime shapes, so probe the same keys it
 		// does instead of assuming `view.canvas`; a silent miss would leave
 		// native menus unguarded on a locked element.
-		const observed = this.adapter.read("getData");
-		const canvas = [this.view, ...["canvas", "_canvas", "canvasView", "canvasRuntime"]
-			.map((key) => readRuntime(this.view, key))]
-			.find((candidate) => isObject(candidate) && observed !== undefined && readRuntime(candidate, "getData") === observed);
-		if (!isObject(canvas)) {
+		const canvas = this.nativeCanvas();
+		if (canvas === undefined) {
 			this.addDiagnostic("Native Canvas guards are unavailable; scoped input guards remain active.");
 			return;
 		}
