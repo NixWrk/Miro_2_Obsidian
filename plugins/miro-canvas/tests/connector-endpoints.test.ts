@@ -2,10 +2,16 @@ import { describe, expect, it } from "vitest";
 
 import {
   buildCanvasAnchorGeometry,
+  facingSide,
+  nativeAnchorEnd,
+  nativeEdgeEnd,
   nodeBoundaryAnchor,
   nodeBoundaryAnchorAtSide,
+  sideDirection,
+  snapToStandardPoint,
   updateConnectorEndpoint,
 } from "../src/connector-endpoints";
+import { shapeOutline } from "../src/shape-geometry";
 
 function baseDocument(): Record<string, unknown> {
   return {
@@ -417,5 +423,58 @@ describe("connectors meet the drawn shape", () => {
   });
 });
 
+describe("native-looking connector ends", () => {
+  const rect = { x: 0, y: 0, width: 200, height: 100 };
 
+  it("leaves a side along its outward normal and turns the host's arrowhead to match", () => {
+    const right = nativeEdgeEnd(rect, "right")!;
+    expect(right.point).toEqual({ x: 200, y: 50 });
+    expect(right.normal).toEqual({ x: 1, y: 0 });
+    // Native Canvas uses 270 for a right side, 0 for a bottom one.
+    expect(right.arrowAngle).toBe(270);
+    expect(nativeEdgeEnd(rect, "bottom")!.arrowAngle).toBe(0);
+    const turned = nativeEdgeEnd({ ...rect, rotation: 90 }, "right")!;
+    expect(turned.point.x).toBeCloseTo(100);
+    expect(turned.point.y).toBeCloseTo(150);
+    expect(turned.arrowAngle).toBe(0);
+  });
 
+  it("leaves an arbitrary perimeter point along the contour there", () => {
+    const top = nativeAnchorEnd(rect, 0.25, 0)!;
+    expect(top.point).toEqual({ x: 50, y: 0 });
+    expect(top.normal.x).toBeCloseTo(0);
+    expect(top.normal.y).toBeCloseTo(-1);
+    expect(top.arrowAngle).toBe(180);
+    // A corner leaves diagonally rather than along whichever side came first.
+    const corner = nativeAnchorEnd(rect, 1, 1)!;
+    expect(corner.normal.x).toBeCloseTo(Math.SQRT1_2);
+    expect(corner.normal.y).toBeCloseTo(Math.SQRT1_2);
+    // A triangle's flank faces up and out, not straight sideways.
+    const flank = nativeAnchorEnd({ x: 0, y: 0, width: 100, height: 100 }, 0.75, 0.5, shapeOutline("triangle"))!;
+    expect(flank.normal.x).toBeGreaterThan(0.8);
+    expect(flank.normal.y).toBeLessThan(-0.3);
+  });
+
+  it("snaps a dropped end onto a nearby standard point only", () => {
+    const near = snapToStandardPoint({ type: "node", nodeId: "a", u: 0.54, v: 0 }, rect, undefined, 10);
+    expect(near).toEqual({ type: "node", nodeId: "a", u: 0.5, v: 0 });
+    const far = snapToStandardPoint({ type: "node", nodeId: "a", u: 0.8, v: 0 }, rect, undefined, 10);
+    expect(far).toEqual({ type: "node", nodeId: "a", u: 0.8, v: 0 });
+  });
+
+  it("finds the side facing a point in the node's own turned frame", () => {
+    const document = baseDocument();
+    expect(facingSide(document, "b", { x: 0, y: 40 })).toBe("left");
+    expect(facingSide(document, "b", { x: 250, y: -500 })).toBe("top");
+    const turned = { ...document, miroCanvas: { schemaVersion: 1, localOverrides: { b: { rotation: 180 } } } };
+    // Upside down, the side that looks left is the node's own right side.
+    expect(facingSide(turned, "b", { x: 0, y: 40 })).toBe("right");
+  });
+
+  it("points a side the way it faces once the node is turned", () => {
+    expect(sideDirection("left", 0)).toEqual({ x: -1, y: 0 });
+    const upsideDown = sideDirection("left", 180);
+    expect(upsideDown.x).toBeCloseTo(1);
+    expect(upsideDown.y).toBeCloseTo(0);
+  });
+});

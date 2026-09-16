@@ -114,11 +114,11 @@ describe("reversible source geometry DOM", () => {
   });
   it("renders local anchors without source and respects document snapshots for undo/redo", () => {
     const f = fixture(); delete f.data.miroSource; const before = structuredClone(f.data);
-    f.renderer.refresh(); expect(f.path.getAttribute("d")).toBe("M 100 16 L 325 260");
+    f.renderer.refresh(); expect(f.path.getAttribute("d")).toMatch(/^M 100 16 L 107 16 M 107 16 C .* 325 267$/);
     const change = updateConnectorEndpoint(f.data, { edgeId: "e", end: "from", anchor: { type: "free", x: 13, y: 19 } });
     expect(change.ok).toBe(true); const after = change.document!;
     f.data = after; f.renderer.refresh(); expect(f.path.getAttribute("d")).toBe("M 13 19 L 325 260");
-    f.data = before; f.renderer.refresh(); expect(f.path.getAttribute("d")).toBe("M 100 16 L 325 260");
+    f.data = before; f.renderer.refresh(); expect(f.path.getAttribute("d")).toMatch(/^M 100 16 L 107 16 M 107 16 C .* 325 267$/);
     f.data = after; f.renderer.refresh(); expect(f.path.getAttribute("d")).toBe("M 13 19 L 325 260");
     expect(f.data.unknown).toEqual({ deep: 1 }); expect(f.data.edges[0].future).toEqual({ keep: true });
   });
@@ -888,7 +888,7 @@ describe("native edges on turned and shaped nodes", () => {
     f.edge.from.side = "left"; f.edge.to.side = "right";
     f.renderer.refresh();
     // Native angle for a right side is 270; the node adds its own 90.
-    expect(f.head.style.getPropertyValue("transform")).toBe("translate(50px, 90px) rotate(360deg)");
+    expect(f.head.style.getPropertyValue("transform")).toBe("translate(50px, 90px) rotate(0deg)");
     expect(f.display.getAttribute("d")!.endsWith("50 97")).toBe(true);
   });
 
@@ -931,14 +931,16 @@ describe("native edges on turned and shaped nodes", () => {
       to: { type: "node", nodeId: "b", u: 0, v: 0.75 },
     } };
     f.renderer.refresh();
-    expect(f.display.getAttribute("d")).toBe("M 100 20 L 300 260");
+    // Drawn the native way: out of the anchor along its side, into the other one.
+    expect(f.display.getAttribute("d")).toMatch(/^M 100 20 L 107 20 M 107 20 C .* 293 260$/);
     const observer = f.observers[f.observers.length - 1]!;
     f.a.x = 100;
     f.edge.updatePath();
     observer.callback([{ type: "attributes", attributeName: "d", target: f.display }]);
     // The anchor rides along with the node instead of the host's side middle.
-    expect(f.display.getAttribute("d")).toBe("M 200 20 L 300 260");
-    expect(f.interaction.getAttribute("d")).toBe("M 200 20 L 300 260");
+    expect(f.display.getAttribute("d")).toMatch(/^M 200 20 L 207 20 M 207 20 C .* 293 260$/);
+    expect(f.interaction.getAttribute("d")).toBe(f.display.getAttribute("d"));
+    expect(f.head.style.getPropertyValue("transform")).toBe("translate(300px, 260px) rotate(90deg)");
     f.renderer.dispose();
     // The route no longer matches what was captured, so the host redraws its own.
     expect(f.edge.redraws).toBe(2);

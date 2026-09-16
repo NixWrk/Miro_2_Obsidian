@@ -1,5 +1,6 @@
 import {
-  buildCanvasAnchorGeometry, nativeEdgeEnd, nativeEdgeRoute, roundCoordinate, routeConnector, type NodeMeasurements,
+  buildCanvasAnchorGeometry, nativeAnchorEnd, nativeEdgeEnd, nativeEdgeRoute, roundCoordinate, routeConnector,
+  type NodeMeasurements,
 } from "./connector-endpoints";
 import { SHAPE_CLIP_PATHS, inscribedInsets, shapeOutline, type ShapePoint } from "./shape-geometry";
 import { normalizeAnchor, resolveAnchor, type AnchorEdgeGeometry, type AnchorPoint, type AnchorRect } from "./anchors";
@@ -930,6 +931,36 @@ interface RouteNode {
   readonly outline?: readonly ShapePoint[];
 }
 
+/** Where a plain connector's ends sit on their nodes; a missing end uses its native side. */
+interface RouteAnchors {
+  readonly from?: { readonly nodeId: string; readonly u: number; readonly v: number };
+  readonly to?: { readonly nodeId: string; readonly u: number; readonly v: number };
+}
+
+/**
+ * The precise anchors of a connector this plugin can draw the native way.
+ *
+ * A connector with its own style, or with an end anchored to something other
+ * than a node, keeps the styled renderer.  An anchor on a node the edge no
+ * longer names - native Canvas reattached that end - is stale, and the end
+ * follows its native side instead.
+ */
+function plainRouteAnchors(override: unknown, edge: unknown): RouteAnchors | undefined {
+  if (isObject(safeGet(override, "connector"))) return undefined;
+  const stored = safeGet(override, "connectorAnchors");
+  const anchors: { from?: RouteAnchors["from"]; to?: RouteAnchors["to"] } = {};
+  for (const end of ["from", "to"] as const) {
+    const raw = safeGet(stored, end);
+    if (raw === undefined) continue;
+    const normalized = normalizeAnchor(raw);
+    const anchor = normalized.valid ? normalized.anchor : undefined;
+    if (anchor?.type !== "node") return undefined;
+    if (anchor.nodeId !== safeGet(edge, `${end}Node`)) continue;
+    anchors[end] = { nodeId: anchor.nodeId, u: anchor.u, v: anchor.v };
+  }
+  return anchors;
+}
+
 function finiteNumber(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value);
 }
@@ -961,6 +992,7 @@ function applyNativeRoute(
   runtime: unknown,
   id: string,
   native: unknown,
+  anchors: RouteAnchors,
   nodeOf: (nodeId: unknown) => RouteNode | undefined,
   patches: RestorePatch[],
   diagnostics: string[],
@@ -975,11 +1007,16 @@ function applyNativeRoute(
   const end = (which: "from" | "to") => {
     const live = safeGet(runtime, which);
     const liveNode = safeGet(live, "node");
-    const known = nodeOf(readCanvasElementId(liveNode) ?? safeGet(native, `${which}Node`));
+    const liveId = readCanvasElementId(liveNode);
+    const anchor = anchors[which];
+    const nodeId = anchor?.nodeId ?? liveId ?? safeGet(native, `${which}Node`);
+    const known = nodeOf(nodeId);
     if (known === undefined) return undefined;
-    const side = safeGet(live, "side") ?? safeGet(native, `${which}Side`);
+    const rect = liveId === nodeId ? liveRect(liveNode, known.rect) : known.rect;
     const kind = safeGet(live, "end") ?? safeGet(native, `${which}End`) ?? (which === "from" ? "none" : "arrow");
-    const geometry = nativeEdgeEnd(liveRect(liveNode, known.rect), side, known.outline);
+    const geometry = anchor === undefined
+      ? nativeEdgeEnd(rect, safeGet(live, "side") ?? safeGet(native, `${which}Side`), known.outline)
+      : nativeAnchorEnd(rect, anchor.u, anchor.v, known.outline);
     const head = safeGet(safeGet(runtime, `${which}LineEnd`), "el");
     return geometry === undefined ? undefined : { geometry, arrow: kind === "arrow", head: isElement(head) ? head : undefined };
   };
@@ -1425,11 +1462,21 @@ export class SourceRenderer {
       const node = routeNode(nodeId);
       return node !== undefined && ((node.rect.rotation ?? 0) !== 0 || node.outline !== undefined);
     };
-    const nativeRoutes = new Map<string, unknown>();
+    // Edges drawn the native way: native edges on a turned or shaped node,
+    // which the host draws to the middle of a side of the upright box, and
+    // connectors this plugin placed precisely without giving them a style of
+    // their own - so an arrow looks the same however it was made.
+    const nativeRoutes = new Map<string, { readonly edge: unknown; readonly anchors: RouteAnchors }>();
     for (const [id, edge] of nativeEdges) {
-      if (!descriptors.has(id) && (reshaped(safeGet(edge, "fromNode")) || reshaped(safeGet(edge, "toNode")))) {
-        nativeRoutes.set(id, edge);
+      const descriptor = descriptors.get(id);
+      if (descriptor === undefined) {
+        if (reshaped(safeGet(edge, "fromNode")) || reshaped(safeGet(edge, "toNode"))) nativeRoutes.set(id, { edge, anchors: {} });
+        continue;
       }
+      if (descriptor.kind !== "connector" || descriptor.sourceId !== undefined
+        || descriptor.structured?.mindmapEdge !== undefined) continue;
+      const anchors = plainRouteAnchors(safeGet(overrides, id), edge);
+      if (anchors !== undefined) nativeRoutes.set(id, { edge, anchors });
     }
     const nodes = itemById(runtimeNodes);
     const edges = itemById(runtimeEdges);
@@ -1438,10 +1485,10 @@ export class SourceRenderer {
     // builds its content on first view, changes this list and so renders
     // again; one that stays missing does not rebuild everything else on every
     // refresh.
-    const ready = [
+    const ready = [...new Map<string, "node" | "edge">([
       ...[...descriptors].map(([id, descriptor]) => [id, descriptor.kind === "connector" ? "edge" : "node"] as const),
       ...[...nativeRoutes.keys()].map((id) => [id, "edge"] as const),
-    ].flatMap(([id, kind]) => {
+    ])].flatMap(([id, kind]) => {
       const runtime = runtimeOf(kind, id);
       return runtime === undefined ? [] : [`${id}:${safeGet(runtime, "initialized") === false ? "new" : "ready"}`];
     });
@@ -1459,6 +1506,7 @@ export class SourceRenderer {
     const rendered: RenderedItem[] = [];
     try {
       for (const [id, descriptor] of descriptors) {
+        if (nativeRoutes.has(id)) continue;
         if (descriptor.kind === "connector") {
           const runtime = edges.get(id);
           if (runtime === undefined) {
@@ -1490,13 +1538,13 @@ export class SourceRenderer {
         }
       }
       applyOrdering(scene, rendered, nextPatches, diagnostics);
-      for (const [id, native] of nativeRoutes) {
+      for (const [id, route] of nativeRoutes) {
         const runtime = edges.get(id);
         if (runtime === undefined) {
           diagnostics.push(`connector-runtime-missing: ${id}.`);
           continue;
         }
-        const item = applyNativeRoute(runtime, id, native, routeNode, nextPatches, diagnostics);
+        const item = applyNativeRoute(runtime, id, route.edge, route.anchors, routeNode, nextPatches, diagnostics);
         if (item !== undefined) rendered.push(item);
       }
       this.patches = nextPatches;

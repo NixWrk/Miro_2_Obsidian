@@ -573,16 +573,35 @@ const SIDE_NORMALS: Readonly<Record<NativeSide, AnchorPoint>> = {
   top: { x: 0, y: -1 }, right: { x: 1, y: 0 }, bottom: { x: 0, y: 1 }, left: { x: -1, y: 0 },
 };
 
-/** The angle native Canvas turns an arrowhead to on each side of an upright node. */
-const SIDE_ARROW_ANGLES: Readonly<Record<NativeSide, number>> = { top: 180, right: 270, bottom: 0, left: 90 };
-
 export interface NativeEdgeEnd {
-  /** Where the edge meets the node: the side's middle, on the contour, turned with the node. */
+  /** Where the edge meets the node, on its contour, turned with the node. */
   readonly point: AnchorPoint;
-  /** The side's outward direction, turned with the node. */
+  /** The contour's outward direction there, turned with the node. */
   readonly normal: AnchorPoint;
-  /** The arrowhead angle native Canvas uses for the side, plus the node's rotation. */
+  /** The angle that points a native arrowhead into the node along that direction. */
   readonly arrowAngle: number;
+}
+
+function rectRotation(rect: AnchorRect): number {
+  return Number.isFinite(rect.rotation) ? rect.rotation ?? 0 : 0;
+}
+
+function turn(vector: AnchorPoint, degrees: number): AnchorPoint {
+  const radians = degrees * Math.PI / 180;
+  return {
+    x: vector.x * Math.cos(radians) - vector.y * Math.sin(radians),
+    y: vector.x * Math.sin(radians) + vector.y * Math.cos(radians),
+  };
+}
+
+/**
+ * The rotation that turns a native arrowhead to face along `normal`.  Its
+ * polygon has the tip at the origin and the base towards +y, which is why an
+ * upright node's bottom side uses 0 and its top 180.
+ */
+function arrowAngleFor(normal: AnchorPoint): number {
+  const degrees = roundCoordinate(Math.atan2(-normal.x, normal.y) * 180 / Math.PI);
+  return ((degrees % 360) + 360) % 360;
 }
 
 /** One end of a native edge on a node that may be turned or drawn as a shape. */
@@ -590,17 +609,98 @@ export function nativeEdgeEnd(rect: AnchorRect, side: unknown, outline?: readonl
   if (typeof side !== "string" || !SIDES.has(side as NativeSide)) return undefined;
   const point = sidePoint(rect, side, outline);
   if (point === undefined) return undefined;
-  const base = SIDE_NORMALS[side as NativeSide];
-  const rotation = Number.isFinite(rect.rotation) ? rect.rotation ?? 0 : 0;
-  const radians = rotation * Math.PI / 180;
-  return {
-    point,
-    normal: {
-      x: base.x * Math.cos(radians) - base.y * Math.sin(radians),
-      y: base.x * Math.sin(radians) + base.y * Math.cos(radians),
-    },
-    arrowAngle: SIDE_ARROW_ANGLES[side as NativeSide] + rotation,
-  };
+  const normal = turn(SIDE_NORMALS[side as NativeSide], rectRotation(rect));
+  return { point, normal, arrowAngle: arrowAngleFor(normal) };
+}
+
+/**
+ * The outward normal of a contour at a point of the normalized box, in board
+ * directions for a box of the given size.  Where the point sits on a vertex
+ * the normals of the segments meeting there are averaged, so a connector
+ * leaves a corner diagonally instead of along whichever side came first.
+ */
+function contourNormal(outline: readonly ShapePoint[], point: ShapePoint, width: number, height: number): AnchorPoint {
+  const sx = width / 100, sy = height / 100;
+  const candidates: { readonly distance: number; readonly normal: AnchorPoint }[] = [];
+  for (let index = 0; index < outline.length; index += 1) {
+    const from = outline[index]!;
+    const to = outline[(index + 1) % outline.length]!;
+    const dx = (to.x - from.x) * sx, dy = (to.y - from.y) * sy;
+    const length = Math.hypot(dx, dy);
+    if (length <= 1e-9) continue;
+    const tx = (point.x - from.x) * sx, ty = (point.y - from.y) * sy;
+    const along = Math.max(0, Math.min(1, (tx * dx + ty * dy) / (length * length)));
+    const distance = Math.hypot(tx - dx * along, ty - dy * along);
+    candidates.push({ distance, normal: { x: dy / length, y: -dx / length } });
+  }
+  const best = Math.min(...candidates.map((candidate) => candidate.distance));
+  const outward = { x: (point.x - 50) * sx, y: (point.y - 50) * sy };
+  let x = 0, y = 0;
+  for (const { distance, normal } of candidates) {
+    if (distance > best + 1e-6) continue;
+    const sign = normal.x * outward.x + normal.y * outward.y < 0 ? -1 : 1;
+    x += normal.x * sign;
+    y += normal.y * sign;
+  }
+  const length = Math.hypot(x, y);
+  if (length <= 1e-9) {
+    const fallback = Math.hypot(outward.x, outward.y);
+    return fallback <= 1e-9 ? { x: 0, y: 1 } : { x: outward.x / fallback, y: outward.y / fallback };
+  }
+  return { x: x / length, y: y / length };
+}
+
+/**
+ * One end of an edge anchored at an arbitrary point of a node, drawn the way
+ * native Canvas draws a side: leaving along the contour's outward normal.
+ */
+export function nativeAnchorEnd(rect: AnchorRect, u: number, v: number, outline?: readonly ShapePoint[]): NativeEdgeEnd | undefined {
+  if (!Number.isFinite(u) || !Number.isFinite(v) || !(rect.width > 0) || !(rect.height > 0)) return undefined;
+  const rotation = rectRotation(rect);
+  const cx = rect.rotationCenterX ?? rect.x + rect.width / 2;
+  const cy = rect.rotationCenterY ?? rect.y + rect.height / 2;
+  const offset = turn({ x: rect.x + u * rect.width - cx, y: rect.y + v * rect.height - cy }, rotation);
+  const local = contourNormal(outline ?? shapeOutline("rectangle")!, { x: u * 100, y: v * 100 }, rect.width, rect.height);
+  const normal = turn(local, rotation);
+  return { point: { x: cx + offset.x, y: cy + offset.y }, normal, arrowAngle: arrowAngleFor(normal) };
+}
+
+/** The side of a node that faces a board point, judged in the node's own turned frame. */
+export function facingSide(document: unknown, nodeId: string, toward: AnchorPoint): NodeBoundarySide | undefined {
+  const rect = buildCanvasAnchorGeometry(document).nodes?.[nodeId];
+  if (rect === undefined || !(rect.width > 0) || !(rect.height > 0)
+    || !Number.isFinite(toward.x) || !Number.isFinite(toward.y)) return undefined;
+  const local = turn({ x: toward.x - (rect.x + rect.width / 2), y: toward.y - (rect.y + rect.height / 2) }, -rectRotation(rect));
+  const across = local.x / rect.width, down = local.y / rect.height;
+  if (Math.abs(across) >= Math.abs(down)) return across >= 0 ? "right" : "left";
+  return down >= 0 ? "bottom" : "top";
+}
+
+/** The outward direction of a side of a node, turned with the node. */
+export function sideDirection(side: NodeBoundarySide, rotation: number): AnchorPoint {
+  return turn(SIDE_NORMALS[side], Number.isFinite(rotation) ? rotation : 0);
+}
+
+/**
+ * Snap an anchor to the nearest of a node's four standard points when it is
+ * within `reach` board units of it.  Standard points sit in the middle of
+ * each side, on the contour, which is where a connector lands unless the
+ * user deliberately places it elsewhere.
+ */
+export function snapToStandardPoint(
+  anchor: CanvasAnchor,
+  rect: AnchorRect,
+  outline: readonly ShapePoint[] | undefined,
+  reach: number,
+): CanvasAnchor {
+  if (anchor.type !== "node" || !(reach > 0)) return anchor;
+  let best: { readonly u: number; readonly v: number; readonly distance: number } | undefined;
+  for (const target of [{ x: 50, y: 0 }, { x: 100, y: 50 }, { x: 50, y: 100 }, { x: 0, y: 50 }]) {
+    const point = contourPoint(outline ?? shapeOutline("rectangle"), target);
+    const distance = Math.hypot((anchor.u - point.x / 100) * rect.width, (anchor.v - point.y / 100) * rect.height);
+    if (best === undefined || distance < best.distance) best = { u: point.x / 100, v: point.y / 100, distance };
+  }
+  return best !== undefined && best.distance <= reach ? { ...anchor, u: best.u, v: best.v } : anchor;
 }
 
 /**
