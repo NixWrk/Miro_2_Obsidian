@@ -316,6 +316,20 @@ function boundingRect(value: unknown): { readonly left: number; readonly top: nu
 	}
 }
 
+/** A resolved custom property of an element, when the host can compute styles. */
+function readStyleValue(element: unknown, property: string): string | undefined {
+	try {
+		const view = readRuntime(readRuntime(element, "ownerDocument"), "defaultView");
+		const compute = readRuntime(view, "getComputedStyle");
+		if (typeof compute !== "function") return undefined;
+		const style = Reflect.apply(compute, view, [element]);
+		const value = Reflect.apply(readRuntime(style, "getPropertyValue") as (name: string) => string, style, [property]);
+		return typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
+	} catch {
+		return undefined;
+	}
+}
+
 function firstProblem(diagnostics: readonly { readonly level: string; readonly message: string }[]): string | undefined {
 	return (diagnostics.find((item) => item.level === "error")
 		?? diagnostics.find((item) => item.level === "warning"))?.message;
@@ -2152,15 +2166,30 @@ export class M1CanvasSession {
 			context.clearRect(0, 0, canvas.width, canvas.height);
 			context.fillStyle = "rgba(127, 127, 127, 0.12)";
 			context.fillRect(0, 0, canvas.width, canvas.height);
-			for (const item of model.items) {
+			// An edge is a line between its ends.  Filling its bounding box drew a
+			// grey slab for every connector, larger the further it reached.
+			context.strokeStyle = "rgba(150, 150, 150, 0.85)";
+			context.lineWidth = 1;
+			for (const item of model.edgeItems) {
+				if (item.mapLine === undefined) {
+					continue;
+				}
+				context.beginPath();
+				context.moveTo(item.mapLine[0].x, item.mapLine[0].y);
+				context.lineTo(item.mapLine[1].x, item.mapLine[1].y);
+				context.stroke();
+			}
+			context.fillStyle = "rgba(80, 120, 230, 0.65)";
+			for (const item of model.nodeItems) {
 				if (item.mapRect === undefined) {
 					continue;
 				}
-				context.fillStyle = item.kind === "edge" ? "rgba(127, 127, 127, 0.7)" : "rgba(80, 120, 230, 0.65)";
 				context.fillRect(item.mapRect.x, item.mapRect.y, Math.max(1, item.mapRect.width), Math.max(1, item.mapRect.height));
 			}
 			if (model.viewportRect !== undefined) {
-				context.strokeStyle = "var(--interactive-accent, #7c3aed)";
+				// A 2D context cannot resolve a CSS variable; read the theme's colour.
+				const accent = readStyleValue(canvas, "--interactive-accent") ?? "#7c3aed";
+				context.strokeStyle = accent;
 				context.lineWidth = 2;
 				context.strokeRect(model.viewportRect.x, model.viewportRect.y, model.viewportRect.width, model.viewportRect.height);
 			}

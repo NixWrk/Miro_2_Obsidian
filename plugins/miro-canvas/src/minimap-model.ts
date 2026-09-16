@@ -39,6 +39,9 @@ export interface MinimapSceneItem {
 	readonly kind: "node" | "edge" | "item";
 	readonly bounds: MinimapRect;
 	readonly mapRect?: MinimapRect;
+	/** An edge's line from one end to the other, in board and in map coordinates. */
+	readonly line?: readonly [MinimapPoint, MinimapPoint];
+	readonly mapLine?: readonly [MinimapPoint, MinimapPoint];
 }
 
 export interface MinimapViewportGeometry {
@@ -503,6 +506,25 @@ function endpoint(value: unknown, nodes: ReadonlyMap<string, MinimapRect>): Mini
 	return undefined;
 }
 
+/** The two ends of an edge, whichever of the known spellings it uses. */
+function edgeLine(value: unknown, nodes: ReadonlyMap<string, MinimapRect>): readonly [MinimapPoint, MinimapPoint] | undefined {
+	if (!isObject(value)) {
+		return undefined;
+	}
+	const first = (keys: readonly string[]): MinimapPoint | undefined => {
+		for (const key of keys) {
+			const point = endpoint(safeRead(value, key), nodes);
+			if (point !== undefined) {
+				return point;
+			}
+		}
+		return undefined;
+	};
+	const start = first(["from", "fromNode", "start", "source", "startPoint"]);
+	const end = first(["to", "toNode", "end", "target", "endPoint"]);
+	return start === undefined || end === undefined ? undefined : [start, end];
+}
+
 function edgeRect(value: unknown, nodes: ReadonlyMap<string, MinimapRect>): MinimapRect | undefined {
 	const direct = readMinimapRect(value);
 	if (direct !== undefined && (direct.width > 0 || direct.height > 0)) {
@@ -590,7 +612,8 @@ export function computeContentBounds(
 			addDiagnostic(diagnostics, diagnosticKeys, "geometry-invalid", "A scene edge had no finite endpoints.");
 			continue;
 		}
-		const item: MinimapSceneItem = { kind: "edge", bounds: rect };
+		const line = edgeLine(value, nodeRects);
+		const item: MinimapSceneItem = { kind: "edge", bounds: rect, ...(line === undefined ? {} : { line }) };
 		const id = itemId(value);
 		const withId = id === undefined ? item : { ...item, id };
 		parsedEdges.push(withId);
@@ -856,10 +879,15 @@ function makeGeometry(scene: unknown, options: MinimapModelOptions): MinimapGeom
 	const projectedHeight = safeMultiply(bounds.height > 0 ? bounds.height : 1, scale);
 	const offsetX = innerRect.x + (innerRect.width - projectedWidth) / 2 - safeMultiply(bounds.x, scale);
 	const offsetY = innerRect.y + (innerRect.height - projectedHeight) / 2 - safeMultiply(bounds.y, scale);
+	const project = (point: MinimapPoint): MinimapPoint => ({
+		x: safeAdd(offsetX, safeMultiply(point.x, scale)),
+		y: safeAdd(offsetY, safeMultiply(point.y, scale)),
+	});
 	const mapItems = (items: readonly MinimapSceneItem[], kind: "node" | "edge"): readonly MinimapSceneItem[] => items.map((item) => ({
 		...item,
 		kind,
 		mapRect: projectRect(item.bounds, scale, offsetX, offsetY),
+		...(item.line === undefined ? {} : { mapLine: [project(item.line[0]), project(item.line[1])] as const }),
 	}));
 	const nodeItems = mapItems(computed.nodes, "node");
 	const edgeItems = mapItems(computed.edges, "edge");

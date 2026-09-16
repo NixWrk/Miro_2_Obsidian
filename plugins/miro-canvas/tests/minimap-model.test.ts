@@ -43,6 +43,12 @@ describe("MinimapModel", () => {
 
 		expect(model.edgeItems).toHaveLength(1);
 		expect(model.diagnostics.map((item) => item.message)).not.toContain("A scene edge had no finite endpoints.");
+		// An edge is drawn as the line between its node centres, not as a box.
+		expect(model.edgeItems[0]!.line).toEqual([{ x: 50, y: 40 }, { x: 350, y: 240 }]);
+		const [start, end] = model.edgeItems[0]!.mapLine!;
+		const map = model.nodeItems.map((item) => item.mapRect!);
+		expect(start.x).toBeCloseTo(map[0]!.x + map[0]!.width / 2);
+		expect(end.y).toBeCloseTo(map[1]!.y + map[1]!.height / 2);
 	});
 
 	it("maps viewport transforms exactly and keeps zoom for click/drag navigation", () => {
