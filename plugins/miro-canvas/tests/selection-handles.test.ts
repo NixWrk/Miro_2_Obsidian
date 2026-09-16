@@ -4,6 +4,7 @@ import {
   SelectionHandles,
   normalizeAngle,
   nearestSide,
+  rightAngleStep,
   pointerAngle,
   sideAnchor,
   type HandleSide,
@@ -344,5 +345,56 @@ describe("connector end grips", () => {
     handles.handlePointerUp({ clientX: 121, clientY: 81 });
     expect(moves).toEqual([]);
     expect(byEnd(root, "from").style.left).toBe("120px");
+  });
+});
+
+describe("rotation controls", () => {
+  const byClass = (root: FakeElement, name: string): FakeElement =>
+    descendants(root).find((item) => item.className.split(" ").includes(name))!;
+
+  it("sit upright below the lowest point of the node, whatever its angle", () => {
+    const { root, update } = build();
+    const bar = byClass(root, "miro-canvas-handles__rotate-bar");
+    // Not inside the frame, which turns with the node.
+    expect(bar.parentNode).toBe(root);
+    expect(bar.hidden).toBe(false);
+    // RECT is 200 x 100 centred on (200, 150): its bottom is at 200.
+    expect(bar.style.left).toBe("200px");
+    expect(bar.style.top).toBe("228px");
+    // Turned a quarter, the node reaches 100 below its centre.
+    update({ rotation: 90 });
+    expect(Number.parseFloat(bar.style.top)).toBeCloseTo(278);
+    // Upside down it is as low as upright - not up by the toolbar.
+    update({ rotation: 180 });
+    expect(Number.parseFloat(bar.style.top)).toBeCloseTo(228);
+    update({ editable: false });
+    expect(bar.hidden).toBe(true);
+    update({ isEdge: true, rect: undefined, selectedIds: ["e1"], endpoints: { from: { x: 1, y: 1 }, to: { x: 2, y: 2 } } });
+    expect(bar.hidden).toBe(true);
+  });
+
+  it("turns the node to the next right angle either way in one write", () => {
+    const { root, rotations, update } = build({ rotation: 30 });
+    byLabel(root, "Turn to the next right angle").dispatch("click");
+    byLabel(root, "Turn to the previous right angle").dispatch("click");
+    expect(rotations).toEqual([{ degrees: 90, commit: true }, { degrees: 0, commit: true }]);
+    update({ rotation: 90 });
+    byLabel(root, "Turn to the next right angle").dispatch("click");
+    update({ rotation: -180 });
+    byLabel(root, "Turn to the next right angle").dispatch("click");
+    expect(rotations.slice(2)).toEqual([{ degrees: -180, commit: true }, { degrees: -90, commit: true }]);
+    update({ editable: false });
+    byLabel(root, "Turn to the previous right angle").dispatch("click");
+    expect(rotations).toHaveLength(4);
+  });
+
+  it("steps between right angles without stopping on the one it is at", () => {
+    expect(rightAngleStep(30, 1)).toBe(90);
+    expect(rightAngleStep(30, -1)).toBe(0);
+    expect(rightAngleStep(0, 1)).toBe(90);
+    expect(rightAngleStep(0, -1)).toBe(-90);
+    expect(rightAngleStep(-100, -1)).toBe(-180);
+    expect(rightAngleStep(170, 1)).toBe(-180);
+    expect(rightAngleStep(-180, 1)).toBe(-90);
   });
 });

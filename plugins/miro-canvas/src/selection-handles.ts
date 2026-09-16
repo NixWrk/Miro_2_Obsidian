@@ -77,6 +77,8 @@ export interface SelectionHandlesOptions {
 const SIDES: readonly HandleSide[] = ["top", "right", "bottom", "left"];
 const DEFAULT_SNAP = 15;
 const DEFAULT_DRAG_THRESHOLD = 4;
+/** Pixels between the lowest point of a turned node and its rotation controls. */
+const ROTATE_BAR_GAP = 28;
 /** Each connection point becomes an arrow pointing away from the node. */
 const SIDE_ARROWS: Readonly<Record<HandleSide, string>> = Object.freeze({
   top: "↑", right: "→", bottom: "↓", left: "←",
@@ -114,6 +116,20 @@ export function pointerAngle(rect: HandleRect, point: { readonly x: number; read
   const cx = rect.left + rect.width / 2;
   const cy = rect.top + rect.height / 2;
   return Math.atan2(point.y - cy, point.x - cx) * 180 / Math.PI;
+}
+
+/**
+ * The next right angle from `degrees` in a direction: +1 clockwise, -1 the
+ * other way.  An angle already on a right angle moves a full quarter.
+ */
+export function rightAngleStep(degrees: number, direction: 1 | -1): number {
+  const quarters = degrees / 90;
+  const nearest = Math.round(quarters);
+  const aligned = Math.abs(quarters - nearest) < 1e-6;
+  const target = direction > 0
+    ? (aligned ? nearest + 1 : Math.ceil(quarters))
+    : (aligned ? nearest - 1 : Math.floor(quarters));
+  return normalizeAngle(target * 90);
 }
 
 /**
@@ -158,6 +174,8 @@ function pointOf(event: unknown): { readonly x: number; readonly y: number } | u
 
 interface HandleRefs {
   readonly frame: HTMLElement;
+  /** The rotation grip and the two right-angle turns, kept upright below the node. */
+  readonly rotateBar: HTMLElement;
   readonly rotate: HTMLButtonElement;
   readonly connectors: readonly HTMLButtonElement[];
   readonly ends: Readonly<Record<ConnectorEnd, HTMLButtonElement>>;
@@ -246,8 +264,16 @@ export class SelectionHandles {
         connectors.push(dot);
       }
     }
-    const rotate = frame.appendChild(makeGrip(document, "miro-canvas-handle--rotate", "↻", "Rotate"));
+    // The rotation controls live outside the turning frame: turned with the
+    // node, a grip at one corner ended up under the formatting toolbar once
+    // the node was upside down.
+    const rotateBar = root.appendChild(make(document, "div", "miro-canvas-handles__rotate-bar"));
+    const turnBack = rotateBar.appendChild(makeGrip(document, "miro-canvas-handle--turn", "↶", "Turn to the previous right angle"));
+    const rotate = rotateBar.appendChild(makeGrip(document, "miro-canvas-handle--rotate", "↻", "Rotate"));
+    const turnOn = rotateBar.appendChild(makeGrip(document, "miro-canvas-handle--turn", "↷", "Turn to the next right angle"));
     this.listen(rotate, "pointerdown", (event) => this.beginRotate(event));
+    this.listen(turnBack, "click", () => this.turn(-1));
+    this.listen(turnOn, "click", () => this.turn(1));
     const end = (which: ConnectorEnd): HTMLButtonElement => {
       const grip = root.appendChild(makeGrip(
         document,
@@ -262,7 +288,7 @@ export class SelectionHandles {
     };
     const ends = { from: end("from"), to: end("to") };
     const preview = makePreview(document, root);
-    return { frame, rotate, connectors, ends, ...(preview === undefined ? {} : { preview }) };
+    return { frame, rotateBar, rotate, connectors, ends, ...(preview === undefined ? {} : { preview }) };
   }
 
   private listen(target: EventTarget, type: string, handler: EventListener): void {
@@ -313,6 +339,12 @@ export class SelectionHandles {
       ?? (event as { target?: unknown }).target) ?? this.dragOrigin;
     this.dragStart = start === undefined ? undefined : this.local(start);
     this.element.setAttribute("data-miro-canvas-connecting", side);
+  }
+
+  /** Turn the node to the next right angle in one step, as one write. */
+  private turn(direction: 1 | -1): void {
+    if (!this.state.editable || this.state.isEdge || this.gestureActive) return;
+    this.actions.onRotate(rightAngleStep(this.state.rotation, direction), true);
   }
 
   private beginEndDrag(end: ConnectorEnd, event: unknown): void {
@@ -437,6 +469,18 @@ export class SelectionHandles {
     }
   }
 
+  /**
+   * Centre the rotation controls just below the lowest point of the turned
+   * node.  The formatting toolbar sits above the node, so they never meet,
+   * whatever the angle.
+   */
+  private placeRotateBar(bar: HTMLElement, rect: HandleRect, rotation: number): void {
+    const radians = rotation * Math.PI / 180;
+    const halfHeight = (Math.abs(rect.width * Math.sin(radians)) + Math.abs(rect.height * Math.cos(radians))) / 2;
+    bar.style.left = `${rect.left + rect.width / 2}px`;
+    bar.style.top = `${rect.top + rect.height / 2 + halfHeight + ROTATE_BAR_GAP}px`;
+  }
+
   /** Position and size the frame over the node it belongs to. */
   private placeFrame(frame: HTMLElement, rect: HandleRect): void {
     frame.style.left = `${rect.left}px`;
@@ -485,10 +529,12 @@ export class SelectionHandles {
     this.placeEnds(state);
     this.element.setAttribute("data-miro-canvas-editable", state.editable ? "true" : "false");
     refs.rotate.hidden = state.isEdge || !state.editable;
+    refs.rotateBar.hidden = !visible || state.isEdge || !state.editable;
     for (const connector of refs.connectors) connector.hidden = state.isEdge || !state.editable;
     if (!visible || state.rect === undefined) return;
     this.placeFrame(refs.frame, state.rect);
     refs.frame.style.transform = state.rotation === 0 ? "none" : `rotate(${state.rotation}deg)`;
+    this.placeRotateBar(refs.rotateBar, state.rect, state.rotation);
     const outline = shapeOutline(state.shape);
     for (const connector of refs.connectors) {
       const side = connector.getAttribute("data-handle-side") as HandleSide | null;
