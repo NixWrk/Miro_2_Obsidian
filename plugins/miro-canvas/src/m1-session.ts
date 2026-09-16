@@ -599,6 +599,12 @@ export class M1CanvasSession {
 	private landingCache: { readonly document: unknown; readonly geometry: AnchorGeometry; readonly scene: SourceScene } | undefined;
 	private lastToolbarSignature = "";
 	private lastToolbarState: SelectionToolbarState | undefined;
+	/** The node a resize gesture is changing, and the box to put back if it is cancelled. */
+	private resizeGesture: {
+		readonly id: string;
+		readonly node: unknown;
+		readonly before: { readonly x: number; readonly y: number; readonly width: number; readonly height: number };
+	} | undefined;
 	/** Observer moving the overlays with native pans, zooms and drags between refreshes. */
 	private followObserver: { observe(target: unknown, options: unknown): void; disconnect(): void } | undefined;
 	private followTargets: readonly unknown[] = [];
@@ -670,6 +676,8 @@ export class M1CanvasSession {
 			onCreateConnected: (sourceId, side, position) => this.createConnectedNode(sourceId, side, position),
 			onMoveEndpoint: (edgeId, end, point) => this.moveConnectorEnd(edgeId, end, point),
 			previewEnd: (gesture, point) => this.previewLanding(gesture, point),
+			onResize: (rect, commit) => this.applyHandleResize(rect, commit),
+			onCancelResize: () => this.cancelHandleResize(),
 		}, { document: controlDocument });
 		this.commentMarkers = controlDocument === undefined ? undefined : new CommentMarkers({
 			onOpenThread: (threadId, origin) => this.options.onOpenCommentThread?.(threadId, origin),
@@ -739,6 +747,79 @@ export class M1CanvasSession {
 		this.rotationGestureTarget = undefined;
 		this.sourceRenderer?.refresh();
 		this.refresh();
+	}
+
+	/**
+	 * Resize the selected node to a box the handles drew.
+	 *
+	 * The drag previews through native Canvas itself, so the node, its edges
+	 * and its snapping all follow the pointer the way a native resize does,
+	 * and only the release saves - one native history entry per gesture.  The
+	 * box stays unturned: the node keeps its angle about its new centre.
+	 */
+	private applyHandleResize(rect: HandleRect, commit: boolean): void {
+		let gesture = this.resizeGesture;
+		if (gesture === undefined) {
+			const id = this.selectedIds[0];
+			const node = id === undefined
+				? undefined
+				: [...(this.adapter.getNodes() ?? [])].find((item) => readCanvasElementId(item) === id);
+			if (id === undefined || node === undefined) return;
+			this.readInteractionState();
+			if (!this.editAllowed("resize", [id])) {
+				this.refresh();
+				return;
+			}
+			const before = {
+				x: finite(readRuntime(node, "x")), y: finite(readRuntime(node, "y")),
+				width: finite(readRuntime(node, "width")), height: finite(readRuntime(node, "height")),
+			};
+			if (before.x === undefined || before.y === undefined || before.width === undefined || before.height === undefined) return;
+			gesture = { id, node, before: { x: before.x, y: before.y, width: before.width, height: before.height } };
+			this.resizeGesture = gesture;
+		}
+		const box = this.boardBox(rect);
+		if (box !== undefined) this.resizeNode(gesture.node, box);
+		if (!commit) return;
+		this.resizeGesture = undefined;
+		this.adapter.requestSave();
+		this.refresh();
+	}
+
+	private cancelHandleResize(): void {
+		const gesture = this.resizeGesture;
+		if (gesture === undefined) return;
+		this.resizeGesture = undefined;
+		this.resizeNode(gesture.node, gesture.before);
+		this.adapter.requestSave();
+		this.refresh();
+	}
+
+	private resizeNode(node: unknown, box: { readonly x: number; readonly y: number; readonly width: number; readonly height: number }): void {
+		const moveAndResize = readRuntime(node, "moveAndResize");
+		if (typeof moveAndResize !== "function") {
+			this.addDiagnostic("Canvas cannot resize this node.");
+			return;
+		}
+		try {
+			Reflect.apply(moveAndResize, node, [box]);
+		} catch {
+			this.addDiagnostic("Canvas refused to resize this node.");
+		}
+	}
+
+	/** The board box under an unturned overlay-local box. */
+	private boardBox(rect: HandleRect): { readonly x: number; readonly y: number; readonly width: number; readonly height: number } | undefined {
+		const origin = this.overlayOrigin();
+		const zoom = finite(readRuntime(this.viewport.getViewport(), "zoom"));
+		if (origin === undefined || zoom === undefined || !(zoom > 0)) return undefined;
+		const centre = this.boardPoint({
+			x: origin.left + rect.left + rect.width / 2,
+			y: origin.top + rect.top + rect.height / 2,
+		});
+		if (centre === undefined) return undefined;
+		const width = rect.width / zoom, height = rect.height / zoom;
+		return { x: centre.x - width / 2, y: centre.y - height / 2, width, height };
 	}
 
 	/** A connection released on the board: onto a node, or into free space. */
@@ -1563,6 +1644,12 @@ export class M1CanvasSession {
 			...(id === undefined ? {} : { shape: this.selectedShape(id) }),
 			...(id === undefined ? {} : { rect: this.handleRect(id) }),
 			...(id === undefined || geometry.edges?.[id] === undefined ? {} : { endpoints: this.connectorEnds(id) }),
+			...(() => {
+				// Native Canvas never lets a node shrink below its own minimum.
+				const least = finite(readRuntime(readRuntime(this.nativeCanvas(), "config"), "minContainerDimension"));
+				const zoom = finite(readRuntime(this.viewport.getViewport(), "zoom"));
+				return least === undefined || zoom === undefined ? {} : { minSize: least * zoom };
+			})(),
 		};
 	}
 

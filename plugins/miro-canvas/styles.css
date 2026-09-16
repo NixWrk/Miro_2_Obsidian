@@ -1120,10 +1120,73 @@
   display: none !important;
 }
 
+/* The dashed box a node is drawn in turns with it and carries the resize
+   grips: a corner scales evenly, a side stretches.  Native resizers step
+   aside so a turned node is never resized along the screen's axes. */
 .miro-canvas-handles__frame {
   position: absolute;
   transform-origin: 50% 50%;
 }
+
+.miro-canvas-handles__frame[data-miro-canvas-resizable="true"] {
+  outline: 1px dashed var(--interactive-accent);
+  outline-offset: 0;
+}
+
+.miro-canvas-root .canvas-node-interaction-layer .canvas-node-resizer {
+  display: none;
+}
+
+.miro-canvas-resizer {
+  position: absolute;
+  pointer-events: auto;
+  touch-action: none;
+}
+
+.miro-canvas-resizer--side {
+  --miro-resizer-reach: 8px;
+}
+
+.miro-canvas-resizer--top,
+.miro-canvas-resizer--bottom {
+  left: 0;
+  width: 100%;
+  height: var(--miro-resizer-reach);
+  transform: translateY(-50%);
+}
+
+.miro-canvas-resizer--top { top: 0; }
+.miro-canvas-resizer--bottom { top: 100%; }
+
+.miro-canvas-resizer--left,
+.miro-canvas-resizer--right {
+  top: 0;
+  height: 100%;
+  width: var(--miro-resizer-reach);
+  transform: translateX(-50%);
+}
+
+.miro-canvas-resizer--left { left: 0; }
+.miro-canvas-resizer--right { left: 100%; }
+
+.miro-canvas-resizer--corner {
+  width: 9px;
+  height: 9px;
+  background: var(--background-primary);
+  border: 1px solid var(--interactive-accent);
+  border-radius: 2px;
+  transform: translate(-50%, -50%);
+}
+
+.miro-canvas-resizer--corner:hover,
+.miro-canvas-handles[data-miro-canvas-resizing] .miro-canvas-resizer--corner {
+  background: var(--interactive-accent);
+}
+
+.miro-canvas-resizer--top-left { left: 0; top: 0; }
+.miro-canvas-resizer--top-right { left: 100%; top: 0; }
+.miro-canvas-resizer--bottom-right { left: 100%; top: 100%; }
+.miro-canvas-resizer--bottom-left { left: 0; top: 100%; }
 
 .miro-canvas-handle {
   position: absolute;

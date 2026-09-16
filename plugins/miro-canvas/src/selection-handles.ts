@@ -1,11 +1,14 @@
 /**
- * Selection handles drawn over the Canvas: a rotation grip and one combined
- * connect/quick-create affordance on every side.
+ * Selection handles drawn over the Canvas: the dashed box a node is drawn in,
+ * with resize grips on its corners and sides, a rotation grip, and one
+ * combined connect/quick-create affordance on every side.
  *
- * The native Canvas keeps its own resize handles and selection outline.  This
- * overlay only adds the affordances it does not have, reports finished
- * gestures to its host, and owns no persistence: a rotation is previewed here
- * and written by the host through one guarded metadata transaction.
+ * The box turns with the node, so resizing works in the node's own frame: a
+ * corner scales the node evenly and a side stretches it along one axis, while
+ * the opposite corner or side stays where it is.  The overlay reports
+ * gestures to its host and owns no persistence: a rotation is previewed here
+ * and written by the host through one guarded metadata transaction, and a
+ * resize is previewed and written by the host through native Canvas.
  *
  * All geometry arrives already resolved in viewport pixels, so this module can
  * be exercised without a layout engine.
@@ -43,6 +46,81 @@ export interface SelectionHandlesState {
   readonly origin?: ShapePointLike;
   /** Overlay-local ends of a selected connector, where its end grips sit. */
   readonly endpoints?: { readonly from?: ShapePointLike; readonly to?: ShapePointLike };
+  /** The smallest width or height a resize may reach, in viewport pixels. */
+  readonly minSize?: number;
+}
+
+/** A grip on the box a node is drawn in: a side stretches, a corner scales. */
+export type ResizeHandle =
+  | "top" | "right" | "bottom" | "left"
+  | "top-left" | "top-right" | "bottom-right" | "bottom-left";
+
+export const RESIZE_HANDLES: readonly ResizeHandle[] = [
+  "top-left", "top", "top-right", "right", "bottom-right", "bottom", "bottom-left", "left",
+];
+
+/** Which way each grip pulls the box, in the node's own unturned frame. */
+const RESIZE_SIGNS: Readonly<Record<ResizeHandle, readonly [number, number]>> = Object.freeze({
+  top: [0, -1], right: [1, 0], bottom: [0, 1], left: [-1, 0],
+  "top-left": [-1, -1], "top-right": [1, -1], "bottom-right": [1, 1], "bottom-left": [-1, 1],
+});
+
+export interface ResizeOptions {
+  /** A corner keeps the proportions; false lets it change both sides freely. */
+  readonly uniform: boolean;
+  readonly minSize?: number;
+}
+
+/**
+ * The unturned box a node takes when one of its grips is dragged to `pointer`.
+ *
+ * The pointer is read in the node's own frame, about its centre, so a turned
+ * node grows along its own sides.  The grip's opposite - the far corner, or
+ * the middle of the far side - keeps its place on screen, which moves the
+ * centre; the result is the box around that new centre that the host turns
+ * by the same angle.  A corner scales evenly by projecting the pointer onto
+ * the box's diagonal, and nothing shrinks below `minSize`.
+ */
+export function resizeRect(
+  start: HandleRect,
+  rotation: number,
+  handle: ResizeHandle,
+  pointer: ShapePointLike,
+  options: ResizeOptions,
+): HandleRect {
+  const [sx, sy] = RESIZE_SIGNS[handle];
+  const least = Math.max(1, options.minSize ?? 1);
+  const radians = rotation * Math.PI / 180;
+  const cos = Math.cos(radians), sin = Math.sin(radians);
+  const cx = start.left + start.width / 2, cy = start.top + start.height / 2;
+  const dx = pointer.x - cx, dy = pointer.y - cy;
+  const qx = dx * cos + dy * sin, qy = -dx * sin + dy * cos;
+  // The point that stays put, in the unturned frame about the old centre.
+  const ax = -sx * start.width / 2, ay = -sy * start.height / 2;
+  let width = start.width, height = start.height;
+  if (sx !== 0 && sy !== 0 && options.uniform) {
+    const along = ((qx - ax) * sx * start.width + (qy - ay) * sy * start.height)
+      / (start.width ** 2 + start.height ** 2);
+    const scale = Math.max(along, least / start.width, least / start.height);
+    width = start.width * scale;
+    height = start.height * scale;
+  } else {
+    if (sx !== 0) width = Math.max(least, sx * (qx - ax));
+    if (sy !== 0) height = Math.max(least, sy * (qy - ay));
+  }
+  const lx = sx === 0 ? 0 : ax + sx * width / 2;
+  const ly = sy === 0 ? 0 : ay + sy * height / 2;
+  const ncx = cx + lx * cos - ly * sin;
+  const ncy = cy + lx * sin + ly * cos;
+  return { left: ncx - width / 2, top: ncy - height / 2, width, height };
+}
+
+/** The resize cursor that points along a grip once the node is turned. */
+export function resizeCursor(handle: ResizeHandle, rotation: number): string {
+  const [sx, sy] = RESIZE_SIGNS[handle];
+  const angle = ((Math.atan2(sy, sx) * 180 / Math.PI + rotation) % 180 + 180) % 180;
+  const step = Math.round(angle / 45) % 4;
+  return ["ew-resize", "nwse-resize", "ns-resize", "nesw-resize"][step]!;
 }
 
 export type ConnectorEnd = "from" | "to";
@@ -66,6 +144,13 @@ export interface SelectionHandlesActions {
   ) => void;
   /** A connection point was clicked rather than dragged. */
   readonly onCreateConnected: (sourceId: string, side: HandleSide, position: HandlePosition) => void;
+  /**
+   * The node was resized to an unturned overlay-local box: continuously while
+   * dragging, then once with `commit` true.
+   */
+  readonly onResize?: (rect: HandleRect, commit: boolean) => void;
+  /** Put back a resize preview that was not committed. */
+  readonly onCancelResize?: () => void;
   /** An end of the selected connector was dragged and released at a viewport point. */
   readonly onMoveEndpoint?: (edgeId: string, end: ConnectorEnd, point: { readonly x: number; readonly y: number }) => void;
   /**
@@ -186,6 +271,7 @@ function pointOf(event: unknown): { readonly x: number; readonly y: number } | u
 
 interface HandleRefs {
   readonly frame: HTMLElement;
+  readonly resizers: readonly HTMLElement[];
   /** The rotation grip and the two right-angle turns, kept upright below the node. */
   readonly rotateBar: HTMLElement;
   readonly rotate: HTMLButtonElement;
@@ -241,6 +327,15 @@ export class SelectionHandles {
   private dragStart: ShapePointLike | undefined;
   /** The end of the selected connector being moved, if one is. */
   private endDrag: { readonly edgeId: string; readonly end: ConnectorEnd; readonly origin: ShapePointLike } | undefined;
+  /** A resize in progress: the grip, the box and angle it started from, and the box it shows now. */
+  private resizeDrag: {
+    readonly handle: ResizeHandle;
+    readonly start: HandleRect;
+    readonly rotation: number;
+    readonly origin: ShapePointLike;
+    rect: HandleRect;
+    moved: boolean;
+  } | undefined;
 
   public constructor(actions: SelectionHandlesActions, options: SelectionHandlesOptions = {}) {
     this.actions = actions;
@@ -261,6 +356,19 @@ export class SelectionHandles {
   private build(root: HTMLElement): HandleRefs {
     const document = this.document!;
     const frame = root.appendChild(make(document, "div", "miro-canvas-handles__frame"));
+    // Resize grips come first so the connection points, drawn later, stay on
+    // top where a side's middle holds both.
+    const resizers = RESIZE_HANDLES.map((handle) => {
+      const corner = handle.includes("-");
+      const grip = frame.appendChild(make(
+        document, "div", `miro-canvas-resizer miro-canvas-resizer--${corner ? "corner" : "side"} miro-canvas-resizer--${handle}`,
+      ));
+      grip.setAttribute("data-resize", handle);
+      // A side explains itself by its cursor; a hint there would sit under the drag.
+      if (corner) grip.setAttribute("aria-label", "Drag to scale evenly; hold Shift to change both sides freely");
+      this.listen(grip, "pointerdown", (event) => this.beginResize(handle, event));
+      return grip;
+    });
     const connectors: HTMLButtonElement[] = [];
     for (const side of SIDES) {
       for (const position of HANDLE_POSITIONS) {
@@ -306,7 +414,7 @@ export class SelectionHandles {
     };
     const ends = { from: end("from"), to: end("to") };
     const preview = makePreview(document, root);
-    return { frame, rotateBar, rotate, connectors, ends, ...(preview === undefined ? {} : { preview }) };
+    return { frame, resizers, rotateBar, rotate, connectors, ends, ...(preview === undefined ? {} : { preview }) };
   }
 
   private listen(target: EventTarget, type: string, handler: EventListener): void {
@@ -359,6 +467,18 @@ export class SelectionHandles {
     this.element.setAttribute("data-miro-canvas-connecting", side);
   }
 
+  private beginResize(handle: ResizeHandle, event: unknown): void {
+    const rect = this.state.rect;
+    const origin = pointOf(event);
+    if (!this.state.editable || this.state.isEdge || rect === undefined || origin === undefined
+      || this.state.selectedIds.length !== 1 || this.actions.onResize === undefined) return;
+    (event as Event).preventDefault?.();
+    (event as Event).stopPropagation?.();
+    this.capture(event);
+    this.resizeDrag = { handle, start: rect, rotation: this.state.rotation, origin, rect, moved: false };
+    this.element.setAttribute("data-miro-canvas-resizing", handle);
+  }
+
   /** Turn the node to the next right angle in one step, as one write. */
   private turn(direction: 1 | -1): void {
     if (!this.state.editable || this.state.isEdge || this.gestureActive) return;
@@ -389,6 +509,18 @@ export class SelectionHandles {
   /** The host forwards document-level pointer events so a drag can leave the grip. */
   public handlePointerMove(event: unknown): void {
     const point = pointOf(event);
+    const resize = this.resizeDrag;
+    if (point !== undefined && resize !== undefined) {
+      if (!resize.moved && Math.hypot(point.x - resize.origin.x, point.y - resize.origin.y) < this.dragThreshold) return;
+      resize.moved = true;
+      resize.rect = resizeRect(resize.start, resize.rotation, resize.handle, this.local(point), {
+        uniform: (event as { shiftKey?: unknown }).shiftKey !== true,
+        ...(this.state.minSize === undefined ? {} : { minSize: this.state.minSize }),
+      });
+      this.showResize(resize.rect, resize.rotation);
+      this.actions.onResize?.(resize.rect, false);
+      return;
+    }
     if (point !== undefined && this.dragSide !== undefined && this.dragOrigin !== undefined
       && this.dragSourceId !== undefined && this.dragPosition !== undefined) {
       const moved = Math.hypot(point.x - this.dragOrigin.x, point.y - this.dragOrigin.y);
@@ -417,6 +549,18 @@ export class SelectionHandles {
   }
 
   public handlePointerUp(event: unknown): void {
+    const resize = this.resizeDrag;
+    if (resize !== undefined) {
+      const point = pointOf(event);
+      if (resize.moved && point !== undefined) {
+        resize.rect = resizeRect(resize.start, resize.rotation, resize.handle, this.local(point), {
+          uniform: (event as { shiftKey?: unknown }).shiftKey !== true,
+          ...(this.state.minSize === undefined ? {} : { minSize: this.state.minSize }),
+        });
+        this.resizeDrag = undefined;
+        this.actions.onResize?.(resize.rect, true);
+      }
+    }
     const rect = this.state.rect;
     if (this.rotating && rect !== undefined) {
       const point = pointOf(event);
@@ -457,6 +601,13 @@ export class SelectionHandles {
     if (this.rotating) {
       this.actions.onCancelRotation();
     }
+    const resize = this.resizeDrag;
+    this.resizeDrag = undefined;
+    this.element.removeAttribute?.("data-miro-canvas-resizing");
+    if (resize !== undefined) {
+      if (resize.moved) this.actions.onCancelResize?.();
+      this.showResize(resize.start, resize.rotation);
+    }
     this.rotating = false;
     this.dragSide = undefined;
     this.dragPosition = undefined;
@@ -474,7 +625,7 @@ export class SelectionHandles {
   }
 
   public get gestureActive(): boolean {
-    return this.rotating || this.dragSide !== undefined || this.endDrag !== undefined;
+    return this.rotating || this.dragSide !== undefined || this.endDrag !== undefined || this.resizeDrag !== undefined;
   }
 
   /** Show and place the end grips of a selected connector. */
@@ -504,6 +655,23 @@ export class SelectionHandles {
     const halfHeight = (rect.width * sin + rect.height * cos) / 2;
     bar.style.left = `${rect.left + rect.width / 2 - halfWidth}px`;
     bar.style.top = `${rect.top + rect.height / 2 + halfHeight}px`;
+  }
+
+  /** Draw the box a resize would give, with the controls that hang off it. */
+  private showResize(rect: HandleRect, rotation: number): void {
+    const refs = this.refs;
+    if (refs === undefined) return;
+    this.placeFrame(refs.frame, rect);
+    refs.frame.style.transform = rotation === 0 ? "none" : `rotate(${rotation}deg)`;
+    this.placeRotateBar(refs.rotateBar, rect, rotation);
+  }
+
+  /** Point every resize cursor along its grip as the node is turned. */
+  private placeResizers(resizers: readonly HTMLElement[], rotation: number): void {
+    for (const grip of resizers) {
+      const handle = grip.getAttribute("data-resize") as ResizeHandle | null;
+      if (handle !== null) grip.style.cursor = resizeCursor(handle, rotation);
+    }
   }
 
   /** Position and size the frame over the node it belongs to. */
@@ -538,6 +706,11 @@ export class SelectionHandles {
     // A gesture keeps the handles it started with rather than hiding them, but
     // it still tracks where the node is: writing only the angle left the frame
     // at the position of the last refresh before the drag.
+    // A resize shows the box it is making, not the one the host still reports.
+    if (this.resizeDrag !== undefined) {
+      this.showResize(this.resizeDrag.rect, this.resizeDrag.rotation);
+      return;
+    }
     if (this.gestureActive && previous.rect !== undefined) {
       const rect = this.state.rect;
       if (rect !== undefined) this.placeFrame(refs.frame, rect);
@@ -556,10 +729,14 @@ export class SelectionHandles {
     refs.rotate.hidden = state.isEdge || !state.editable;
     refs.rotateBar.hidden = !visible || state.isEdge || !state.editable;
     for (const connector of refs.connectors) connector.hidden = state.isEdge || !state.editable;
+    const resizable = state.editable && !state.isEdge && this.actions.onResize !== undefined;
+    for (const grip of refs.resizers) grip.hidden = !resizable;
+    refs.frame.setAttribute("data-miro-canvas-resizable", resizable ? "true" : "false");
     if (!visible || state.rect === undefined) return;
     this.placeFrame(refs.frame, state.rect);
     refs.frame.style.transform = state.rotation === 0 ? "none" : `rotate(${state.rotation}deg)`;
     this.placeRotateBar(refs.rotateBar, state.rect, state.rotation);
+    this.placeResizers(refs.resizers, state.rotation);
     const outline = shapeOutline(state.shape);
     for (const connector of refs.connectors) {
       const side = connector.getAttribute("data-handle-side") as HandleSide | null;

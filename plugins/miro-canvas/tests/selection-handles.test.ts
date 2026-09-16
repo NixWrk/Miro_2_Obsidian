@@ -6,7 +6,10 @@ import {
   nearestSide,
   rightAngleStep,
   pointerAngle,
+  resizeCursor,
+  resizeRect,
   sideAnchor,
+  type HandleRect,
   type HandleSide,
   type HandlePosition,
   type SelectionHandlesState,
@@ -92,7 +95,11 @@ function build(overrides: Partial<SelectionHandlesState> = {}, options: Record<s
   const connects: Array<{ sourceId: string; side: HandleSide; position: HandlePosition; point: { x: number; y: number } }> = [];
   const creates: Array<{ sourceId: string; side: HandleSide; position: HandlePosition }> = [];
   const moves: Array<{ edgeId: string; end: string; point: { x: number; y: number } }> = [];
+  const resizes: Array<{ rect: HandleRect; commit: boolean }> = [];
+  let resizeCancellations = 0;
   const handles = new SelectionHandles({
+    onResize: (rect, commit) => { resizes.push({ rect, commit }); },
+    onCancelResize: () => { resizeCancellations += 1; },
     onRotate: (degrees, commit) => { rotations.push({ degrees, commit }); },
     onCancelRotation: () => { cancellations += 1; },
     onConnect: (sourceId, side, position, point) => { connects.push({ sourceId, side, position, point: { x: point.x, y: point.y } }); },
@@ -104,7 +111,10 @@ function build(overrides: Partial<SelectionHandlesState> = {}, options: Record<s
   };
   const update = (patch: Partial<SelectionHandlesState> = {}): void => handles.update({ ...base, ...patch });
   update();
-  return { handles, root: handles.element as unknown as FakeElement, rotations, connects, creates, moves, update, cancellations: () => cancellations };
+  return {
+    handles, root: handles.element as unknown as FakeElement, rotations, connects, creates, moves, resizes, update,
+    cancellations: () => cancellations, resizeCancellations: () => resizeCancellations,
+  };
 }
 
 describe("selection handle geometry", () => {
@@ -403,6 +413,153 @@ describe("rotation controls", () => {
     expect(rightAngleStep(-100, -1)).toBe(-180);
     expect(rightAngleStep(170, 1)).toBe(-180);
     expect(rightAngleStep(-180, 1)).toBe(-90);
+  });
+});
+
+describe("resizing the box a node is drawn in", () => {
+  const box = { left: 100, top: 100, width: 200, height: 100 };
+  const close = (rect: HandleRect, expected: HandleRect): void => {
+    for (const key of ["left", "top", "width", "height"] as const) expect(rect[key], key).toBeCloseTo(expected[key]);
+  };
+  const corner = (rect: HandleRect, rotation: number, sx: number, sy: number) => {
+    const radians = rotation * Math.PI / 180;
+    const x = sx * rect.width / 2, y = sy * rect.height / 2;
+    return {
+      x: rect.left + rect.width / 2 + x * Math.cos(radians) - y * Math.sin(radians),
+      y: rect.top + rect.height / 2 + x * Math.sin(radians) + y * Math.cos(radians),
+    };
+  };
+
+  it("stretches along one axis from a side and keeps the opposite side", () => {
+    close(resizeRect(box, 0, "right", { x: 350, y: 999 }, { uniform: true }), { left: 100, top: 100, width: 250, height: 100 });
+    close(resizeRect(box, 0, "top", { x: -5, y: 60 }, { uniform: true }), { left: 100, top: 60, width: 200, height: 140 });
+    close(resizeRect(box, 0, "left", { x: 150, y: 0 }, { uniform: true }), { left: 150, top: 100, width: 150, height: 100 });
+  });
+
+  it("scales evenly from a corner and keeps the opposite corner", () => {
+    const grown = resizeRect(box, 0, "bottom-right", { x: 500, y: 200 }, { uniform: true });
+    expect(grown.width / grown.height).toBeCloseTo(2);
+    expect(grown.left).toBeCloseTo(100);
+    expect(grown.top).toBeCloseTo(100);
+    expect(grown.width).toBeGreaterThan(200);
+    const shrunk = resizeRect(box, 0, "top-left", { x: 200, y: 150 }, { uniform: true });
+    close(shrunk, { left: 200, top: 150, width: 100, height: 50 });
+  });
+
+  it("lets a corner change both sides freely when asked", () => {
+    close(resizeRect(box, 0, "bottom-right", { x: 400, y: 300 }, { uniform: false }), { left: 100, top: 100, width: 300, height: 200 });
+  });
+
+  it("resizes a turned node along its own sides and keeps its far corner in place", () => {
+    for (const rotation of [30, 90, -135]) {
+      const fixed = corner(box, rotation, -1, -1);
+      const pulled = corner(box, rotation, 1, 1);
+      // Pull the corner further out along the node's own diagonal.
+      const out = { x: fixed.x + (pulled.x - fixed.x) * 1.5, y: fixed.y + (pulled.y - fixed.y) * 1.5 };
+      const rect = resizeRect(box, rotation, "bottom-right", out, { uniform: true });
+      expect(rect.width, String(rotation)).toBeCloseTo(300);
+      expect(rect.height, String(rotation)).toBeCloseTo(150);
+      const after = corner(rect, rotation, -1, -1);
+      expect(after.x, String(rotation)).toBeCloseTo(fixed.x);
+      expect(after.y, String(rotation)).toBeCloseTo(fixed.y);
+    }
+    // A side of a turned node moves only along the node's own axis.
+    const fixedSide = corner(box, 90, -1, 0);
+    const rect = resizeRect(box, 90, "right", { x: 250, y: 350 }, { uniform: true });
+    expect(rect.width).toBeCloseTo(300);
+    expect(rect.height).toBeCloseTo(100);
+    const after = corner(rect, 90, -1, 0);
+    expect(after.x).toBeCloseTo(fixedSide.x);
+    expect(after.y).toBeCloseTo(fixedSide.y);
+  });
+
+  it("never shrinks below the smallest size, even past the fixed corner", () => {
+    const side = resizeRect(box, 0, "right", { x: 0, y: 0 }, { uniform: true, minSize: 20 });
+    close(side, { left: 100, top: 100, width: 20, height: 100 });
+    const evenly = resizeRect(box, 0, "bottom-right", { x: 0, y: 0 }, { uniform: true, minSize: 20 });
+    expect(evenly.height).toBeCloseTo(20);
+    expect(evenly.width).toBeCloseTo(40);
+    expect(evenly.left).toBeCloseTo(100);
+  });
+
+  it("points each cursor along its grip as the node turns", () => {
+    expect(resizeCursor("right", 0)).toBe("ew-resize");
+    expect(resizeCursor("top", 0)).toBe("ns-resize");
+    expect(resizeCursor("top-left", 0)).toBe("nwse-resize");
+    expect(resizeCursor("top-right", 0)).toBe("nesw-resize");
+    expect(resizeCursor("right", 90)).toBe("ns-resize");
+    expect(resizeCursor("right", 45)).toBe("nwse-resize");
+    expect(resizeCursor("bottom-left", -90)).toBe("nwse-resize");
+  });
+
+  const grip = (root: FakeElement, handle: string): FakeElement =>
+    descendants(root).find((item) => item.attributes.get("data-resize") === handle)!;
+
+  it("draws a dashed box with a grip on every corner and side", () => {
+    const { root, update } = build({ rotation: 90 });
+    const frame = root.children[0]!;
+    expect(frame.getAttribute("data-miro-canvas-resizable")).toBe("true");
+    const grips = descendants(frame).filter((item) => item.attributes.has("data-resize"));
+    expect(grips.map((item) => item.attributes.get("data-resize")).sort()).toEqual(
+      ["bottom", "bottom-left", "bottom-right", "left", "right", "top", "top-left", "top-right"],
+    );
+    expect(grip(root, "right").style.cursor).toBe("ns-resize");
+    update({ editable: false });
+    expect(frame.getAttribute("data-miro-canvas-resizable")).toBe("false");
+    expect(grips.every((item) => item.hidden)).toBe(true);
+    update({ isEdge: true, editable: true });
+    expect(grips.every((item) => item.hidden)).toBe(true);
+  });
+
+  it("previews a resize, keeps showing it over stale reports, and commits once", () => {
+    const { root, handles, resizes, update } = build();
+    grip(root, "right").dispatch("pointerdown", { clientX: 300, clientY: 150, pointerId: 1 });
+    handles.handlePointerMove({ clientX: 302, clientY: 150 });
+    expect(resizes).toEqual([]);
+    handles.handlePointerMove({ clientX: 350, clientY: 150 });
+    expect(resizes).toHaveLength(1);
+    expect(resizes[0]!.commit).toBe(false);
+    expect(resizes[0]!.rect.width).toBeCloseTo(250);
+    // The host still reports the old box until it saves.
+    update();
+    expect(root.children[0]!.style.width).toBe("250px");
+    handles.handlePointerUp({ clientX: 360, clientY: 150 });
+    expect(resizes[1]!.commit).toBe(true);
+    expect(resizes[1]!.rect.width).toBeCloseTo(260);
+    expect(handles.gestureActive).toBe(false);
+    expect(root.getAttribute("data-miro-canvas-resizing")).toBeNull();
+  });
+
+  it("scales evenly unless Shift is held", () => {
+    const { root, handles, resizes } = build();
+    grip(root, "bottom-right").dispatch("pointerdown", { clientX: 300, clientY: 200, pointerId: 1 });
+    handles.handlePointerMove({ clientX: 400, clientY: 210 });
+    expect(resizes[0]!.rect.width / resizes[0]!.rect.height).toBeCloseTo(2);
+    handles.handlePointerMove({ clientX: 400, clientY: 210, shiftKey: true });
+    expect(resizes[1]!.rect.width).toBeCloseTo(300);
+    expect(resizes[1]!.rect.height).toBeCloseTo(110);
+  });
+
+  it("writes nothing for a press and puts a cancelled preview back", () => {
+    const { root, handles, resizes, resizeCancellations } = build();
+    grip(root, "left").dispatch("pointerdown", { clientX: 100, clientY: 150, pointerId: 1 });
+    handles.handlePointerUp({ clientX: 101, clientY: 150 });
+    expect(resizes).toEqual([]);
+    expect(resizeCancellations()).toBe(0);
+    grip(root, "left").dispatch("pointerdown", { clientX: 100, clientY: 150, pointerId: 1 });
+    handles.handlePointerMove({ clientX: 50, clientY: 150 });
+    handles.cancelGesture();
+    expect(resizeCancellations()).toBe(1);
+    expect(resizes.filter((item) => item.commit)).toEqual([]);
+    expect(root.children[0]!.style.width).toBe("200px");
+  });
+
+  it("does not start on a locked node", () => {
+    const { root, handles, resizes } = build({ editable: false });
+    grip(root, "left").dispatch("pointerdown", { clientX: 100, clientY: 150, pointerId: 1 });
+    expect(handles.gestureActive).toBe(false);
+    handles.handlePointerMove({ clientX: 50, clientY: 150 });
+    expect(resizes).toEqual([]);
   });
 });
 
