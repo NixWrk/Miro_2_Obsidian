@@ -6,10 +6,17 @@ import {
   contourPoint,
   inscribedInsets,
   shapeOutline,
+  shapePath,
 } from "../src/shape-geometry";
 import { LOCAL_SHAPE_KINDS } from "../src/source-model";
 
 describe("shape silhouettes", () => {
+  it("draws the manual operation with its wide side up, unlike a trapezoid", () => {
+    expect(shapePath("flow_chart_manual_operation")).toBe("M0 0L100 0L88 100L12 100Z");
+    expect(shapePath("trapezoid")).toBe("M18 0L82 0L100 100L0 100Z");
+    expect(shapeOutline("flow_chart_manual_operation")?.[0]).toEqual({ x: 0, y: 0 });
+  });
+
   it("knows an outline for every kind the renderer draws", () => {
     const missing = LOCAL_SHAPE_KINDS.filter((kind) => shapeOutline(kind) === undefined);
     expect(missing).toEqual([]);

@@ -39,7 +39,8 @@ export const SHAPE_CLIP_PATHS: Readonly<Record<string, string>> = Object.freeze(
   flow_chart_input_output: "polygon(18% 0%, 100% 0%, 82% 100%, 0% 100%)",
   flow_chart_decision: "polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%)",
   flow_chart_manual_input: "polygon(12% 12%, 100% 0%, 100% 100%, 0% 100%)",
-  flow_chart_manual_operation: "polygon(12% 0%, 88% 0%, 100% 100%, 0% 100%)",
+  // Wide side up, as the flowchart symbol is drawn; a trapezoid stands on its wide side.
+  flow_chart_manual_operation: "polygon(0% 0%, 100% 0%, 88% 100%, 12% 100%)",
   flow_chart_merge: "polygon(0% 0%, 100% 0%, 50% 100%)",
   flow_chart_offpage_connector: "polygon(0% 0%, 100% 0%, 100% 72%, 50% 100%, 0% 72%)",
   flow_chart_preparation: "polygon(20% 0%, 80% 0%, 100% 50%, 80% 100%, 20% 100%, 0% 50%)",
