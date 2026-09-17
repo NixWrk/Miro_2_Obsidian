@@ -76,7 +76,7 @@ describe("connector endpoints", () => {
     expect((triangle as { u: number }).u).toBeLessThan(1);
     expect((triangle as { v: number }).v).toBeGreaterThan(0.25);
   });
-  it("builds bounded node/image geometry and straight edge polylines from explicit endpoints", () => {
+  it("builds bounded node/image geometry and edge routes from explicit endpoints", () => {
     const document = baseDocument();
     const metadata = document.miroCanvas as Record<string, unknown>;
     const overrides = metadata.localOverrides as Record<string, Record<string, unknown>>;
@@ -91,8 +91,17 @@ describe("connector endpoints", () => {
 
     expect(geometry.nodes?.a).toEqual({ x: 0, y: 0, width: 100, height: 80 });
     expect(geometry.images?.image).toEqual({ x: 50, y: 200, width: 100, height: 100 });
-    expect(geometry.edges?.e1?.points).toEqual([{ x: 100, y: 40 }, { x: 200, y: 40 }]);
-    expect(geometry.edges?.e2?.points).toEqual([{ x: 310, y: 25 }, { x: 400, y: 20 }]);
+    // A local edge curves the way Obsidian draws it; facing sides at one height stay level.
+    const e1 = geometry.edges?.e1?.points ?? [];
+    expect(e1[0]).toEqual({ x: 100, y: 40 });
+    expect(e1[e1.length - 1]).toEqual({ x: 200, y: 40 });
+    expect(e1.every((point) => Math.abs(point.y - 40) < 1e-9)).toBe(true);
+    expect(geometry.edges?.e1?.path).toBe("M 100 40 C 170 40 130 40 200 40");
+    const e2 = geometry.edges?.e2?.points ?? [];
+    expect(e2[0]).toEqual({ x: 310, y: 25 });
+    expect(e2[e2.length - 1]).toEqual({ x: 400, y: 20 });
+    // It arrives at C's left side from the left.
+    expect(geometry.edges?.e2?.path).toMatch(/^M 310 25 C .* 330 20 400 20$/u);
   });
 
   it("uses null-prototype geometry maps and centers native endpoints with omitted sides", () => {
@@ -110,7 +119,11 @@ describe("connector endpoints", () => {
     expect(Object.getPrototypeOf(geometry.images)).toBeNull();
     expect(Object.getPrototypeOf(geometry.edges)).toBeNull();
     expect(geometry.nodes?.toString).toEqual({ x: 0, y: 0, width: 100, height: 80 });
-    expect(geometry.edges?.e1?.points).toEqual([{ x: 50, y: 40 }, { x: 250, y: 40 }]);
+    const points = geometry.edges?.e1?.points ?? [];
+    expect(points[0]).toEqual({ x: 50, y: 40 });
+    expect(points[points.length - 1]).toEqual({ x: 250, y: 40 });
+    // Centred ends face each other, so the curve runs along the line between them.
+    expect(points.every((point) => Math.abs(point.y - 40) < 1e-9)).toBe(true);
   });
 
   it("rotates node and connector anchor geometry around the native node center", () => {

@@ -28,14 +28,23 @@ function square(corners: readonly { x: number; y: number }[]): boolean {
 
 describe("connector routes", () => {
   it("keeps the route imported Miro connectors have always had", () => {
-    const straight = planRoute(free(100, 16), free(325, 260), "straight");
+    const imported = { imported: true };
+    const straight = planRoute(free(100, 16), free(325, 260), "straight", [], imported);
     expect(straight.path).toBe("M 100 16 L 325 260");
-    const elbowed = planRoute(free(100, 16), free(325, 260), "elbowed");
+    const elbowed = planRoute(free(100, 16), free(325, 260), "elbowed", [], imported);
     expect(elbowed.path).toBe("M 100 16 L 100 138 L 325 138 L 325 260");
     expect(elbowed.points).toHaveLength(4);
-    const curved = planRoute(free(100, 16), free(325, 260), "curved");
+    const curved = planRoute(free(100, 16), free(325, 260), "curved", [], imported);
     expect(curved.path).toBe("M 100 16 C 100 138 325 138 325 260");
     expect(curved.points).toHaveLength(129);
+    // Once bent, an imported connector follows its waypoints like any other.
+    expect(planRoute(free(0, 0), free(100, 0), "straight", [{ x: 50, y: 50 }], imported).path).toBe("M 0 0 L 50 50 L 100 0");
+  });
+
+  it("curves a local connector between free ends along the line joining them", () => {
+    const route = planRoute(free(0, 0), free(300, 0), "curved");
+    expect(route.path).toBe("M 0 0 C 150 0 150 0 300 0");
+    expect(route.points.every((point) => point.y === 0)).toBe(true);
   });
 
   it("draws Obsidian's own curve between two outlines", () => {

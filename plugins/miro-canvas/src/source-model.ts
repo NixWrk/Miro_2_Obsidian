@@ -1,6 +1,7 @@
 /** Pure, bounded read-only projection of canonical Miro source metadata. */
 
 import { isSafeColor, isSafeFontFamily, normalizeColor } from "./appearance";
+import { MAX_WAYPOINTS } from "./connector-route";
 
 export type SourceItemKind = "shape" | "text" | "sticky" | "connector" | "frame" | "media" | "code";
 
@@ -71,6 +72,21 @@ export interface SourceConnectorStyle {
   readonly startCap?: string;
   readonly endCap?: string;
   readonly strokeStyle?: "solid" | "dashed" | "dotted";
+  /** Board points a person bent the route through; bends for an elbowed route. */
+  readonly waypoints?: readonly { readonly x: number; readonly y: number }[];
+}
+
+/** Stored waypoints, or undefined when the value is not a short list of finite points. */
+export function readWaypoints(value: unknown): readonly { readonly x: number; readonly y: number }[] | undefined {
+  if (!Array.isArray(value) || value.length > MAX_WAYPOINTS) return undefined;
+  const points: { readonly x: number; readonly y: number }[] = [];
+  for (const item of value as readonly unknown[]) {
+    const x = isRecord(item) ? item.x : undefined;
+    const y = isRecord(item) ? item.y : undefined;
+    if (typeof x !== "number" || typeof y !== "number" || !Number.isFinite(x) || !Number.isFinite(y)) return undefined;
+    points.push(Object.freeze({ x, y }));
+  }
+  return Object.freeze(points);
 }
 
 export interface SourceItemDescriptor {
@@ -150,6 +166,8 @@ export interface LocalConnectorSettings {
   readonly endCap?: (typeof CONNECTOR_CAPS)[number];
   readonly width?: number;
   readonly color?: string | null;
+  /** Board points the route is bent through; bends for an elbowed route. */
+  readonly waypoints?: readonly { readonly x: number; readonly y: number }[];
 }
 const STICKY_COLORS: Readonly<Record<string, string>> = Object.freeze({
   light_yellow: "#fff59d", yellow: "#ffd54f", orange: "#ff8a65", red: "#ff0000", light_pink: "#f48fb1",
@@ -562,6 +580,8 @@ function applyLocalConnector(
     const cap = valueOf(local, key);
     if (typeof cap === "string" && (CONNECTOR_CAPS as readonly string[]).includes(cap)) result[key] = cap;
   }
+  const waypoints = readWaypoints(valueOf(local, "waypoints"));
+  if (waypoints !== undefined) result.waypoints = waypoints;
   const width = finiteNumber(valueOf(local, "width"));
   if (width !== undefined && width > 0 && width <= 100) css["stroke-width"] = String(width);
   const color = readOwn(local, "color");
@@ -799,10 +819,11 @@ export function buildSourceScene(document: unknown): SourceScene {
     applyLocalCss(css, override);
     const mindmapEdge = isRecord(edge) ? mindmapEdgeDescriptor(edge, index) : undefined;
     if (mindmapEdge?.branchColor !== undefined && css.stroke === undefined) css.stroke = mindmapEdge.branchColor;
+    // Obsidian's own arrowhead is a filled triangle, not Miro's open arrow.
     const connector = applyLocalConnector({
       shape: "curved", strokeStyle: "solid",
-      startCap: mindmapEdge === undefined && valueOf(edge, "fromEnd") === "arrow" ? "arrow" : "none",
-      endCap: mindmapEdge !== undefined || valueOf(edge, "toEnd") === "none" ? "none" : "arrow",
+      startCap: mindmapEdge === undefined && valueOf(edge, "fromEnd") === "arrow" ? "filled_triangle" : "none",
+      endCap: mindmapEdge !== undefined || valueOf(edge, "toEnd") === "none" ? "none" : "filled_triangle",
     }, override, css);
     items.set(id, Object.freeze({
       kind: "connector", rotation: effectiveRotationFor(document, id), css: Object.freeze(css), connector,

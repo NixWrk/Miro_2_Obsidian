@@ -234,24 +234,16 @@ export function resolveSelectionToolbarPresentation(
 	const borderStyle = css["border-style"];
 	const borderWidth = cssNumber(css["border-width"]);
 	const connector = descriptor?.connector;
+	// An imported connector without a route is drawn straight; a local one curves like Obsidian's.
 	const route = connector?.shape !== undefined && (CONNECTOR_ROUTES as readonly string[]).includes(connector.shape)
-		? connector.shape : undefined;
+		? connector.shape
+		: descriptor?.kind === "connector" && descriptor.sourceId !== undefined ? "straight" : undefined;
 	const strokeStyle = connector?.strokeStyle !== undefined && (CONNECTOR_STROKES as readonly string[]).includes(connector.strokeStyle)
 		? connector.strokeStyle : undefined;
-	// A plain Canvas edge keeps its ends natively: an arrow or nothing.
-	const edges = readRuntime(document, "edges");
-	const edge = id === undefined || !Array.isArray(edges)
-		? undefined
-		: (edges as readonly unknown[]).find((item) => readRuntime(item, "id") === id);
-	const nativeEnd = (key: "fromEnd" | "toEnd"): "none" | "arrow" | undefined => {
-		if (edge === undefined) return undefined;
-		const value = readRuntime(edge, key);
-		return value === "arrow" || value === "none" ? value : key === "toEnd" ? "arrow" : "none";
-	};
 	const startCap = connector?.startCap !== undefined && (CONNECTOR_CAPS as readonly string[]).includes(connector.startCap)
-		? connector.startCap as NonNullable<SelectionToolbarStyle["connector"]>["startCap"] : nativeEnd("fromEnd");
+		? connector.startCap as NonNullable<SelectionToolbarStyle["connector"]>["startCap"] : undefined;
 	const endCap = connector?.endCap !== undefined && (CONNECTOR_CAPS as readonly string[]).includes(connector.endCap)
-		? connector.endCap as NonNullable<SelectionToolbarStyle["connector"]>["endCap"] : nativeEnd("toEnd");
+		? connector.endCap as NonNullable<SelectionToolbarStyle["connector"]>["endCap"] : undefined;
 	const width = cssNumber(css["stroke-width"]);
 	const connectorStyle: NonNullable<SelectionToolbarStyle["connector"]> = {
 		...(route === undefined ? {} : { route }),
@@ -1114,7 +1106,14 @@ export class M1CanvasSession {
 			return;
 		}
 		this.authoring ??= createCanvasAuthoring(this.view);
-		const result = this.authoring.updateElementStyles(this.selectedIds.map((id) => ({ id, ...patch })));
+		const result = this.authoring.updateElementStyles(this.selectedIds.map((id) => {
+			// A connector changing its kind of route starts unbent: bends made for
+			// one kind of line do not describe another.
+			const route = patch.connector?.route;
+			if (route === undefined || patch.connector?.waypoints !== undefined) return { id, ...patch };
+			const current = resolveSelectionToolbarPresentation(this.currentRawDocument, id).style.connector?.route;
+			return current === route ? { id, ...patch } : { id, ...patch, connector: { ...patch.connector, waypoints: [] } };
+		}));
 		if (!result.ok) {
 			const reason = firstProblem(result.diagnostics);
 			this.addDiagnostic(reason ?? "Canvas rejected the style change.");

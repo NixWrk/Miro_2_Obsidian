@@ -26,7 +26,7 @@ import type { CanvasAnchor } from "./anchors";
 import { isSafeColor, normalizeColor } from "./appearance";
 import {
 	LOCAL_SHAPE_KINDS, CONNECTOR_CAPS, CONNECTOR_ROUTES, CONNECTOR_STROKES,
-	buildSourceScene, type LocalConnectorSettings,
+	buildSourceScene, readWaypoints, type LocalConnectorSettings,
 } from "./source-model";
 
 export const CANVAS_SHAPE_KINDS = LOCAL_SHAPE_KINDS;
@@ -849,6 +849,15 @@ function actionProperty(action: unknown, key: string): ReadResult {
 function copyStyleData(value: unknown, depth = 0): unknown {
 	if (depth > 8) throw new SnapshotError("style nesting limit");
 	if (value === null || typeof value !== "object") return cloneJson(value);
+	// A connector's waypoints are the one list a style carries.
+	if (Array.isArray(value)) {
+		if (value.length > 64) throw new SnapshotError("style list limit");
+		return Array.from({ length: value.length }, (_, index) => {
+			const descriptor = Object.getOwnPropertyDescriptor(value, index);
+			if (descriptor === undefined || !("value" in descriptor)) throw new SnapshotError("style accessor refused");
+			return copyStyleData(descriptor.value, depth + 1);
+		});
+	}
 	if (!isPlainObject(value)) throw new SnapshotError("style object expected");
 	const keys = ownKeys(value);
 	if (keys === undefined || keys.length > 64) throw new SnapshotError("style field limit");
@@ -895,7 +904,12 @@ function readStylePatch(action: unknown, diagnostics: CanvasAuthoringDiagnostic[
 		if (patch.borderStyle !== undefined && !["solid", "dashed", "dotted", "none"].includes(patch.borderStyle as string)) throw new SnapshotError("invalid border style");
 		if (patch.borderWidth !== undefined && (!isFiniteNumber(patch.borderWidth) || patch.borderWidth < 0 || patch.borderWidth > 100)) throw new SnapshotError("invalid border width");
 		if (patch.connector !== undefined) {
-			const connector = only(patch.connector, ["route", "strokeStyle", "startCap", "endCap", "width", "color"]);
+			const connector = only(patch.connector, ["route", "strokeStyle", "startCap", "endCap", "width", "color", "waypoints"]);
+			if (hasOwn(connector, "waypoints")) {
+				const waypoints = readWaypoints(connector.waypoints);
+				if (waypoints === undefined) throw new SnapshotError("invalid connector waypoints");
+				connector.waypoints = waypoints.map((point) => ({ x: Math.round(point.x * 100) / 100, y: Math.round(point.y * 100) / 100 }));
+			}
 			for (const [key, values] of [["route", CONNECTOR_ROUTES], ["strokeStyle", CONNECTOR_STROKES], ["startCap", CONNECTOR_CAPS], ["endCap", CONNECTOR_CAPS]] as const) {
 				if (connector[key] !== undefined && !(values as readonly unknown[]).includes(connector[key])) throw new SnapshotError("invalid connector enum");
 			}

@@ -42,7 +42,7 @@ describe("effective selection toolbar presentation", () => {
     });
   });
 
-  it("shows a plain Canvas edge with the ends Obsidian draws for it", () => {
+  it("shows a plain Canvas edge with the ends and curve Obsidian draws for it", () => {
     const document = {
       nodes: [{ id: "a", type: "text", text: "", x: 0, y: 0, width: 10, height: 10 },
         { id: "b", type: "text", text: "", x: 50, y: 0, width: 10, height: 10 }],
@@ -52,8 +52,10 @@ describe("effective selection toolbar presentation", () => {
         { id: "bare", fromNode: "a", toNode: "b", toEnd: "none" },
       ],
     };
-    expect(resolveSelectionToolbarPresentation(document, "plain").style.connector).toMatchObject({ startCap: "none", endCap: "arrow" });
-    expect(resolveSelectionToolbarPresentation(document, "both").style.connector).toMatchObject({ startCap: "arrow", endCap: "arrow" });
+    expect(resolveSelectionToolbarPresentation(document, "plain").style.connector)
+      .toMatchObject({ route: "curved", startCap: "none", endCap: "filled_triangle" });
+    expect(resolveSelectionToolbarPresentation(document, "both").style.connector)
+      .toMatchObject({ startCap: "filled_triangle", endCap: "filled_triangle" });
     expect(resolveSelectionToolbarPresentation(document, "bare").style.connector).toMatchObject({ startCap: "none", endCap: "none" });
     expect(resolveSelectionToolbarPresentation(document, "a").style.connector).toBeUndefined();
   });

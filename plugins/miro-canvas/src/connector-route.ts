@@ -231,19 +231,18 @@ function curveThrough(from: RouteEnd, to: RouteEnd, waypoints: readonly AnchorPo
  * Without waypoints a curved route is Obsidian's own curve - it leaves each
  * outline square to it, its control points half the distance out and kept
  * between 70 and 150 units - and an elbowed route turns where it must to
- * leave and reach each node squarely.  Two free ends with no waypoints keep
- * the route imported Miro connectors have always had.
+ * leave and reach each node squarely; a free end faces the other end.  An
+ * imported Miro connector nobody has bent keeps the route it has always had.
  */
 export function planRoute(
   from: RouteEnd,
   to: RouteEnd,
   route: ConnectorRoute,
   waypoints: readonly AnchorPoint[] = [],
+  options: { readonly imported?: boolean } = {},
 ): PlannedRoute {
   const points = waypoints.slice(0, MAX_WAYPOINTS);
-  if (points.length === 0 && from.normal === undefined && to.normal === undefined) {
-    return legacyRoute(from.point, to.point, route);
-  }
+  if (points.length === 0 && options.imported === true) return legacyRoute(from.point, to.point, route);
   if (route === "straight") return lines(route, [from.point, ...points, to.point]);
   if (route === "elbowed") {
     const bends = points.length > 0 ? squareBends(from, to, points) : autoBends(from, to);

@@ -1,9 +1,10 @@
 import {
   buildCanvasAnchorGeometry, nativeAnchorEnd, nativeEdgeEnd, nativeEdgeRoute, nativeFreeEnd, roundCoordinate,
-  routeConnector, type NativeEdgeEnd, type NodeMeasurements,
+  type NativeEdgeEnd, type NodeMeasurements,
 } from "./connector-endpoints";
 import { SHAPE_CLIP_PATHS, inscribedInsets, shapeOutline, shapePath, type ShapePoint } from "./shape-geometry";
 import { CAP_PATHS, capFilled, strokeDash } from "./connector-style";
+import { planRoute, routePath, type RouteEnd as PlannedEnd, type RouteSegment } from "./connector-route";
 import { normalizeAnchor, resolveAnchor, type AnchorEdgeGeometry, type AnchorPoint, type AnchorRect } from "./anchors";
 import { readCanvasElementId } from "./canvas-elements";
 import { buildSourceScene, type SourceItemDescriptor, type SourceScene } from "./source-model";
@@ -694,14 +695,22 @@ function queryAll(element: DomElementLike, selector: string): DomElementLike[] {
   return result;
 }
 
-function marker(document: Document | undefined, cap: string, color: string, patches: RestorePatch[], parent: DomElementLike): string | undefined {
+/**
+ * Caps are drawn at Miro's size on imported connectors and at Obsidian's on
+ * local ones, where the filled triangle matches Obsidian's own arrowhead.
+ */
+const LOCAL_CAP_SCALE = 0.6;
+
+function marker(
+  document: Document | undefined, cap: string, color: string, patches: RestorePatch[], parent: DomElementLike, scale = 1,
+): string | undefined {
   if (cap === "none") return "none";
   const d = CAP_PATHS[cap];
   if (d === undefined) return undefined;
   const defs = createSvg(document, "defs"), mark = createSvg(document, "marker"), path = createSvg(document, "path");
   if (defs === undefined || mark === undefined || path === undefined) return undefined;
   const id = `miro-cap-${++markerSequence}`;
-  for (const [key, value] of Object.entries({ id, viewBox: "-16 -8 18 16", refX: "0", refY: "0", markerWidth: "18", markerHeight: "16", markerUnits: "strokeWidth", orient: "auto-start-reverse" })) {
+  for (const [key, value] of Object.entries({ id, viewBox: "-16 -8 18 16", refX: "0", refY: "0", markerWidth: String(18 * scale), markerHeight: String(16 * scale), markerUnits: "strokeWidth", orient: "auto-start-reverse" })) {
     setOwnedElementAttribute(mark, key, value);
   }
   const filled = capFilled(cap);
@@ -726,6 +735,8 @@ function localRoute(path: DomElementLike, geometry: AnchorEdgeGeometry): string 
     const [a, b, c, d, e, f] = values as number[];
     map = point => ({ x: a! * point.x + c! * point.y + e!, y: b! * point.x + d! * point.y + f! });
   }
+  const segments = geometry.segments as readonly RouteSegment[] | undefined;
+  if (Array.isArray(segments)) return routePath(start, segments, map);
   const p = (point: AnchorPoint): string => { const q = map(point); return `${q.x} ${q.y}`; };
   const controls = geometry.controls;
   if (Array.isArray(controls) && controls.length === 2) return `M ${p(start)} C ${p(controls[0])} ${p(controls[1])} ${p(end)}`;
@@ -745,15 +756,19 @@ function renderConnectorGeometry(document: Document | undefined, runtime: unknow
     diagnostics.push(`connector-geometry-fallback: ${id}.`);
     return undefined;
   }
-  const caps = [descriptor.connector?.startCap ?? (safeGet(native, "fromEnd") === "arrow" ? "arrow" : "none"),
-    descriptor.connector?.endCap ?? (safeGet(native, "toEnd") === "none" ? "none" : "arrow")];
+  // A local connector without its own ends keeps Obsidian's filled arrowhead.
+  const local = descriptor.sourceId === undefined;
+  const nativeArrow = local ? "filled_triangle" : "arrow";
+  const caps = [descriptor.connector?.startCap ?? (safeGet(native, "fromEnd") === "arrow" ? nativeArrow : "none"),
+    descriptor.connector?.endCap ?? (safeGet(native, "toEnd") === "none" ? "none" : nativeArrow)];
   if (caps.some(cap => cap !== "none" && CAP_PATHS[cap] === undefined)) {
     diagnostics.push(`connector-endcap-fallback: ${id}.`);
     return undefined;
   }
   const color = descriptor.css.stroke ?? "var(--canvas-color, currentColor)";
-  const startMarker = marker(document, caps[0]!, color, patches, group);
-  const endMarker = marker(document, caps[1]!, color, patches, group);
+  const scale = local ? LOCAL_CAP_SCALE : 1;
+  const startMarker = marker(document, caps[0]!, color, patches, group, scale);
+  const endMarker = marker(document, caps[1]!, color, patches, group, scale);
   if (startMarker === undefined || endMarker === undefined) {
     diagnostics.push(`connector-marker-fallback: ${id}.`);
     return undefined;
@@ -827,10 +842,18 @@ function liveConnectorGeometry(
   runtime: unknown,
   native: unknown,
   nodeOf: (nodeId: unknown) => RouteNode | undefined,
-  routing: "straight" | "elbowed" | "curved" | undefined,
+  descriptor: SourceItemDescriptor,
 ): (() => AnchorEdgeGeometry | undefined) | undefined {
   const anchors = safeGet(safeGet(safeGet(safeGet(document, "miroCanvas"), "localOverrides"), id), "connectorAnchors");
-  const endOf = (end: "from" | "to"): (() => AnchorPoint | undefined) | undefined => {
+  // Imported Miro connectors keep the route they were drawn with; a local
+  // connector leaves each outline square to it, the way Obsidian draws.
+  const local = descriptor.sourceId === undefined;
+  const route = descriptor.connector?.shape ?? (local ? "curved" : "straight");
+  const waypoints = descriptor.connector?.waypoints ?? [];
+  const facing = (end: NativeEdgeEnd | undefined): PlannedEnd | undefined => (end === undefined
+    ? undefined
+    : local ? { point: end.point, normal: end.normal } : { point: end.point });
+  const endOf = (end: "from" | "to"): (() => PlannedEnd | undefined) | undefined => {
     const live = safeGet(runtime, end);
     const liveNode = safeGet(live, "node");
     const liveId = readCanvasElementId(liveNode);
@@ -839,11 +862,11 @@ function liveConnectorGeometry(
       const known = nodeOf(liveId ?? safeGet(native, `${end}Node`));
       if (known === undefined) return undefined;
       const side = safeGet(live, "side") ?? safeGet(native, `${end}Side`);
-      return () => nativeEdgeEnd(liveRect(liveNode, known.rect), side, known.outline)?.point;
+      return () => facing(nativeEdgeEnd(liveRect(liveNode, known.rect), side, known.outline));
     }
     const normalized = normalizeAnchor(raw);
     const anchor = normalized.valid ? normalized.anchor : undefined;
-    if (anchor?.type === "free") return () => ({ x: anchor.x, y: anchor.y });
+    if (anchor?.type === "free") return () => ({ point: { x: anchor.x, y: anchor.y } });
     if (anchor?.type !== "node") return undefined;
     const known = nodeOf(anchor.nodeId);
     if (known === undefined) return undefined;
@@ -851,14 +874,16 @@ function liveConnectorGeometry(
     return () => {
       const rect = node === undefined ? known.rect : liveRect(node, known.rect);
       const point = resolveAnchor(anchor, { nodes: { [anchor.nodeId]: rect } }).point;
-      return point === undefined ? undefined : { x: point.x, y: point.y };
+      if (point === undefined) return undefined;
+      const end = facing(nativeAnchorEnd(rect, anchor.u, anchor.v, known.outline));
+      return { point: { x: point.x, y: point.y }, ...(end?.normal === undefined ? {} : { normal: end.normal }) };
     };
   };
   const from = endOf("from"), to = endOf("to");
   if (from === undefined || to === undefined) return undefined;
   return () => {
     const start = from(), end = to();
-    return start === undefined || end === undefined ? undefined : routeConnector(start, end, routing);
+    return start === undefined || end === undefined ? undefined : { ...planRoute(start, end, route, waypoints, { imported: !local }) };
   };
 }
 
@@ -1468,9 +1493,7 @@ export class SourceRenderer {
             diagnostics.push(`connector-runtime-missing: ${id}.`);
             continue;
           }
-          const routed = descriptor.sourceId !== undefined || isObject(safeGet(safeGet(overrides, id), "connector"));
-          const live = liveConnectorGeometry(sourceDocument, id, runtime, nativeEdges.get(id), routeNode,
-            routed ? descriptor.connector?.shape : undefined);
+          const live = liveConnectorGeometry(sourceDocument, id, runtime, nativeEdges.get(id), routeNode, descriptor);
           const item = applyConnector(this.document, geometry.edges?.[id], nativeEdges.get(id), runtime, id, descriptor, nextPatches, diagnostics, live);
           if (item !== undefined) rendered.push(item);
         } else {

@@ -717,6 +717,28 @@ describe("CanvasAuthoring", () => {
 		expect(runtime.getData()).toEqual(applied);
 	});
 
+	it("stores a connector's waypoints, replaces them whole and refuses malformed ones", () => {
+		const runtime = new NativeGraph(endpointDocument());
+		const authoring = createCanvasAuthoring(runtime);
+		const overrides = () => ((runtime.getData().miroCanvas as CanvasDocument).localOverrides as Record<string, CanvasDocument>);
+		const bent = authoring.updateElementStyles([
+			{ id: "e1", connector: { route: "straight", waypoints: [{ x: 150.123, y: -40 }, { x: 170, y: 60 }] } },
+		]);
+		expect(bent.ok).toBe(true);
+		expect(overrides().e1).toMatchObject({
+			futureOverrideField: { keep: true },
+			connector: { route: "straight", waypoints: [{ x: 150.12, y: -40 }, { x: 170, y: 60 }] },
+		});
+		expect(authoring.updateElementStyles([{ id: "e1", connector: { waypoints: [] } }]).ok).toBe(true);
+		expect((overrides().e1!.connector as CanvasDocument).waypoints).toEqual([]);
+		expect((overrides().e1!.connector as CanvasDocument).route).toBe("straight");
+		for (const waypoints of [[{ x: 1, y: Number.NaN }], [{ x: 1 }], "nope", Array.from({ length: 65 }, () => ({ x: 0, y: 0 }))]) {
+			const refused = authoring.updateElementStyles([{ id: "e1", connector: { waypoints } as never }]);
+			expect(refused.ok).toBe(false);
+		}
+		expect((overrides().e1!.connector as CanvasDocument).waypoints).toEqual([]);
+	});
+
 	it("rejects a multi-selection style atomically when one target is locked", () => {
 		const initial = endpointDocument();
 		((initial.miroCanvas as CanvasDocument).localOverrides as Record<string, CanvasDocument>).b = { locked: true };
