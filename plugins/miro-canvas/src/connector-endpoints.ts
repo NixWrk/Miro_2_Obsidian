@@ -483,7 +483,12 @@ export function buildCanvasAnchorGeometry(document: unknown, measurements?: Node
       return undefined;
     }
     const route = descriptor?.connector?.shape ?? (local ? "curved" : "straight");
-    const geometry = { ...planRoute(start, end, route, descriptor?.connector?.waypoints ?? [], { imported: !local }) };
+    // The ends and the import flag travel with the route, so a drag can plan it again.
+    const geometry = {
+      ...planRoute(start, end, route, descriptor?.connector?.waypoints ?? [], { imported: !local }),
+      ends: { from: start, to: end },
+      imported: !local,
+    };
     edges[edgeId] = geometry;
     return geometry;
   };

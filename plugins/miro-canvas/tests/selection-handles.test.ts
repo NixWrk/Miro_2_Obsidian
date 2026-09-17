@@ -12,6 +12,7 @@ import {
   type HandleRect,
   type HandleSide,
   type HandlePosition,
+  type RouteGrip,
   type SelectionHandlesState,
 } from "../src/selection-handles";
 
@@ -72,6 +73,10 @@ class FakeDocument {
   public createElement(tagName: string): FakeElement {
     return new FakeElement(tagName);
   }
+
+  public createElementNS(_namespace: string, tagName: string): FakeElement {
+    return new FakeElement(tagName);
+  }
 }
 
 function descendants(root: FakeElement): FakeElement[] {
@@ -97,7 +102,16 @@ function build(overrides: Partial<SelectionHandlesState> = {}, options: Record<s
   const moves: Array<{ edgeId: string; end: string; point: { x: number; y: number } }> = [];
   const resizes: Array<{ rect: HandleRect; commit: boolean }> = [];
   let resizeCancellations = 0;
+  const reshapes: Array<{ edgeId: string; grip: RouteGrip; point: { x: number; y: number } }> = [];
+  const previews: Array<{ edgeId: string; grip: RouteGrip; point: { x: number; y: number } }> = [];
+  const straightened: Array<{ edgeId: string; grip: RouteGrip }> = [];
   const handles = new SelectionHandles({
+    previewRoute: (edgeId, grip, point) => {
+      previews.push({ edgeId, grip, point: { x: point.x, y: point.y } });
+      return [{ x: 0, y: 0 }, { x: point.x, y: point.y }, { x: 50, y: 50 }];
+    },
+    onReshape: (edgeId, grip, point) => { reshapes.push({ edgeId, grip, point: { x: point.x, y: point.y } }); },
+    onStraighten: (edgeId, grip) => { straightened.push({ edgeId, grip }); },
     onResize: (rect, commit) => { resizes.push({ rect, commit }); },
     onCancelResize: () => { resizeCancellations += 1; },
     onRotate: (degrees, commit) => { rotations.push({ degrees, commit }); },
@@ -113,6 +127,7 @@ function build(overrides: Partial<SelectionHandlesState> = {}, options: Record<s
   update();
   return {
     handles, root: handles.element as unknown as FakeElement, rotations, connects, creates, moves, resizes, update,
+    reshapes, previews, straightened,
     cancellations: () => cancellations, resizeCancellations: () => resizeCancellations,
   };
 }
@@ -560,6 +575,89 @@ describe("resizing the box a node is drawn in", () => {
     expect(handles.gestureActive).toBe(false);
     handles.handlePointerMove({ clientX: 50, clientY: 150 });
     expect(resizes).toEqual([]);
+  });
+});
+
+describe("reshaping a connector", () => {
+  const GRIPS: readonly RouteGrip[] = [
+    { kind: "insert", index: 0, x: 40, y: 20 },
+    { kind: "waypoint", index: 0, x: 80, y: 60 },
+    { kind: "insert", index: 1, x: 120, y: 30 },
+  ];
+  const edge = (overrides: Partial<SelectionHandlesState> = {}) => build({
+    isEdge: true, selectedIds: ["e1"], rect: undefined,
+    endpoints: { from: { x: 0, y: 0 }, to: { x: 160, y: 0 } }, routeGrips: GRIPS, ...overrides,
+  });
+  const grips = (root: FakeElement): FakeElement[] => descendants(root).filter((item) => item.attributes.has("data-route-grip"));
+
+  it("draws a grip at every place the route can be grabbed", () => {
+    const { root, update } = edge();
+    const drawn = grips(root);
+    expect(drawn.map((item) => item.attributes.get("data-route-grip"))).toEqual(["insert", "waypoint", "insert"]);
+    expect(drawn.map((item) => [item.style.left, item.style.top])).toEqual([["40px", "20px"], ["80px", "60px"], ["120px", "30px"]]);
+    expect(drawn[1]!.className).toContain("miro-canvas-handle--route-waypoint");
+    // Moved grips of the same kinds are reused, not rebuilt.
+    update({ routeGrips: GRIPS.map((grip) => ({ ...grip, x: grip.x + 5 })) });
+    expect(grips(root)[0]).toBe(drawn[0]);
+    expect(drawn[0]!.style.left).toBe("45px");
+    update({ routeGrips: [{ kind: "segment", index: 1, axis: "x", x: 10, y: 10 }] });
+    expect(grips(root).map((item) => item.attributes.get("data-route-axis"))).toEqual(["x"]);
+  });
+
+  it("shows no grips on a node, a locked connector or a multiple selection", () => {
+    const { root, update } = edge();
+    update({ editable: false });
+    expect(grips(root)).toHaveLength(0);
+    update({ editable: true, selectedIds: ["e1", "e2"] });
+    expect(grips(root)).toHaveLength(0);
+    update({ selectedIds: ["n1"], isEdge: false, rect: RECT });
+    expect(grips(root)).toHaveLength(0);
+  });
+
+  it("previews the dragged shape and writes it once on release", () => {
+    const { root, handles, reshapes, previews } = edge();
+    const insert = grips(root)[2]!;
+    insert.dispatch("pointerdown", { clientX: 120, clientY: 30, pointerId: 1 });
+    expect(handles.gestureActive).toBe(true);
+    expect(root.getAttribute("data-miro-canvas-reshaping")).toBe("insert");
+    handles.handlePointerMove({ clientX: 121, clientY: 30 });
+    expect(previews).toEqual([]);
+    handles.handlePointerMove({ clientX: 130, clientY: 70 });
+    expect(previews).toEqual([{ edgeId: "e1", grip: GRIPS[2], point: { x: 130, y: 70 } }]);
+    expect(insert.style.left).toBe("130px");
+    const preview = descendants(root).find((item) => item.tagName === "path")!;
+    expect(preview.getAttribute("d")).toBe("M 0 0 L 130 70 L 50 50");
+    handles.handlePointerUp({ clientX: 140, clientY: 80 });
+    expect(reshapes).toEqual([{ edgeId: "e1", grip: GRIPS[2], point: { x: 140, y: 80 } }]);
+    expect(handles.gestureActive).toBe(false);
+    expect(preview.getAttribute("d")).toBeNull();
+    expect(root.getAttribute("data-miro-canvas-reshaping")).toBeNull();
+  });
+
+  it("leaves the route alone when a grip is only pressed, and puts a cancelled grip back", () => {
+    const { root, handles, reshapes } = edge();
+    const waypoint = grips(root)[1]!;
+    waypoint.dispatch("pointerdown", { clientX: 80, clientY: 60, pointerId: 1 });
+    handles.handlePointerUp({ clientX: 81, clientY: 60 });
+    expect(reshapes).toEqual([]);
+    waypoint.dispatch("pointerdown", { clientX: 80, clientY: 60, pointerId: 1 });
+    handles.handlePointerMove({ clientX: 200, clientY: 200 });
+    expect(waypoint.style.left).toBe("200px");
+    handles.cancelGesture();
+    expect(waypoint.style.left).toBe("80px");
+    expect(reshapes).toEqual([]);
+  });
+
+  it("straightens a bend on double-click, but not the middle of a stretch", () => {
+    const { root, straightened, update } = edge();
+    grips(root)[0]!.dispatch("dblclick");
+    grips(root)[1]!.dispatch("dblclick");
+    expect(straightened).toEqual([{ edgeId: "e1", grip: GRIPS[1] }]);
+    // Grips rebuilt for another route drop the old grips' listeners.
+    const old = grips(root)[1]!;
+    update({ routeGrips: [{ kind: "segment", index: 0, axis: "y", x: 0, y: 0 }] });
+    old.dispatch("dblclick");
+    expect(straightened).toHaveLength(1);
   });
 });
 

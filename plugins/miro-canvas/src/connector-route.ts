@@ -291,6 +291,29 @@ export function routeHandles(route: PlannedRoute): RouteHandle[] {
   return handles;
 }
 
+/**
+ * The grip a press anywhere on a route stands for: the elbowed segment under
+ * it, or the middle of the stretch under it, which bends the line there.
+ */
+export function gripNear(route: PlannedRoute, point: AnchorPoint): RouteHandle | undefined {
+  let best: { readonly index: number; readonly distance: number } | undefined;
+  let from = route.start;
+  route.segments.forEach((segment, index) => {
+    const samples = segment.kind === "line"
+      ? [from, segment.to]
+      : Array.from({ length: CURVE_STEPS + 1 }, (_, step) => cubicAt(from, segment.c1, segment.c2, segment.to, step / CURVE_STEPS));
+    for (let step = 0; step + 1 < samples.length; step += 1) {
+      const distance = distanceToSegment(point, samples[step]!, samples[step + 1]!);
+      if (best === undefined || distance < best.distance) best = { index, distance };
+    }
+    from = segment.to;
+  });
+  const found = best;
+  if (found === undefined) return undefined;
+  const kind = route.route === "elbowed" ? "segment" : "insert";
+  return routeHandles(route).find((handle) => handle.kind === kind && handle.index === found.index);
+}
+
 /** Distance from a point to the segment between two others. */
 function distanceToSegment(point: AnchorPoint, a: AnchorPoint, b: AnchorPoint): number {
   const dx = b.x - a.x, dy = b.y - a.y;

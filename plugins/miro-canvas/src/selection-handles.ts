@@ -48,6 +48,21 @@ export interface SelectionHandlesState {
   readonly endpoints?: { readonly from?: ShapePointLike; readonly to?: ShapePointLike };
   /** The smallest width or height a resize may reach, in viewport pixels. */
   readonly minSize?: number;
+  /** Overlay-local places where a selected connector's route can be reshaped. */
+  readonly routeGrips?: readonly RouteGrip[];
+}
+
+/**
+ * A place on a connector's route: a waypoint, the middle of a stretch that
+ * gains a waypoint when dragged, or an elbowed segment that moves square to
+ * itself along `axis`.
+ */
+export interface RouteGrip {
+  readonly kind: "waypoint" | "insert" | "segment";
+  readonly index: number;
+  readonly x: number;
+  readonly y: number;
+  readonly axis?: "x" | "y";
 }
 
 /** A grip on the box a node is drawn in: a side stretches, a corner scales. */
@@ -151,6 +166,16 @@ export interface SelectionHandlesActions {
   readonly onResize?: (rect: HandleRect, commit: boolean) => void;
   /** Put back a resize preview that was not committed. */
   readonly onCancelResize?: () => void;
+  /**
+   * The route a connector would take with `grip` dragged to a viewport point,
+   * as overlay-local points, so the drag shows the shape it will leave.
+   */
+  readonly previewRoute?: (edgeId: string, grip: RouteGrip, point: { readonly x: number; readonly y: number }) =>
+    readonly { readonly x: number; readonly y: number }[] | undefined;
+  /** A route grip was dragged and released at a viewport point. */
+  readonly onReshape?: (edgeId: string, grip: RouteGrip, point: { readonly x: number; readonly y: number }) => void;
+  /** A waypoint or segment was double-clicked: take that bend out. */
+  readonly onStraighten?: (edgeId: string, grip: RouteGrip) => void;
   /** An end of the selected connector was dragged and released at a viewport point. */
   readonly onMoveEndpoint?: (edgeId: string, end: ConnectorEnd, point: { readonly x: number; readonly y: number }) => void;
   /**
@@ -272,6 +297,8 @@ function pointOf(event: unknown): { readonly x: number; readonly y: number } | u
 interface HandleRefs {
   readonly frame: HTMLElement;
   readonly resizers: readonly HTMLElement[];
+  /** Where a connector's route grips are drawn, rebuilt when their number or kinds change. */
+  readonly routeLayer: HTMLElement;
   /** The rotation grip and the two right-angle turns, kept upright below the node. */
   readonly rotateBar: HTMLElement;
   readonly rotate: HTMLButtonElement;
@@ -314,6 +341,8 @@ export class SelectionHandles {
   private readonly snapDegrees: number;
   private readonly dragThreshold: number;
   private readonly listeners: Array<() => void> = [];
+  /** Listeners on route grips, dropped whenever the grips are rebuilt. */
+  private readonly routeListeners: Array<() => void> = [];
   private readonly refs: HandleRefs | undefined;
   private state: SelectionHandlesState = { rotation: 0, editable: false, isEdge: false, selectedIds: [] };
   private rotating = false;
@@ -327,6 +356,15 @@ export class SelectionHandles {
   private dragStart: ShapePointLike | undefined;
   /** The end of the selected connector being moved, if one is. */
   private endDrag: { readonly edgeId: string; readonly end: ConnectorEnd; readonly origin: ShapePointLike } | undefined;
+  /** A route grip being dragged. */
+  private routeDrag: {
+    readonly edgeId: string;
+    readonly grip: RouteGrip;
+    /** The grip under the pointer; a press on the line itself has none. */
+    readonly element?: HTMLElement;
+    readonly origin: ShapePointLike;
+    moved: boolean;
+  } | undefined;
   /** A resize in progress: the grip, the box and angle it started from, and the box it shows now. */
   private resizeDrag: {
     readonly handle: ResizeHandle;
@@ -413,13 +451,19 @@ export class SelectionHandles {
       return grip;
     };
     const ends = { from: end("from"), to: end("to") };
+    const routeLayer = root.appendChild(make(document, "div", "miro-canvas-handles__route"));
     const preview = makePreview(document, root);
-    return { frame, resizers, rotateBar, rotate, connectors, ends, ...(preview === undefined ? {} : { preview }) };
+    return { frame, resizers, routeLayer, rotateBar, rotate, connectors, ends, ...(preview === undefined ? {} : { preview }) };
   }
 
   private listen(target: EventTarget, type: string, handler: EventListener): void {
     target.addEventListener(type, handler);
     this.listeners.push(() => target.removeEventListener(type, handler));
+  }
+
+  private listenRoute(target: EventTarget, type: string, handler: EventListener): void {
+    target.addEventListener(type, handler);
+    this.routeListeners.push(() => target.removeEventListener(type, handler));
   }
 
   /** Pointer capture keeps the gesture alive when it leaves the small grip. */
@@ -479,6 +523,74 @@ export class SelectionHandles {
     this.element.setAttribute("data-miro-canvas-resizing", handle);
   }
 
+  private beginRouteDrag(grip: RouteGrip, element: HTMLElement, event: unknown): void {
+    const edgeId = this.state.selectedIds[0];
+    const origin = pointOf(event);
+    if (!this.state.editable || !this.state.isEdge || edgeId === undefined || origin === undefined) return;
+    (event as Event).preventDefault?.();
+    (event as Event).stopPropagation?.();
+    this.capture(event);
+    this.routeDrag = { edgeId, grip, element, origin, moved: false };
+    this.element.setAttribute("data-miro-canvas-reshaping", grip.kind);
+  }
+
+  /**
+   * Reshape a connector from a press on its line, as if the grip it stands
+   * for had been grabbed.  The host has already checked that the connector
+   * may change; the drag previews and commits like any grip.
+   */
+  public grabRoute(edgeId: string, grip: RouteGrip, event: unknown): boolean {
+    const origin = pointOf(event);
+    if (origin === undefined || this.gestureActive) return false;
+    this.routeDrag = { edgeId, grip, origin, moved: false };
+    this.element.setAttribute("data-miro-canvas-reshaping", grip.kind);
+    // The connector may only now be selected; the preview must show regardless.
+    this.element.hidden = false;
+    return true;
+  }
+
+  /** Draw the grips a selected connector's route offers, reusing elements while their kinds match. */
+  private placeRouteGrips(state: SelectionHandlesState, shown: boolean): void {
+    const refs = this.refs;
+    if (refs === undefined) return;
+    const grips = shown ? state.routeGrips ?? [] : [];
+    const layer = refs.routeLayer;
+    const signature = grips.map((grip) => `${grip.kind}:${grip.index}:${grip.axis ?? ""}`).join(" ");
+    if (layer.getAttribute("data-grips") !== signature) {
+      layer.setAttribute("data-grips", signature);
+      for (const remove of this.routeListeners.splice(0)) remove();
+      for (const child of Array.from(layer.children ?? [])) child.remove?.();
+      for (const grip of grips) {
+        const title = grip.kind === "insert"
+          ? "Drag to bend the line here"
+          : grip.kind === "waypoint"
+            ? "Drag to move this bend; double-click to remove it"
+            : "Drag to move this segment; double-click to straighten the line";
+        const element = layer.appendChild(makeGrip(this.document!, `miro-canvas-handle--route miro-canvas-handle--route-${grip.kind}`, "", title));
+        element.setAttribute("data-route-grip", grip.kind);
+        element.setAttribute("data-route-index", String(grip.index));
+        if (grip.axis !== undefined) element.setAttribute("data-route-axis", grip.axis);
+        this.listenRoute(element, "pointerdown", (event) => this.beginRouteDrag(grip, element, event));
+        if (grip.kind !== "insert") {
+          this.listenRoute(element, "dblclick", (event) => {
+            const edgeId = this.state.selectedIds[0];
+            if (!this.state.editable || edgeId === undefined) return;
+            (event as Event).preventDefault?.();
+            (event as Event).stopPropagation?.();
+            this.actions.onStraighten?.(edgeId, grip);
+          });
+        }
+      }
+    }
+    const elements = Array.from(layer.children ?? []) as HTMLElement[];
+    grips.forEach((grip, index) => {
+      const element = elements[index];
+      if (element === undefined) return;
+      element.style.left = `${grip.x}px`;
+      element.style.top = `${grip.y}px`;
+    });
+  }
+
   /** Turn the node to the next right angle in one step, as one write. */
   private turn(direction: 1 | -1): void {
     if (!this.state.editable || this.state.isEdge || this.gestureActive) return;
@@ -497,18 +609,34 @@ export class SelectionHandles {
 
   /** Draw the line a pulled connector would follow, or hide it. */
   private showPreview(from: ShapePointLike | undefined, to: ShapePointLike | undefined): void {
+    this.showPreviewLine(from === undefined || to === undefined ? undefined : [from, to]);
+  }
+
+  private showPreviewLine(points: readonly ShapePointLike[] | undefined): void {
     const path = this.refs?.preview;
     if (path === undefined) return;
-    if (from === undefined || to === undefined) {
+    if (points === undefined || points.length < 2) {
       path.removeAttribute("d");
       return;
     }
-    path.setAttribute("d", `M ${from.x} ${from.y} L ${to.x} ${to.y}`);
+    path.setAttribute("d", points.map((point, index) => `${index === 0 ? "M" : "L"} ${point.x} ${point.y}`).join(" "));
   }
 
   /** The host forwards document-level pointer events so a drag can leave the grip. */
   public handlePointerMove(event: unknown): void {
     const point = pointOf(event);
+    const reshape = this.routeDrag;
+    if (point !== undefined && reshape !== undefined) {
+      if (!reshape.moved && Math.hypot(point.x - reshape.origin.x, point.y - reshape.origin.y) < this.dragThreshold) return;
+      reshape.moved = true;
+      const local = this.local(point);
+      if (reshape.element !== undefined) {
+        reshape.element.style.left = `${local.x}px`;
+        reshape.element.style.top = `${local.y}px`;
+      }
+      this.showPreviewLine(this.actions.previewRoute?.(reshape.edgeId, reshape.grip, point));
+      return;
+    }
     const resize = this.resizeDrag;
     if (point !== undefined && resize !== undefined) {
       if (!resize.moved && Math.hypot(point.x - resize.origin.x, point.y - resize.origin.y) < this.dragThreshold) return;
@@ -549,6 +677,12 @@ export class SelectionHandles {
   }
 
   public handlePointerUp(event: unknown): void {
+    const reshape = this.routeDrag;
+    if (reshape !== undefined) {
+      const point = pointOf(event);
+      this.routeDrag = undefined;
+      if (reshape.moved && point !== undefined) this.actions.onReshape?.(reshape.edgeId, reshape.grip, point);
+    }
     const resize = this.resizeDrag;
     if (resize !== undefined) {
       const point = pointOf(event);
@@ -604,6 +738,11 @@ export class SelectionHandles {
     const resize = this.resizeDrag;
     this.resizeDrag = undefined;
     this.element.removeAttribute?.("data-miro-canvas-resizing");
+    const reshape = this.routeDrag;
+    this.routeDrag = undefined;
+    this.element.removeAttribute?.("data-miro-canvas-reshaping");
+    // A dragged route grip that was not committed goes back where the route is.
+    if (reshape !== undefined) this.placeRouteGrips(this.state, this.routeGripsShown(this.state));
     if (resize !== undefined) {
       if (resize.moved) this.actions.onCancelResize?.();
       this.showResize(resize.start, resize.rotation);
@@ -625,14 +764,19 @@ export class SelectionHandles {
   }
 
   public get gestureActive(): boolean {
-    return this.rotating || this.dragSide !== undefined || this.endDrag !== undefined || this.resizeDrag !== undefined;
+    return this.rotating || this.dragSide !== undefined || this.endDrag !== undefined
+      || this.resizeDrag !== undefined || this.routeDrag !== undefined;
+  }
+
+  private routeGripsShown(state: SelectionHandlesState): boolean {
+    return state.isEdge && state.editable && state.selectedIds.length === 1;
   }
 
   /** Show and place the end grips of a selected connector. */
   private placeEnds(state: SelectionHandlesState): void {
     const refs = this.refs;
     if (refs === undefined) return;
-    const shown = state.isEdge && state.editable && state.selectedIds.length === 1;
+    const shown = this.routeGripsShown(state);
     for (const end of ["from", "to"] as const) {
       const grip = refs.ends[end];
       const at = state.endpoints?.[end];
@@ -717,14 +861,15 @@ export class SelectionHandles {
       refs.frame.style.transform = this.state.rotation === 0 ? "none" : `rotate(${this.state.rotation}deg)`;
       return;
     }
-    // The dragged end grip stays under the pointer until the drag ends.
-    if (this.endDrag !== undefined) return;
+    // A dragged end or route grip stays under the pointer until the drag ends.
+    if (this.endDrag !== undefined || this.routeDrag !== undefined) return;
     const single = state.selectedIds.length === 1;
     const visible = state.rect !== undefined && single && !state.isEdge;
     const endsVisible = state.isEdge && single && state.endpoints !== undefined;
     this.element.hidden = !visible && !endsVisible;
     refs.frame.hidden = !visible;
     this.placeEnds(state);
+    this.placeRouteGrips(state, this.routeGripsShown(state) && state.endpoints !== undefined);
     this.element.setAttribute("data-miro-canvas-editable", state.editable ? "true" : "false");
     refs.rotate.hidden = state.isEdge || !state.editable;
     refs.rotateBar.hidden = !visible || state.isEdge || !state.editable;
@@ -750,7 +895,7 @@ export class SelectionHandles {
   }
 
   public dispose(): void {
-    for (const remove of this.listeners.splice(0)) {
+    for (const remove of [...this.listeners.splice(0), ...this.routeListeners.splice(0)]) {
       try {
         remove();
       } catch {

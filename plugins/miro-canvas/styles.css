@@ -1474,6 +1474,56 @@
   background: var(--interactive-accent);
 }
 
+/* Grips along a selected connector: a dot in the middle of each stretch
+   bends it there, a ring moves a bend, a bar moves an elbowed segment. */
+.miro-canvas-handles__route {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+/* Doubled so Obsidian's own button colours do not win. */
+.miro-canvas-handles .miro-canvas-handle--route {
+  width: 9px;
+  height: 9px;
+  padding: 0;
+  background: var(--interactive-accent);
+  border: 1px solid var(--background-primary);
+  box-shadow: none;
+  transform: translate(-50%, -50%);
+  cursor: move;
+}
+
+.miro-canvas-handles .miro-canvas-handle--route-waypoint {
+  width: 11px;
+  height: 11px;
+  background: var(--background-primary);
+  border: 2px solid var(--interactive-accent);
+}
+
+.miro-canvas-handles .miro-canvas-handle--route-segment[data-route-axis="y"] {
+  width: 16px;
+  height: 6px;
+  border-radius: 3px;
+  cursor: ns-resize;
+}
+
+.miro-canvas-handles .miro-canvas-handle--route-segment[data-route-axis="x"] {
+  width: 6px;
+  height: 16px;
+  border-radius: 3px;
+  cursor: ew-resize;
+}
+
+.miro-canvas-handle--route:hover,
+.miro-canvas-handles[data-miro-canvas-reshaping] .miro-canvas-handle--route {
+  transform: translate(-50%, -50%) scale(1.3);
+}
+
+.miro-canvas-handles[data-miro-canvas-reshaping] .miro-canvas-handle--route:not(:hover) {
+  opacity: 0.35;
+}
+
 /* The line a connector follows while it is being pulled. */
 .miro-canvas-handles__preview {
   position: absolute;

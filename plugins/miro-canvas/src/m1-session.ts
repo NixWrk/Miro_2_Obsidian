@@ -30,11 +30,16 @@ import {
 } from "./canvas-adapter";
 import { CANVAS_SHAPE_KINDS, createCanvasAuthoring, type CanvasAuthoring, type ConnectorSide } from "./canvas-authoring";
 import {
+	MAX_WAYPOINTS, gripNear, moveElbowSegment, placeWaypoint, planRoute, removeWaypoint, routeBends, routeHandles, simplifyCorners,
+	type PlannedRoute, type RouteEnd,
+} from "./connector-route";
+import {
 	SelectionHandles,
 	normalizeAngle,
 	type ConnectorGesture,
 	type HandleRect,
 	type HandleSide,
+	type RouteGrip,
 	type SelectionHandlesState,
 } from "./selection-handles";
 import {
@@ -137,6 +142,8 @@ const PANEL_SELECTOR = ".miro-canvas-panel, .miro-canvas-toolbar, .miro-canvas-c
 const DEFAULT_TOOLBAR_FONT = "Inter";
 const DEFAULT_TOOLBAR_FONT_SIZE = 16;
 const REFRESH_INTERVAL_MS = 750;
+/** A bend dropped within this many screen pixels of the straight line is no bend. */
+const STRAIGHTEN_DISTANCE = 8;
 const APPEARANCE_ATTRIBUTE = "data-miro-canvas-appearance";
 const VERTICAL_ALIGN_ATTRIBUTE = "data-miro-canvas-vertical-align";
 const THEME_ROOT_CLASS = "miro-canvas-root";
@@ -603,6 +610,8 @@ export class M1CanvasSession {
 	private landingCache: { readonly document: unknown; readonly geometry: AnchorGeometry; readonly scene: SourceScene } | undefined;
 	private lastToolbarSignature = "";
 	private lastToolbarState: SelectionToolbarState | undefined;
+	/** Until when a click is the tail of a reshape drag rather than a click of its own. */
+	private swallowClickUntil = 0;
 	/** The node a resize gesture is changing, and the box to put back if it is cancelled. */
 	private resizeGesture: {
 		readonly id: string;
@@ -685,6 +694,9 @@ export class M1CanvasSession {
 			previewEnd: (gesture, point) => this.previewLanding(gesture, point),
 			onResize: (rect, commit) => this.applyHandleResize(rect, commit),
 			onCancelResize: () => this.cancelHandleResize(),
+			previewRoute: (edgeId, grip, point) => this.previewReshape(edgeId, grip, point),
+			onReshape: (edgeId, grip, point) => this.reshapeConnector(edgeId, grip, point),
+			onStraighten: (edgeId, grip) => this.straightenConnector(edgeId, grip),
 		}, { document: controlDocument });
 		this.commentMarkers = controlDocument === undefined ? undefined : new CommentMarkers({
 			onOpenThread: (threadId, origin) => this.options.onOpenCommentThread?.(threadId, origin),
@@ -827,6 +839,155 @@ export class M1CanvasSession {
 		if (centre === undefined) return undefined;
 		const width = rect.width / zoom, height = rect.height / zoom;
 		return { x: centre.x - width / 2, y: centre.y - height / 2, width, height };
+	}
+
+	/** A connector's route as the anchoring geometry planned it, with the ends it was planned from. */
+	private plannedRoute(edgeId: string): (PlannedRoute & {
+		readonly ends: { readonly from: RouteEnd; readonly to: RouteEnd };
+		readonly imported: boolean;
+	}) | undefined {
+		const geometry = this.landingGeometry().geometry.edges?.[edgeId] as Record<string, unknown> | undefined;
+		if (geometry === undefined || !Array.isArray(geometry.corners) || !Array.isArray(geometry.segments)
+			|| !isObject(geometry.ends) || typeof geometry.route !== "string") return undefined;
+		return geometry as unknown as ReturnType<M1CanvasSession["plannedRoute"]>;
+	}
+
+	/** Where the selected connector's route can be grabbed, in overlay pixels. */
+	private routeGrips(edgeId: string): RouteGrip[] | undefined {
+		const plan = this.plannedRoute(edgeId);
+		const origin = this.overlayOrigin();
+		if (plan === undefined || origin === undefined) return undefined;
+		return routeHandles(plan).flatMap((handle): RouteGrip[] => {
+			const at = this.viewportPoint(handle.point);
+			if (at === undefined) return [];
+			const place = { index: handle.index, x: at.x - origin.left, y: at.y - origin.top };
+			return [handle.kind === "segment" ? { kind: "segment", axis: handle.axis, ...place } : { kind: handle.kind, ...place }];
+		});
+	}
+
+	/**
+	 * The bends a connector would have with one grip dragged to a viewport
+	 * point.  A waypoint dropped back on the line between its neighbours
+	 * goes, and an elbowed route loses corners that no longer turn.
+	 */
+	private reshapedBends(
+		edgeId: string, grip: RouteGrip, point: { readonly x: number; readonly y: number },
+	): { readonly plan: NonNullable<ReturnType<M1CanvasSession["plannedRoute"]>>; readonly bends: { x: number; y: number }[] } | undefined {
+		const plan = this.plannedRoute(edgeId);
+		const board = this.boardPoint(point);
+		if (plan === undefined || board === undefined) return undefined;
+		const { from, to } = plan.ends;
+		const bends = routeBends(plan);
+		if (grip.kind === "segment") {
+			if (plan.route !== "elbowed") return undefined;
+			const moved = moveElbowSegment(from, to, bends, grip.index, grip.axis === "x" ? board.x : board.y);
+			return { plan, bends: simplifyCorners([from.point, ...moved, to.point]).slice(1, -1) };
+		}
+		const zoom = finite(readRuntime(this.viewport.getViewport(), "zoom")) ?? 1;
+		return {
+			plan,
+			bends: placeWaypoint(from.point, to.point, bends, grip.index, board, {
+				insert: grip.kind === "insert",
+				straighten: STRAIGHTEN_DISTANCE / (zoom > 0 ? zoom : 1),
+			}),
+		};
+	}
+
+	/** The route a drag would leave, in overlay pixels, for the handles to draw. */
+	private previewReshape(
+		edgeId: string, grip: RouteGrip, point: { readonly x: number; readonly y: number },
+	): readonly { readonly x: number; readonly y: number }[] | undefined {
+		const shaped = this.reshapedBends(edgeId, grip, point);
+		const origin = this.overlayOrigin();
+		if (shaped === undefined || origin === undefined) return undefined;
+		const { plan, bends } = shaped;
+		const route = planRoute(plan.ends.from, plan.ends.to, plan.route, bends, { imported: plan.imported });
+		return route.points.flatMap((item) => {
+			const at = this.viewportPoint(item);
+			return at === undefined ? [] : [{ x: at.x - origin.left, y: at.y - origin.top }];
+		});
+	}
+
+	/**
+	 * A press on a connector's line bends it there, as Miro does, instead of
+	 * native Canvas pulling the nearest end loose - which deletes the edge when
+	 * it is let go over empty board.  A click still reaches native Canvas and
+	 * selects the connector; its ends move by their own grips.
+	 */
+	private grabConnectorLine(event: Event): void {
+		if (readRuntime(event, "button") !== 0 || readRuntime(event, "shiftKey") === true || this.isSpacePanHeld()) return;
+		if (!this.closestTarget(event, "path.canvas-interaction-path")) return;
+		const target = eventTarget(event);
+		const edge = [...(this.adapter.getEdges() ?? [])].find((item) => {
+			const group = readRuntime(item, "lineGroupEl");
+			const contains = readRuntime(group, "contains");
+			try {
+				return typeof contains === "function" && Reflect.apply(contains, group, [target]) === true;
+			} catch {
+				return false;
+			}
+		});
+		const id = readCanvasElementId(edge);
+		const x = finite(readRuntime(event, "clientX")), y = finite(readRuntime(event, "clientY"));
+		if (edge === undefined || id === undefined || x === undefined || y === undefined) return;
+		this.readInteractionState();
+		if (!this.editAllowed("restyle", [id])) return;
+		const plan = this.plannedRoute(id);
+		const board = this.boardPoint({ x, y });
+		const handle = plan === undefined || board === undefined ? undefined : gripNear(plan, board);
+		if (handle === undefined) return;
+		try {
+			event.preventDefault();
+			event.stopImmediatePropagation();
+		} catch {
+			// A test double may not stop propagation; the drag still starts.
+		}
+		if (this.selectedIds.length !== 1 || this.selectedIds[0] !== id) {
+			this.adapter.invoke("selectOnly", edge);
+			this.readInteractionState();
+		}
+		const grip: RouteGrip = handle.kind === "segment"
+			? { kind: "segment", axis: handle.axis, index: handle.index, x, y }
+			: { kind: handle.kind, index: handle.index, x, y };
+		this.handles.grabRoute(id, grip, event);
+	}
+
+	private reshapeConnector(edgeId: string, grip: RouteGrip, point: { readonly x: number; readonly y: number }): void {
+		// The release that ends a drag must not also click the board clear.
+		this.swallowClickUntil = Date.now() + 400;
+		const shaped = this.reshapedBends(edgeId, grip, point);
+		if (shaped === undefined) {
+			this.refresh();
+			return;
+		}
+		this.writeBends(edgeId, shaped.plan.route, shaped.bends);
+	}
+
+	/** A double-clicked waypoint goes; a double-clicked elbowed segment lets the route find its own way again. */
+	private straightenConnector(edgeId: string, grip: RouteGrip): void {
+		const plan = this.plannedRoute(edgeId);
+		if (plan === undefined) return;
+		this.writeBends(edgeId, plan.route, grip.kind === "waypoint" ? removeWaypoint(routeBends(plan), grip.index) : []);
+	}
+
+	/**
+	 * Store a connector's bends together with its route, so the bends keep
+	 * describing the same kind of line whatever the default becomes.
+	 */
+	private writeBends(edgeId: string, route: PlannedRoute["route"], bends: readonly { readonly x: number; readonly y: number }[]): void {
+		this.readInteractionState();
+		if (!this.editAllowed("restyle", [edgeId])) {
+			this.refresh();
+			return;
+		}
+		const waypoints = bends.slice(0, MAX_WAYPOINTS).map((point) => ({
+			x: Math.round(point.x * 100) / 100,
+			y: Math.round(point.y * 100) / 100,
+		}));
+		this.authoring ??= createCanvasAuthoring(this.view);
+		const result = this.authoring.updateElementStyles([{ id: edgeId, connector: { route, waypoints } }]);
+		if (!result.ok) this.addDiagnostic(firstProblem(result.diagnostics) ?? "Canvas rejected the new connector shape.");
+		this.refresh();
 	}
 
 	/** A connection released on the board: onto a node, or into free space. */
@@ -1658,6 +1819,10 @@ export class M1CanvasSession {
 			...(id === undefined ? {} : { shape: this.selectedShape(id) }),
 			...(id === undefined ? {} : { rect: this.handleRect(id) }),
 			...(id === undefined || geometry.edges?.[id] === undefined ? {} : { endpoints: this.connectorEnds(id) }),
+			...(() => {
+				const grips = id === undefined || geometry.edges?.[id] === undefined ? undefined : this.routeGrips(id);
+				return grips === undefined ? {} : { routeGrips: grips };
+			})(),
 			...(() => {
 				// Native Canvas never lets a node shrink below its own minimum.
 				const least = finite(readRuntime(readRuntime(this.nativeCanvas(), "config"), "minContainerDimension"));
@@ -3072,6 +3237,17 @@ export class M1CanvasSession {
 				}
 			});
 		}
+		listen("pointerdown", (event) => this.grabConnectorLine(event));
+		listen("click", (event) => {
+			if (Date.now() > this.swallowClickUntil) return;
+			this.swallowClickUntil = 0;
+			try {
+				event.preventDefault();
+				event.stopImmediatePropagation();
+			} catch {
+				// Nothing else to stop.
+			}
+		});
 		const clearGesture = (): void => { this.pointerEditIds = undefined; };
 		const host = ownerDocument(this.root) ?? this.root;
 		this.listen(host, "pointermove", (event) => this.handles.handlePointerMove(event), true);

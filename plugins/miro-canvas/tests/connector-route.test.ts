@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   ELBOW_STUB,
   autoBends,
+  gripNear,
   moveElbowSegment,
   placeWaypoint,
   planRoute,
@@ -185,6 +186,16 @@ describe("connector routes", () => {
       expect(placeWaypoint(a, b, [{ x: 100, y: 50 }], 0, { x: 100, y: 30 }, { insert: false, straighten: 6 }))
         .toEqual([{ x: 100, y: 30 }]);
     });
+  });
+
+  it("finds the grip a press on the line stands for", () => {
+    const elbowed = planRoute(right(0, 0), left(200, 100), "elbowed");
+    expect(gripNear(elbowed, { x: 103, y: 70 })).toEqual({ kind: "segment", index: 1, axis: "x", point: { x: 100, y: 50 } });
+    expect(gripNear(elbowed, { x: 170, y: 98 })).toMatchObject({ kind: "segment", index: 2, axis: "y" });
+    const straight = planRoute(right(0, 0), left(200, 0), "straight", [{ x: 100, y: 100 }]);
+    expect(gripNear(straight, { x: 160, y: 45 })).toMatchObject({ kind: "insert", index: 1 });
+    const curved = planRoute(right(0, 0), left(200, 0), "curved", [{ x: 100, y: 100 }]);
+    expect(gripNear(curved, { x: 20, y: 30 })).toMatchObject({ kind: "insert", index: 0 });
   });
 
   it("drops repeated and in-line corners", () => {
