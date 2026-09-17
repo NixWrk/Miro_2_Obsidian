@@ -1216,6 +1216,12 @@ function applyNode(
   if (descriptor.structured?.tags !== undefined && tagLayer === undefined) diagnostics.push(`tag-decoration-dom-inaccessible: ${id}.`);
 
   if (layer !== undefined) {
+    // Native Canvas contains its node container strictly, which makes it a
+    // stacking context of its own: without a z-index it is painted below the
+    // decoration that follows it, whatever its content asks for.
+    if (containerEl !== undefined && containerEl !== layer && containerEl !== shell && isContained(shell, containerEl)) {
+      patchStyle(containerEl, "z-index", "1", patches);
+    }
     for (const foreground of allElementsFor(runtime, ["contentEl", "labelEl", "fileEl", "embedEl"])) {
       if (foreground === layer || !isContained(shell, foreground)) continue;
       patchStyle(foreground, "position", "relative", patches);
@@ -1339,13 +1345,15 @@ function applyOrdering(scene: SourceScene, items: readonly RenderedItem[], patch
     diagnostics.push("source-order-cross-layer-interleaving-unsupported: node and connector DOM use separate stacking contexts.");
   }
   const globalRank = new Map(scene.order.map((id, index) => [id, index] as const));
-  const nodeRank = new Map(scene.order.filter((id) => scene.items.get(id)?.kind !== "connector").map((id, index) => [id, index] as const));
   const edgeRank = new Map(scene.order.filter((id) => scene.items.get(id)?.kind === "connector").map((id, index) => [id, index] as const));
   for (const item of items) {
+    // Native Canvas stacks node shells itself, from the order the file keeps.
+    // A node's element is its inner container: a z-index there only reorders
+    // the node's own layers, and lifted the native surface over the fill the
+    // decoration paints.
+    if (item.kind === "node") continue;
     const explicit = normalizedZIndex(item.descriptor.zIndex);
-    const rank = separateContexts
-      ? (item.kind === "node" ? nodeRank.get(item.id) : edgeRank.get(item.id))
-      : globalRank.get(item.id);
+    const rank = separateContexts ? edgeRank.get(item.id) : globalRank.get(item.id);
     const value = explicit ?? (rank === undefined ? undefined : String(rank));
     if (value !== undefined) patchStyle(item.element, "z-index", value, patches);
     else if (item.descriptor.zIndex !== undefined) diagnostics.push(`z-index-out-of-range: ${item.id}.`);
