@@ -632,10 +632,16 @@ function domSize(element: DomElementLike | undefined): { readonly width: number;
  *
  * A collapsed group is the case that matters: its state is not in the file, so
  * only the live DOM knows it shrank.  The board scale is derived from the
- * nodes that agree with the document, and a rotated node is never measured
+ * nodes that agree with the document, and a turned node is never measured
  * because its DOM box is the inflated axis-aligned bounds, not its own size.
+ * A node counts as turned when the file says so, when it is being turned
+ * right now, or when the DOM still carries a turn: a node saved upright but
+ * previewed at an angle was measured by its inflated box, and every edge on
+ * it ended on a node larger than the one drawn.
  */
-function measureNodes(document: unknown, runtimeNodes: readonly unknown[], scene: SourceScene): NodeMeasurements {
+function measureNodes(
+  document: unknown, runtimeNodes: readonly unknown[], scene: SourceScene, turning: ReadonlySet<string> = new Set(),
+): NodeMeasurements {
   const declared = new Map<string, { readonly width: number; readonly height: number }>();
   const nodes = safeGet(document, "nodes");
   if (!Array.isArray(nodes)) return {};
@@ -650,11 +656,15 @@ function measureNodes(document: unknown, runtimeNodes: readonly unknown[], scene
   const ratios: number[] = [];
   for (const runtime of runtimeNodes) {
     const id = readCanvasElementId(runtime);
-    const size = domSize(elementFor(runtime, ["nodeEl", "containerEl", "el"]));
+    const element = elementFor(runtime, ["nodeEl", "containerEl", "el"]);
     const declaredSize = id === undefined ? undefined : declared.get(id);
-    if (id === undefined || size === undefined || declaredSize === undefined) continue;
+    if (id === undefined || element === undefined || declaredSize === undefined) continue;
+    const shownAngle = trailingRotation(readStyle(element, "transform") ?? "") ?? 0;
+    if ((scene.items.get(id)?.rotation ?? 0) !== 0 || turning.has(id) || cssAngle(shownAngle) !== 0) continue;
+    const size = domSize(element);
+    if (size === undefined) continue;
     observed.set(id, size);
-    if ((scene.items.get(id)?.rotation ?? 0) === 0) ratios.push(size.width / declaredSize.width);
+    ratios.push(size.width / declaredSize.width);
   }
   if (ratios.length === 0) return {};
   ratios.sort((left, right) => left - right);
@@ -662,7 +672,6 @@ function measureNodes(document: unknown, runtimeNodes: readonly unknown[], scene
   if (!Number.isFinite(scale) || scale <= 0) return {};
   const measurements: Record<string, { width: number; height: number }> = Object.create(null);
   for (const [id, size] of observed) {
-    if ((scene.items.get(id)?.rotation ?? 0) !== 0) continue;
     const declaredSize = declared.get(id)!;
     const width = size.width / scale, height = size.height / scale;
     // Only a real disagreement is reported; rounding noise is not a measurement.
@@ -1424,7 +1433,7 @@ export class SourceRenderer {
     // A connector must end on what the host drew, not on what the file says a
     // collapsed group would occupy if it were open - and on a node being
     // turned, at the angle it is shown at, not the one it will be saved with.
-    const measured = measureNodes(sourceDocument, runtimeNodes, scene);
+    const measured = measureNodes(sourceDocument, runtimeNodes, scene, new Set(preview === undefined ? [] : [preview.id]));
     const geometry = buildCanvasAnchorGeometry(sourceDocument, preview === undefined ? measured : {
       ...measured, [preview.id]: { ...measured[preview.id], rotation: preview.rotation },
     });

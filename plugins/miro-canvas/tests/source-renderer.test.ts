@@ -807,7 +807,9 @@ describe("the point a node turns about", () => {
 });
 
 /** A native edge from node a's right side to node b's left, as Obsidian holds it. */
-function routeFixture({ rotation = 0, shape, observe = false }: { rotation?: number; shape?: string; observe?: boolean } = {}) {
+function routeFixture({ rotation = 0, shape, observe = false, preview }: {
+  rotation?: number; shape?: string; observe?: boolean; preview?: { id: string; rotation: number };
+} = {}) {
   const observers: Array<{ callback: (records: unknown[]) => void; connected: boolean }> = [];
   class FakeObserver {
     public connected = true;
@@ -852,6 +854,7 @@ function routeFixture({ rotation = 0, shape, observe = false }: { rotation?: num
     getDocument: () => data,
     getNodes: () => [a, b],
     getEdges: () => [edge],
+    getRotationPreview: () => preview,
   }, document);
   const numbers = (value: string | null) => (value ?? "").match(/-?\d+(?:\.\d+)?/gu)!.map(Number);
   return { renderer, data, a, b, edge, display, interaction, head, NATIVE, observers, numbers };
@@ -879,6 +882,20 @@ describe("native edges on turned and shaped nodes", () => {
     // The host redraws its own edge rather than being handed a stale copy.
     expect(f.edge.redraws).toBe(1);
     expect(f.display.getAttribute("d")).toBe(f.NATIVE);
+  });
+
+  it("ends an edge on a node being turned at its own size, not its inflated bounds", () => {
+    // Saved upright, previewed at 40 degrees: the DOM reports the box the turned node covers.
+    const f = routeFixture({ preview: { id: "a", rotation: 40 } });
+    const box = (width: number, height: number) => () => ({ left: 0, top: 0, right: width, bottom: height, width, height });
+    Object.assign(f.a.nodeEl, { getBoundingClientRect: box(128.3, 125.6) });
+    Object.assign(f.b.nodeEl, { getBoundingClientRect: box(100, 80) });
+    f.renderer.refresh();
+    const radians = 40 * Math.PI / 180;
+    const [startX, startY] = f.numbers(f.display.getAttribute("d"));
+    expect(startX).toBeCloseTo(50 + 50 * Math.cos(radians), 2);
+    expect(startY).toBeCloseTo(40 + 50 * Math.sin(radians), 2);
+    expect(f.display.getAttribute("d")!.endsWith("293 240")).toBe(true);
   });
 
   it("turns the arrowhead on the turned node it points at", () => {
