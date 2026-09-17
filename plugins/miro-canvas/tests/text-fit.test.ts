@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { fitFontSize, plainText } from "../src/text-fit";
+import { codeLineCount, fitFontSize, lineNumbersCss, plainText } from "../src/text-fit";
 import { MIRO_STICKY_COLORS, readableInk, stickyFill } from "../src/miro-palette";
 
 describe("plain text of stored markup", () => {
@@ -8,6 +8,23 @@ describe("plain text of stored markup", () => {
     expect(plainText("<p>one</p><p>two &amp; three&#33;</p>")).toBe("one\ntwo & three!");
     expect(plainText("## **Heading** with `code`")).toBe("Heading with code");
     expect(plainText(undefined)).toBe("");
+  });
+});
+
+describe("code line numbers", () => {
+  it("counts the lines of the code a node shows", () => {
+    expect(codeLineCount("<p>Title</p><pre style=\"x\"><code>a\nb\nc</code></pre>")).toBe(3);
+    expect(codeLineCount("<pre><code>one<br>two</code></pre>")).toBe(2);
+    expect(codeLineCount("Intro\n```js\nconst a = 1;\nconst b = 2;\n```")).toBe(2);
+    expect(codeLineCount("just one line")).toBe(1);
+    expect(codeLineCount("<pre><code>\nfirst\nsecond\n</code></pre>")).toBe(2);
+    expect(codeLineCount(undefined)).toBe(1);
+    expect(codeLineCount(`<pre>${"x\n".repeat(9000)}</pre>`)).toBe(5000);
+  });
+
+  it("writes them as one CSS string, a line each", () => {
+    expect(lineNumbersCss(3)).toBe("\"1\\A 2\\A 3\"");
+    expect(lineNumbersCss(0)).toBe("\"1\"");
   });
 });
 

@@ -21,6 +21,30 @@ export function plainText(markup: unknown): string {
     .trim();
 }
 
+const MAX_NUMBERED_LINES = 5_000;
+
+/**
+ * How many lines the code a node shows has: the body of its first <pre> or
+ * fenced block, or the whole text when it has neither.
+ */
+export function codeLineCount(markup: unknown): number {
+  if (typeof markup !== "string") return 1;
+  const source = markup.slice(0, 200_000);
+  const pre = /<pre\b[^>]*>([\s\S]*?)<\/pre>/iu.exec(source);
+  const fence = /^\s*(`{3,}|~{3,})[^\n]*\n([\s\S]*?)\n\s*\1\s*$/mu.exec(source);
+  const body = pre !== null
+    ? pre[1]!.replace(/<br\s*\/?>/giu, "\n").replace(/<[^>]*>/gu, "")
+    : fence !== null ? fence[2]! : source;
+  const lines = body.replace(/\r\n?/gu, "\n").replace(/^\n/u, "").replace(/\n$/u, "").split("\n").length;
+  return Math.min(Math.max(lines, 1), MAX_NUMBERED_LINES);
+}
+
+/** A CSS string of the numbers 1 to count, one per line, for generated content. */
+export function lineNumbersCss(count: number): string {
+  const total = Math.min(Math.max(Math.trunc(count), 1), MAX_NUMBERED_LINES);
+  return `"${Array.from({ length: total }, (_, index) => index + 1).join("\\A ")}"`;
+}
+
 export interface FitOptions {
   readonly min?: number;
   readonly max?: number;

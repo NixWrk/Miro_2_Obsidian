@@ -5,7 +5,7 @@ import {
 import { SHAPE_CLIP_PATHS, inscribedInsets, shapeOutline, shapePath, type ShapePoint } from "./shape-geometry";
 import { CAP_PATHS, capFilled, strokeDash } from "./connector-style";
 import { readableInk } from "./miro-palette";
-import { fitFontSize, plainText } from "./text-fit";
+import { codeLineCount, fitFontSize, lineNumbersCss, plainText } from "./text-fit";
 import { planRoute, routePath, type RouteEnd as PlannedEnd, type RouteSegment } from "./connector-route";
 import { normalizeAnchor, resolveAnchor, type AnchorEdgeGeometry, type AnchorPoint, type AnchorRect } from "./anchors";
 import { readCanvasElementId } from "./canvas-elements";
@@ -326,6 +326,18 @@ function decoratePreview(document: Document | undefined, layer: DomElementLike, 
     return safeGet(metadata, "parentNode") === layer;
   }
   return false;
+}
+
+/** Miro names a code block above it, where a frame keeps its title. */
+function decorateCode(document: Document | undefined, layer: DomElementLike, descriptor: SourceItemDescriptor): boolean {
+  const title = descriptor.structured?.code?.title;
+  if (document === undefined || title === undefined) return true;
+  const label = createElement(document, "div");
+  if (label === undefined) return true;
+  addOwnedElementClass(label, "miro-source-code-title");
+  setOwnedElementText(label, title);
+  safeCall(layer, "appendChild", [label]);
+  return true;
 }
 
 function decorateTags(
@@ -1158,6 +1170,14 @@ function applyNode(
   if (sourceCode?.lineNumbersVisible !== undefined) {
     patchAttribute(shell, "data-miro-source-code-line-numbers", String(sourceCode.lineNumbersVisible), patches);
   }
+  if (descriptor.kind === "code" && sourceCode?.lineNumbersVisible !== false) {
+    // Numbered from the code the node shows, which may have been edited since
+    // the export, so the gutter always matches the lines beside it.
+    const lines = codeLineCount(safeGet(runtime, "text"));
+    patchStyle(shell, "--miro-code-lines", lineNumbersCss(lines), patches);
+    patchStyle(shell, "--miro-code-gutter", `${String(lines).length}ch`, patches);
+    patchAttribute(shell, "data-miro-source-code-numbered", "true", patches);
+  }
   if (sourceAppCard !== undefined) {
     patchClass(shell, "miro-source-app-card", patches);
     patchAttribute(shell, "data-miro-source-card-kind", sourceAppCard.kind, patches);
@@ -1221,7 +1241,9 @@ function applyNode(
       if (sourceMindmap?.branchColor !== undefined) setOwnedElementStyle(created, "--miro-mindmap-color", sourceMindmap.branchColor);
       const drawable = descriptor.kind === "shape"
         ? decorateShape(document, created, descriptor)
-        : sourcePreview === undefined || decoratePreview(document, created, descriptor);
+        : descriptor.kind === "code"
+          ? decorateCode(document, created, descriptor)
+          : sourcePreview === undefined || decoratePreview(document, created, descriptor);
       if (!drawable) diagnostics.push(`shape-renderer-fallback: ${id} (${descriptor.shape ?? "unknown"}).`);
       if (drawable && appendOwnedChild(shell, created, patches)) layer = created;
     }
@@ -1443,13 +1465,15 @@ export class SourceRenderer {
     const runtimeNodes = readCollection(this.host, "getNodes", diagnostics);
     const runtimeEdges = readCollection(this.host, "getEdges", diagnostics);
     const documentSizes = new Map<string, { readonly width: number; readonly height: number }>();
-    // A note's text sets its fitted size, so an edit to it renders again.
+    // A note's text sets its fitted size and a code block's its numbering, so
+    // an edit to either renders again.
     const fittedTexts: [string, unknown][] = [];
     const documentNodes = safeGet(sourceDocument, "nodes");
     if (Array.isArray(documentNodes)) {
       for (const node of documentNodes) {
         const nodeId = safeGet(node, "id");
-        if (typeof nodeId === "string" && descriptors.get(nodeId)?.kind === "sticky") fittedTexts.push([nodeId, safeGet(node, "text")]);
+        const kind = typeof nodeId === "string" ? descriptors.get(nodeId)?.kind : undefined;
+        if (typeof nodeId === "string" && (kind === "sticky" || kind === "code")) fittedTexts.push([nodeId, safeGet(node, "text")]);
         const width = safeGet(node, "width"), height = safeGet(node, "height");
         if (typeof nodeId === "string" && typeof width === "number" && typeof height === "number"
           && width > 0 && height > 0) {

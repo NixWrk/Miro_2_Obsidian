@@ -1647,23 +1647,105 @@
   margin: 0;
 }
 
-/* A source code item keeps the converted Canvas text editable.  The inert
-   layer supplies the Miro-like code-card chrome while the native <pre>/<code>
-   remains the only visible copy of the code. */
-[data-miro-source-kind="code"] {
-  border-radius: 8px;
+/* A code block is Miro's navy panel: light monospace text, the line numbers
+   in a dim gutter and the title above the panel.  The Canvas text stays
+   editable and remains the only copy of the code; the layer draws the panel
+   and the title, and the numbers are generated beside the native <pre>.  The
+   heading line a converter writes in front of the code gives way to the
+   title, and the <pre>'s own inline colours to the panel's. */
+.miro-source-code {
+  --miro-code-panel: #050038;
+  --miro-code-ink: #f4f4fb;
+  --miro-code-dim: rgb(244 244 251 / 38%);
 }
 
-[data-miro-source-kind="code"] > .miro-source-decoration-code {
-  background: var(--background-secondary);
-  border: 1px solid var(--background-modifier-border);
-  border-radius: 8px;
-  box-shadow: var(--shadow-s, 0 2px 8px rgb(0 0 0 / 12%));
+.miro-source-code,
+.miro-source-code > .canvas-node-container,
+.miro-source-code .canvas-node-content,
+.miro-source-code .markdown-preview-view,
+.miro-source-code .markdown-embed {
+  background-color: transparent !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
 }
 
-[data-miro-source-kind="code"] pre,
-[data-miro-source-kind="code"] code {
-  font-family: var(--font-monospace);
+.miro-source-code > .miro-source-decoration-code {
+  background: var(--miro-code-panel);
+  border-radius: 4px;
+}
+
+.miro-source-code-title {
+  position: absolute;
+  bottom: 100%;
+  left: 0;
+  max-width: 100%;
+  padding-bottom: 6px;
+  overflow: hidden;
+  color: var(--text-muted);
+  font-family: var(--font-interface);
+  font-size: 14px;
+  line-height: 1.3;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.miro-source-code .markdown-preview-view {
+  --text-normal: var(--miro-code-ink);
+  --code-normal: var(--miro-code-ink);
+  --code-background: transparent;
+  display: flex;
+  flex-direction: column;
+  justify-content: safe center;
+  padding: 0 !important;
+  overflow: hidden;
+  color: var(--miro-code-ink);
+}
+
+.miro-source-code .markdown-preview-view > .markdown-preview-sizer {
+  flex: 0 0 auto !important;
+  min-height: 0 !important;
+  padding-bottom: 0 !important;
+}
+
+.miro-source-code .markdown-preview-pusher,
+.miro-source-code .markdown-preview-view p:has(+ pre) {
+  display: none;
+}
+
+.miro-source-code .markdown-preview-view pre {
+  position: relative;
+  margin: 0 !important;
+  padding: 10px 14px !important;
+  overflow: hidden;
+  color: var(--miro-code-ink) !important;
+  font-family: var(--font-monospace) !important;
+  white-space: pre !important;
+  background: transparent !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+}
+
+.miro-source-code .markdown-preview-view pre code {
+  color: inherit;
+  font-family: inherit;
+  background: transparent;
+}
+
+.miro-source-code[data-miro-source-code-numbered="true"] .markdown-preview-view pre {
+  padding-left: calc(var(--miro-code-gutter, 1ch) + 32px) !important;
+}
+
+.miro-source-code[data-miro-source-code-numbered="true"] .markdown-preview-view pre::before {
+  position: absolute;
+  top: 10px;
+  left: 12px;
+  width: var(--miro-code-gutter, 1ch);
+  color: var(--miro-code-dim);
+  text-align: right;
+  white-space: pre;
+  content: var(--miro-code-lines);
+  pointer-events: none;
+  user-select: none;
 }
 
 /* App-card fields stay native editable text; this layer only restores the

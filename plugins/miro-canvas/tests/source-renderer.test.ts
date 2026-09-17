@@ -389,7 +389,7 @@ describe("source-backed code rendering", () => {
     nodeEl.appendChild(contentEl);
     const renderer = new SourceRenderer({
       getDocument: () => data,
-      getNodes: () => [{ id: "code-1", nodeEl, contentEl }],
+      getNodes: () => [{ id: "code-1", nodeEl, contentEl, text: nativeText }],
       getEdges: () => [],
     }, dom);
 
@@ -398,14 +398,22 @@ describe("source-backed code rendering", () => {
     expect(nodeEl.getAttribute("data-miro-source-code-title")).toBe("Example");
     expect(nodeEl.getAttribute("data-miro-source-code-language")).toBe("JavaScript");
     expect(nodeEl.getAttribute("data-miro-source-code-line-numbers")).toBe("true");
-    expect(nodeEl.querySelectorAll("div")).toHaveLength(2);
+    // The layer and the title above the panel; the code stays native.
+    const divs = nodeEl.querySelectorAll("div");
+    expect(divs).toHaveLength(3);
+    expect(divs.find((item) => item.classes.has("miro-source-code-title"))).toMatchObject({ textContent: "Example" });
+    expect(nodeEl.getAttribute("data-miro-source-code-numbered")).toBe("true");
+    expect(nodeEl.style.getPropertyValue("--miro-code-lines")).toBe("\"1\"");
+    expect(nodeEl.style.getPropertyValue("--miro-code-gutter")).toBe("1ch");
     expect((contentEl as any).textContent).toBe(nativeText);
     expect(JSON.stringify(data)).toBe(before);
 
     renderer.refresh();
-    expect(nodeEl.querySelectorAll("div")).toHaveLength(2);
+    expect(nodeEl.querySelectorAll("div")).toHaveLength(3);
     renderer.dispose();
     expect(nodeEl.querySelectorAll("div")).toHaveLength(1);
+    expect(nodeEl.style.getPropertyValue("--miro-code-lines")).toBe("");
+    expect(nodeEl.getAttribute("data-miro-source-code-numbered")).toBeNull();
     expect(nodeEl.getAttribute("data-miro-source-kind")).toBeNull();
     expect(nodeEl.getAttribute("data-miro-source-code-title")).toBeNull();
     expect(nodeEl.getAttribute("data-miro-source-code-language")).toBeNull();
