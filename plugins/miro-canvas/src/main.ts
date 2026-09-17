@@ -283,6 +283,7 @@ export default class MiroCanvasPlugin extends Plugin {
       onNotice: (message) => new Notice(message),
       onStateChange: () => this.updateStatus(true),
       setIcon: (element, icon) => setIcon(element, icon),
+      onOpenSettings: () => this.openOwnSettings(),
       onOpenCommentThread: (threadId, origin) => {
         const session = this.activeM1Session();
         if (session !== null) this.openLocalTools(session, { threadId, origin });
@@ -320,6 +321,15 @@ export default class MiroCanvasPlugin extends Plugin {
     if (this.m1Session !== null && leaf !== null && leaf !== undefined) {
       this.handleActiveLeafChange(leaf);
     }
+  }
+
+  /** Obsidian's settings, open on this plugin's page. */
+  private openOwnSettings(): void {
+    const setting = (this.app as unknown as {
+      setting?: { open?: () => void; openTabById?: (id: string) => void };
+    }).setting;
+    setting?.open?.();
+    setting?.openTabById?.(this.manifest.id);
   }
 
   private activeM1Session(): M1CanvasSession | null {

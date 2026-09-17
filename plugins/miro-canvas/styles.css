@@ -8,31 +8,6 @@
   color: var(--text-normal);
 }
 
-/* M1 controls are deliberately prefixed so this stylesheet cannot alter an
-   ordinary Canvas or another plugin's controls. */
-.miro-canvas-panel {
-  --miro-canvas-panel-bg: var(--background-primary);
-  --miro-canvas-panel-fg: var(--text-normal);
-  --miro-canvas-panel-muted: var(--text-muted);
-  --miro-canvas-panel-border: var(--background-modifier-border);
-  position: absolute;
-  top: 10px;
-  right: 10px;
-  z-index: 100;
-  width: min(238px, calc(100vw - 20px));
-  max-height: calc(100vh - 20px);
-  overflow: visible;
-  box-sizing: border-box;
-  padding: 8px;
-  color: var(--miro-canvas-panel-fg);
-  background: color-mix(in srgb, var(--miro-canvas-panel-bg) 94%, transparent);
-  border: 1px solid var(--miro-canvas-panel-border);
-  border-radius: var(--radius-m, 10px);
-  box-shadow: var(--shadow-s, 0 4px 18px rgb(0 0 0 / 16%));
-  font-size: var(--font-ui-small, 12px);
-  backdrop-filter: blur(10px);
-}
-
 /* The active Canvas root is decorated only for the lifetime of M1Session.
    These rules make persisted board theme/vertical alignment visible while
    keeping every selector under the plugin namespace. */
@@ -61,263 +36,53 @@
   justify-content: var(--miro-canvas-vertical-align, flex-start);
 }
 
-.miro-canvas-panel__header,
-.miro-canvas-panel__row,
-.miro-canvas-panel__navigation,
-.miro-canvas-panel__check {
+/* The corner dock: the minimap above one row of small icons, with the view
+   and board menus opening over the map.  It takes the place of Obsidian's
+   own Canvas controls, whose zoom, undo, redo and snapping it carries, so a
+   board has one set of view controls.  Selectors are doubled where
+   Obsidian styles every button. */
+.miro-canvas-root .canvas-controls {
+  display: none;
+}
+
+.miro-canvas-dock {
+  --miro-canvas-dock-bg: var(--background-primary);
+  --miro-canvas-dock-border: var(--background-modifier-border);
+  position: absolute;
+  right: 12px;
+  /* Clear of Obsidian's status bar, which floats over the lower right corner. */
+  bottom: 36px;
+  z-index: 100;
   display: flex;
-  align-items: center;
+  flex-direction: column;
+  align-items: flex-end;
   gap: 6px;
+  color: var(--text-normal);
+  font-size: var(--font-ui-small, 13px);
+  pointer-events: none;
 }
 
-.miro-canvas-panel__header {
-  justify-content: space-between;
-  margin-bottom: 4px;
+.miro-canvas-dock > * {
+  pointer-events: auto;
 }
 
-.miro-canvas-panel__title {
-  letter-spacing: .01em;
+.miro-canvas-dock[hidden],
+.miro-canvas-dock [hidden] {
+  display: none !important;
 }
 
-.miro-canvas-panel__group {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 5px;
-  margin-top: 6px;
-  padding-top: 6px;
-  border-top: 1px solid var(--miro-canvas-panel-border);
-}
-
-.miro-canvas-panel__group-title {
-  flex: 1 0 100%;
-  color: var(--miro-canvas-panel-muted);
-  font-weight: 600;
-}
-
-.miro-canvas-panel__navigation {
-  flex-wrap: wrap;
-}
-
-.miro-canvas-panel__navigation .miro-canvas-panel__group-title {
-  flex-basis: 100%;
-}
-
-.miro-canvas-panel__button {
-  min-height: var(--input-height, 28px);
-  padding: 2px 8px;
-  color: inherit;
-  background: var(--interactive-normal, var(--background-secondary));
-  border: 1px solid var(--miro-canvas-panel-border);
-  border-radius: var(--button-radius, var(--radius-s, 5px));
-  cursor: pointer;
-}
-
-.miro-canvas-panel__button:hover,
-.miro-canvas-panel__button:focus-visible {
-  background: var(--interactive-hover, var(--background-modifier-hover));
-  border-color: var(--interactive-accent, #7c3aed);
-}
-
-.miro-canvas-panel[data-miro-canvas-has-selection="false"] .miro-canvas-panel__selection-only {
-  display: none;
-}
-
-.miro-canvas-panel[data-miro-canvas-has-selection="false"] .miro-canvas-panel__selection-toolbar {
-  display: none;
-}
-
-.miro-canvas-panel__selection-toolbar {
-  position: absolute;
-  top: 0;
-  right: calc(100% + 8px);
-  display: flex;
-  gap: 8px;
-  width: min(720px, calc(100vw - 276px));
+.miro-canvas-dock__map,
+.miro-canvas-dock__bar,
+.miro-canvas-dock__menu {
   box-sizing: border-box;
-  padding: 7px;
-  background: color-mix(in srgb, var(--miro-canvas-panel-bg) 96%, transparent);
-  border: 1px solid var(--miro-canvas-panel-border);
-  border-radius: var(--radius-m, 10px);
-  box-shadow: var(--shadow-s, 0 4px 18px rgb(0 0 0 / 16%));
-  backdrop-filter: blur(10px);
-}
-
-.miro-canvas-panel__selection-toolbar > .miro-canvas-panel__group {
-  align-content: start;
-  margin: 0;
-  padding: 0;
-  border: 0;
-}
-
-.miro-canvas-panel__selection-toolbar > .miro-canvas-panel__group + .miro-canvas-panel__group {
-  padding-left: 8px;
-  border-left: 1px solid var(--miro-canvas-panel-border);
-}
-
-.miro-canvas-panel__typography {
-  flex: 1 1 430px;
-}
-
-.miro-canvas-panel__colors {
-  flex: 0 1 260px;
-}
-
-.miro-canvas-panel__selection-toolbar .miro-canvas-panel__grid {
-  grid-template-columns: 1.35fr 1.05fr .8fr .9fr .9fr;
-}
-
-.miro-canvas-panel__selection-toolbar .miro-canvas-panel__colors .miro-canvas-panel__grid {
-  grid-template-columns: minmax(76px, .9fr) minmax(86px, 1fr) 30px auto;
-  align-items: end;
-}
-
-.miro-canvas-panel__button:disabled {
-  cursor: not-allowed;
-  opacity: .5;
-}
-
-.miro-canvas-panel__grid {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  gap: 5px;
-  width: 100%;
-}
-
-.miro-canvas-panel__label {
-  display: grid;
-  gap: 2px;
-  min-width: 0;
-}
-
-.miro-canvas-panel__label-text {
-  color: var(--miro-canvas-panel-muted);
-  font-size: .9em;
-}
-
-.miro-canvas-panel input[type="number"],
-.miro-canvas-panel input[type="text"],
-.miro-canvas-panel select {
-  min-width: 0;
-  max-width: 100%;
-  padding: 2px 4px;
-  color: inherit;
-  background: var(--background-primary-alt, rgb(127 127 127 / 7%));
-  border: 1px solid var(--miro-canvas-panel-border);
-  border-radius: 4px;
-}
-
-.miro-canvas-panel__stepper {
-  display: grid;
-  grid-template-columns: 25px minmax(38px, 1fr) 25px;
-  align-items: stretch;
-}
-
-.miro-canvas-panel__stepper .miro-canvas-panel__button {
-  min-height: 26px;
-  padding: 0;
-  border-radius: 4px 0 0 4px;
-}
-
-.miro-canvas-panel__stepper .miro-canvas-panel__button:last-child {
-  border-radius: 0 4px 4px 0;
-}
-
-.miro-canvas-panel__stepper input {
-  border-right: 0;
-  border-left: 0;
-  border-radius: 0;
-  text-align: center;
-}
-
-.miro-canvas-panel__native-color {
-  width: 30px;
-  height: 28px;
-  padding: 2px !important;
-  border-radius: 50% !important;
-  cursor: pointer;
-}
-
-.miro-canvas-panel__format {
-  width: 28px;
-  font-weight: 700;
-}
-
-.miro-canvas-panel__format--italic {
-  font-style: italic;
-}
-
-.miro-canvas-panel__format--underline {
-  text-decoration: underline;
-}
-
-.miro-canvas-panel__format[aria-pressed="true"] {
-  color: var(--text-on-accent, #fff);
-  background: var(--interactive-accent, #7c3aed);
-}
-
-.miro-canvas-panel__swatches {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  width: 100%;
-  padding-top: 2px;
-}
-
-.miro-canvas-panel__swatch {
-  width: 22px;
-  height: 22px;
-  padding: 0;
-  background: var(--miro-canvas-swatch, transparent);
-  border: 2px solid var(--miro-canvas-panel-border);
-  border-radius: 50%;
-  cursor: pointer;
-}
-
-.miro-canvas-panel__swatch:hover,
-.miro-canvas-panel__swatch:focus-visible {
-  outline: 2px solid var(--interactive-accent, #7c3aed);
-  outline-offset: 1px;
-}
-
-.miro-canvas-panel__muted,
-.miro-canvas-panel__status {
-  color: var(--miro-canvas-panel-muted);
-}
-
-.miro-canvas-panel__status,
-.miro-canvas-panel__selection {
-  padding: 2px 0;
-}
-
-.miro-canvas-panel__diagnostics {
-  display: grid;
-  gap: 3px;
-  width: 100%;
-  color: var(--text-warning, #a15c00);
-  font-size: .9em;
-}
-
-.miro-canvas-panel__diagnostic {
-  padding: 3px 4px;
-  border-left: 2px solid currentcolor;
-}
-
-.miro-canvas-minimap {
-  position: absolute;
-  right: 14px;
-  bottom: 68px;
-  z-index: 96;
-  box-sizing: border-box;
-  padding: 6px;
-  background: color-mix(in srgb, var(--background-primary) 94%, transparent);
-  border: 1px solid var(--background-modifier-border);
-  border-radius: var(--radius-m, 10px);
+  background: var(--miro-canvas-dock-bg);
+  border: 1px solid var(--miro-canvas-dock-border);
+  border-radius: var(--radius-m, 8px);
   box-shadow: var(--shadow-s, 0 4px 18px rgb(0 0 0 / 18%));
-  backdrop-filter: blur(10px);
 }
 
-.miro-canvas-minimap[hidden] {
-  display: none;
+.miro-canvas-dock__map {
+  padding: 4px;
 }
 
 .miro-canvas-panel__minimap-canvas {
@@ -325,13 +90,240 @@
   width: 220px;
   height: 146px;
   border: 0;
-  border-radius: var(--radius-s, 6px);
+  border-radius: var(--radius-s, 4px);
   cursor: crosshair;
 }
 
 .miro-canvas-panel__minimap-canvas:focus-visible {
   outline: 2px solid var(--interactive-accent, #7c3aed);
   outline-offset: 1px;
+}
+
+.miro-canvas-dock__bar {
+  display: flex;
+  align-items: center;
+  padding: 3px;
+}
+
+.miro-canvas-dock__group {
+  display: inline-flex;
+  align-items: center;
+  gap: 1px;
+}
+
+.miro-canvas-dock__group + .miro-canvas-dock__group {
+  margin-left: 3px;
+  padding-left: 3px;
+  border-left: 1px solid var(--miro-canvas-dock-border);
+}
+
+.miro-canvas-dock .miro-canvas-dock__button {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  min-width: 28px;
+  height: 28px;
+  margin: 0;
+  padding: 0 5px;
+  color: var(--icon-color, var(--text-muted));
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-s, 4px);
+  box-shadow: none;
+  cursor: pointer;
+  font-size: inherit;
+}
+
+.miro-canvas-dock .miro-canvas-dock__button > .svg-icon {
+  width: var(--icon-s, 16px);
+  height: var(--icon-s, 16px);
+}
+
+.miro-canvas-dock .miro-canvas-dock__button:hover:not(:disabled),
+.miro-canvas-dock .miro-canvas-dock__button[aria-expanded="true"] {
+  color: var(--icon-color-hover, var(--text-normal));
+  background: var(--background-modifier-hover);
+}
+
+.miro-canvas-dock .miro-canvas-dock__button[aria-pressed="true"] {
+  color: var(--interactive-accent);
+}
+
+.miro-canvas-dock .miro-canvas-dock__zoom {
+  min-width: 48px;
+  color: var(--text-normal);
+  font-variant-numeric: tabular-nums;
+}
+
+.miro-canvas-dock .miro-canvas-dock__diagnostics {
+  color: var(--text-warning, #d97706);
+}
+
+.miro-canvas-dock__badge {
+  margin-left: 2px;
+  font-size: var(--font-ui-smaller, 11px);
+  font-variant-numeric: tabular-nums;
+}
+
+.miro-canvas-dock__status {
+  padding: 0 6px;
+  color: var(--text-accent);
+  font-size: var(--font-ui-smaller, 11px);
+}
+
+/* Menus open over the map, right-aligned with the bar. */
+.miro-canvas-dock__menu {
+  display: flex;
+  flex-direction: column;
+  min-width: 232px;
+  max-width: min(320px, calc(100vw - 32px));
+  max-height: min(420px, calc(100vh - 120px));
+  overflow-y: auto;
+  padding: 6px;
+}
+
+.miro-canvas-dock__heading {
+  padding: 4px 8px 2px;
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller, 11px);
+}
+
+.miro-canvas-dock__separator {
+  height: 1px;
+  margin: 5px 2px;
+  background: var(--miro-canvas-dock-border);
+}
+
+.miro-canvas-dock .miro-canvas-dock__item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  height: auto;
+  min-height: 30px;
+  margin: 0;
+  padding: 4px 8px;
+  color: var(--text-normal);
+  text-align: left;
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-s, 4px);
+  box-shadow: none;
+  cursor: pointer;
+  font-size: inherit;
+}
+
+.miro-canvas-dock .miro-canvas-dock__item:hover:not(:disabled) {
+  background: var(--background-modifier-hover);
+}
+
+.miro-canvas-dock .miro-canvas-dock__item:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.miro-canvas-dock__item-icon {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  color: var(--icon-color, var(--text-muted));
+}
+
+.miro-canvas-dock__item-icon > .svg-icon {
+  width: var(--icon-s, 16px);
+  height: var(--icon-s, 16px);
+}
+
+.miro-canvas-dock__item-label {
+  flex: 1;
+}
+
+.miro-canvas-dock__item-hint {
+  color: var(--text-faint);
+  font-size: var(--font-ui-smaller, 11px);
+}
+
+/* A switch in Obsidian's own shape. */
+.miro-canvas-dock__switch {
+  position: relative;
+  flex: none;
+  width: 26px;
+  height: 14px;
+  background: var(--background-modifier-border-hover, var(--background-modifier-border));
+  border-radius: 7px;
+  transition: background 120ms ease;
+}
+
+.miro-canvas-dock__switch::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 10px;
+  height: 10px;
+  background: var(--background-primary);
+  border-radius: 50%;
+  transition: transform 120ms ease;
+}
+
+.miro-canvas-dock__item[aria-checked="true"] .miro-canvas-dock__switch {
+  background: var(--interactive-accent);
+}
+
+.miro-canvas-dock__item[aria-checked="true"] .miro-canvas-dock__switch::after {
+  transform: translateX(12px);
+}
+
+.miro-canvas-dock__segments {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 4px;
+  padding: 2px 4px 4px;
+}
+
+.miro-canvas-dock .miro-canvas-dock__segment {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  height: auto;
+  margin: 0;
+  padding: 6px 4px;
+  color: var(--text-muted);
+  background: transparent;
+  border: 1px solid var(--miro-canvas-dock-border);
+  border-radius: var(--radius-s, 4px);
+  box-shadow: none;
+  cursor: pointer;
+  font-size: var(--font-ui-smaller, 11px);
+}
+
+.miro-canvas-dock .miro-canvas-dock__segment:hover {
+  color: var(--text-normal);
+  background: var(--background-modifier-hover);
+}
+
+.miro-canvas-dock .miro-canvas-dock__segment[aria-pressed="true"] {
+  color: var(--interactive-accent);
+  border-color: var(--interactive-accent);
+}
+
+.miro-canvas-panel__diagnostics {
+  display: grid;
+  gap: 3px;
+  padding: 2px 4px 4px;
+  color: var(--text-warning, #a15c00);
+  font-size: var(--font-ui-smaller, 11px);
+}
+
+.miro-canvas-panel__diagnostic {
+  padding: 3px 6px;
+  border-left: 2px solid currentcolor;
+  overflow-wrap: anywhere;
 }
 
 .miro-canvas-attachment-label {
@@ -400,28 +392,36 @@
 
 .miro-canvas-command-modal__list {
   display: grid;
-  gap: 4px;
+  gap: 1px;
 }
 
-.miro-canvas-command-modal__item {
+/* Rows read like Obsidian's own suggestion list; doubled so its button style does not win. */
+.miro-canvas-command-modal .miro-canvas-command-modal__item {
   display: grid;
+  justify-content: start;
+  justify-items: start;
   gap: 2px;
-  padding: 7px;
+  width: 100%;
+  height: auto;
+  padding: 7px 10px;
   color: inherit;
   text-align: left;
-  background: var(--background-secondary);
-  border: 1px solid var(--background-modifier-border);
-  border-radius: 5px;
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-s, 4px);
+  box-shadow: none;
   cursor: pointer;
+  font-size: var(--font-ui-medium, 14px);
 }
 
-.miro-canvas-command-modal__item:hover,
-.miro-canvas-command-modal__item:focus-visible {
-  border-color: var(--interactive-accent);
+.miro-canvas-command-modal .miro-canvas-command-modal__item:hover,
+.miro-canvas-command-modal .miro-canvas-command-modal__item:focus-visible {
+  background: var(--background-modifier-hover);
 }
 
 .miro-canvas-command-modal__item-description {
   color: var(--text-muted);
+  font-size: var(--font-ui-smaller, 12px);
 }
 
 .miro-canvas-source-inspector__dialog {
@@ -796,9 +796,9 @@
     grid-column: 1 / -1;
   }
 
-  .miro-canvas-minimap {
+  .miro-canvas-dock {
     right: 10px;
-    bottom: 60px;
+    bottom: 32px;
   }
 
   .miro-canvas-panel__minimap-canvas {
@@ -1225,35 +1225,6 @@
   color: var(--text-muted);
   font-size: var(--font-ui-smaller, 12px);
   white-space: normal;
-}
-
-/* Zoom and the minimap toggle sit in the dock beside the map they navigate. */
-.miro-canvas-minimap__navigation {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  align-items: center;
-  justify-content: center;
-  margin-top: 6px;
-}
-
-.miro-canvas-minimap[data-miro-canvas-minimap="hidden"] .miro-canvas-minimap__navigation {
-  margin-top: 0;
-}
-
-.miro-canvas-minimap__navigation .miro-canvas-panel__button {
-  min-width: 30px;
-  min-height: 26px;
-  padding: 2px 6px;
-}
-
-.miro-canvas-minimap__toggle[aria-pressed="false"] {
-  opacity: 0.75;
-}
-
-/* The canvas is hidden on its own so the dock keeps carrying zoom. */
-.miro-canvas-panel__minimap-canvas[hidden] {
-  display: none;
 }
 
 /* Selection handles: the affordances native Canvas does not provide.  The

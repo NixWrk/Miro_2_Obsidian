@@ -121,6 +121,8 @@ export interface M1SessionOptions {
 	readonly persistenceProblem?: string;
 	/** Draws a named Obsidian icon; the toolbar falls back to glyphs without it. */
 	readonly setIcon?: (element: HTMLElement, icon: string) => void;
+	/** Opens this plugin's page in Obsidian's settings, from the board menu. */
+	readonly onOpenSettings?: () => void;
 	readonly onOpenCommentThread?: (threadId: string, origin: CommentOrigin) => void;
 }
 
@@ -138,7 +140,7 @@ export interface M1SessionSnapshot {
 
 type UnknownRecord = Record<string, unknown>;
 
-const PANEL_SELECTOR = ".miro-canvas-panel, .miro-canvas-toolbar, .miro-canvas-comment-markers, .miro-canvas-handles, .miro-canvas-minimap";
+const PANEL_SELECTOR = ".miro-canvas-panel, .miro-canvas-dock, .miro-canvas-toolbar, .miro-canvas-comment-markers, .miro-canvas-handles, .miro-canvas-minimap";
 const DEFAULT_TOOLBAR_FONT = "Inter";
 const DEFAULT_TOOLBAR_FONT_SIZE = 16;
 const REFRESH_INTERVAL_MS = 750;
@@ -674,9 +676,14 @@ export class M1CanvasSession {
 			onAttachment: (action) => this.applyAttachment(action),
 			onNavigation: (action) => this.applyNavigation(action),
 			openCommandModal: () => this.openCommandModal(),
+			openSourceInspector: () => this.openSourceInspector(),
+			...(options.onOpenSettings === undefined ? {} : { openSettings: options.onOpenSettings }),
 		};
 		const controlDocument = options.document ?? ownerDocument(this.root);
-		this.controls = new M1Controls(actions, { document: controlDocument });
+		this.controls = new M1Controls(actions, {
+			...(controlDocument === undefined ? {} : { document: controlDocument }),
+			...(options.setIcon === undefined ? {} : { setIcon: options.setIcon }),
+		});
 		this.toolbar = new SelectionToolbar({
 			onAppearance: (action) => this.applyAppearance(action),
 			onStyle: (patch) => this.applyElementStyle(patch),
@@ -1618,7 +1625,7 @@ export class M1CanvasSession {
 		for (const diagnostic of markerModel?.diagnostics ?? []) {
 			diagnostics.push(`Comment ${diagnostic.threadId}: ${diagnostic.message}`);
 		}
-		const minimapVisible = this.appearance.settings.minimapVisible !== false;
+		const minimapVisible = this.minimapShown();
 		const drawSignature = `${this.lastMinimapSignature}|${minimapVisible ? "visible" : "hidden"}`;
 		if (drawSignature !== this.lastDrawSignature || minimapChanged) {
 			this.drawMinimap();
@@ -1634,8 +1641,11 @@ export class M1CanvasSession {
 			lockedSelection,
 			showAttachmentNames: this.appearance.settings.showAttachmentNames !== false,
 			...(selectedAttachmentNames === undefined ? {} : { selectedAttachmentNames }),
-			minimapVisible: this.appearance.settings.minimapVisible !== false,
+			minimapVisible,
 			diagnostics: [...new Set(diagnostics)],
+			...(viewport === undefined ? {} : { zoom: Math.round(viewport.zoom * 100) / 100 }),
+			...this.nativeSnapping(),
+			showDiagnostics: this.settings.showDiagnostics,
 		};
 		this.lastSnapshot = {
 			status: this.adapter.status,
@@ -1655,6 +1665,10 @@ export class M1CanvasSession {
 			selectedAttachmentNames: state.selectedAttachmentNames,
 			minimapVisible: state.minimapVisible,
 			diagnostics: state.diagnostics,
+			zoom: state.zoom,
+			snapToGrid: state.snapToGrid,
+			snapToObjects: state.snapToObjects,
+			showDiagnostics: state.showDiagnostics,
 		});
 		if (controlSignature !== this.lastControlSignature) {
 			this.lastControlSignature = controlSignature;
@@ -2212,7 +2226,7 @@ export class M1CanvasSession {
 		if (action === "toggle-minimap") {
 			this.writeMetadata("minimap-visibility", (draft) => {
 				const settings = isRecord(draft.settings) ? { ...draft.settings } : {};
-				settings.minimapVisible = this.appearance.settings.minimapVisible === false;
+				settings.minimapVisible = !this.minimapShown();
 				draft.settings = settings;
 			});
 			return;
@@ -2224,13 +2238,51 @@ export class M1CanvasSession {
 			applied = this.viewport.zoomOut();
 		} else if (action === "zoom-reset") {
 			applied = this.viewport.resetZoom();
+		} else if (action === "zoom-50" || action === "zoom-200") {
+			applied = this.viewport.setZoom(action === "zoom-50" ? 0.5 : 2);
 		} else if (action === "zoom-fit") {
 			applied = this.viewport.fitToBounds(this.minimap?.contentBounds, clientSize(this.root));
+		} else if (action === "undo" || action === "redo") {
+			// Native history holds every edit this plugin makes, so it undoes them all alike.
+			applied = this.callNative(action);
+		} else if (action === "toggle-snap-grid" || action === "toggle-snap-objects") {
+			const grid = action === "toggle-snap-grid";
+			const current = this.nativeSnapping()[grid ? "snapToGrid" : "snapToObjects"];
+			applied = current !== undefined && this.callNative(grid ? "toggleGridSnapping" : "toggleObjectSnapping", [!current]);
 		}
 		if (!applied) {
 			this.addDiagnostic(`Navigation action "${action}" is unavailable in this Canvas runtime.`);
 		}
 		this.refresh();
+	}
+
+	/** A board shows its minimap as it was last set, or as the plugin settings say for a new board. */
+	private minimapShown(): boolean {
+		const stored = this.appearance.settings.minimapVisible;
+		return typeof stored === "boolean" ? stored : this.settings.minimapVisible;
+	}
+
+	/** Obsidian's own snapping switches, as its Canvas settings menu shows them. */
+	private nativeSnapping(): { snapToGrid?: boolean; snapToObjects?: boolean } {
+		const options = readRuntime(this.nativeCanvas(), "options");
+		const grid = readRuntime(options, "snapToGrid");
+		const objects = readRuntime(options, "snapToObjects");
+		return {
+			...(typeof grid === "boolean" ? { snapToGrid: grid } : {}),
+			...(typeof objects === "boolean" ? { snapToObjects: objects } : {}),
+		};
+	}
+
+	private callNative(method: string, args: readonly unknown[] = []): boolean {
+		const canvas = this.nativeCanvas();
+		const run = readRuntime(canvas, method);
+		if (typeof run !== "function") return false;
+		try {
+			Reflect.apply(run, canvas, args);
+			return true;
+		} catch {
+			return false;
+		}
 	}
 
 	private openCommandModal(): void {
