@@ -1039,6 +1039,44 @@
   background: var(--text-faint);
 }
 
+/* Obsidian's own colour: half background, half text, the way an automatic
+   choice is usually drawn.  It leads every palette and marks the button of a
+   slot that sets nothing. */
+.miro-canvas-toolbar__standard {
+  justify-content: space-between;
+}
+
+.miro-canvas-toolbar .miro-canvas-toolbar__button--default {
+  gap: 6px;
+  padding: 0 8px 0 5px;
+  color: var(--text-normal);
+}
+
+.miro-canvas-toolbar__default-mark {
+  box-sizing: border-box;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--background-primary) 50%, var(--text-muted) 50%);
+  box-shadow: inset 0 0 0 1px var(--background-modifier-border-hover, var(--background-modifier-border));
+}
+
+.miro-canvas-toolbar__default-label {
+  font-size: var(--font-ui-smaller, 12px);
+}
+
+.miro-canvas-toolbar__button[data-look="fill"][data-color-origin="obsidian"] > .miro-canvas-toolbar__swatch-mark {
+  background: linear-gradient(135deg, var(--background-primary) 50%, var(--text-muted) 50%);
+}
+
+.miro-canvas-toolbar__button[data-look="ring"][data-color-origin="obsidian"] > .miro-canvas-toolbar__swatch-mark {
+  border-color: var(--text-muted);
+}
+
+.miro-canvas-toolbar__button[data-look="text"][data-color-origin="obsidian"]::after {
+  background: var(--text-normal);
+}
+
 /* Popover panels are the only place a long list is allowed to appear. */
 .miro-canvas-toolbar__panel {
   position: absolute;
@@ -1184,17 +1222,17 @@
   padding: 0;
   background: var(--miro-canvas-swatch, transparent);
   border-radius: 50%;
-  box-shadow: inset 0 0 0 1px rgb(0 0 0 / 15%);
+  box-shadow: inset 0 0 0 1px var(--background-modifier-border-hover, rgb(128 128 128 / 40%));
 }
 
 .miro-canvas-toolbar .miro-canvas-toolbar__button--swatch:hover:not(:disabled) {
   background: var(--miro-canvas-swatch, transparent);
-  box-shadow: inset 0 0 0 1px rgb(0 0 0 / 15%), 0 0 0 2px var(--background-modifier-border-hover, var(--miro-canvas-toolbar-border));
+  box-shadow: inset 0 0 0 1px var(--background-modifier-border-hover, rgb(128 128 128 / 40%)), 0 0 0 2px var(--background-modifier-border-hover, var(--miro-canvas-toolbar-border));
 }
 
 .miro-canvas-toolbar .miro-canvas-toolbar__button--swatch[aria-pressed="true"] {
   background: var(--miro-canvas-swatch, transparent);
-  box-shadow: inset 0 0 0 1px rgb(0 0 0 / 15%), 0 0 0 2px var(--miro-canvas-toolbar-bg), 0 0 0 3px var(--interactive-accent);
+  box-shadow: inset 0 0 0 1px var(--background-modifier-border-hover, rgb(128 128 128 / 40%)), 0 0 0 2px var(--miro-canvas-toolbar-bg), 0 0 0 3px var(--interactive-accent);
 }
 
 /* The custom colour picker is one more, wider swatch at the end. */
@@ -1206,7 +1244,7 @@
   background: none;
   border: 0;
   border-radius: 11px;
-  box-shadow: inset 0 0 0 1px rgb(0 0 0 / 15%);
+  box-shadow: inset 0 0 0 1px var(--background-modifier-border-hover, rgb(128 128 128 / 40%));
   cursor: pointer;
 }
 

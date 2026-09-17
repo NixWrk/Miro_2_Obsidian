@@ -109,6 +109,13 @@ function panelOf(root: FakeElement, buttonLabel: string): FakeElement {
   return host.children.find((child) => child.className.includes("__panel"))!;
 }
 
+/** The control with a label inside one popover. */
+function inPanel(root: FakeElement, popover: string, label: string): FakeElement {
+  const matches = descendants(panelOf(root, popover)).filter((item) => item.attributes.get("aria-label") === label);
+  if (matches.length !== 1) throw new Error(`expected one ${label} in ${popover}, found ${matches.length}`);
+  return matches[0]!;
+}
+
 /** The choice carrying a value inside one popover. */
 function choice(root: FakeElement, popover: string, value: string): FakeElement {
   const matches = descendants(panelOf(root, popover)).filter((item) => item.attributes.get("data-value") === value);
@@ -334,8 +341,8 @@ describe("selection toolbar", () => {
     const fill = byLabel(root, "Custom fill color");
     fill.value = "#123456";
     fill.dispatch("change");
-    byLabel(root, "Clear fill color").dispatch("click");
-    byLabel(root, "Clear border color").dispatch("click");
+    inPanel(root, "Fill color", "Transparent").dispatch("click");
+    inPanel(root, "Border", "Transparent").dispatch("click");
     expect(appearance).toEqual([
       { type: APPEARANCE_ACTIONS.setFontSize, fontSize: 19 },
       { type: APPEARANCE_ACTIONS.setFontSize, fontSize: 17 },
@@ -343,6 +350,33 @@ describe("selection toolbar", () => {
       { type: APPEARANCE_ACTIONS.setColor, slot: "fill", color: null },
       { type: APPEARANCE_ACTIONS.setColor, slot: "border", color: null },
     ]);
+  });
+
+  it("leads every palette with Obsidian's own colour and marks it while nothing is set", () => {
+    const { root, appearance, update } = build({ colors: { fill: "#abcdef", border: null } });
+    for (const popover of ["Text color", "Fill color", "Border"]) {
+      inPanel(root, popover, "Obsidian color").dispatch("click");
+    }
+    update({ ...EDGE, colors: {} });
+    inPanel(root, "Line color", "Obsidian color").dispatch("click");
+    expect(appearance).toEqual([
+      { type: APPEARANCE_ACTIONS.resetColor, slot: "text" },
+      { type: APPEARANCE_ACTIONS.resetColor, slot: "fill" },
+      { type: APPEARANCE_ACTIONS.resetColor, slot: "border" },
+      { type: APPEARANCE_ACTIONS.resetColor, slot: "edge" },
+    ]);
+    update({ colors: { fill: "#abcdef", border: null } });
+    const pressedIn = (popover: string, label: string) => inPanel(root, popover, label).getAttribute("aria-pressed");
+    expect(pressedIn("Text color", "Obsidian color")).toBe("true");
+    expect(pressedIn("Fill color", "Obsidian color")).toBe("false");
+    expect(pressedIn("Border", "Obsidian color")).toBe("false");
+    expect(pressedIn("Border", "Transparent")).toBe("true");
+    expect(byLabel(root, "Text color").getAttribute("data-color-origin")).toBe("obsidian");
+    expect(byLabel(root, "Fill color").getAttribute("data-color-origin")).toBe("board");
+    // A transparent line or text would only hide the element.
+    expect(inPanel(root, "Text color", "Transparent").hidden).toBe(true);
+    expect(inPanel(root, "Line color", "Transparent").hidden).toBe(true);
+    expect(inPanel(root, "Fill color", "Transparent").hidden).toBe(false);
   });
 
   it("sets a border's style from pictures and its width from a slider", () => {

@@ -424,6 +424,7 @@ const APPEARANCE_STYLE_PROPERTIES = [
 	"background-color",
 	"border-color",
 	"stroke",
+	"--canvas-color",
 ] as const;
 const THEME_STYLE_PROPERTIES = ["color-scheme", "background-color", "color"] as const;
 
@@ -1605,8 +1606,8 @@ export class M1CanvasSession {
 		}
 		for (const edge of this.scene.edges) {
 			const id = readCanvasElementId(edge);
-			if (id !== undefined && this.appearance.localOverrides[id]?.colors !== undefined
-				&& readCanvasElementDom(edge) === undefined) {
+			if (id !== undefined && this.appearance.localOverrides[id]?.colors?.edge !== undefined
+				&& !isElement(readRuntime(edge, "lineGroupEl"))) {
 				diagnostics.push(`Edge ${id} appearance is persisted, but this Canvas runtime exposes no safe edge DOM target.`);
 			}
 		}
@@ -2144,6 +2145,7 @@ export class M1CanvasSession {
 				return;
 			}
 		}
+		const slot = readRuntime(action, "slot");
 		this.writeMetadata(type, (draft) => {
 			const previous = normalizeAppearanceState(draft);
 			let next = previous;
@@ -2156,6 +2158,33 @@ export class M1CanvasSession {
 			}
 			return mergeAppearanceMetadata(draft, next, previous);
 		});
+		// Obsidian's own colour also lives on the element as a Canvas preset,
+		// tinting a node's fill and border and a connector's line.  It is taken
+		// off after the metadata commit, which refuses a graph that changed
+		// under it, and saved the way Canvas saves its own colour menu.
+		if (type === APPEARANCE_ACTIONS.resetColor && (slot === "fill" || slot === "border" || slot === "edge")
+			&& this.clearNativeColors(this.selectedIds)) {
+			this.adapter.requestSave();
+			this.refresh();
+		}
+	}
+
+	/** Take native Canvas colour presets off elements, the way its own colour menu does. */
+	private clearNativeColors(ids: readonly string[]): boolean {
+		let cleared = false;
+		for (const item of [...(this.adapter.getNodes() ?? []), ...(this.adapter.getEdges() ?? [])]) {
+			const id = readCanvasElementId(item);
+			const color = readRuntime(item, "color");
+			const setColor = readRuntime(item, "setColor");
+			if (id === undefined || !ids.includes(id) || typeof color !== "string" || color === "" || typeof setColor !== "function") continue;
+			try {
+				Reflect.apply(setColor, item, ["", false]);
+				cleared = true;
+			} catch {
+				this.addDiagnostic("Canvas refused to clear its own color on an element.");
+			}
+		}
+		return cleared;
 	}
 
 	private applyInteraction(action: Record<string, unknown>): void {
@@ -2372,16 +2401,20 @@ export class M1CanvasSession {
 			// vertical control visible without replacing the native content.
 			this.setAppearanceStyle(element, "justify-content", vertical.css);
 		}
+		// Only the slots a board sets are painted; the rest keep Obsidian's colours.
 		if (colors !== undefined) {
 			if (isEdge) {
-				const edge = colorToCss(colors.edge);
-				this.setAppearanceStyle(element, "stroke", edge);
-				this.setAppearanceStyle(element, "color", edge);
-				this.setAppearanceStyle(element, "border-color", edge);
+				if (colors.edge !== undefined) {
+					// Native Canvas paints a connector's line and arrowhead from
+					// --canvas-color, which an inherited stroke never reaches.
+					const edge = colorToCss(colors.edge);
+					this.setAppearanceStyle(element, "--canvas-color", edge);
+					this.setAppearanceStyle(element, "color", edge);
+				}
 			} else {
-				this.setAppearanceStyle(element, "color", colorToCss(colors.text));
-				this.setAppearanceStyle(element, "background-color", colorToCss(colors.fill));
-				this.setAppearanceStyle(element, "border-color", colorToCss(colors.border));
+				if (colors.text !== undefined) this.setAppearanceStyle(element, "color", colorToCss(colors.text));
+				if (colors.fill !== undefined) this.setAppearanceStyle(element, "background-color", colorToCss(colors.fill));
+				if (colors.border !== undefined) this.setAppearanceStyle(element, "border-color", colorToCss(colors.border));
 			}
 		}
 	}
@@ -2448,12 +2481,16 @@ export class M1CanvasSession {
 		}
 		for (const edge of this.scene.edges) {
 			const id = readCanvasElementId(edge);
-			const dom = readCanvasElementDom(edge);
-			if (id === undefined || dom === undefined) {
+			const colors = id === undefined ? undefined : this.appearance.localOverrides[id]?.colors;
+			if (colors?.edge === undefined) {
 				continue;
 			}
-			const override = this.appearance.localOverrides[id];
-			this.applyElementAppearance(dom, undefined, override?.colors, true);
+			// A connector has no HTML element of its own: its line and its
+			// arrowhead are SVG groups, and both take the colour.
+			for (const key of ["lineGroupEl", "lineEndGroupEl"]) {
+				const group = readRuntime(edge, key);
+				if (isElement(group)) this.applyElementAppearance(group, undefined, colors, true);
+			}
 		}
 	}
 

@@ -163,6 +163,8 @@ const COLOR_SLOTS: readonly {
   { slot: "border", label: "Border", valueLabel: "Border color", look: "ring", forEdge: false },
   { slot: "edge", label: "Line color", valueLabel: "Line color", look: "fill", forEdge: true },
 ];
+/** Transparent text or a transparent line only hides the element; a fill or a border may go. */
+const TRANSPARENT_SLOTS: ReadonlySet<ColorSlot> = new Set<ColorSlot>(["fill", "border"]);
 
 function hasDocument(value: unknown): value is Document {
   return value !== null && typeof value === "object"
@@ -347,6 +349,9 @@ interface Popover {
 interface ColorRefs {
   readonly popover: Popover;
   readonly input: HTMLInputElement;
+  /** Back to Obsidian's own colour for this slot. */
+  readonly reset: HTMLButtonElement;
+  /** Transparent; only where no colour is a sensible choice. */
   readonly clear: HTMLButtonElement;
   readonly swatches: HTMLElement;
   readonly recent: HTMLElement;
@@ -595,6 +600,13 @@ export class SelectionToolbar {
       popover.button.setAttribute("data-look", look);
       if (look === "text") this.icon(popover.button, "baseline", "A");
       else append(popover.button, make(document, "span", "miro-canvas-toolbar__swatch-mark"));
+      // Obsidian's own colour leads the palette, so any colour can be undone.
+      const standard = this.block(popover.panel, undefined, "miro-canvas-toolbar__row miro-canvas-toolbar__standard");
+      const reset = append(standard, makeButton(document, "Obsidian color", "miro-canvas-toolbar__button--default"));
+      reset.setAttribute("data-color-default", slot);
+      reset.setAttribute("aria-pressed", "false");
+      append(reset, make(document, "span", "miro-canvas-toolbar__default-mark"));
+      append(reset, make(document, "span", "miro-canvas-toolbar__default-label", "Default"));
       const swatches = this.block(popover.panel, undefined, "miro-canvas-toolbar__pictures miro-canvas-toolbar__palette");
       swatches.setAttribute("data-color-palette", slot);
       const recent = this.block(popover.panel, undefined, "miro-canvas-toolbar__pictures miro-canvas-toolbar__palette miro-canvas-toolbar__palette--recent");
@@ -605,9 +617,11 @@ export class SelectionToolbar {
       // Distinct from the popover button's own label so assistive technology
       // and tests can address the value control unambiguously.
       input.setAttribute("aria-label", `Custom ${valueLabel.toLowerCase()}`);
-      const clear = append(custom, makeButton(document, `Clear ${valueLabel.toLowerCase()}`));
+      const clear = append(standard, makeButton(document, "Transparent", "miro-canvas-toolbar__button--transparent"));
+      clear.setAttribute("aria-pressed", "false");
       this.icon(clear, "ban", "∅");
-      colors[slot] = { popover, input, clear, swatches, recent };
+      clear.hidden = !TRANSPARENT_SLOTS.has(slot);
+      colors[slot] = { popover, input, reset, clear, swatches, recent };
     }
     const borderPanel = colors.border!.popover.panel;
     const borderStyles = this.choices(
@@ -707,6 +721,7 @@ export class SelectionToolbar {
         if (value !== undefined) this.appearance({ type: APPEARANCE_ACTIONS.setColor, slot, color: value });
       });
       this.listen(color.clear, "click", () => this.appearance({ type: APPEARANCE_ACTIONS.setColor, slot, color: null }));
+      this.listen(color.reset, "click", () => this.appearance({ type: APPEARANCE_ACTIONS.resetColor, slot }));
     }
     for (const option of refs.borderStyles) {
       this.listen(option, "click", () => this.style({ borderStyle: valueOf(option) as BorderStyle }));
@@ -831,6 +846,10 @@ export class SelectionToolbar {
     for (const { slot } of COLOR_SLOTS) {
       const color = normalizedHex(state.colors[slot]);
       const slotRefs = refs.colors[slot]!;
+      // Absent is Obsidian's own colour; null is a transparent choice.
+      slotRefs.reset.setAttribute("aria-pressed", state.colors[slot] === undefined ? "true" : "false");
+      slotRefs.clear.setAttribute("aria-pressed", state.colors[slot] === null ? "true" : "false");
+      slotRefs.popover.button.setAttribute("data-color-origin", state.colors[slot] === undefined ? "obsidian" : "board");
       slotRefs.input.value = color ?? "#000000";
       slotRefs.popover.button.setAttribute("data-color-unset", color === undefined ? "true" : "false");
       slotRefs.popover.button.style.setProperty?.("--miro-canvas-swatch", color ?? "transparent");
@@ -882,7 +901,7 @@ export class SelectionToolbar {
       ...refs.fontOptions, refs.fontSize, refs.fontSizeDown, refs.fontSizeUp,
       ...Object.values(refs.formats), ...refs.alignments, ...refs.verticalAlignments, refs.lineHeight,
       ...refs.startCaps, ...refs.endCaps, refs.swapEnds, ...refs.routes, ...refs.strokes, refs.lineWidth,
-      ...Object.values(refs.colors).flatMap((color) => [color.input, color.clear]),
+      ...Object.values(refs.colors).flatMap((color) => [color.input, color.clear, color.reset]),
       ...refs.borderStyles, refs.borderWidth,
     ];
   }
