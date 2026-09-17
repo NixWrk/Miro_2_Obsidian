@@ -9,6 +9,7 @@ import {
   type CommentOrigin,
   type CommentThread,
 } from "./local-comments";
+import { authorColor, authorInitial, threadMessages } from "./comment-thread";
 
 export interface CommentMarker {
   /** Origin is part of the key: imported and local IDs can coincide. */
@@ -20,6 +21,9 @@ export interface CommentMarker {
   readonly point: AnchorPoint;
   readonly label: string;
   readonly replyCount: number;
+  /** The opening author's initial and colour, which the pin shows as Miro's does. */
+  readonly initial: string;
+  readonly color: string;
 }
 
 export interface CommentMarkersState extends CommentListOptions {
@@ -69,6 +73,10 @@ export function buildCommentMarkers(
       continue;
     }
     const status = thread.resolved ? "Resolved" : "Open";
+    // An exported thread lists its opening message among its messages.
+    const messages = threadMessages(thread);
+    const author = messages[0]?.author ?? commentAuthorLabel(thread);
+    const replyCount = Math.max(0, messages.length - 1);
     markers.push(Object.freeze({
       key: JSON.stringify([thread.origin, thread.id]),
       threadId: thread.id,
@@ -76,8 +84,10 @@ export function buildCommentMarkers(
       anchorType: anchor.type === "free" ? "board" : anchor.type,
       state: thread.resolved ? "resolved" : "open",
       point: Object.freeze({ x: point.x, y: point.y }),
-      label: `${status} comment by ${commentAuthorLabel(thread)}, ${commentTimeLabel(thread.createdAt, display)}: ${thread.text}. ${thread.replies.length} replies. Open thread`,
-      replyCount: thread.replies.length,
+      label: `${status} comment by ${author}, ${commentTimeLabel(thread.createdAt, display)}: ${messages[0]?.text ?? thread.text}. ${replyCount} replies. Open thread`,
+      replyCount,
+      initial: authorInitial(author),
+      color: authorColor(author),
     }));
   }
   return { markers: Object.freeze(markers), diagnostics: Object.freeze(diagnostics) };
@@ -163,8 +173,10 @@ export class CommentMarkers {
       button.setAttribute("data-comment-has-replies", marker.replyCount > 0 ? "true" : "false");
       button.setAttribute("aria-label", marker.label);
       button.title = marker.label;
-      button.textContent = marker.state === "resolved" ? "✓"
-        : marker.replyCount > 0 ? String(marker.replyCount + 1) : "";
+      // A pin shows who started the thread; a badge counts its messages.
+      button.textContent = marker.state === "resolved" ? "✓" : marker.initial;
+      button.style.setProperty?.("--miro-avatar", marker.color);
+      button.setAttribute("data-comment-count", String(marker.replyCount + 1));
       button.style.left = `${marker.point.x}px`;
       button.style.top = `${marker.point.y}px`;
     }

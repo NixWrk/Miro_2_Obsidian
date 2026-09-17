@@ -2210,44 +2210,280 @@
   pointer-events: none;
 }
 
-.miro-canvas-comment-marker {
+/* A comment is Miro's pin: its author's initial in a round badge with one
+   square corner pointing at the spot, and a count once it has replies.
+   Doubled selectors keep Obsidian's own button look away. */
+.miro-canvas-comment-markers .miro-canvas-comment-marker {
   display: grid;
   place-items: center;
-  width: 28px;
-  height: 28px;
-  min-width: 28px !important;
-  min-height: 28px !important;
+  width: 32px;
+  height: 32px;
+  min-width: 32px !important;
+  min-height: 32px !important;
   padding: 0;
-  color: var(--text-on-accent);
-  background: var(--interactive-accent);
+  color: #ffffff;
+  font-size: 13px;
+  font-weight: 600;
+  background: var(--miro-avatar, var(--interactive-accent));
   border: 2px solid var(--background-primary);
-  border-radius: 50%;
-  box-shadow: var(--shadow-s, 0 3px 10px rgb(0 0 0 / 25%));
+  border-radius: 50% 50% 50% 4px;
+  box-shadow: 0 2px 8px rgb(0 0 0 / 25%);
+  transform: translate(0, -100%) !important;
+  cursor: pointer;
   pointer-events: auto;
 }
 
-.miro-canvas-comment-marker[data-comment-state="resolved"] {
+.miro-canvas-comment-markers .miro-canvas-comment-marker:hover {
+  box-shadow: 0 0 0 2px var(--interactive-accent), 0 2px 8px rgb(0 0 0 / 25%);
+}
+
+.miro-canvas-comment-markers .miro-canvas-comment-marker[data-comment-state="resolved"] {
   color: var(--text-muted);
   background: var(--background-secondary);
   border-color: var(--background-modifier-border);
 }
 
-.miro-canvas-comment-marker[data-comment-state="open"][data-comment-has-replies="false"]::before {
-  content: "";
-  width: 11px;
-  height: 8px;
-  border: 2px solid currentColor;
-  border-radius: 4px;
+.miro-canvas-comment-marker[data-comment-count]:not([data-comment-count="1"])::after {
+  position: absolute;
+  top: -6px;
+  right: -8px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  color: var(--text-on-accent);
+  font-size: 10px;
+  line-height: 16px;
+  text-align: center;
+  content: attr(data-comment-count);
+  background: var(--interactive-accent);
+  border-radius: 8px;
 }
 
-.miro-canvas-comment-marker[data-comment-state="open"][data-comment-has-replies="false"]::after {
-  content: "";
+/* The thread a pin opens: header with the resolve switch, the messages and a
+   reply field, in a small card beside the pin. */
+.miro-canvas-thread {
   position: absolute;
-  width: 5px;
-  height: 5px;
-  margin: 9px 0 0 -7px;
-  border-left: 2px solid currentColor;
-  transform: skewY(-38deg);
+  z-index: 110;
+  display: flex;
+  flex-direction: column;
+  width: 320px;
+  max-height: min(420px, calc(100% - 16px));
+  color: var(--text-normal);
+  font-size: var(--font-ui-small);
+  background: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 14px;
+  box-shadow: var(--shadow-l);
+}
+
+.miro-canvas-thread[hidden] {
+  display: none;
+}
+
+.miro-canvas-thread__header {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 8px 8px 8px 14px;
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.miro-canvas-thread__spacer {
+  flex: 1;
+}
+
+.miro-canvas-thread .miro-canvas-thread__button {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 28px;
+  padding: 0 6px;
+  color: var(--text-normal);
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+  box-shadow: none;
+}
+
+.miro-canvas-thread .miro-canvas-thread__button:hover:not(:disabled) {
+  background: var(--background-modifier-hover);
+}
+
+.miro-canvas-thread .miro-canvas-thread__icon {
+  justify-content: center;
+  width: 28px;
+  padding: 0;
+  color: var(--icon-color);
+}
+
+.miro-canvas-thread__switch {
+  position: relative;
+  width: 28px;
+  height: 16px;
+  background: var(--background-modifier-border-hover);
+  border-radius: 8px;
+  transition: background-color 120ms ease;
+}
+
+.miro-canvas-thread__switch::after {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 12px;
+  height: 12px;
+  content: "";
+  background: #ffffff;
+  border-radius: 50%;
+  transition: transform 120ms ease;
+}
+
+.miro-canvas-thread__resolve[aria-checked="true"] .miro-canvas-thread__switch {
+  background: var(--interactive-accent);
+}
+
+.miro-canvas-thread__resolve[aria-checked="true"] .miro-canvas-thread__switch::after {
+  transform: translateX(12px);
+}
+
+.miro-canvas-thread__resolve:disabled {
+  opacity: 0.6;
+}
+
+.miro-canvas-thread__messages {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 14px;
+  overflow-y: auto;
+}
+
+.miro-canvas-thread__byline {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.miro-canvas-thread__avatar {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  color: #ffffff;
+  font-size: 11px;
+  font-weight: 600;
+  background: var(--miro-avatar);
+  border-radius: 50%;
+}
+
+.miro-canvas-thread__author {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.miro-canvas-thread__time {
+  flex: none;
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+}
+
+.miro-canvas-thread__text {
+  margin: 4px 0 0 28px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.miro-canvas-thread__note {
+  margin: 0;
+  padding: 8px 14px 10px;
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  border-top: 1px solid var(--background-modifier-border);
+}
+
+.miro-canvas-thread__note[hidden],
+.miro-canvas-thread__composer[hidden] {
+  display: none;
+}
+
+.miro-canvas-thread__composer {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 8px 8px 14px;
+  border-top: 1px solid var(--background-modifier-border);
+}
+
+.miro-canvas-thread .miro-canvas-thread__input {
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+}
+
+/* A converted comment node shows the same thread, statically. */
+.miro-source-comment-face {
+  gap: 12px;
+  padding: 14px 16px;
+  font-size: 14px;
+}
+
+.miro-source-comment-state {
+  align-self: flex-start;
+  padding: 1px 8px;
+  color: var(--text-muted);
+  font-size: 12px;
+  background: var(--background-modifier-hover);
+  border-radius: 8px;
+}
+
+[data-miro-source-comment-state="resolved"] .miro-source-comment-state {
+  color: var(--text-on-accent);
+  background: var(--interactive-accent);
+}
+
+.miro-source-comment-byline {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.miro-source-comment-avatar {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  color: #ffffff;
+  font-size: 12px;
+  font-weight: 600;
+  background: var(--miro-avatar);
+  border-radius: 50%;
+}
+
+.miro-source-comment-author {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.miro-source-comment-time {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.miro-source-comment-text {
+  margin: 4px 0 0 30px;
+  overflow-wrap: anywhere;
 }
 
 /* A source shape supplies its own vector contour, so only its native rectangular

@@ -97,7 +97,8 @@ import {
 	type SourceScene,
 } from "./source-model";
 import { CommentMarkers } from "./comment-markers";
-import { listCommentThreads, type CommentOrigin } from "./local-comments";
+import { addReply, listCommentThreads, setCommentResolved, type CommentOrigin, type CommentMutationResult } from "./local-comments";
+import { CommentThreadCard } from "./comment-thread";
 import {
 	boundaryAnchorOnRect,
 	buildCanvasAnchorGeometry,
@@ -146,7 +147,8 @@ type UnknownRecord = Record<string, unknown>;
 const STICKY_PALETTE: readonly PaletteColor[] = Object.freeze(MIRO_STICKY_COLORS.map((entry) => Object.freeze({
 	id: `miro-sticky-${entry.token}`, label: entry.label, color: entry.color, source: "miro" as const,
 })));
-const PANEL_SELECTOR = ".miro-canvas-panel, .miro-canvas-dock, .miro-canvas-toolbar, .miro-canvas-comment-markers, .miro-canvas-handles, .miro-canvas-minimap";
+const LOCAL_COMMENT_AUTHOR = Object.freeze({ name: "Local user" });
+const PANEL_SELECTOR = ".miro-canvas-panel, .miro-canvas-dock, .miro-canvas-thread, .miro-canvas-slideshow, .miro-canvas-toolbar, .miro-canvas-comment-markers, .miro-canvas-handles, .miro-canvas-minimap";
 const DEFAULT_TOOLBAR_FONT = "Inter";
 const DEFAULT_TOOLBAR_FONT_SIZE = 16;
 const REFRESH_INTERVAL_MS = 750;
@@ -634,6 +636,8 @@ export class M1CanvasSession {
 	/** Shape kind of each selected element, kept while the document is the same object. */
 	private shapeCache: { readonly document: unknown; readonly shapes: Map<string, string | undefined> } | undefined;
 	private commentThreadCache: { readonly document: unknown; readonly threads: ReturnType<typeof listCommentThreads> } | undefined;
+	private commentCard: CommentThreadCard | undefined;
+	private openThread: { readonly id: string; readonly origin: CommentOrigin } | undefined;
 	private minimapDragStart: MinimapPoint | undefined;
 	private minimapDragViewport: ViewportTransform | undefined;
 	private refreshTimer: ReturnType<typeof setInterval> | undefined;
@@ -716,7 +720,7 @@ export class M1CanvasSession {
 			onStraighten: (edgeId, grip) => this.straightenConnector(edgeId, grip),
 		}, { document: controlDocument });
 		this.commentMarkers = controlDocument === undefined ? undefined : new CommentMarkers({
-			onOpenThread: (threadId, origin) => this.options.onOpenCommentThread?.(threadId, origin),
+			onOpenThread: (threadId, origin) => this.openCommentThread(threadId, origin),
 		}, { document: controlDocument });
 	}
 
@@ -1698,19 +1702,97 @@ export class M1CanvasSession {
 		this.retargetFollow();
 	}
 
-	private updateCommentMarkers(): ReturnType<CommentMarkers["update"]> | undefined {
+	private commentThreads(): ReturnType<typeof listCommentThreads> {
 		const document = this.currentRawDocument;
 		let cache = this.commentThreadCache;
 		if (cache === undefined || cache.document !== document) {
 			cache = { document, threads: listCommentThreads(document, { includeResolved: true }) };
 			this.commentThreadCache = cache;
 		}
-		return this.commentMarkers?.update({
-			threads: cache.threads,
+		return cache.threads;
+	}
+
+	private updateCommentMarkers(): ReturnType<CommentMarkers["update"]> | undefined {
+		const model = this.commentMarkers?.update({
+			threads: this.commentThreads(),
 			includeResolved: true,
 			geometry: this.landingGeometry().geometry,
 			boardToViewport: (point) => this.viewport.boardToScreen(point) ?? point,
 		});
+		this.updateCommentCard(model);
+		return model;
+	}
+
+	/**
+	 * A pin opens its thread beside it, as in Miro; the full panel stays one
+	 * click away.  The card follows the pin while the board moves.
+	 */
+	private openCommentThread(threadId: string, origin: CommentOrigin): void {
+		const document = ownerDocument(this.root);
+		if (this.root === undefined || document === undefined) {
+			this.options.onOpenCommentThread?.(threadId, origin);
+			return;
+		}
+		if (this.commentCard === undefined) {
+			const card = new CommentThreadCard(document, {
+				onReply: (id, text) => this.mutateComment("reply-comment", (draft) => addReply(draft, id, text, { author: LOCAL_COMMENT_AUTHOR })),
+				onResolve: (id, resolved) => this.mutateComment("resolve-comment", (draft) => setCommentResolved(draft, id, resolved)),
+				onOpenPanel: (id, from) => {
+					this.closeCommentThread();
+					this.options.onOpenCommentThread?.(id, from);
+				},
+				onClose: () => this.closeCommentThread(),
+				...(this.options.setIcon === undefined ? {} : { setIcon: this.options.setIcon }),
+			});
+			this.root.appendChild(card.element);
+			// A press anywhere else on the board closes the card, as in Miro.
+			const outside = (event: Event): void => {
+				const target = event.target as Node | null;
+				if (this.openThread === undefined || target === null) return;
+				if (card.element.contains(target) || this.commentMarkers?.element.contains(target)) return;
+				this.closeCommentThread();
+			};
+			this.root.addEventListener("pointerdown", outside, true);
+			this.disposers.push(() => this.root?.removeEventListener("pointerdown", outside, true));
+			this.commentCard = card;
+		}
+		this.openThread = { id: threadId, origin };
+		this.updateCommentMarkers();
+	}
+
+	private closeCommentThread(): void {
+		this.openThread = undefined;
+		this.commentCard?.hide();
+	}
+
+	private updateCommentCard(model: ReturnType<CommentMarkers["update"]> | undefined): void {
+		const open = this.openThread;
+		const card = this.commentCard;
+		if (open === undefined || card === undefined) return;
+		const thread = this.commentThreads().find((item) => item.id === open.id && item.origin === open.origin);
+		const marker = model?.markers.find((item) => item.threadId === open.id && item.origin === open.origin);
+		if (thread === undefined) {
+			this.closeCommentThread();
+			return;
+		}
+		card.show(thread, { editable: this.appearance.settings.reviewMode !== true });
+		if (marker !== undefined) card.place(marker.point, clientSize(this.root));
+	}
+
+	private mutateComment(action: string, transform: (draft: Record<string, unknown>) => CommentMutationResult): void {
+		let problem: string | undefined;
+		const result = this.writeMetadata(action, (draft) => {
+			const mutation = transform(draft);
+			if (!mutation.ok || mutation.metadata === undefined) {
+				problem = mutation.diagnostics[0]?.message ?? "The comment could not be changed.";
+				throw new Error(problem);
+			}
+			return mutation.metadata as Record<string, unknown>;
+		});
+		if (result?.status !== "applied" && result?.status !== "noop") {
+			this.options.onNotice?.(problem ?? result?.diagnostics[0]?.message ?? "The comment could not be saved.");
+		}
+		this.refresh();
 	}
 
 	/**
@@ -3456,6 +3538,7 @@ export class M1CanvasSession {
 		this.toolbar.dispose();
 		this.handles.dispose();
 		this.commentMarkers?.destroy();
+		this.commentCard?.destroy();
 		this.authoring?.dispose();
 		this.authoring = undefined;
 		this.sourceRenderer?.dispose();

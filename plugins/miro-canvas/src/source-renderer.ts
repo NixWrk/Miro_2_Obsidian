@@ -6,6 +6,7 @@ import { SHAPE_CLIP_PATHS, inscribedInsets, shapeOutline, shapePath, type ShapeP
 import { CAP_PATHS, capFilled, strokeDash } from "./connector-style";
 import { readableInk } from "./miro-palette";
 import { codeLineCount, fitFontSize, lineNumbersCss, plainText } from "./text-fit";
+import { authorColor, authorInitial, shortTime } from "./comment-thread";
 import { planRoute, routePath, type RouteEnd as PlannedEnd, type RouteSegment } from "./connector-route";
 import { normalizeAnchor, resolveAnchor, type AnchorEdgeGeometry, type AnchorPoint, type AnchorRect } from "./anchors";
 import { readCanvasElementId } from "./canvas-elements";
@@ -411,6 +412,35 @@ function decorateCode(document: Document | undefined, layer: DomElementLike, des
   setOwnedElementText(label, title);
   safeCall(layer, "appendChild", [label]);
   return true;
+}
+
+/** A converted comment node, drawn as the thread Miro opens beside its pin. */
+function decorateComment(document: Document | undefined, layer: DomElementLike, descriptor: SourceItemDescriptor): boolean {
+  const comment = descriptor.structured?.comment;
+  if (document === undefined || comment === undefined) return false;
+  const face = createElement(document, "div");
+  if (face === undefined) return false;
+  addOwnedElementClass(face, "miro-source-card-face");
+  addOwnedElementClass(face, "miro-source-comment-face");
+  addCardLine(document, face, "miro-source-comment-state", comment.resolved ? "Resolved" : "Open");
+  for (const message of comment.messages) {
+    const item = createElement(document, "div");
+    const byline = createElement(document, "div");
+    const avatar = createElement(document, "span");
+    if (item === undefined || byline === undefined || avatar === undefined) continue;
+    addOwnedElementClass(item, "miro-source-comment-message");
+    addOwnedElementClass(byline, "miro-source-comment-byline");
+    addOwnedElementClass(avatar, "miro-source-comment-avatar");
+    setOwnedElementText(avatar, authorInitial(message.author));
+    setOwnedElementStyle(avatar, "--miro-avatar", authorColor(message.author));
+    safeCall(byline, "appendChild", [avatar]);
+    addCardLine(document, byline, "miro-source-comment-author", message.author);
+    addCardLine(document, byline, "miro-source-comment-time", shortTime(message.createdAt) || undefined);
+    safeCall(item, "appendChild", [byline]);
+    addCardLine(document, item, "miro-source-comment-text", message.text);
+    safeCall(face, "appendChild", [item]);
+  }
+  return appendFace(layer, face);
 }
 
 const DECK_ICONS: Readonly<Record<string, string>> = Object.freeze({
@@ -1337,6 +1367,11 @@ function applyNode(
   }
   const sourceDocument = descriptor.structured?.document;
   const sourceEmbed = descriptor.structured?.embed;
+  const sourceComment = descriptor.structured?.comment;
+  if (sourceComment !== undefined) {
+    patchClass(shell, "miro-source-comment", patches);
+    patchAttribute(shell, "data-miro-source-comment-state", sourceComment.resolved ? "resolved" : "open", patches);
+  }
   const host = hostType(runtime);
   if (host !== undefined && (sourcePreview !== undefined || sourceDocument !== undefined || sourceEmbed !== undefined)) {
     patchAttribute(shell, "data-miro-source-host", host, patches);
@@ -1402,14 +1437,15 @@ function applyNode(
   }
 
   let layer: DomElementLike | undefined;
-  if (descriptor.kind === "shape" || descriptor.kind === "sticky" || descriptor.kind === "frame" || descriptor.kind === "media" || descriptor.kind === "code" || sourceAppCard !== undefined || sourceCard !== undefined || sourcePreview !== undefined || sourceMindmap !== undefined) {
+  if (descriptor.kind === "shape" || descriptor.kind === "sticky" || descriptor.kind === "frame" || descriptor.kind === "media" || descriptor.kind === "code" || sourceAppCard !== undefined || sourceCard !== undefined || sourcePreview !== undefined || sourceMindmap !== undefined || sourceComment !== undefined) {
     const created = document === undefined ? undefined : createElement(document, "div");
     if (created !== undefined) {
       const decorationKind = sourceAppCard !== undefined ? "app-card" : sourceCard !== undefined ? "card"
         : sourcePreview !== undefined ? "preview" : sourceDocument !== undefined ? "document"
-          : sourceEmbed !== undefined ? "embed" : sourceMindmap !== undefined ? "mindmap-node" : descriptor.kind;
+          : sourceEmbed !== undefined ? "embed" : sourceComment !== undefined ? "comment"
+            : sourceMindmap !== undefined ? "mindmap-node" : descriptor.kind;
       // A card face covers the native content; any other layer lies under it.
-      const covers = sourcePreview !== undefined || (sourceDocument !== undefined && host !== "file");
+      const covers = sourcePreview !== undefined || sourceComment !== undefined || (sourceDocument !== undefined && host !== "file");
       addOwnedElementClass(created, DECORATION_CLASS);
       addOwnedElementClass(created, `miro-source-decoration-${decorationKind}`);
       setOwnedElementAttribute(created, "aria-hidden", "true");
@@ -1424,7 +1460,9 @@ function applyNode(
         ? decorateShape(document, created, descriptor)
         : descriptor.kind === "code"
           ? decorateCode(document, created, descriptor)
-          : sourcePreview !== undefined
+          : sourceComment !== undefined
+            ? decorateComment(document, created, descriptor)
+            : sourcePreview !== undefined
             ? decoratePreview(document, created, descriptor, linkHost(runtime))
             : sourceDocument === undefined || decorateDocument(document, created, descriptor, host, linkHost(runtime));
       if (sourceDeck !== undefined) decorateDeck(document, created, id, descriptor, onDeckAction);

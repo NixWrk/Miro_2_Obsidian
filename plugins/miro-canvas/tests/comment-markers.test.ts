@@ -125,6 +125,9 @@ describe("comment marker DOM renderer", () => {
     expect(local.attributes.get("aria-label")).toContain("Open comment by Alice");
     expect(local.attributes.get("aria-label")).toContain("<img src=x onerror=alert(1)>");
     expect(local.children).toHaveLength(0);
+    // The pin shows who opened the thread, and counts its messages.
+    expect(local.textContent).toBe("A");
+    expect(local.attributes.get("data-comment-count")).toBe(String(thread.replies.length + 1));
     expect(local.style.left).toBe("10px");
     expect(local.style.top).toBe("20px");
     expect(imported.attributes.get("data-comment-state")).toBe("resolved");

@@ -3,6 +3,8 @@
 import { isSafeColor, isSafeFontFamily, normalizeColor } from "./appearance";
 import { MAX_WAYPOINTS } from "./connector-route";
 import { stickyFill } from "./miro-palette";
+import { listCommentThreads } from "./local-comments";
+import { threadMessages, type ThreadMessage } from "./comment-thread";
 
 export type SourceItemKind = "shape" | "text" | "sticky" | "connector" | "frame" | "media" | "code" | "group";
 
@@ -36,6 +38,12 @@ export interface SourceDocumentDescriptor {
   readonly extension?: string;
   /** The opening words of a Miro doc, as plain text. */
   readonly excerpt?: string;
+}
+
+/** A Miro comment thread a converter placed on the board as a text node. */
+export interface SourceCommentDescriptor {
+  readonly resolved: boolean;
+  readonly messages: readonly ThreadMessage[];
 }
 
 /** A Miro presentation: a container holding its slides, in showing order. */
@@ -94,6 +102,7 @@ export interface SourceStructuredDescriptor {
   readonly embed?: SourceEmbedDescriptor;
   readonly deck?: SourceDeckDescriptor;
   readonly slide?: SourceSlideDescriptor;
+  readonly comment?: SourceCommentDescriptor;
   /** The fill of the frame an item sits in, which its text is read against. */
   readonly backdrop?: string;
   readonly card?: SourceCardDescriptor;
@@ -935,6 +944,7 @@ export function buildSourceScene(document: unknown): SourceScene {
 
   linkSlides(document, items, index);
   linkBackdrops(items, index);
+  linkCommentNodes(document, items);
 
   const localOrder = explicitOrder(valueOf(metadata, "zOrder"), items, index, diagnostics, "miro-canvas-z-order");
   const sourceRoot = valueOf(document, "miroSource");
@@ -994,6 +1004,36 @@ function linkSlides(document: unknown, items: Map<string, SourceItemDescriptor>,
     slides.forEach((slideId, position) => {
       items.set(slideId, withStructured(items.get(slideId)!, { slide: Object.freeze({ deckId, index: position }) }));
     });
+  }
+}
+
+const MAX_COMMENT_MESSAGES = 50;
+const MAX_COMMENT_TEXT_LENGTH = 1_000;
+const MAX_COMMENT_AUTHOR_LENGTH = 128;
+
+/**
+ * An exported comment has no board item, but a converter may still place its
+ * thread on the board as a text node under the comment's id.  That node is
+ * shown as the thread.
+ */
+function linkCommentNodes(document: unknown, items: Map<string, SourceItemDescriptor>): void {
+  const nodeIds = new Set((arrayValue(valueOf(document, "nodes")) ?? [])
+    .map((node) => valueOf(node, "id")).filter((id): id is string => typeof id === "string"));
+  for (const thread of listCommentThreads(document, { includeResolved: true })) {
+    if (thread.origin !== "imported" || !nodeIds.has(thread.id) || items.has(thread.id)) continue;
+    const messages = threadMessages(thread).slice(0, MAX_COMMENT_MESSAGES).map((message) => Object.freeze({
+      id: message.id,
+      author: message.author.slice(0, MAX_COMMENT_AUTHOR_LENGTH),
+      text: message.text.slice(0, MAX_COMMENT_TEXT_LENGTH),
+      ...(message.createdAt === undefined ? {} : { createdAt: message.createdAt.slice(0, 64) }),
+    }));
+    items.set(thread.id, Object.freeze({
+      sourceId: thread.id,
+      kind: "text",
+      rotation: 0,
+      css: Object.freeze({}),
+      structured: Object.freeze({ comment: Object.freeze({ resolved: thread.resolved, messages: Object.freeze(messages) }) }),
+    }));
   }
 }
 
