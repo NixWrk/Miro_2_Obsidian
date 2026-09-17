@@ -345,6 +345,31 @@ describe("source projection model", () => {
     expect(projected).not.toContain("<");
   });
 
+  it("ties a presentation to its slides in showing order and reads groups and frame fills", () => {
+    const at = (x: number, y: number) => ({ x, y, width: 100, height: 60 });
+    const scene = buildSourceScene({
+      nodes: [
+        { id: "deck", ...at(0, 0) }, { id: "s1", ...at(0, 0) }, { id: "s2", ...at(200, 3) }, { id: "s3", ...at(0, 200) },
+        { id: "title", ...at(10, 10) }, { id: "loose", ...at(900, 900) },
+      ],
+      miroSource: { items: [
+        { id: "deck", type: "slide_container", data: { title: " Kittens " } },
+        { id: "s3", type: "frame", parent: { id: "deck" }, style: { fillColor: "#fff8ee" } },
+        { id: "s2", type: "frame", parent: { id: "deck" } },
+        { id: "s1", type: "frame", parent: { id: "deck" }, style: { fillColor: "#ffffff" } },
+        { id: "title", type: "text", parent: { id: "s1" } },
+        { id: "loose", type: "frame" },
+        { id: "g", type: "group", data: {} },
+      ] },
+    });
+    expect(scene.items.get("deck")).toMatchObject({ kind: "frame", structured: { deck: { title: "Kittens", slides: ["s1", "s2", "s3"] } } });
+    expect(scene.items.get("s2")?.structured?.slide).toEqual({ deckId: "deck", index: 1 });
+    expect(scene.items.get("s3")?.structured?.slide).toEqual({ deckId: "deck", index: 2 });
+    expect(scene.items.get("loose")?.structured).toBeUndefined();
+    expect(scene.items.get("g")?.kind).toBe("group");
+    expect(scene.items.get("title")?.structured?.backdrop).toBe("#ffffff");
+  });
+
   it("resolves ordinary card tags from source definitions without rendering tag records", () => {
     const scene = buildSourceScene({ miroSource: {
       items: [

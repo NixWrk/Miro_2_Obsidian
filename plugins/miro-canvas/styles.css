@@ -1574,6 +1574,30 @@
   box-shadow: none !important;
 }
 
+/* Miro text is only its words: no card around them, unless the item has a
+   fill of its own.  Only items from the board source are meant; a local node
+   the plugin merely turned keeps its card. */
+.miro-source-text[data-miro-source-id]:not([data-miro-source-card-kind], .miro-source-mindmap-node) > .canvas-node-container,
+.miro-source-text[data-miro-source-id]:not([data-miro-source-card-kind], .miro-source-mindmap-node) .canvas-node-content,
+.miro-source-text[data-miro-source-id]:not([data-miro-source-card-kind], .miro-source-mindmap-node) .markdown-preview-view,
+.miro-source-text[data-miro-source-id]:not([data-miro-source-card-kind], .miro-source-mindmap-node) .markdown-embed {
+  background-color: transparent !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
+}
+
+/* Text inked against what lies under it. */
+.miro-source-rendered[data-miro-source-inked="true"] .canvas-node-content {
+  color: var(--miro-ink);
+}
+
+.miro-source-rendered[data-miro-source-inked="true"] .markdown-preview-view {
+  --text-normal: var(--miro-ink);
+  --text-muted: var(--miro-ink);
+  --text-faint: var(--miro-ink);
+  color: var(--miro-ink);
+}
+
 /* A sticky note is a flat sheet of its colour with a soft shadow under the
    lower edge and no outline, its text centred and inked for contrast.  The
    native surface steps aside, as it does for a shape. */
@@ -1603,9 +1627,6 @@
 .miro-source-sticky .markdown-preview-view {
   --text-normal: var(--miro-sticky-ink, #1a1a1a);
   --text-muted: var(--miro-sticky-ink, #1a1a1a);
-  display: flex;
-  flex-direction: column;
-  justify-content: safe center;
   /* Native Canvas pads text by a fixed amount; a note keeps a margin in step
      with its size, the one its fitted text is measured against. */
   padding: 8% !important;
@@ -1614,22 +1635,31 @@
   line-height: 1.3;
 }
 
-.miro-source-sticky[data-miro-source-valign="top"] .markdown-preview-view {
+/* Where Miro places text in a note or a shape: the middle unless it says
+   otherwise.  Text that outgrows the item starts at the top instead of
+   spilling over it. */
+.miro-source-rendered[data-miro-source-valign] .markdown-preview-view {
+  display: flex;
+  flex-direction: column;
+  justify-content: safe center;
+}
+
+.miro-source-rendered[data-miro-source-valign="top"] .markdown-preview-view {
   justify-content: flex-start;
 }
 
-.miro-source-sticky[data-miro-source-valign="bottom"] .markdown-preview-view {
+.miro-source-rendered[data-miro-source-valign="bottom"] .markdown-preview-view {
   justify-content: safe flex-end;
 }
 
-.miro-source-sticky .markdown-preview-view > .markdown-preview-sizer {
-  /* Native Canvas stretches the sizer over the whole note. */
+.miro-source-rendered[data-miro-source-valign] .markdown-preview-view > .markdown-preview-sizer {
+  /* Native Canvas stretches the sizer over the whole node. */
   flex: 0 0 auto !important;
   min-height: 0 !important;
   padding-bottom: 0 !important;
 }
 
-.miro-source-sticky .markdown-preview-pusher {
+.miro-source-rendered[data-miro-source-valign] .markdown-preview-pusher {
   display: none;
 }
 
@@ -1966,6 +1996,181 @@
   content: "";
   background: rgb(255 255 255 / 45%);
   border-radius: 0 16px 0 4px;
+}
+
+/* A presentation is a plain rounded sheet holding its slides, with Miro's
+   bar over its corner instead of a group label.  The bar keeps one size on
+   screen, as native labels do.  Slides are thin-edged thumbnails. */
+.miro-source-deck > .canvas-node-container {
+  background-color: var(--background-primary) !important;
+  border-color: transparent !important;
+  border-radius: 6px;
+  box-shadow: 0 1px 3px rgb(0 0 0 / 10%), 0 6px 20px rgb(0 0 0 / 10%) !important;
+}
+
+.miro-source-deck > .canvas-group-label,
+.miro-source-slide > .canvas-group-label {
+  display: none;
+}
+
+.miro-source-slide > .canvas-node-container {
+  border: 1px solid var(--background-modifier-border) !important;
+  border-radius: 2px;
+  box-shadow: none !important;
+}
+
+.miro-source-deck-bar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  display: flex;
+  align-items: stretch;
+  height: 32px;
+  overflow: hidden;
+  color: var(--text-normal);
+  font-family: var(--font-interface);
+  font-size: 14px;
+  background: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  box-shadow: var(--shadow-s);
+  transform: translate(0, calc(-100% - 10px * var(--zoom-multiplier, 1))) scale(var(--zoom-multiplier, 1));
+  transform-origin: left bottom;
+  pointer-events: auto;
+}
+
+.miro-source-deck-name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 12px 0 10px;
+  white-space: nowrap;
+}
+
+.miro-source-deck-name svg {
+  flex: none;
+  fill: none;
+  stroke: #e5484d;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* Doubled so Obsidian's own button look does not win. */
+.miro-source-deck-bar .miro-source-deck-button {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: auto;
+  padding: 0;
+  color: var(--icon-color);
+  background: transparent;
+  border: 0;
+  border-left: 1px solid var(--background-modifier-border);
+  border-radius: 0;
+  box-shadow: none;
+  cursor: pointer;
+}
+
+.miro-source-deck-bar .miro-source-deck-button:hover {
+  color: var(--icon-color-hover);
+  background: var(--background-modifier-hover);
+}
+
+.miro-source-deck-button svg {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.miro-source-deck-button[data-deck-action="present"] svg {
+  fill: currentColor;
+}
+
+.canvas-wrapper.mod-zoomed-out .miro-source-deck-bar {
+  display: none;
+}
+
+/* A Miro group is invisible: its items show, and a selection outlines it. */
+.miro-source-group > .canvas-node-container {
+  background-color: transparent !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
+}
+
+.miro-source-group .canvas-node-content {
+  background-color: transparent !important;
+}
+
+.miro-source-group > .canvas-group-label {
+  display: none;
+}
+
+.miro-source-group.is-selected > .canvas-node-container,
+.miro-source-group.is-focused > .canvas-node-container {
+  border: 1px dashed var(--interactive-accent) !important;
+}
+
+/* While slides are shown, only the slide and the presenter's bar remain. */
+.miro-canvas-presenting :is(
+  .miro-canvas-dock,
+  .miro-canvas-toolbar,
+  .miro-canvas-handles,
+  .miro-canvas-comment-markers,
+  .miro-canvas-minimap,
+  .canvas-card-menu,
+  .canvas-menu
+) {
+  display: none !important;
+}
+
+.miro-canvas-slideshow {
+  position: absolute;
+  bottom: 44px;
+  left: 50%;
+  z-index: 120;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px;
+  color: var(--text-normal);
+  background: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 10px;
+  box-shadow: var(--shadow-l);
+  transform: translateX(-50%);
+}
+
+.miro-canvas-slideshow .miro-canvas-slideshow__button {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  color: var(--icon-color);
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+  box-shadow: none;
+}
+
+.miro-canvas-slideshow .miro-canvas-slideshow__button:hover {
+  color: var(--icon-color-hover);
+  background: var(--background-modifier-hover);
+}
+
+.miro-canvas-slideshow[data-first="true"] .miro-canvas-slideshow__previous,
+.miro-canvas-slideshow[data-last="true"] .miro-canvas-slideshow__next {
+  opacity: 0.35;
+}
+
+.miro-canvas-slideshow__counter {
+  min-width: 56px;
+  font-size: var(--font-ui-small);
+  font-variant-numeric: tabular-nums;
+  text-align: center;
 }
 
 /* Mind-map nodes keep native editable text. The source layer restores root and

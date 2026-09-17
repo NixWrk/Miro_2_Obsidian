@@ -4,7 +4,7 @@ import { isSafeColor, isSafeFontFamily, normalizeColor } from "./appearance";
 import { MAX_WAYPOINTS } from "./connector-route";
 import { stickyFill } from "./miro-palette";
 
-export type SourceItemKind = "shape" | "text" | "sticky" | "connector" | "frame" | "media" | "code";
+export type SourceItemKind = "shape" | "text" | "sticky" | "connector" | "frame" | "media" | "code" | "group";
 
 export interface SourceCodeDescriptor {
   readonly title?: string;
@@ -36,6 +36,19 @@ export interface SourceDocumentDescriptor {
   readonly extension?: string;
   /** The opening words of a Miro doc, as plain text. */
   readonly excerpt?: string;
+}
+
+/** A Miro presentation: a container holding its slides, in showing order. */
+export interface SourceDeckDescriptor {
+  readonly title?: string;
+  readonly slides: readonly string[];
+}
+
+/** A frame that is one slide of a presentation. */
+export interface SourceSlideDescriptor {
+  readonly deckId: string;
+  /** Zero-based place in the deck's showing order. */
+  readonly index: number;
 }
 
 export interface SourceEmbedDescriptor {
@@ -79,6 +92,10 @@ export interface SourceStructuredDescriptor {
   readonly preview?: SourcePreviewDescriptor;
   readonly document?: SourceDocumentDescriptor;
   readonly embed?: SourceEmbedDescriptor;
+  readonly deck?: SourceDeckDescriptor;
+  readonly slide?: SourceSlideDescriptor;
+  /** The fill of the frame an item sits in, which its text is read against. */
+  readonly backdrop?: string;
   readonly card?: SourceCardDescriptor;
   readonly tags?: readonly SourceTagDescriptor[];
   readonly mindmapNode?: SourceMindmapNodeDescriptor;
@@ -498,6 +515,9 @@ function sourceKind(item: UnknownRecord, forcedConnector: boolean): SourceItemKi
     case "sticky_note": return "sticky";
     case "connector": return "connector";
     case "frame": return "frame";
+    // A presentation holds its slides as a frame holds its items.
+    case "slide_container": return "frame";
+    case "group": return "group";
     case "image": case "document": case "doc_format": case "embed": case "preview": return "media";
     case "code": return "code";
     case "app_card": return "text";
@@ -913,6 +933,9 @@ export function buildSourceScene(document: unknown): SourceScene {
     }
   }
 
+  linkSlides(document, items, index);
+  linkBackdrops(items, index);
+
   const localOrder = explicitOrder(valueOf(metadata, "zOrder"), items, index, diagnostics, "miro-canvas-z-order");
   const sourceRoot = valueOf(document, "miroSource");
   const sourceOrder = localOrder ?? explicitOrder(valueOf(sourceRoot, "zOrder"), items, index, diagnostics, "miro-source-z-order");
@@ -932,6 +955,62 @@ export function buildSourceScene(document: unknown): SourceScene {
     }
   }
   return Object.freeze({ items, order: Object.freeze(order), diagnostics: Object.freeze(diagnostics) });
+}
+
+/**
+ * Ties each presentation to its slides: the frames whose parent is a slide
+ * container.  Miro shows them row by row as the board lays them out, so that
+ * is their order here too, taken from where the Canvas nodes sit.
+ */
+function linkSlides(document: unknown, items: Map<string, SourceItemDescriptor>, index: IndexedSource): void {
+  const positions = new Map<string, Point>();
+  for (const node of arrayValue(valueOf(document, "nodes")) ?? []) {
+    const id = valueOf(node, "id"), x = finiteNumber(valueOf(node, "x")), y = finiteNumber(valueOf(node, "y"));
+    if (typeof id === "string" && x !== undefined && y !== undefined) positions.set(id, { x, y });
+  }
+  const decks = new Map<string, string[]>();
+  for (const [canvasId, item] of items) {
+    if (item.kind !== "frame" || item.sourceId === undefined) continue;
+    const source = index.byId.get(item.sourceId);
+    if (String(valueOf(source, "type")).toLowerCase() === "slide_container" && !decks.has(canvasId)) {
+      decks.set(canvasId, []);
+    }
+    const parentId = valueOf(valueOf(source, "parent"), "id");
+    const parent = typeof parentId === "string" ? index.byId.get(parentId) : undefined;
+    if (String(valueOf(parent, "type")).toLowerCase() !== "slide_container") continue;
+    const deckId = index.canvasForSource.get(parentId as string) ?? (parentId as string);
+    if (!items.has(deckId)) continue;
+    decks.set(deckId, [...(decks.get(deckId) ?? []), canvasId]);
+  }
+  for (const [deckId, slides] of decks) {
+    const at = (id: string): Point => positions.get(id) ?? { x: 0, y: 0 };
+    // A row is whatever starts within a few units of the same height.
+    slides.sort((a, b) => (Math.abs(at(a).y - at(b).y) > 8 ? at(a).y - at(b).y : at(a).x - at(b).x));
+    const deck = items.get(deckId)!;
+    const source = deck.sourceId === undefined ? undefined : index.byId.get(deck.sourceId);
+    const rawTitle = valueOf(valueOf(source, "data"), "title");
+    const title = typeof rawTitle === "string" && rawTitle.trim().length > 0 ? rawTitle.trim().slice(0, MAX_PREVIEW_TITLE_LENGTH) : undefined;
+    items.set(deckId, withStructured(deck, { deck: Object.freeze({ ...(title === undefined ? {} : { title }), slides: Object.freeze(slides) }) }));
+    slides.forEach((slideId, position) => {
+      items.set(slideId, withStructured(items.get(slideId)!, { slide: Object.freeze({ deckId, index: position }) }));
+    });
+  }
+}
+
+/** Records the fill of each item's frame, for text that has no colour of its own. */
+function linkBackdrops(items: Map<string, SourceItemDescriptor>, index: IndexedSource): void {
+  for (const [canvasId, item] of items) {
+    if (item.sourceId === undefined || item.kind === "connector") continue;
+    const parentId = valueOf(valueOf(index.byId.get(item.sourceId), "parent"), "id");
+    const parent = typeof parentId === "string" ? index.byId.get(parentId) : undefined;
+    if (String(valueOf(parent, "type")).toLowerCase() !== "frame") continue;
+    const fill = safeColor(valueOf(valueOf(parent, "style"), "fillColor"));
+    if (fill !== undefined && /^#[0-9a-f]{6}$/iu.test(fill)) items.set(canvasId, withStructured(item, { backdrop: fill }));
+  }
+}
+
+function withStructured(item: SourceItemDescriptor, extra: SourceStructuredDescriptor): SourceItemDescriptor {
+  return Object.freeze({ ...item, structured: Object.freeze({ ...item.structured, ...extra }) });
 }
 
 /** Resolve rotation for one Canvas ID using local -> source geometry -> source fallback precedence. */

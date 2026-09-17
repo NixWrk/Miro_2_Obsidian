@@ -86,7 +86,8 @@ import {
 	type M1ControlsState,
 	type M1NavigationAction,
 } from "./m1-controls";
-import { SourceRenderer } from "./source-renderer";
+import { SourceRenderer, type DeckAction } from "./source-renderer";
+import { SlideShow, type SlideRect } from "./slide-show";
 import { buildSourceInspection } from "./source-inspector";
 import {
 	buildSourceScene,
@@ -578,6 +579,7 @@ export class M1CanvasSession {
 	private readonly settings: MiroCanvasSettings;
 	private readonly disposers: Array<() => void> = [];
 	private readonly sourceRenderer: SourceRenderer | undefined;
+	private slideShow: SlideShow | undefined;
 	private readonly readonlyOriginal: boolean | undefined;
 	private readonly lockedDom = new Map<HTMLElement, { readonly classPresent: boolean; readonly attrPresent: boolean; readonly attrValue: string | null }>();
 	private readonly appearanceDom = new Map<HTMLElement, AppearanceDomSnapshot>();
@@ -666,6 +668,7 @@ export class M1CanvasSession {
 			getNodes: () => this.adapter.getNodes(),
 			getEdges: () => this.adapter.getEdges(),
 			getRotationPreview: () => this.rotationPreview,
+			onDeckAction: (deckId, action) => this.runDeckAction(deckId, action),
 		}, renderDocument);
 		const settings = options.settings ?? DEFAULT_SETTINGS;
 		this.settings = settings;
@@ -1976,6 +1979,43 @@ export class M1CanvasSession {
 		if (url !== undefined) view?.open(url, "_blank", "noopener");
 	}
 
+	/** A board rectangle for a node the file still has. */
+	private nodeRect(id: string): SlideRect | undefined {
+		const nodes = readRuntime(this.currentRawDocument, "nodes");
+		const node = Array.isArray(nodes)
+			? (nodes as readonly unknown[]).find((item) => readRuntime(item, "id") === id)
+			: undefined;
+		const x = finite(readRuntime(node, "x")), y = finite(readRuntime(node, "y"));
+		const width = finite(readRuntime(node, "width")), height = finite(readRuntime(node, "height"));
+		return x === undefined || y === undefined || width === undefined || height === undefined || !(width > 0) || !(height > 0)
+			? undefined
+			: { x, y, width, height };
+	}
+
+	private showRect(rect: SlideRect): void {
+		if (this.root === undefined) return;
+		this.viewport.fitToBounds(rect, clientSize(this.root));
+		this.refresh();
+	}
+
+	/** A presentation's bar: show its slides one by one, or all of them at once. */
+	private runDeckAction(deckId: string, action: DeckAction): void {
+		if (this.root === undefined || this.disposed) return;
+		const slides = buildSourceScene(this.currentRawDocument).items.get(deckId)?.structured?.deck?.slides ?? [];
+		if (action === "fit") {
+			const rect = this.nodeRect(deckId);
+			if (rect !== undefined) this.showRect(rect);
+			return;
+		}
+		this.callNative("deselectAll");
+		this.slideShow ??= new SlideShow(this.root, {
+			rectOf: (id) => this.nodeRect(id),
+			show: (rect) => this.showRect(rect),
+			...(this.options.setIcon === undefined ? {} : { setIcon: this.options.setIcon }),
+		});
+		this.slideShow.start(slides);
+	}
+
 	private selectionKinds(): readonly SelectionKind[] {
 		const edgeIds = new Set(collectCanvasElementIds(this.adapter.getEdges() ?? []));
 		const source = buildSourceScene(this.currentRawDocument);
@@ -1988,7 +2028,7 @@ export class M1CanvasSession {
 			}
 			const kind = source.items.get(id)?.kind;
 			if (kind !== undefined) {
-				kinds.add(kind === "connector" ? "edge" : kind === "code" ? "text" : kind);
+				kinds.add(kind === "connector" ? "edge" : kind === "code" ? "text" : kind === "group" ? "frame" : kind);
 				continue;
 			}
 			const node = Array.isArray(nodes)
@@ -3411,6 +3451,7 @@ export class M1CanvasSession {
 			return;
 		}
 		this.disposed = true;
+		this.slideShow?.stop();
 		this.controls.dispose();
 		this.toolbar.dispose();
 		this.handles.dispose();

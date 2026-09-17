@@ -18,7 +18,11 @@ export interface SourceRendererHost {
   getNodes(): readonly unknown[] | undefined;
   getEdges(): readonly unknown[] | undefined;
   getRotationPreview?(): { readonly id: string; readonly rotation: number } | undefined;
+  /** A presentation's own buttons: show its slides, or bring them all into view. */
+  onDeckAction?(deckId: string, action: DeckAction): void;
 }
+
+export type DeckAction = "present" | "fit";
 
 interface DomElementLike extends UnknownRecord {
   readonly nodeType?: unknown;
@@ -407,6 +411,72 @@ function decorateCode(document: Document | undefined, layer: DomElementLike, des
   setOwnedElementText(label, title);
   safeCall(layer, "appendChild", [label]);
   return true;
+}
+
+const DECK_ICONS: Readonly<Record<string, string>> = Object.freeze({
+  deck: "M3 5.5h18v11H3zM8 20h8M12 16.5V20",
+  present: "M8 5.5v13l10.5-6.5z",
+  fit: "M14.5 4.5h5v5M19.5 4.5 13.5 10.5M9.5 19.5h-5v-5M4.5 19.5l6-6",
+});
+
+function deckIcon(document: Document, name: string): DomElementLike | undefined {
+  const svg = createSvg(document, "svg"), path = createSvg(document, "path");
+  if (svg === undefined || path === undefined) return undefined;
+  for (const [key, value] of Object.entries({ viewBox: "0 0 24 24", width: "16", height: "16", "aria-hidden": "true" })) {
+    setOwnedElementAttribute(svg, key, value);
+  }
+  setOwnedElementAttribute(path, "d", DECK_ICONS[name] ?? "");
+  safeCall(svg, "appendChild", [path]);
+  return svg;
+}
+
+/**
+ * The bar Miro puts over a presentation: its name, and buttons to show the
+ * slides or bring them all into view.  It is the one part of a decoration
+ * that takes the pointer, so its events stop here instead of reaching the
+ * board, which would start a drag.
+ */
+function decorateDeck(
+  document: Document | undefined, layer: DomElementLike, deckId: string, descriptor: SourceItemDescriptor,
+  onAction: ((deckId: string, action: DeckAction) => void) | undefined,
+): void {
+  const deck = descriptor.structured?.deck;
+  if (document === undefined || deck === undefined) return;
+  const bar = createElement(document, "div");
+  if (bar === undefined) return;
+  addOwnedElementClass(bar, "miro-source-deck-bar");
+  const name = createElement(document, "span");
+  const icon = deckIcon(document, "deck");
+  if (name !== undefined) {
+    addOwnedElementClass(name, "miro-source-deck-name");
+    if (icon !== undefined) safeCall(name, "appendChild", [icon]);
+    const title = createElement(document, "span");
+    if (title !== undefined) {
+      setOwnedElementText(title, deck.title ?? "Slides");
+      safeCall(name, "appendChild", [title]);
+    }
+    safeCall(bar, "appendChild", [name]);
+  }
+  if (onAction !== undefined && deck.slides.length > 0) {
+    for (const [action, label] of [["present", "Present slides"], ["fit", "Show all slides"]] as const) {
+      const button = createElement(document, "button");
+      const glyph = deckIcon(document, action);
+      if (button === undefined) continue;
+      addOwnedElementClass(button, "miro-source-deck-button");
+      setOwnedElementAttribute(button, "type", "button");
+      setOwnedElementAttribute(button, "aria-label", label);
+      setOwnedElementAttribute(button, "data-deck-action", action);
+      if (glyph !== undefined) safeCall(button, "appendChild", [glyph]);
+      const stop = (event: unknown): void => { safeCall(event, "stopPropagation"); };
+      for (const type of ["pointerdown", "mousedown", "dblclick"]) safeCall(button, "addEventListener", [type, stop]);
+      safeCall(button, "addEventListener", ["click", (event: unknown) => {
+        stop(event);
+        onAction(deckId, action);
+      }]);
+      safeCall(bar, "appendChild", [button]);
+    }
+  }
+  safeCall(layer, "appendChild", [bar]);
 }
 
 function decorateTags(
@@ -1212,6 +1282,7 @@ function applyNode(
   diagnostics: string[],
   size?: { readonly width: number; readonly height: number },
   previewRotation?: number,
+  onDeckAction?: (deckId: string, action: DeckAction) => void,
 ): RenderedItem | undefined {
   const nodeEl = elementFor(runtime, ["nodeEl"]);
   const containerEl = elementFor(runtime, ["containerEl"]);
@@ -1271,6 +1342,13 @@ function applyNode(
     patchAttribute(shell, "data-miro-source-host", host, patches);
   }
   if (sourceDocument !== undefined) patchClass(shell, "miro-source-document", patches);
+  const sourceDeck = descriptor.structured?.deck;
+  const sourceSlide = descriptor.structured?.slide;
+  if (sourceDeck !== undefined) patchClass(shell, "miro-source-deck", patches);
+  if (sourceSlide !== undefined) {
+    patchClass(shell, "miro-source-slide", patches);
+    patchAttribute(shell, "data-miro-source-slide", String(sourceSlide.index + 1), patches);
+  }
   if (sourceEmbed !== undefined) patchClass(shell, "miro-source-embed", patches);
   if (sourcePreview !== undefined) {
     patchClass(shell, "miro-source-preview", patches);
@@ -1285,6 +1363,28 @@ function applyNode(
     patchAttribute(shell, "data-miro-source-mindmap-root", String(sourceMindmap.isRoot), patches);
     patchAttribute(shell, "data-miro-source-mindmap-content", String(sourceMindmap.hasContent), patches);
     if (sourceMindmap.shape !== undefined) patchAttribute(shell, "data-miro-source-mindmap-shape", sourceMindmap.shape, patches);
+  }
+
+  const plainItem = sourceAppCard === undefined && sourceCard === undefined && sourceMindmap === undefined;
+  if ((descriptor.kind === "text" || descriptor.kind === "shape") && plainItem && descriptor.css.color === undefined) {
+    // Miro's default ink is near-black, which a dark theme's text colour
+    // would turn light on a white shape or slide.  An item is inked against
+    // its own fill, or the frame it sits in when it has none.
+    const fill = descriptor.css["background-color"];
+    const opacity = Number(descriptor.css["--miro-fill-opacity"] ?? "1");
+    const ground = fill !== undefined && /^#[0-9a-f]{6}$/iu.test(fill) && !(opacity < 0.5)
+      ? fill
+      : descriptor.structured?.backdrop;
+    if (ground !== undefined) {
+      patchStyle(shell, "--miro-ink", readableInk(ground), patches);
+      patchAttribute(shell, "data-miro-source-inked", "true", patches);
+    }
+  }
+
+  if (descriptor.kind === "shape" && descriptor.sourceId !== undefined) {
+    // Miro centres a shape's text both ways unless the item says otherwise.
+    patchAttribute(shell, "data-miro-source-valign", descriptor.css["vertical-align"] ?? "middle", patches);
+    if (descriptor.css["text-align"] === undefined) patchStyle(content, "text-align", "center", patches);
   }
 
   if (descriptor.kind === "sticky") {
@@ -1327,6 +1427,7 @@ function applyNode(
           : sourcePreview !== undefined
             ? decoratePreview(document, created, descriptor, linkHost(runtime))
             : sourceDocument === undefined || decorateDocument(document, created, descriptor, host, linkHost(runtime));
+      if (sourceDeck !== undefined) decorateDeck(document, created, id, descriptor, onDeckAction);
       if (!drawable) diagnostics.push(`shape-renderer-fallback: ${id} (${descriptor.shape ?? "unknown"}).`);
       if (drawable && appendOwnedChild(shell, created, patches)) layer = created;
     }
@@ -1654,6 +1755,9 @@ export class SourceRenderer {
             diagnostics,
             documentSizes.get(id),
             preview?.id === id ? preview.rotation : undefined,
+            this.host.onDeckAction === undefined
+              ? undefined
+              : (deckId, action) => this.host.onDeckAction?.(deckId, action),
           );
           if (item !== undefined) rendered.push(item);
         }

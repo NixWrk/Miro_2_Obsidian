@@ -484,6 +484,96 @@ describe("source-backed document and embed cards", () => {
   });
 });
 
+describe("presentations, groups and ink", () => {
+  function scene(items: unknown[], nodes: { id: string; [key: string]: unknown }[], onDeckAction?: (deckId: string, action: string) => void) {
+    const elements = new Map(nodes.map((node) => {
+      const nodeEl = new Element("div"), containerEl = new Element("div"), contentEl = new Element("div");
+      nodeEl.appendChild(containerEl); containerEl.appendChild(contentEl);
+      return [node.id, { id: node.id, nodeEl, containerEl, contentEl }] as const;
+    }));
+    const data = { nodes: nodes.map((node) => ({ x: 0, y: 0, width: 100, height: 60, ...node })), edges: [], miroSource: { items } };
+    const renderer = new SourceRenderer({
+      getDocument: () => data,
+      getNodes: () => [...elements.values()],
+      getEdges: () => [],
+      ...(onDeckAction === undefined ? {} : { onDeckAction }),
+    }, dom);
+    renderer.refresh();
+    return { renderer, el: (id: string) => elements.get(id)! };
+  }
+  it("puts Miro's bar over a presentation and runs its buttons without reaching the board", () => {
+    const actions: string[] = [];
+    const created: Element[] = [];
+    const handlers = new Map<Element, Map<string, (event: unknown) => void>>();
+    const recording = {
+      createElement: (tag: string) => {
+        const element = new Element(tag);
+        created.push(element);
+        (element as any).addEventListener = (type: string, listener: (event: unknown) => void) => {
+          handlers.set(element, new Map([...(handlers.get(element) ?? []), [type, listener]]));
+        };
+        return element;
+      },
+      createElementNS: (_ns: string, tag: string) => new Element(tag),
+    } as unknown as Document;
+    const elements = new Map(["deck", "s1"].map((id) => {
+      const nodeEl = new Element("div"), containerEl = new Element("div"), contentEl = new Element("div");
+      nodeEl.appendChild(containerEl); containerEl.appendChild(contentEl);
+      return [id, { id, nodeEl, containerEl, contentEl }] as const;
+    }));
+    const data = {
+      nodes: [{ id: "deck", x: 0, y: 0, width: 300, height: 100 }, { id: "s1", x: 10, y: 10, width: 96, height: 54 }],
+      edges: [],
+      miroSource: { items: [{ id: "deck", type: "slide_container" }, { id: "s1", type: "frame", parent: { id: "deck" } }] },
+    };
+    const renderer = new SourceRenderer({
+      getDocument: () => data, getNodes: () => [...elements.values()], getEdges: () => [],
+      onDeckAction: (deckId, action) => { actions.push(`${deckId}:${action}`); },
+    }, recording);
+    renderer.refresh();
+    const deck = elements.get("deck")!.nodeEl;
+    expect(deck.classes.has("miro-source-deck")).toBe(true);
+    expect(elements.get("s1")!.nodeEl.classes.has("miro-source-slide")).toBe(true);
+    expect(elements.get("s1")!.nodeEl.getAttribute("data-miro-source-slide")).toBe("1");
+    const bar = created.find((element) => element.classes.has("miro-source-deck-bar"))!;
+    expect(bar.parentNode?.parentNode).toBe(deck);
+    const buttons = created.filter((element) => element.classes.has("miro-source-deck-button"));
+    expect(buttons.map((button) => button.getAttribute("aria-label"))).toEqual(["Present slides", "Show all slides"]);
+    const stopped: string[] = [];
+    const fire = (button: Element, type: string) => handlers.get(button)?.get(type)?.({ type, stopPropagation: () => stopped.push(type) });
+    fire(buttons[0]!, "pointerdown");
+    fire(buttons[0]!, "click");
+    fire(buttons[1]!, "click");
+    expect(stopped).toEqual(["pointerdown", "click", "click"]);
+    expect(actions).toEqual(["deck:present", "deck:fit"]);
+    renderer.dispose();
+    expect(deck.classes.has("miro-source-deck")).toBe(false);
+    expect(deck.children).toHaveLength(1);
+  });
+
+  it("hides a group, inks text against its frame and centres a shape's text", () => {
+    const f = scene([
+      { id: "g", type: "group" },
+      { id: "slide", type: "frame", style: { fillColor: "#ffffff" } },
+      { id: "t", type: "text", parent: { id: "slide" } },
+      { id: "dark", type: "shape", data: { shape: "circle" }, style: { fillColor: "#1a1a1a" } },
+      { id: "chosen", type: "shape", data: { shape: "circle" }, style: { fillColor: "#ffffff", color: "#ff0000", textAlign: "left" } },
+    ], [{ id: "g" }, { id: "slide" }, { id: "t" }, { id: "dark" }, { id: "chosen" }]);
+    expect(f.el("g").nodeEl.classes.has("miro-source-group")).toBe(true);
+    expect(f.el("t").nodeEl.style.getPropertyValue("--miro-ink")).toBe("#1a1a1a");
+    expect(f.el("t").nodeEl.getAttribute("data-miro-source-inked")).toBe("true");
+    expect(f.el("dark").nodeEl.style.getPropertyValue("--miro-ink")).toBe("#ffffff");
+    expect(f.el("dark").nodeEl.getAttribute("data-miro-source-valign")).toBe("middle");
+    expect(f.el("dark").contentEl.style.getPropertyValue("text-align")).toBe("center");
+    // A colour and an alignment of its own are kept.
+    expect(f.el("chosen").nodeEl.getAttribute("data-miro-source-inked")).toBeNull();
+    expect(f.el("chosen").contentEl.style.getPropertyValue("text-align")).toBe("left");
+    f.renderer.dispose();
+    expect(f.el("t").nodeEl.style.getPropertyValue("--miro-ink")).toBe("");
+    expect(f.el("dark").contentEl.style.getPropertyValue("text-align")).toBe("");
+  });
+});
+
 describe("source-backed app-card rendering", () => {
   it("adds reversible card chrome without copying source fields into the DOM", () => {
     const nativeText = "<p><strong>Status:</strong> In Progress</p>";
