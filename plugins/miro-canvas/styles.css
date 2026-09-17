@@ -1320,7 +1320,9 @@
 .miro-canvas-resizer--left { left: 0; }
 .miro-canvas-resizer--right { left: 100%; }
 
+/* A corner sits above the two strips that meet under it. */
 .miro-canvas-resizer--corner {
+  z-index: 1;
   width: 9px;
   height: 9px;
   background: var(--background-primary);
@@ -1422,14 +1424,17 @@
   top: 20px;
 }
 
+/* Each turn arrow is drawn pointing the way it turns the node. */
 .miro-canvas-handles__rotate-bar .miro-canvas-handle--turn-next {
   left: -20px;
   top: -12px;
+  transform: translate(-50%, -50%) rotate(-90deg);
 }
 
 .miro-canvas-handles__rotate-bar .miro-canvas-handle--turn-back {
   left: 12px;
   top: 20px;
+  transform: translate(-50%, -50%) rotate(180deg);
 }
 
 .miro-canvas-handle--rotate,
