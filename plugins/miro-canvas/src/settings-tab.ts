@@ -83,6 +83,8 @@ export class MiroCanvasSettingTab extends PluginSettingTab {
       "How close a connector end has to come to a node's standard connection point, in screen pixels, to snap onto it.",
       "connectorSnap", (value) => `${value} px`);
 
+    new Setting(containerEl).setName("Keyboard").setHeading();
+
     new Setting(containerEl)
       .setName("Keyboard shortcuts")
       .setDesc("Pan, zoom, minimap, review mode and lock are commands. Assign keys to them in Settings → Hotkeys, filtered by \"Miro Canvas\". No keys are bound by default, so nothing is taken from another plugin.")
@@ -96,7 +98,10 @@ export class MiroCanvasSettingTab extends PluginSettingTab {
           setting?.openTabById?.("hotkeys");
         }));
 
-    new Setting(containerEl).setName("Interface").setHeading();
+    new Setting(containerEl)
+      .setName("Interface")
+      .setDesc("Board theme, review mode and attachment names belong to each board, snapping to Obsidian's Canvas; change them from the corner dock.")
+      .setHeading();
 
     new Setting(containerEl)
       .setName("Show the minimap by default")
@@ -112,8 +117,8 @@ export class MiroCanvasSettingTab extends PluginSettingTab {
         .onChange((value) => void this.host.saveSettings({ selectionToolbarEnabled: value })));
 
     new Setting(containerEl)
-      .setName("Show diagnostics in the panel")
-      .setDesc("Reports degraded or host-limited behavior instead of hiding it.")
+      .setName("Show diagnostics")
+      .setDesc("A warning badge in the corner dock lists degraded or host-limited behavior instead of hiding it.")
       .addToggle((toggle) => toggle
         .setValue(this.host.settings.showDiagnostics)
         .onChange((value) => void this.host.saveSettings({ showDiagnostics: value })));
