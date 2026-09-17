@@ -4,6 +4,8 @@ import {
 } from "./connector-endpoints";
 import { SHAPE_CLIP_PATHS, inscribedInsets, shapeOutline, shapePath, type ShapePoint } from "./shape-geometry";
 import { CAP_PATHS, capFilled, strokeDash } from "./connector-style";
+import { readableInk } from "./miro-palette";
+import { fitFontSize, plainText } from "./text-fit";
 import { planRoute, routePath, type RouteEnd as PlannedEnd, type RouteSegment } from "./connector-route";
 import { normalizeAnchor, resolveAnchor, type AnchorEdgeGeometry, type AnchorPoint, type AnchorRect } from "./anchors";
 import { readCanvasElementId } from "./canvas-elements";
@@ -1188,6 +1190,20 @@ function applyNode(
     if (sourceMindmap.shape !== undefined) patchAttribute(shell, "data-miro-source-mindmap-shape", sourceMindmap.shape, patches);
   }
 
+  if (descriptor.kind === "sticky") {
+    // Miro inks a note for contrast with its fill, centres its text and, until
+    // a size is chosen, fits the text to the note.
+    if (descriptor.css.color === undefined) {
+      patchStyle(shell, "--miro-sticky-ink", readableInk(descriptor.css["background-color"] ?? ""), patches);
+    }
+    patchAttribute(shell, "data-miro-source-valign", descriptor.css["vertical-align"] ?? "middle", patches);
+    if (descriptor.css["font-size"] === undefined && size !== undefined) {
+      const fitted = fitFontSize(plainText(safeGet(runtime, "text")), size.width, size.height);
+      patchStyle(shell, "--miro-sticky-font-size", `${fitted}px`, patches);
+      patchAttribute(shell, "data-miro-source-fit", "true", patches);
+    }
+  }
+
   let layer: DomElementLike | undefined;
   if (descriptor.kind === "shape" || descriptor.kind === "sticky" || descriptor.kind === "frame" || descriptor.kind === "media" || descriptor.kind === "code" || sourceAppCard !== undefined || sourceCard !== undefined || sourcePreview !== undefined || sourceMindmap !== undefined) {
     const created = document === undefined ? undefined : createElement(document, "div");
@@ -1427,10 +1443,13 @@ export class SourceRenderer {
     const runtimeNodes = readCollection(this.host, "getNodes", diagnostics);
     const runtimeEdges = readCollection(this.host, "getEdges", diagnostics);
     const documentSizes = new Map<string, { readonly width: number; readonly height: number }>();
+    // A note's text sets its fitted size, so an edit to it renders again.
+    const fittedTexts: [string, unknown][] = [];
     const documentNodes = safeGet(sourceDocument, "nodes");
     if (Array.isArray(documentNodes)) {
       for (const node of documentNodes) {
         const nodeId = safeGet(node, "id");
+        if (typeof nodeId === "string" && descriptors.get(nodeId)?.kind === "sticky") fittedTexts.push([nodeId, safeGet(node, "text")]);
         const width = safeGet(node, "width"), height = safeGet(node, "height");
         if (typeof nodeId === "string" && typeof width === "number" && typeof height === "number"
           && width > 0 && height > 0) {
@@ -1490,7 +1509,7 @@ export class SourceRenderer {
       return runtime === undefined ? [] : [`${id}:${safeGet(runtime, "initialized") === false ? "new" : "ready"}`];
     });
     const signature = safeSignature({
-      descriptors: [...descriptors], routes: [...nativeRoutes.keys()], ready, order: scene.order, preview, geometry, diagnostics,
+      descriptors: [...descriptors], routes: [...nativeRoutes.keys()], ready, order: scene.order, preview, geometry, diagnostics, fittedTexts,
     });
     if (signature !== undefined && signature === this.lastSignature
       && this.decorationsIntact((item) => runtimeOf(item.kind, item.id))) {

@@ -82,6 +82,8 @@ export interface SelectionToolbarState extends SelectionToolbarStyle {
   readonly typography: TypographySettings;
   readonly colors: Readonly<Partial<Record<ColorSlot, string | null>>>;
   readonly palette: readonly PaletteColor[];
+  /** Replaces the palette for the fill colour, as Miro does for a sticky note. */
+  readonly fillPalette?: readonly PaletteColor[];
   readonly recentColors: readonly string[];
   readonly placement?: SelectionToolbarPlacement;
 }
@@ -853,7 +855,8 @@ export class SelectionToolbar {
       slotRefs.input.value = color ?? "#000000";
       slotRefs.popover.button.setAttribute("data-color-unset", color === undefined ? "true" : "false");
       slotRefs.popover.button.style.setProperty?.("--miro-canvas-swatch", color ?? "transparent");
-      this.renderSwatches(slotRefs.swatches, slot, state.palette.map((entry) => entry.color), state.editable, color);
+      const palette = slot === "fill" ? state.fillPalette ?? state.palette : state.palette;
+      this.renderSwatches(slotRefs.swatches, slot, palette.map((entry) => entry.color), state.editable, color, palette);
       this.renderSwatches(slotRefs.recent, slot, state.recentColors, state.editable, color);
       slotRefs.recent.hidden = state.recentColors.length === 0;
     }
@@ -876,13 +879,15 @@ export class SelectionToolbar {
   /** Swatches are rebuilt only when the palette they show actually changed. */
   private renderSwatches(
     container: HTMLElement, slot: ColorSlot, colors: readonly string[], editable: boolean, current: string | undefined,
+    named: readonly PaletteColor[] = [],
   ): void {
     const wanted = colors.map((color) => normalizedHex(color)).filter((color): color is string => color !== undefined);
     if (container.getAttribute("data-colors") !== wanted.join(",")) {
       container.setAttribute("data-colors", wanted.join(","));
       empty(container);
       for (const color of wanted) {
-        const button = append(container, makeButton(this.document!, color, "miro-canvas-toolbar__button--swatch"));
+        const label = named.find((entry) => normalizedHex(entry.color) === color)?.label;
+        const button = append(container, makeButton(this.document!, label === undefined ? color : `${label}\n${color}`, "miro-canvas-toolbar__button--swatch"));
         button.setAttribute("data-color", color);
         button.setAttribute("data-tooltip-delay", PICTURE_TOOLTIP_DELAY);
         button.style.setProperty?.("--miro-canvas-swatch", color);

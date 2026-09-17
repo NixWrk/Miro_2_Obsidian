@@ -175,6 +175,18 @@ describe("source projection model", () => {
     expect(JSON.stringify([...scene.items.values()])).not.toContain("script");
   });
 
+  it("fills a sticky from Miro's own colours and reads its vertical placement", () => {
+    const scene = buildSourceScene({ miroSource: { items: [
+      { id: "gray", type: "sticky_note", style: { fillColor: "gray", textAlignVertical: "bottom" } },
+      { id: "hex", type: "sticky_note", style: { fillColor: "#123456" } },
+      { id: "shape", type: "shape", style: { fillColor: "gray" } },
+    ] } });
+    expect(scene.items.get("gray")?.css).toMatchObject({ "background-color": "#f4f6f8", "vertical-align": "bottom" });
+    expect(scene.items.get("hex")?.css["background-color"]).toBe("#123456");
+    // A sticky name means nothing on another item.
+    expect(scene.items.get("shape")?.css["background-color"]).not.toBe("#f4f6f8");
+  });
+
   it("projects only the proven bounded code fields", () => {
     const scene = buildSourceScene({ miroSource: { items: [{
       id: "code-1",

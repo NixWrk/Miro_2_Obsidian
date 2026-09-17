@@ -2,6 +2,7 @@
 
 import { isSafeColor, isSafeFontFamily, normalizeColor } from "./appearance";
 import { MAX_WAYPOINTS } from "./connector-route";
+import { stickyFill } from "./miro-palette";
 
 export type SourceItemKind = "shape" | "text" | "sticky" | "connector" | "frame" | "media" | "code";
 
@@ -169,11 +170,6 @@ export interface LocalConnectorSettings {
   /** Board points the route is bent through; bends for an elbowed route. */
   readonly waypoints?: readonly { readonly x: number; readonly y: number }[];
 }
-const STICKY_COLORS: Readonly<Record<string, string>> = Object.freeze({
-  light_yellow: "#fff59d", yellow: "#ffd54f", orange: "#ff8a65", red: "#ff0000", light_pink: "#f48fb1",
-  pink: "#f06292", light_blue: "#7986cb", violet: "#9fa8da", blue: "#4fc3f7", dark_blue: "#42a5f5",
-  cyan: "#26a69a", dark_green: "#66bb6a", light_green: "#c5e1a5", green: "#aed581", white: "#ffffff", black: "#000000",
-});
 const TAG_COLORS: Readonly<Record<string, string>> = Object.freeze({
   red: "#f24726", orange: "#ff9d48", yellow: "#ffd02f", green: "#67c6a0",
   blue: "#4262ff", violet: "#9b51e0", magenta: "#ea94bb", gray: "#c3c4c7",
@@ -224,7 +220,7 @@ function numericCss(value: unknown): string | undefined {
 
 function safeColor(value: unknown, sticky = false): string | undefined {
   if (sticky && typeof value === "string") {
-    const mapped = STICKY_COLORS[value.toLowerCase()];
+    const mapped = stickyFill(value);
     if (mapped !== undefined) return mapped;
   }
   if (!isSafeColor(value)) return undefined;
@@ -509,7 +505,8 @@ function sourceCss(item: UnknownRecord, kind: SourceItemKind): Record<string, st
   if (fontStyle === "normal" || fontStyle === "italic") css["font-style"] = fontStyle;
   const textAlign = valueOf(style, "textAlign");
   if (["left", "center", "right", "justify", "start", "end"].includes(String(textAlign))) css["text-align"] = String(textAlign);
-  const verticalAlign = valueOf(style, "verticalAlign");
+  // Miro's own name for it is textAlignVertical.
+  const verticalAlign = valueOf(style, "verticalAlign") ?? valueOf(style, "textAlignVertical");
   if (["top", "middle", "bottom"].includes(String(verticalAlign))) css["vertical-align"] = String(verticalAlign);
   const borderStyle = valueOf(style, "borderStyle");
   if (["normal", "solid", "dashed", "dotted", "none"].includes(String(borderStyle))) css["border-style"] = borderStyle === "normal" ? "solid" : String(borderStyle);

@@ -16,6 +16,7 @@ import {
 	type AppearanceAction,
 	type AppearanceState,
 	type ColorSettings,
+	type PaletteColor,
 	type TypographySettings,
 } from "./appearance";
 import {
@@ -109,6 +110,7 @@ import {
 } from "./connector-endpoints";
 import { resolveAnchor, type AnchorGeometry, type CanvasAnchor } from "./anchors";
 import { shapeOutline } from "./shape-geometry";
+import { MIRO_STICKY_COLORS } from "./miro-palette";
 
 export interface M1SessionOptions {
 	readonly document?: Document;
@@ -140,6 +142,9 @@ export interface M1SessionSnapshot {
 
 type UnknownRecord = Record<string, unknown>;
 
+const STICKY_PALETTE: readonly PaletteColor[] = Object.freeze(MIRO_STICKY_COLORS.map((entry) => Object.freeze({
+	id: `miro-sticky-${entry.token}`, label: entry.label, color: entry.color, source: "miro" as const,
+})));
 const PANEL_SELECTOR = ".miro-canvas-panel, .miro-canvas-dock, .miro-canvas-toolbar, .miro-canvas-comment-markers, .miro-canvas-handles, .miro-canvas-minimap";
 const DEFAULT_TOOLBAR_FONT = "Inter";
 const DEFAULT_TOOLBAR_FONT_SIZE = 16;
@@ -1917,9 +1922,10 @@ export class M1CanvasSession {
 		const id = this.selectedIds[0];
 		const presentation = resolveSelectionToolbarPresentation(this.currentRawDocument, id);
 		const placement = this.selectionPlacement();
+		const kinds = this.selectionKinds();
 		return {
 			selectedIds: this.selectedIds,
-			kinds: this.selectionKinds(),
+			kinds,
 			editable: !state.reviewMode && !lockedSelection,
 			locked: lockedSelection,
 			reviewMode: state.reviewMode,
@@ -1931,6 +1937,8 @@ export class M1CanvasSession {
 			typography: presentation.typography,
 			colors: presentation.colors,
 			palette: this.appearance.settings.palette,
+			// A note is filled from Miro's own sticky colours, as Miro offers them.
+			...(kinds.length > 0 && kinds.every((kind) => kind === "sticky") ? { fillPalette: STICKY_PALETTE } : {}),
 			recentColors: this.appearance.settings.recentColors,
 			...presentation.style,
 			...(placement === undefined ? {} : { placement }),

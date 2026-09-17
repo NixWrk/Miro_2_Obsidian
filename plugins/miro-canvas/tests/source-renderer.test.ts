@@ -964,3 +964,47 @@ describe("native edges on turned and shaped nodes", () => {
     expect(f.display.getAttribute("d")).toBe(f.NATIVE);
   });
 });
+
+describe("sticky notes", () => {
+  function stickyFixture(style: Record<string, unknown>, text = "<p>REST sticky yellow</p>") {
+    const nodeEl = new Element("div"), containerEl = new Element("div"), contentEl = new Element("div");
+    nodeEl.appendChild(containerEl); containerEl.appendChild(contentEl);
+    const data = {
+      nodes: [{ id: "s", type: "text", text, x: 0, y: 0, width: 280, height: 160 }],
+      edges: [],
+      miroSource: { items: [{ id: "s", type: "sticky_note", data: { content: "x" }, style, zIndex: 4 }] },
+    };
+    const renderer = new SourceRenderer({
+      getDocument: () => data,
+      getNodes: () => [{ id: "s", nodeEl, containerEl, contentEl, text }],
+      getEdges: () => [],
+    }, dom);
+    return { renderer, nodeEl, containerEl, contentEl };
+  }
+
+  it("fills the note from Miro's palette, inks and fits its text, and keeps the text above the fill", () => {
+    const f = stickyFixture({ fillColor: "black", textAlignVertical: "top" });
+    f.renderer.refresh();
+    const layer = f.nodeEl.children.find((child) => child.classes.has("miro-source-decoration-sticky"))!;
+    expect(layer.style.getPropertyValue("background-color")).toBe("#1a1a1a");
+    expect(f.nodeEl.style.getPropertyValue("--miro-sticky-ink")).toBe("#ffffff");
+    expect(f.nodeEl.getAttribute("data-miro-source-valign")).toBe("top");
+    expect(f.nodeEl.getAttribute("data-miro-source-fit")).toBe("true");
+    expect(Number.parseInt(f.nodeEl.style.getPropertyValue("--miro-sticky-font-size"), 10)).toBeGreaterThan(18);
+    // The strictly contained native container would otherwise paint under the fill.
+    expect(f.containerEl.style.getPropertyValue("z-index")).toBe("1");
+    f.renderer.dispose();
+    expect(f.nodeEl.style.getPropertyValue("--miro-sticky-ink")).toBe("");
+    expect(f.nodeEl.getAttribute("data-miro-source-fit")).toBeNull();
+    expect(f.containerEl.style.getPropertyValue("z-index")).toBe("");
+  });
+
+  it("keeps a chosen text size and colour", () => {
+    const f = stickyFixture({ fillColor: "gray", fontSize: "24", color: "#ff0000" });
+    f.renderer.refresh();
+    expect(f.nodeEl.getAttribute("data-miro-source-fit")).toBeNull();
+    expect(f.nodeEl.style.getPropertyValue("--miro-sticky-ink")).toBe("");
+    expect(f.nodeEl.getAttribute("data-miro-source-valign")).toBe("middle");
+    expect(f.contentEl.style.getPropertyValue("font-size")).toBe("24px");
+  });
+});
