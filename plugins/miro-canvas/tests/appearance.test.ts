@@ -18,6 +18,7 @@ import {
   normalizeTypography,
   mergeAppearanceMetadata,
   resolveDisplayTheme,
+  selectColors,
   toAppearanceMetadata,
   validateAppearanceState,
   validateColor,
@@ -128,6 +129,47 @@ describe("appearance core", () => {
     expect(withColor.settings.recentColors[0]).toBe("#aabbcc");
     expect(withColor).not.toBe(withTypography);
     expect(withTypography).not.toBe(initial);
+  });
+
+  it("sets only the colour it is given and hands one slot back to Obsidian", () => {
+    const initial = createDefaultAppearanceState();
+    const filled = appearanceReducer(initial, {
+      type: APPEARANCE_ACTIONS.setColor, nodeId: "node", slot: "fill", color: "#123456",
+    });
+    // Untouched slots are not invented: they keep Obsidian's own colours.
+    expect(filled.localOverrides.node?.colors).toEqual({ fill: "#123456" });
+    const lined = appearanceReducer(filled, {
+      type: APPEARANCE_ACTIONS.setColors, nodeId: "node", colors: { border: null, edge: "#abcdef" },
+    });
+    expect(lined.localOverrides.node?.colors).toEqual({ fill: "#123456", border: null, edge: "#abcdef" });
+    expect(lined.settings.recentColors).toEqual(["#abcdef", "#123456"]);
+
+    const noFill = appearanceReducer(lined, { type: APPEARANCE_ACTIONS.resetColor, nodeId: "node", slot: "fill" });
+    expect(noFill.localOverrides.node?.colors).toEqual({ border: null, edge: "#abcdef" });
+    const noBorder = appearanceReducer(noFill, { type: APPEARANCE_ACTIONS.resetColor, nodeId: "node", slot: "border" });
+    const bare = appearanceReducer(noBorder, { type: APPEARANCE_ACTIONS.resetColor, nodeId: "node", slot: "edge" });
+    // The last slot takes the colours record, and the empty override, with it.
+    expect(bare.localOverrides.node).toBeUndefined();
+    // Nothing to reset, or no such slot, changes nothing.
+    expect(appearanceReducer(bare, { type: APPEARANCE_ACTIONS.resetColor, nodeId: "node", slot: "fill" })).toEqual(bare);
+    expect(appearanceReducer(lined, { type: APPEARANCE_ACTIONS.resetColor, nodeId: "node", slot: "glow" })).toEqual(lined);
+
+    const written = mergeAppearanceMetadata({
+      schemaVersion: 1,
+      localOverrides: { node: { colors: { fill: "#123456", text: "#1e1e1e", futureColor: { keep: true } }, locked: true } },
+    }, appearanceReducer(normalizeAppearanceState({
+      localOverrides: { node: { colors: { fill: "#123456", text: "#1e1e1e", futureColor: { keep: true } }, locked: true } },
+    }), { type: APPEARANCE_ACTIONS.resetColor, nodeId: "node", slot: "text" }));
+    expect((written.localOverrides as Record<string, Record<string, unknown>>).node).toEqual({
+      colors: { fill: "#123456", futureColor: { keep: true } }, locked: true,
+    });
+  });
+
+  it("keeps a stored record partial when it reads it", () => {
+    const state = normalizeAppearanceState({ localOverrides: { node: { colors: { text: "#112233" } } } });
+    expect(state.localOverrides.node?.colors).toEqual({ text: "#112233" });
+    expect(selectColors(state, "node")).toEqual({ text: "#112233" });
+    expect(selectColors(state, "other")).toEqual({});
   });
 
   it("fails closed for invalid actions and prototype-polluting node IDs", () => {

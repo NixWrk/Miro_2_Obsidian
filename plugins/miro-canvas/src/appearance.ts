@@ -91,11 +91,15 @@ export interface PaletteColor {
   readonly [key: string]: unknown;
 }
 
+/**
+ * The colours a board sets for one element.  A slot that is absent keeps
+ * Obsidian's own colour for it; null is a real choice, transparent.
+ */
 export interface ColorSettings {
-  readonly text: AppearanceColor;
-  readonly fill: AppearanceColor;
-  readonly border: AppearanceColor;
-  readonly edge: AppearanceColor;
+  readonly text?: AppearanceColor;
+  readonly fill?: AppearanceColor;
+  readonly border?: AppearanceColor;
+  readonly edge?: AppearanceColor;
   readonly [key: string]: unknown;
 }
 
@@ -158,12 +162,12 @@ export const DEFAULT_TYPOGRAPHY: TypographySettings = Object.freeze({
   verticalAlign: "top",
 });
 
-export const DEFAULT_COLORS: ColorSettings = Object.freeze({
-  text: "#1e1e1e",
-  fill: null,
-  border: "#1e1e1e",
-  edge: "#1e1e1e",
-});
+/**
+ * Nothing overridden: every slot keeps Obsidian's own colour.  Filling the
+ * untouched slots with fixed values painted near-black text, borders and
+ * lines the first time any one colour was set, with no way back.
+ */
+export const DEFAULT_COLORS: ColorSettings = Object.freeze({});
 
 const RESERVED_KEYS = new Set(["__proto__", "prototype", "constructor"]);
 const COLOR_SLOTS: readonly ColorSlot[] = ["text", "fill", "border", "edge"];
@@ -705,40 +709,32 @@ export function normalizeTypography(
 
 export const normalizeTypographySettings = normalizeTypography;
 
+/**
+ * Keep the slots a value sets, falling back per slot to `fallback`.  A slot
+ * neither sets stays absent, so it keeps Obsidian's own colour.
+ */
 export function normalizeColors(
   value: unknown,
   fallback: ColorSettings = DEFAULT_COLORS,
 ): ColorSettings {
-  const fallbackRecord = isRecord(fallback as unknown)
-    ? fallback as unknown as UnknownRecord
-    : DEFAULT_COLORS as unknown as UnknownRecord;
-  const fallbackText = readOwn(fallbackRecord, "text");
-  const fallbackFill = readOwn(fallbackRecord, "fill");
-  const fallbackBorder = readOwn(fallbackRecord, "border");
-  const fallbackEdge = readOwn(fallbackRecord, "edge");
-  const base: ColorSettings = {
-    text: normalizeColor(fallbackText),
-    fill: normalizeColor(fallbackFill),
-    border: normalizeColor(fallbackBorder),
-    edge: normalizeColor(fallbackEdge),
+  const fallbackRecord = isRecord(fallback as unknown) ? fallback as unknown as UnknownRecord : {};
+  const source = isRecord(value) ? value : {};
+  const result: Record<string, unknown> = {
+    ...copyUnknownProperties(fallbackRecord, COLOR_FIELDS),
+    ...copyUnknownProperties(source, COLOR_FIELDS),
   };
-  if (!isRecord(value)) {
-    const fallbackUnknown = isRecord(fallback)
-      ? copyUnknownProperties(fallback as unknown as UnknownRecord, COLOR_FIELDS)
-      : {};
-    return freeze({ ...fallbackUnknown, ...base });
+  for (const slot of COLOR_SLOTS) {
+    const own = readOwn(source, slot);
+    const parsed = own === ABSENT ? INVALID : parseColor(own);
+    if (parsed !== INVALID) {
+      result[slot] = parsed;
+      continue;
+    }
+    const inherited = readOwn(fallbackRecord, slot);
+    const parsedFallback = inherited === ABSENT ? INVALID : parseColor(inherited);
+    if (parsedFallback !== INVALID) result[slot] = parsedFallback;
   }
-  const unknown = {
-    ...(isRecord(fallback) ? copyUnknownProperties(fallback as unknown as UnknownRecord, COLOR_FIELDS) : {}),
-    ...copyUnknownProperties(value, COLOR_FIELDS),
-  };
-  return freeze({
-    ...unknown,
-    text: normalizeColor(readOwn(value, "text"), base.text),
-    fill: normalizeColor(readOwn(value, "fill"), base.fill),
-    border: normalizeColor(readOwn(value, "border"), base.border),
-    edge: normalizeColor(readOwn(value, "edge"), base.edge),
-  });
+  return freeze(result as ColorSettings);
 }
 
 export const normalizeColorSettings = normalizeColors;
@@ -1495,6 +1491,8 @@ export const APPEARANCE_ACTIONS = Object.freeze({
   setColors: "appearance.set-colors",
   resetTypography: "appearance.reset-typography",
   resetColors: "appearance.reset-colors",
+  /** Give one slot back to Obsidian's own colour. */
+  resetColor: "appearance.reset-color",
   addPaletteColor: "appearance.add-palette-color",
   removePaletteColor: "appearance.remove-palette-color",
   addRecentColor: "appearance.add-recent-color",
@@ -1509,6 +1507,7 @@ export type AppearanceActionType = typeof APPEARANCE_ACTIONS[keyof typeof APPEAR
   | "set-node-color"
   | "set-node-colors"
   | "reset-node-typography"
+  | "reset-node-color"
   | "reset-node-colors";
 
 /**
@@ -1538,6 +1537,7 @@ export const APPEARANCE_COMMAND_LABELS: Readonly<Record<string, string>> = Objec
   [APPEARANCE_ACTIONS.setColors]: "Set colors",
   [APPEARANCE_ACTIONS.resetTypography]: "Reset typography",
   [APPEARANCE_ACTIONS.resetColors]: "Reset colors",
+  [APPEARANCE_ACTIONS.resetColor]: "Use the Obsidian color",
   [APPEARANCE_ACTIONS.addPaletteColor]: "Add palette color",
   [APPEARANCE_ACTIONS.removePaletteColor]: "Remove palette color",
   [APPEARANCE_ACTIONS.addRecentColor]: "Use recent color",
@@ -1791,7 +1791,7 @@ export function appearanceReducer(state: AppearanceState | unknown, action: Appe
         return current;
       }
       const base = currentOverride?.colors ?? DEFAULT_COLORS;
-      const nextColors: Record<ColorSlot, AppearanceColor> = { ...base };
+      const nextColors: Partial<Record<ColorSlot, AppearanceColor>> = { ...base };
       let changed = false;
       for (const slot of COLOR_SLOTS) {
         const item = readOwn(value, slot);
@@ -1808,7 +1808,8 @@ export function appearanceReducer(state: AppearanceState | unknown, action: Appe
         return current;
       }
       const colors = normalizeColors(nextColors);
-      const recent = [...colors.text !== null ? [colors.text] : [], ...colors.fill !== null ? [colors.fill] : [], ...colors.border !== null ? [colors.border] : [], ...colors.edge !== null ? [colors.edge] : []]
+      const recent = COLOR_SLOTS.map((slot) => colors[slot])
+        .filter((item): item is string => typeof item === "string")
         .reduce<readonly string[]>((items, item) => addRecentColor(items, item), current.settings.recentColors);
       return updateOverride(buildState({ ...current.settings, recentColors: recent }, current.localOverrides), nodeId, (override) => ({ ...override, colors }));
     }
@@ -1822,6 +1823,24 @@ export function appearanceReducer(state: AppearanceState | unknown, action: Appe
       const colors = normalizeColors({ ...base, [slot]: normalizeColor(value) });
       const recent = addRecentColor(current.settings.recentColors, value);
       return updateOverride(buildState({ ...current.settings, recentColors: recent }, current.localOverrides), nodeId, (override) => ({ ...override, colors }));
+    }
+    if (type === APPEARANCE_ACTIONS.resetColor || type === "reset-node-color") {
+      const slot = actionValue(action, "slot", "target");
+      if (!isColorSlot(slot) || currentOverride?.colors === undefined || !hasOwnKey(currentOverride.colors, slot)) {
+        return current;
+      }
+      return updateOverride(current, nodeId, (override) => {
+        if (override === undefined) {
+          return undefined;
+        }
+        const colors = { ...override.colors } as Record<string, unknown>;
+        delete colors[slot];
+        const next = { ...override } as Record<string, unknown>;
+        // Unknown colour fields from a later schema keep the record alive.
+        if (Object.keys(colors).length === 0) delete next.colors;
+        else next.colors = normalizeColors(colors);
+        return Object.keys(next).length === 0 ? undefined : next;
+      });
     }
     if (type === APPEARANCE_ACTIONS.resetColors || type === "reset-node-colors") {
       return updateOverride(current, nodeId, (override) => {
