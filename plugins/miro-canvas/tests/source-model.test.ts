@@ -327,6 +327,24 @@ describe("source projection model", () => {
     expect(projected).not.toContain("<script>");
   });
 
+  it("projects a document's name, type and opening words but none of its locations or markup", () => {
+    const scene = buildSourceScene({ miroSource: { items: [
+      { id: "pdf", type: "document", data: { title: "  Specification.pdf ", documentUrl: "https://files.invalid/spec.pdf?sig=secret" } },
+      { id: "untitled", type: "document", data: { documentUrl: "https://files.invalid/archive.ZIP#part" } },
+      { id: "doc", type: "doc_format", local_name: "notes.html", data: { html: "<style>p{}</style><p>Plan&nbsp;<b>A</b></p>" } },
+      { id: "video", type: "embed", data: { providerName: "YouTube", title: "Demo", html: "<iframe src=https://bad.invalid>" } },
+    ] } });
+    expect(scene.items.get("pdf")?.structured?.document).toEqual({ kind: "document", title: "Specification.pdf", extension: "PDF" });
+    expect(scene.items.get("untitled")?.structured?.document).toEqual({ kind: "document", extension: "ZIP" });
+    expect(scene.items.get("doc")?.structured?.document).toEqual({ kind: "doc_format", extension: "HTML", excerpt: "Plan A" });
+    expect(scene.items.get("video")?.structured?.embed).toEqual({ provider: "YouTube", title: "Demo" });
+    const projected = JSON.stringify([...scene.items.values()]);
+    expect(projected).not.toContain("files.invalid");
+    expect(projected).not.toContain("secret");
+    expect(projected).not.toContain("bad.invalid");
+    expect(projected).not.toContain("<");
+  });
+
   it("resolves ordinary card tags from source definitions without rendering tag records", () => {
     const scene = buildSourceScene({ miroSource: {
       items: [

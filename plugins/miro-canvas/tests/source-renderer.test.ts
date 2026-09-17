@@ -424,6 +424,66 @@ describe("source-backed code rendering", () => {
   });
 });
 
+describe("source-backed document and embed cards", () => {
+  function cardFixture(item: Record<string, unknown>, runtime: Record<string, unknown>) {
+    const nodeEl = new Element("div"), contentEl = new Element("div");
+    nodeEl.appendChild(contentEl);
+    const data = {
+      nodes: [{ id: "d", type: "link", x: 0, y: 0, width: 300, height: 400 }],
+      edges: [],
+      miroSource: { items: [{ id: "d", ...item }] },
+    };
+    const renderer = new SourceRenderer({
+      getDocument: () => data,
+      getNodes: () => [{ id: "d", nodeEl, contentEl, ...runtime }],
+      getEdges: () => [],
+    }, dom);
+    renderer.refresh();
+    const layer = nodeEl.children.find((child) => child.classes.has("miro-source-decoration"))!;
+    return { renderer, nodeEl, layer };
+  }
+  const words = (element: Element): string[] => [
+    ...((element as any).textContent ? [(element as any).textContent] : []),
+    ...element.children.flatMap(words),
+  ];
+
+  it("covers a document without a file with a card naming its type", () => {
+    const f = cardFixture(
+      { type: "document", data: { title: "Specification.pdf", documentUrl: "https://files.invalid/x.pdf" } },
+      { url: "https://files.invalid/x.pdf" },
+    );
+    expect(f.nodeEl.classes.has("miro-source-document")).toBe(true);
+    expect(f.layer.classes.has("miro-source-decoration-document")).toBe(true);
+    expect(f.layer.style.getPropertyValue("z-index")).toBe("2");
+    const icon = f.layer.querySelectorAll("div").find((item) => item.classes.has("miro-source-document-icon"))!;
+    expect(icon.getAttribute("data-extension")).toBe("PDF");
+    expect(words(f.layer)).toEqual(["PDF", "Specification.pdf", "files.invalid"]);
+    f.renderer.dispose();
+    expect(f.nodeEl.classes.has("miro-source-document")).toBe(false);
+    expect(f.nodeEl.children).toHaveLength(1);
+  });
+
+  it("names a document that has a file above its native preview", () => {
+    const f = cardFixture({ type: "document", data: { title: "Brief.docx" } }, { file: { path: "a/Brief.docx" } });
+    expect(f.nodeEl.getAttribute("data-miro-source-host")).toBe("file");
+    expect(f.layer.style.getPropertyValue("z-index")).toBe("0");
+    expect(f.layer.children.map((child) => [...child.classes][0])).toEqual(["miro-source-caption"]);
+    expect(words(f.layer)).toEqual(["Brief.docx"]);
+  });
+
+  it("shows a Miro doc's opening words and frames an embed", () => {
+    const doc = cardFixture(
+      { type: "doc_format", data: { html: "<h1>Notes</h1><script>steal()</script><p>Agenda &amp; decisions</p>" } },
+      { text: "<p>[doc format]</p>" },
+    );
+    expect(words(doc.layer)).toEqual(["DOC", "Document", "Notes Agenda & decisions"]);
+    const embed = cardFixture({ type: "embed", data: { providerName: "YouTube", html: "<iframe></iframe>" } }, { url: "https://youtube.test/v" });
+    expect(embed.nodeEl.classes.has("miro-source-embed")).toBe(true);
+    expect(embed.layer.style.getPropertyValue("z-index")).toBe("0");
+    expect(embed.layer.children).toHaveLength(0);
+  });
+});
+
 describe("source-backed app-card rendering", () => {
   it("adds reversible card chrome without copying source fields into the DOM", () => {
     const nativeText = "<p><strong>Status:</strong> In Progress</p>";
@@ -502,7 +562,7 @@ describe("source-backed preview rendering", () => {
     nodeEl.appendChild(contentEl);
     const renderer = new SourceRenderer({
       getDocument: () => data,
-      getNodes: () => [{ id: "preview-1", nodeEl, contentEl }],
+      getNodes: () => [{ id: "preview-1", nodeEl, contentEl, url: "https://www.example.test/article" }],
       getEdges: () => [],
     }, dom);
 
@@ -515,8 +575,16 @@ describe("source-backed preview rendering", () => {
     const decoration = nodeEl.children.find((child) => child.classList.contains("miro-source-decoration-preview"));
     expect(decoration?.style.getPropertyValue("pointer-events")).toBe("none");
     expect(decoration?.style.getPropertyValue("z-index")).toBe("2");
-    expect((decoration?.children.find((child) => child.classList.contains("miro-source-preview-meta"))?.children ?? [])
-      .map((child) => (child as any).textContent)).toEqual(["Example", "Article", "Saved preview"]);
+    expect(nodeEl.getAttribute("data-miro-source-host")).toBe("link");
+    // The card: the provider's initial and name, the title, the summary and
+    // the site the native link opens - never the source's own address.
+    const face = decoration!.children.find((child) => child.classList.contains("miro-source-card-face"))!;
+    const text = (element: Element): string[] => [
+      ...((element as any).textContent ? [(element as any).textContent] : []),
+      ...element.children.flatMap(text),
+    ];
+    expect(text(face)).toEqual(["E", "Example", "Article", "Saved preview", "example.test"]);
+    expect(JSON.stringify(text(face))).not.toContain("javascript");
     expect(contentEl.getAttribute("href")).toBe("https://example.test/article");
     expect(JSON.stringify(data)).toBe(before);
 

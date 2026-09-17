@@ -28,6 +28,21 @@ export interface SourcePreviewDescriptor {
   readonly hasPreviewAsset: boolean;
 }
 
+/** A document card: what Miro shows of a file, never where it came from. */
+export interface SourceDocumentDescriptor {
+  readonly kind: "document" | "doc_format";
+  readonly title?: string;
+  /** Upper-case file type, such as PDF, when the title or source names one. */
+  readonly extension?: string;
+  /** The opening words of a Miro doc, as plain text. */
+  readonly excerpt?: string;
+}
+
+export interface SourceEmbedDescriptor {
+  readonly provider?: string;
+  readonly title?: string;
+}
+
 export interface SourceTagDescriptor {
   readonly id: string;
   readonly title: string;
@@ -62,6 +77,8 @@ export interface SourceStructuredDescriptor {
   readonly code?: SourceCodeDescriptor;
   readonly appCard?: SourceAppCardDescriptor;
   readonly preview?: SourcePreviewDescriptor;
+  readonly document?: SourceDocumentDescriptor;
+  readonly embed?: SourceEmbedDescriptor;
   readonly card?: SourceCardDescriptor;
   readonly tags?: readonly SourceTagDescriptor[];
   readonly mindmapNode?: SourceMindmapNodeDescriptor;
@@ -312,6 +329,52 @@ function sourcePreviewDescriptor(source: UnknownRecord): SourcePreviewDescriptor
   });
 }
 
+const MAX_DOCUMENT_EXCERPT_LENGTH = 280;
+const EXTENSION = /\.([a-z0-9]{1,8})(?:[?#].*)?$/iu;
+
+function boundedText(value: unknown, maxLength: number): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const normalized = value.replace(/\s+/gu, " ").trim();
+  return normalized.length === 0 ? undefined : normalized.slice(0, maxLength);
+}
+
+/** Visible words of an HTML fragment; script and style bodies are not words. */
+function htmlExcerpt(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const text = value.slice(0, 20_000)
+    .replace(/<(script|style)\b[\s\S]*?<\/\1\s*>/giu, " ")
+    .replace(/<[^>]*>/gu, " ")
+    .replace(/&nbsp;/giu, " ").replace(/&lt;/giu, "<").replace(/&gt;/giu, ">").replace(/&quot;/giu, "\"")
+    .replace(/&#39;/gu, "'").replace(/&amp;/giu, "&");
+  return boundedText(text, MAX_DOCUMENT_EXCERPT_LENGTH);
+}
+
+function sourceDocumentDescriptor(source: UnknownRecord, kind: "document" | "doc_format"): SourceDocumentDescriptor {
+  const data = valueOf(source, "data");
+  const title = boundedText(isRecord(data) ? valueOf(data, "title") ?? valueOf(data, "name") : undefined, MAX_PREVIEW_TITLE_LENGTH);
+  // Only the type is read from a location: the location itself stays out.
+  const named = [title, valueOf(source, "local_name"), isRecord(data) ? valueOf(data, "documentUrl") : undefined]
+    .find((candidate): candidate is string => typeof candidate === "string" && EXTENSION.test(candidate));
+  const extension = named === undefined ? undefined : EXTENSION.exec(named)?.[1]?.toUpperCase();
+  const excerpt = kind === "doc_format" && isRecord(data) ? htmlExcerpt(valueOf(data, "html")) : undefined;
+  return Object.freeze({
+    kind,
+    ...(title === undefined ? {} : { title }),
+    ...(extension === undefined ? {} : { extension }),
+    ...(excerpt === undefined ? {} : { excerpt }),
+  });
+}
+
+function sourceEmbedDescriptor(source: UnknownRecord): SourceEmbedDescriptor {
+  const data = valueOf(source, "data");
+  const provider = boundedText(isRecord(data) ? valueOf(data, "providerName") : undefined, MAX_PREVIEW_PROVIDER_LENGTH);
+  const title = boundedText(isRecord(data) ? valueOf(data, "title") : undefined, MAX_PREVIEW_TITLE_LENGTH);
+  return Object.freeze({
+    ...(provider === undefined ? {} : { provider }),
+    ...(title === undefined ? {} : { title }),
+  });
+}
+
 function sourceCardDescriptor(source: UnknownRecord, diagnostics: string[], sourceId: string): SourceCardDescriptor {
   const data = valueOf(source, "data");
   const fields = isRecord(data) ? arrayValue(valueOf(data, "fields")) : undefined;
@@ -410,12 +473,14 @@ function sourceStructuredDescriptor(
   sourceId: string,
   tagDefinitions: ReadonlyMap<string, SourceTagDescriptor>,
 ): SourceStructuredDescriptor | undefined {
-  const result: { code?: SourceCodeDescriptor; appCard?: SourceAppCardDescriptor; preview?: SourcePreviewDescriptor; card?: SourceCardDescriptor; tags?: readonly SourceTagDescriptor[]; mindmapNode?: SourceMindmapNodeDescriptor } = {};
+  const result: { code?: SourceCodeDescriptor; appCard?: SourceAppCardDescriptor; preview?: SourcePreviewDescriptor; document?: SourceDocumentDescriptor; embed?: SourceEmbedDescriptor; card?: SourceCardDescriptor; tags?: readonly SourceTagDescriptor[]; mindmapNode?: SourceMindmapNodeDescriptor } = {};
   if (kind === "code") result.code = sourceCodeDescriptor(source, diagnostics, sourceId);
   const rawType = valueOf(source, "type");
   const type = typeof rawType === "string" ? rawType.toLowerCase() : "";
   if (type === "app_card") result.appCard = sourceAppCardDescriptor(source, diagnostics, sourceId);
   if (type === "preview") result.preview = sourcePreviewDescriptor(source);
+  if (type === "document" || type === "doc_format") result.document = sourceDocumentDescriptor(source, type);
+  if (type === "embed") result.embed = sourceEmbedDescriptor(source);
   if (type === "card") result.card = sourceCardDescriptor(source, diagnostics, sourceId);
   if (type === "mindmap_node") result.mindmapNode = sourceMindmapNodeDescriptor(source);
   const tags = sourceTagsForItem(source, tagDefinitions, diagnostics, sourceId);

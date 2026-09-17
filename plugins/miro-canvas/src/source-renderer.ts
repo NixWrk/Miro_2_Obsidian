@@ -305,27 +305,96 @@ function setOwnedElementText(element: DomElementLike, value: string): void {
   try { Reflect.set(element, "textContent", value, element); } catch { /* owned optional decoration */ }
 }
 
-function decoratePreview(document: Document | undefined, layer: DomElementLike, descriptor: SourceItemDescriptor): boolean {
+/** Which native node carries the item: a link, a file or converted text. */
+function hostType(runtime: unknown): "link" | "file" | "text" | undefined {
+  if (typeof safeGet(runtime, "url") === "string") return "link";
+  if (isObject(safeGet(runtime, "file"))) return "file";
+  if (typeof safeGet(runtime, "text") === "string") return "text";
+  return undefined;
+}
+
+/** The site a link node opens, for the card's footer; only a web address has one. */
+function linkHost(runtime: unknown): string | undefined {
+  const url = safeGet(runtime, "url");
+  if (typeof url !== "string") return undefined;
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === "http:" || parsed.protocol === "https:" ? parsed.hostname.replace(/^www\./u, "") : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Adds a text line to a card face; nothing for a missing value. */
+function addCardLine(document: Document, face: DomElementLike, className: string, value: string | undefined): void {
+  if (value === undefined) return;
+  const item = createElement(document, "div");
+  if (item === undefined) return;
+  addOwnedElementClass(item, className);
+  setOwnedElementText(item, value);
+  safeCall(face, "appendChild", [item]);
+}
+
+function appendFace(layer: DomElementLike, face: DomElementLike): boolean {
+  safeCall(layer, "appendChild", [face]);
+  return safeGet(face, "parentNode") === layer;
+}
+
+/**
+ * Miro's link card: the site's initial and name, the page title and its
+ * summary.  Native Canvas would load the live page into the node instead; the
+ * card covers it until the node is focused to use the page.
+ */
+function decoratePreview(document: Document | undefined, layer: DomElementLike, descriptor: SourceItemDescriptor, host: string | undefined): boolean {
   const preview = descriptor.structured?.preview;
   if (document === undefined || preview === undefined) return false;
-  const metadata = createElement(document, "div");
-  if (metadata === undefined) return false;
-  addOwnedElementClass(metadata, "miro-source-preview-meta");
-  const add = (className: string, value: string | undefined): void => {
-    if (value === undefined) return;
-    const item = createElement(document, "div");
-    if (item === undefined) return;
-    addOwnedElementClass(item, className);
-    setOwnedElementText(item, value);
-    safeCall(metadata, "appendChild", [item]);
-  };
-  add("miro-source-preview-provider", preview.provider);
-  add("miro-source-preview-title", preview.title);
-  add("miro-source-preview-description", preview.description);
-  if (safeGet(metadata, "children") !== undefined && safeCall(layer, "appendChild", [metadata]) !== undefined) {
-    return safeGet(metadata, "parentNode") === layer;
+  const face = createElement(document, "div");
+  const row = createElement(document, "div");
+  const badge = createElement(document, "span");
+  if (face === undefined || row === undefined || badge === undefined) return false;
+  addOwnedElementClass(face, "miro-source-card-face");
+  addOwnedElementClass(row, "miro-source-card-provider");
+  addOwnedElementClass(badge, "miro-source-card-badge");
+  const provider = preview.provider ?? host;
+  setOwnedElementText(badge, [...(provider ?? "")][0]?.toUpperCase() ?? "");
+  safeCall(row, "appendChild", [badge]);
+  addCardLine(document, row, "miro-source-card-provider-name", provider);
+  safeCall(face, "appendChild", [row]);
+  addCardLine(document, face, "miro-source-card-title", preview.title);
+  addCardLine(document, face, "miro-source-card-description", preview.description);
+  if (preview.provider !== undefined) addCardLine(document, face, "miro-source-card-host", host);
+  return appendFace(layer, face);
+}
+
+/**
+ * A document Miro shows as a card with its file type, for a document the
+ * export has no file for.  A document with a file is the native preview, with
+ * its name above it.
+ */
+function decorateDocument(
+  document: Document | undefined, layer: DomElementLike, descriptor: SourceItemDescriptor,
+  host: "link" | "file" | "text" | undefined, site: string | undefined,
+): boolean {
+  const source = descriptor.structured?.document;
+  if (document === undefined || source === undefined) return false;
+  if (host === "file") {
+    addCardLine(document, layer, "miro-source-caption", source.title);
+    return true;
   }
-  return false;
+  const face = createElement(document, "div");
+  const icon = createElement(document, "div");
+  if (face === undefined || icon === undefined) return false;
+  addOwnedElementClass(face, "miro-source-card-face");
+  addOwnedElementClass(face, "miro-source-document-face");
+  addOwnedElementClass(icon, "miro-source-document-icon");
+  const type = source.extension ?? (source.kind === "doc_format" ? "DOC" : "FILE");
+  setOwnedElementAttribute(icon, "data-extension", type);
+  setOwnedElementText(icon, type);
+  safeCall(face, "appendChild", [icon]);
+  addCardLine(document, face, "miro-source-card-title", source.title ?? (source.kind === "doc_format" ? "Document" : undefined));
+  addCardLine(document, face, "miro-source-card-description", source.excerpt);
+  addCardLine(document, face, "miro-source-card-host", site);
+  return appendFace(layer, face);
 }
 
 /** Miro names a code block above it, where a frame keeps its title. */
@@ -1195,6 +1264,14 @@ function applyNode(
     patchAttribute(shell, "data-miro-source-card-due-date", String(sourceCard.hasDueDate), patches);
     patchAttribute(shell, "data-miro-source-card-assignee", String(sourceCard.hasAssignee), patches);
   }
+  const sourceDocument = descriptor.structured?.document;
+  const sourceEmbed = descriptor.structured?.embed;
+  const host = hostType(runtime);
+  if (host !== undefined && (sourcePreview !== undefined || sourceDocument !== undefined || sourceEmbed !== undefined)) {
+    patchAttribute(shell, "data-miro-source-host", host, patches);
+  }
+  if (sourceDocument !== undefined) patchClass(shell, "miro-source-document", patches);
+  if (sourceEmbed !== undefined) patchClass(shell, "miro-source-embed", patches);
   if (sourcePreview !== undefined) {
     patchClass(shell, "miro-source-preview", patches);
     patchAttribute(shell, "data-miro-source-preview-title", String(sourcePreview.title !== undefined), patches);
@@ -1228,7 +1305,11 @@ function applyNode(
   if (descriptor.kind === "shape" || descriptor.kind === "sticky" || descriptor.kind === "frame" || descriptor.kind === "media" || descriptor.kind === "code" || sourceAppCard !== undefined || sourceCard !== undefined || sourcePreview !== undefined || sourceMindmap !== undefined) {
     const created = document === undefined ? undefined : createElement(document, "div");
     if (created !== undefined) {
-      const decorationKind = sourceAppCard !== undefined ? "app-card" : sourceCard !== undefined ? "card" : sourcePreview !== undefined ? "preview" : sourceMindmap !== undefined ? "mindmap-node" : descriptor.kind;
+      const decorationKind = sourceAppCard !== undefined ? "app-card" : sourceCard !== undefined ? "card"
+        : sourcePreview !== undefined ? "preview" : sourceDocument !== undefined ? "document"
+          : sourceEmbed !== undefined ? "embed" : sourceMindmap !== undefined ? "mindmap-node" : descriptor.kind;
+      // A card face covers the native content; any other layer lies under it.
+      const covers = sourcePreview !== undefined || (sourceDocument !== undefined && host !== "file");
       addOwnedElementClass(created, DECORATION_CLASS);
       addOwnedElementClass(created, `miro-source-decoration-${decorationKind}`);
       setOwnedElementAttribute(created, "aria-hidden", "true");
@@ -1237,13 +1318,15 @@ function applyNode(
       setOwnedElementStyle(created, "inset", "0");
       setOwnedElementStyle(created, "box-sizing", "border-box");
       setOwnedElementStyle(created, "pointer-events", "none");
-      setOwnedElementStyle(created, "z-index", sourcePreview === undefined ? "0" : "2");
+      setOwnedElementStyle(created, "z-index", covers ? "2" : "0");
       if (sourceMindmap?.branchColor !== undefined) setOwnedElementStyle(created, "--miro-mindmap-color", sourceMindmap.branchColor);
       const drawable = descriptor.kind === "shape"
         ? decorateShape(document, created, descriptor)
         : descriptor.kind === "code"
           ? decorateCode(document, created, descriptor)
-          : sourcePreview === undefined || decoratePreview(document, created, descriptor);
+          : sourcePreview !== undefined
+            ? decoratePreview(document, created, descriptor, linkHost(runtime))
+            : sourceDocument === undefined || decorateDocument(document, created, descriptor, host, linkHost(runtime));
       if (!drawable) diagnostics.push(`shape-renderer-fallback: ${id} (${descriptor.shape ?? "unknown"}).`);
       if (drawable && appendOwnedChild(shell, created, patches)) layer = created;
     }

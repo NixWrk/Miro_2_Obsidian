@@ -1674,7 +1674,8 @@
   border-radius: 4px;
 }
 
-.miro-source-code-title {
+.miro-source-code-title,
+.miro-source-caption {
   position: absolute;
   bottom: 100%;
   left: 0;
@@ -1797,49 +1798,174 @@
   box-shadow: 0 1px 2px rgb(0 0 0 / 12%);
 }
 
-/* Preview links stay native and clickable; the source layer only supplies a
-   stable card edge behind Obsidian's own preview surface. */
-.miro-source-preview {
+/* Links, embeds and documents are Miro cards: a rounded surface with a soft
+   shadow and no label above.  A link preview and a document without a file
+   are drawn as a static face over the native content - native Canvas would
+   load the live page.  The selection toolbar opens the page instead.  An embed
+   keeps its native player inside a narrow frame. */
+.miro-source-preview,
+.miro-source-document,
+.miro-source-embed {
   border-radius: 10px;
 }
 
-.miro-source-preview > .miro-source-decoration-preview {
+.miro-source-preview > .canvas-node-label,
+.miro-source-document > .canvas-node-label,
+.miro-source-embed > .canvas-node-label {
+  display: none;
+}
+
+.miro-source-preview > .canvas-node-container,
+.miro-source-document > .canvas-node-container,
+.miro-source-embed > .canvas-node-container {
+  border-color: transparent !important;
+  border-radius: 10px;
+  box-shadow: 0 1px 2px rgb(0 0 0 / 8%), 0 4px 14px rgb(0 0 0 / 14%) !important;
+}
+
+.miro-source-embed > .canvas-node-container {
+  padding: 6px;
+  background: var(--background-primary) !important;
+}
+
+.miro-source-embed > .canvas-node-container :is(iframe, img, .canvas-node-content) {
+  border-radius: 6px;
+}
+
+/* Native Canvas hands a selected link's pointer to its page, which the card
+   hides; a converted document is still edited as text. */
+.miro-source-preview[data-miro-source-host="link"].is-focused .canvas-node-content-blocker,
+.miro-source-document[data-miro-source-host="link"].is-focused .canvas-node-content-blocker {
+  display: block !important;
+}
+
+.miro-source-document.is-editing > .miro-source-decoration-document {
+  display: none;
+}
+
+.miro-source-card-face {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 22px 24px;
   overflow: hidden;
-  background: transparent;
+  color: var(--text-normal);
+  font-family: var(--font-interface);
+  background: var(--background-primary);
+  /* The shadow alone is lost on a dark board. */
   border: 1px solid var(--background-modifier-border);
   border-radius: 10px;
-  box-shadow: var(--shadow-s, 0 2px 8px rgb(0 0 0 / 12%));
 }
 
-.miro-source-preview-meta {
-  position: absolute;
-  inset: auto 0 0;
-  display: grid;
-  gap: 2px;
-  padding: 24px 12px 10px;
-  color: var(--text-normal);
-  background: linear-gradient(to bottom, transparent, var(--background-primary) 30%);
-}
-
-.miro-source-preview-provider {
+.miro-source-card-provider {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
   color: var(--text-muted);
-  font-size: var(--font-ui-smaller);
+  font-size: 14px;
 }
 
-.miro-source-preview-title {
+.miro-source-card-badge {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  color: var(--background-primary);
+  font-size: 12px;
+  font-weight: 600;
+  background: var(--text-faint);
+  border-radius: 50%;
+}
+
+.miro-source-card-provider-name,
+.miro-source-card-host {
   overflow: hidden;
-  font-weight: var(--font-semibold, 600);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.miro-source-preview-description {
+.miro-source-card-title {
+  display: -webkit-box;
+  margin-top: 8px;
+  overflow: hidden;
+  font-size: 22px;
+  font-weight: 700;
+  line-height: 1.3;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+
+.miro-source-card-description {
   display: -webkit-box;
   overflow: hidden;
   color: var(--text-muted);
-  font-size: var(--font-ui-small);
+  font-size: 15px;
+  line-height: 1.45;
   -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
+  -webkit-line-clamp: 4;
+}
+
+.miro-source-card-host {
+  margin-top: auto;
+  color: var(--text-faint);
+  font-size: 13px;
+}
+
+/* A document card leads with a sheet showing its file type. */
+.miro-source-document-face {
+  align-items: flex-start;
+}
+
+.miro-source-document-icon {
+  position: relative;
+  display: grid;
+  flex: none;
+  place-items: end center;
+  width: 56px;
+  height: 70px;
+  margin-bottom: 6px;
+  padding-bottom: 10px;
+  color: #ffffff;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  background: #4262ff;
+  border-radius: 4px 16px 4px 4px;
+}
+
+.miro-source-document-icon[data-extension="PDF"] {
+  background: #e5484d;
+}
+
+.miro-source-document-icon[data-extension="DOC"],
+.miro-source-document-icon[data-extension="DOCX"] {
+  background: #2f6bd8;
+}
+
+.miro-source-document-icon[data-extension="XLS"],
+.miro-source-document-icon[data-extension="XLSX"],
+.miro-source-document-icon[data-extension="CSV"] {
+  background: #1f9d55;
+}
+
+.miro-source-document-icon[data-extension="PPT"],
+.miro-source-document-icon[data-extension="PPTX"] {
+  background: #e8772e;
+}
+
+.miro-source-document-icon::before {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 16px;
+  height: 16px;
+  content: "";
+  background: rgb(255 255 255 / 45%);
+  border-radius: 0 16px 0 4px;
 }
 
 /* Mind-map nodes keep native editable text. The source layer restores root and
