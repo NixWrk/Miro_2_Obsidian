@@ -694,6 +694,7 @@ export class M1CanvasSession {
 			onAppearance: (action) => this.applyAppearance(action),
 			onStyle: (patch) => this.applyElementStyle(patch),
 			onLock: (locked) => (locked ? this.lockSelection() : this.unlockSelection()),
+			onOpenLink: () => this.openSelectedLink(),
 		}, {
 			...(controlDocument === undefined ? {} : { document: controlDocument }),
 			...(options.setIcon === undefined ? {} : { setIcon: options.setIcon }),
@@ -1923,6 +1924,7 @@ export class M1CanvasSession {
 		const presentation = resolveSelectionToolbarPresentation(this.currentRawDocument, id);
 		const placement = this.selectionPlacement();
 		const kinds = this.selectionKinds();
+		const link = this.selectedLink();
 		return {
 			selectedIds: this.selectedIds,
 			kinds,
@@ -1942,7 +1944,36 @@ export class M1CanvasSession {
 			recentColors: this.appearance.settings.recentColors,
 			...presentation.style,
 			...(placement === undefined ? {} : { placement }),
+			...(link === undefined ? {} : { link }),
 		};
+	}
+
+	/** The web address of the one selected link node; nothing else is opened from the board. */
+	private selectedLink(): string | undefined {
+		if (this.selectedIds.length !== 1) {
+			return undefined;
+		}
+		const nodes = readRuntime(this.currentRawDocument, "nodes");
+		const node = Array.isArray(nodes)
+			? (nodes as readonly unknown[]).find((item) => readRuntime(item, "id") === this.selectedIds[0])
+			: undefined;
+		const url = readRuntime(node, "type") === "link" ? readRuntime(node, "url") : undefined;
+		if (typeof url !== "string") {
+			return undefined;
+		}
+		try {
+			const protocol = new URL(url).protocol;
+			return protocol === "http:" || protocol === "https:" ? url : undefined;
+		} catch {
+			return undefined;
+		}
+	}
+
+	private openSelectedLink(): void {
+		const url = this.selectedLink();
+		const view = ownerDocument(this.root)?.defaultView;
+		// Obsidian hands a new window's web address to the system browser.
+		if (url !== undefined) view?.open(url, "_blank", "noopener");
 	}
 
 	private selectionKinds(): readonly SelectionKind[] {

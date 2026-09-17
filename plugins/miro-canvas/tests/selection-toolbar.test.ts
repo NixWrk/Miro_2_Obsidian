@@ -197,9 +197,9 @@ describe("selection toolbar", () => {
   it("keeps one compact row and hides every popover until it is opened", () => {
     const { root } = build();
     const bar = root.children.find((child) => child.className.includes("__bar"))!;
-    // Shape, the text group, the connector group, the colour group, the lock
-    // and the native menu's slot.
-    expect(bar.children.length).toBeLessThanOrEqual(6);
+    // Shape, the text group, the connector group, the colour group, the link
+    // opener, the lock and the native menu's slot.
+    expect(bar.children.length).toBeLessThanOrEqual(7);
     for (const panel of descendants(root).filter((item) => item.className.includes("__panel"))) {
       expect(panel.hidden).toBe(true);
     }
@@ -498,6 +498,44 @@ describe("selection toolbar", () => {
     update({ palette: [], recentColors: [] });
     expect(palette.children).toHaveLength(0);
     expect(recent.hidden).toBe(true);
+  });
+
+  it("offers a note Miro's sticky colours by name, for its fill only", () => {
+    const { root } = build({
+      kinds: ["sticky"],
+      fillPalette: [{ id: "miro-sticky-yellow", label: "Yellow", color: "#ffe86d", source: "miro" }],
+    });
+    const swatches = (slot: string) => descendants(root)
+      .find((item) => item.attributes.get("data-color-palette") === slot)!.children;
+    expect(swatches("fill").map((item) => item.attributes.get("data-color"))).toEqual(["#ffe86d"]);
+    expect(swatches("fill")[0]!.getAttribute("aria-label")).toBe("Yellow\n#ffe86d");
+    expect(swatches("text").map((item) => item.attributes.get("data-color"))).toEqual(["#f24726"]);
+  });
+
+  it("opens a selected link from its own button, even in review mode", () => {
+    const opened: number[] = [];
+    const toolbar = new SelectionToolbar({
+      onAppearance: () => undefined,
+      onStyle: () => undefined,
+      onLock: () => undefined,
+      onOpenLink: () => { opened.push(1); },
+    }, { document: new FakeDocument() as unknown as Document });
+    const root = toolbar.element as unknown as FakeElement;
+    const state: SelectionToolbarState = {
+      selectedIds: ["link"], kinds: ["media"], editable: false, locked: false, reviewMode: true,
+      typography: TYPOGRAPHY, colors: {}, palette: [], recentColors: [], placement: { x: 0, y: 0 },
+    };
+    toolbar.update(state);
+    const open = descendants(root).find((item) => item.className.includes("--open-link"))!;
+    expect(shown(open)).toBe(false);
+    toolbar.update({ ...state, link: "https://example.test/page" });
+    expect(shown(open)).toBe(true);
+    expect(open.getAttribute("aria-label")).toBe("Open link\nhttps://example.test/page");
+    expect(open.disabled).toBe(false);
+    open.dispatch("click");
+    expect(opened).toEqual([1]);
+    // A link has no text of its own to format.
+    expect(shown(byLabel(root, "Font"))).toBe(false);
   });
 
   it("removes its listeners on dispose", () => {

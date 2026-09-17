@@ -86,6 +86,8 @@ export interface SelectionToolbarState extends SelectionToolbarStyle {
   readonly fillPalette?: readonly PaletteColor[];
   readonly recentColors: readonly string[];
   readonly placement?: SelectionToolbarPlacement;
+  /** The web address a single selected link opens; it shows the open button. */
+  readonly link?: string;
 }
 
 /** A style patch never carries the target id: the host owns the selection. */
@@ -95,6 +97,8 @@ export interface SelectionToolbarActions {
   readonly onAppearance: (action: AppearanceAction) => void;
   readonly onStyle: (patch: SelectionStylePatch) => void;
   readonly onLock: (locked: boolean) => void;
+  /** Opens the selected link outside the board. */
+  readonly onOpenLink?: () => void;
 }
 
 export interface SelectionToolbarOptions {
@@ -392,6 +396,7 @@ interface ToolbarRefs {
   readonly borderWidth: HTMLInputElement;
   readonly borderWidthValue: HTMLElement;
   readonly lock: HTMLButtonElement;
+  readonly openLink: HTMLButtonElement;
   /** Where the host puts the native Canvas menu, so a selection has one menu. */
   readonly nativeSlot: HTMLElement;
   readonly status: HTMLElement;
@@ -635,6 +640,10 @@ export class SelectionToolbar {
     const borderWidth = append(borderWidthRow, makeRange(document, "Border width", 0, BORDER_SLIDER_MAX));
     const borderWidthValue = append(borderWidthRow, make(document, "span", "miro-canvas-toolbar__value"));
 
+    // A link card no longer loads its page, so it is opened from here.
+    const openLink = append(bar, makeButton(document, "Open link", "miro-canvas-toolbar__button--open-link"));
+    this.icon(openLink, "external-link", "↗");
+    openLink.hidden = true;
     const lock = append(bar, makeButton(document, "Lock selection", "miro-canvas-toolbar__button--lock"));
     lock.setAttribute("aria-pressed", "false");
     const nativeSlot = append(bar, make(document, "span", "miro-canvas-toolbar__native"));
@@ -649,7 +658,7 @@ export class SelectionToolbar {
       format, formats, align, alignments, verticalAlignments, lineHeight,
       edgeGroup, startCap, endCap, startCaps, endCaps, swapEnds, line, routes, strokes, lineWidth, lineWidthValue,
       colors, borderStyles, borderWidth, borderWidthValue,
-      lock, nativeSlot, status,
+      lock, openLink, nativeSlot, status,
     };
     this.wire(refs);
     return refs;
@@ -739,6 +748,10 @@ export class SelectionToolbar {
       if (this.state === undefined || this.state.reviewMode) return;
       this.actions.onLock(!this.state.locked);
     });
+    // Opening a link changes nothing on the board, so review mode allows it.
+    this.listen(refs.openLink, "click", () => {
+      if (this.state?.link !== undefined) this.actions.onOpenLink?.();
+    });
     this.listen(this.element, "keydown", (event) => {
       if ((event as KeyboardEvent).key === "Escape") this.closePopovers();
     });
@@ -800,8 +813,9 @@ export class SelectionToolbar {
     const hasEdge = state.kinds.includes("edge");
     const hasNode = state.kinds.some((kind) => kind !== "edge");
     refs.shape.host.hidden = !state.kinds.includes("shape");
-    // A connector's label keeps native editing; the text row belongs to nodes.
-    refs.textGroup.hidden = !hasNode;
+    // A connector's label keeps native editing, and a link, file or embed has
+    // no text of its own: the text row belongs to nodes that show text.
+    refs.textGroup.hidden = !state.kinds.some((kind) => kind !== "edge" && kind !== "media");
     refs.edgeGroup.hidden = !hasEdge;
     for (const { slot, forEdge } of COLOR_SLOTS) {
       refs.colors[slot]!.popover.host.hidden = forEdge ? !hasEdge : !hasNode;
@@ -868,6 +882,8 @@ export class SelectionToolbar {
     refs.lock.setAttribute("aria-pressed", state.locked ? "true" : "false");
     refs.lock.setAttribute("aria-label", state.locked ? "Unlock selection" : "Lock selection");
     refs.lock.disabled = state.reviewMode;
+    refs.openLink.hidden = state.link === undefined || this.actions.onOpenLink === undefined;
+    refs.openLink.setAttribute("aria-label", state.link === undefined ? "Open link" : `Open link\n${state.link}`);
     for (const control of this.controls(refs)) {
       control.disabled = !state.editable;
     }
