@@ -436,7 +436,9 @@ function decorateDrawing(document: Document | undefined, layer: DomElementLike, 
   })) setOwnedElementAttribute(path, name, value);
   safeCall(svg, "appendChild", [path]);
   safeCall(layer, "appendChild", [svg]);
-  return safeGet(svg, "parentNode") === layer;
+  // Both halves are checked: a line that never reached its drawing would
+  // otherwise count as drawn, and the empty node would say nothing about it.
+  return safeGet(svg, "parentNode") === layer && safeGet(path, "parentNode") === svg;
 }
 
 /** A grid keeps its name above it, where a frame and a code block keep theirs. */

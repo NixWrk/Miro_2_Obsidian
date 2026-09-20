@@ -1199,3 +1199,82 @@ describe("item creation", () => {
 		expect(runtime.getData().nodes).toEqual([]);
 	});
 });
+
+describe("deleteItems", () => {
+	function multiEdgeDocument(): CanvasDocument {
+		return {
+			nodes: [
+				{ id: "a", type: "text", x: 0, y: 0, width: 100, height: 80, text: "A" },
+				{ id: "b", type: "text", x: 200, y: 0, width: 100, height: 80, text: "B" },
+				{ id: "c", type: "text", x: 400, y: 0, width: 100, height: 80, text: "C" },
+			],
+			edges: [
+				{ id: "e1", fromNode: "a", toNode: "b" },
+				{ id: "e2", fromNode: "b", toNode: "c" },
+				{ id: "e3", fromNode: "a", toNode: "c" },
+			],
+			miroCanvas: {
+				schemaVersion: 1,
+				localOverrides: {
+					b: { rotation: 34 },
+					e1: { connectorAnchors: { from: { type: "free", x: 1, y: 2 } } },
+				},
+			},
+		};
+	}
+
+	it("removes a node, every edge that ended on it, and its local overrides in one import and one history step", () => {
+		const runtime = new NativeGraph(multiEdgeDocument());
+		const authoring = createCanvasAuthoring(runtime);
+
+		const result = authoring.deleteItems({ ids: ["b"] });
+
+		expect(result.ok).toBe(true);
+		expect(result.status).toBe("applied");
+		const data = runtime.getData();
+		expect((data.nodes as CanvasDocument[]).map((node) => node.id)).toEqual(["a", "c"]);
+		expect((data.edges as CanvasDocument[]).map((edge) => edge.id)).toEqual(["e3"]);
+		expect((data.miroCanvas as CanvasDocument).localOverrides).toEqual({});
+		expect(runtime.importDataSpy).toHaveBeenCalledTimes(1);
+		expect(runtime.importDataSpy).toHaveBeenCalledWith(expect.any(Object), true);
+		expect(runtime.requestSaveSpy).toHaveBeenCalledTimes(1);
+		expect(runtime.requestSaveSpy).toHaveBeenCalledWith(true);
+		expect(runtime.history).toHaveLength(2);
+	});
+
+	it("rejects an id that does not exist and an empty id list, importing nothing", () => {
+		const runtime = new NativeGraph(multiEdgeDocument());
+		const authoring = createCanvasAuthoring(runtime);
+
+		const missing = authoring.deleteItems({ ids: ["missing"] });
+		expect(missing.ok).toBe(false);
+		expect(missing.diagnostics.map((item) => item.code)).toContain("delete-node-missing");
+
+		const empty = authoring.deleteItems({ ids: [] });
+		expect(empty.ok).toBe(false);
+		expect(empty.diagnostics.map((item) => item.code)).toContain("delete-ids-invalid");
+
+		expect(runtime.importDataSpy).not.toHaveBeenCalled();
+		expect(runtime.getData().nodes).toHaveLength(3);
+	});
+
+	it("deletes a drawing made with createItem along with its stroke override", () => {
+		const runtime = new NativeGraph({ nodes: [], edges: [] });
+		const authoring = createCanvasAuthoring(runtime);
+		const stroke = { color: "#1a1a1a", width: 5, box: { width: 40, height: 20 }, points: [0, 0, 20, 10, 40, 20] };
+
+		const created = authoring.createItem({
+			item: { type: "drawing", stroke },
+			x: 0, y: 0, width: 200, height: 200,
+		});
+		expect(created.ok).toBe(true);
+		const id = created.nodeId!;
+		expect(runtime.getData()).toHaveProperty(`miroCanvas.localOverrides.${id}.item.stroke`, stroke);
+
+		const result = authoring.deleteItems({ ids: [id] });
+
+		expect(result.ok).toBe(true);
+		expect(runtime.getData().nodes).toEqual([]);
+		expect(runtime.getData()).not.toHaveProperty(`miroCanvas.localOverrides.${id}`);
+	});
+});

@@ -46,7 +46,10 @@ export function simplifyPoints(points: readonly StrokePoint[], tolerance: number
   return points.filter((_, index) => keep[index] === true);
 }
 
-/** The box a stroke occupies, with room for the width of its line. */
+/**
+ * The box a stroke occupies: every point, half the width of the line on each
+ * side, and a unit of slack so a round end is never clipped by rounding.
+ */
 export function strokeBounds(points: readonly StrokePoint[], width = 0): StrokeBox {
   if (points.length === 0) return { x: 0, y: 0, width: Math.max(width, 1), height: Math.max(width, 1) };
   let minX = Number.POSITIVE_INFINITY, minY = Number.POSITIVE_INFINITY;

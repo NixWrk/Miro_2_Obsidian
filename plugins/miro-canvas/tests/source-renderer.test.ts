@@ -786,6 +786,41 @@ describe("source-backed mindmap rendering", () => {
   });
 });
 
+describe("source-backed drawing rendering", () => {
+  it("draws a local stroke as an SVG polyline and removes it again on dispose", () => {
+    const stroke = { color: "#ff00ff", width: 6, opacity: 0.5, box: { width: 40, height: 20 }, points: [0, 0, 20, 10, 40, 20] };
+    const data: any = {
+      nodes: [{ id: "drawing-1", type: "text", x: 0, y: 0, width: 200, height: 100 }],
+      edges: [],
+      miroCanvas: { schemaVersion: 1, localOverrides: { "drawing-1": { item: { type: "drawing", stroke } } } },
+    };
+    const nodeEl = new Element("div"), contentEl = new Element("div");
+    nodeEl.appendChild(contentEl);
+    const renderer = new SourceRenderer({
+      getDocument: () => data,
+      getNodes: () => [{ id: "drawing-1", nodeEl, contentEl }],
+      getEdges: () => [],
+    }, dom);
+
+    renderer.refresh();
+    expect(nodeEl.classes.has("miro-source-drawing")).toBe(true);
+    const layer = nodeEl.children.find((child) => child.classes.has("miro-source-decoration-drawing"))!;
+    const svg = layer.children.find((child) => child.tagName === "svg")!;
+    expect(svg.getAttribute("viewBox")).toBe("0 0 40 20");
+    const polyline = svg.children.find((child) => child.tagName === "polyline")!;
+    expect(polyline.getAttribute("points")).toBe("0,0 20,10 40,20");
+    expect(polyline.getAttribute("stroke")).toBe("#ff00ff");
+    expect(polyline.getAttribute("stroke-width")).toBe("6");
+    expect(polyline.getAttribute("stroke-opacity")).toBe("0.5");
+
+    renderer.refresh();
+    expect(nodeEl.children.filter((child) => child.classes.has("miro-source-decoration-drawing"))).toHaveLength(1);
+    renderer.dispose();
+    expect(nodeEl.classes.has("miro-source-drawing")).toBe(false);
+    expect(nodeEl.children.some((child) => child.classes.has("miro-source-decoration-drawing"))).toBe(false);
+  });
+});
+
 describe("rotation and a node the host is moving", () => {
   it("follows the host's transform instead of pinning the node where it was", () => {
     const f = fixture("rectangle");
