@@ -118,12 +118,22 @@ function panelOf(button: FakeElement): FakeElement {
   return button.parentElement!.children.find((child) => child.className.includes("__panel"))!;
 }
 
-type Call = { readonly kind: "arm"; readonly tool: QuickTool } | { readonly kind: "shape"; readonly shape: string };
+type Call =
+  | { readonly kind: "arm"; readonly tool: QuickTool }
+  | { readonly kind: "shape"; readonly shape: string }
+  | { readonly kind: "pen"; readonly settings: { readonly color?: string; readonly width?: number } };
+
+/** What the bar is told about the board when nothing in particular is set. */
+const STATE = { editable: true, armed: "select", shape: "rectangle", penColor: "#1a1a1a", penWidth: 5 } as const;
 
 function build(): { readonly tools: QuickTools; readonly root: FakeElement; readonly calls: Call[] } {
   const calls: Call[] = [];
   const tools = new QuickTools(
-    { onArm: (tool) => calls.push({ kind: "arm", tool }), onShape: (shape) => calls.push({ kind: "shape", shape }) },
+    {
+      onArm: (tool) => calls.push({ kind: "arm", tool }),
+      onShape: (shape) => calls.push({ kind: "shape", shape }),
+      onPen: (settings) => calls.push({ kind: "pen", settings }),
+    },
     { document: new FakeDocument() as unknown as Document },
   );
   return { tools, root: tools.element as unknown as FakeElement, calls };
@@ -189,7 +199,7 @@ describe("quick tools", () => {
   it("disables every tool but select and closes open panels when the board stops being editable", () => {
     const { root, tools } = build();
     toolButton(root, "shape").dispatch("click");
-    tools.update({ editable: false, armed: "select", shape: "rectangle" });
+    tools.update({ ...STATE, editable: false });
     expect(panelOf(toolButton(root, "shape")).hidden).toBe(true);
     for (const tool of QUICK_TOOLS) {
       expect(toolButton(root, tool).disabled).toBe(tool !== "select");
@@ -198,14 +208,14 @@ describe("quick tools", () => {
 
   it("marks the armed tool and the chosen shape as pressed", () => {
     const { root, tools } = build();
-    tools.update({ editable: true, armed: "text", shape: "rhombus" });
+    tools.update({ ...STATE, armed: "text", shape: "rhombus" });
     for (const tool of QUICK_TOOLS) {
       expect(toolButton(root, tool).getAttribute("aria-pressed")).toBe(tool === "text" ? "true" : "false");
     }
     expect(shapeOption(root, "rhombus").getAttribute("aria-pressed")).toBe("true");
     expect(shapeOption(root, "rectangle").getAttribute("aria-pressed")).toBe("false");
     // A second, different shape swaps the picture the bar button already shows.
-    tools.update({ editable: true, armed: "frame", shape: "rectangle" });
+    tools.update({ ...STATE, armed: "frame" });
     expect(toolButton(root, "frame").getAttribute("aria-pressed")).toBe("true");
     expect(toolButton(root, "text").getAttribute("aria-pressed")).toBe("false");
     expect(shapeOption(root, "rectangle").getAttribute("aria-pressed")).toBe("true");
@@ -214,7 +224,7 @@ describe("quick tools", () => {
 
   it("maps each bar shortcut letter to its tool", () => {
     expect([...QUICK_TOOL_KEYS.entries()]).toEqual([
-      ["V", "select"], ["T", "text"], ["N", "sticky"], ["S", "shape"],
+      ["V", "select"], ["T", "text"], ["N", "sticky"], ["S", "shape"], ["P", "pen"],
       ["L", "connector"], ["C", "comment"], ["F", "frame"],
     ]);
   });

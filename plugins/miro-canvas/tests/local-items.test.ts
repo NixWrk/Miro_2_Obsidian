@@ -3,11 +3,19 @@ import { describe, expect, it } from "vitest";
 import { MIRO_STICKY_COLORS } from "../src/miro-palette";
 import { LOCAL_ITEM_SIZES, LOCAL_ITEM_TYPES, readLocalItem } from "../src/local-items";
 
+const STROKE = { color: "#1a1a1a", width: 5, box: { width: 40, height: 20 }, points: [0, 0, 20, 10, 40, 20] };
+
 describe("readLocalItem", () => {
   it("accepts every type the board tools make", () => {
     for (const type of LOCAL_ITEM_TYPES) {
+      // A drawing is its stroke; every other item stands on its type alone.
+      if (type === "drawing") continue;
       expect(readLocalItem({ type })).toEqual({ type });
     }
+    expect(readLocalItem({ type: "drawing" })).toBeUndefined();
+    expect(readLocalItem({ type: "drawing", stroke: STROKE })).toEqual({ type: "drawing", stroke: STROKE });
+    // Only a drawing carries one.
+    expect(readLocalItem({ type: "text", stroke: STROKE })).toBeUndefined();
   });
 
   it("keeps a valid Miro sticky colour name and a short title", () => {

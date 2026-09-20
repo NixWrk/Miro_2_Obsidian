@@ -6,8 +6,25 @@
  */
 import { MIRO_STICKY_COLORS } from "./miro-palette";
 
-export const LOCAL_ITEM_TYPES = ["text", "sticky_note", "code", "frame", "table"] as const;
+export const LOCAL_ITEM_TYPES = ["text", "sticky_note", "code", "frame", "table", "drawing"] as const;
 export type LocalItemType = (typeof LOCAL_ITEM_TYPES)[number];
+
+/**
+ * One freehand stroke, as the pen drew it.
+ *
+ * The points live in the box the stroke was drawn in, so the drawing keeps
+ * its shape when the node is resized: the renderer maps that box onto
+ * whatever the node is now.
+ */
+export interface LocalStroke {
+  readonly color: string;
+  readonly width: number;
+  /** Below one for a highlighter, which Miro draws to see through. */
+  readonly opacity?: number;
+  readonly box: { readonly width: number; readonly height: number };
+  /** x and y in turn, inside the box. */
+  readonly points: readonly number[];
+}
 
 export interface LocalItem {
   readonly type: LocalItemType;
@@ -15,6 +32,8 @@ export interface LocalItem {
   readonly color?: string;
   /** A code block's or a grid's title. */
   readonly title?: string;
+  /** What the pen drew, for a drawing. */
+  readonly stroke?: LocalStroke;
 }
 
 const MAX_TITLE_LENGTH = 256;
@@ -27,7 +46,38 @@ export const LOCAL_ITEM_SIZES: Readonly<Record<LocalItemType, { readonly width: 
   code: { width: 480, height: 120 },
   frame: { width: 640, height: 400 },
   table: { width: 720, height: 200 },
+  drawing: { width: 200, height: 200 },
 });
+
+const MAX_STROKE_POINTS = 4_096;
+const MAX_STROKE_SIZE = 100_000;
+const HEX_COLOR = /^#[0-9a-f]{6}$/iu;
+
+/** A stroke this plugin can draw again, or undefined when the record is not one. */
+export function readLocalStroke(value: unknown): LocalStroke | undefined {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const color = own(value, "color");
+  const width = own(value, "width");
+  const opacity = own(value, "opacity");
+  const box = own(value, "box");
+  const points = own(value, "points");
+  if (typeof color !== "string" || !HEX_COLOR.test(color)) return undefined;
+  if (typeof width !== "number" || !Number.isFinite(width) || width <= 0 || width > 1_000) return undefined;
+  if (opacity !== undefined && (typeof opacity !== "number" || !(opacity > 0) || opacity > 1)) return undefined;
+  if (box === null || typeof box !== "object") return undefined;
+  const boxWidth = own(box, "width"), boxHeight = own(box, "height");
+  const positive = (side: unknown): side is number => typeof side === "number" && Number.isFinite(side) && side > 0 && side <= MAX_STROKE_SIZE;
+  if (!positive(boxWidth) || !positive(boxHeight)) return undefined;
+  if (!Array.isArray(points) || points.length < 4 || points.length > MAX_STROKE_POINTS * 2 || points.length % 2 !== 0) return undefined;
+  if (points.some((point) => typeof point !== "number" || !Number.isFinite(point) || Math.abs(point) > MAX_STROKE_SIZE)) return undefined;
+  return Object.freeze({
+    color: color.toLowerCase(),
+    width,
+    ...(opacity === undefined ? {} : { opacity }),
+    box: Object.freeze({ width: boxWidth, height: boxHeight }),
+    points: Object.freeze([...points as readonly number[]]),
+  });
+}
 
 /**
  * The grid a new table starts as: an ordinary Markdown table, which Canvas
@@ -50,9 +100,14 @@ export function readLocalItem(value: unknown): LocalItem | undefined {
   const title = own(value, "title");
   if (color !== undefined && (typeof color !== "string" || !STICKY_TOKENS.has(color))) return undefined;
   if (title !== undefined && (typeof title !== "string" || title.length > MAX_TITLE_LENGTH)) return undefined;
+  const rawStroke = own(value, "stroke");
+  const stroke = rawStroke === undefined ? undefined : readLocalStroke(rawStroke);
+  // A drawing is nothing without its stroke, and nothing else carries one.
+  if (type === "drawing" ? stroke === undefined : rawStroke !== undefined) return undefined;
   return Object.freeze({
     type: type as LocalItemType,
     ...(color === undefined ? {} : { color }),
     ...(title === undefined ? {} : { title }),
+    ...(stroke === undefined ? {} : { stroke }),
   });
 }

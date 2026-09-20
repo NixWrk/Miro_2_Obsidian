@@ -94,6 +94,10 @@ export interface CreateItemResult extends CanvasGraphResult {
 	readonly nodeId?: string;
 }
 
+export interface DeleteItemsInput {
+	readonly ids: readonly string[];
+}
+
 export interface UpdateElementStyleInput {
 	readonly id: string;
 	readonly shape?: CanvasShapeKind;
@@ -670,6 +674,15 @@ function readSnapshotFromHost(host: NativeHost, diagnostics: CanvasAuthoringDiag
 		return undefined;
 	}
 	return makeSnapshot(result.value, diagnostics);
+}
+
+/** Drops one own field, leaving the rest of the record untouched. */
+function deleteOwn(record: UnknownRecord, key: string): void {
+	try {
+		Reflect.deleteProperty(record, key);
+	} catch {
+		// A record that refuses the removal keeps the field; the caller checks.
+	}
 }
 
 function setOwn(record: UnknownRecord, key: string, value: unknown): void {
@@ -2020,6 +2033,98 @@ export class CanvasAuthoring {
 		const verified = this.commitDocument(before, document, diagnostics, item?.type === "frame");
 		if (verified === undefined) return reject();
 		return { ok: true, status: "applied", nodeId: id, document: verified.document, diagnostics: [...this.diagnosticList, ...diagnostics] };
+	}
+
+	/**
+	 * Take nodes off the board, with the connectors that ended on them and the
+	 * plugin metadata that described them, in one native history step.
+	 */
+	public deleteItems(input: DeleteItemsInput, expected?: CanvasAuthoringExpected): CanvasGraphResult {
+		const diagnostics: CanvasAuthoringDiagnostic[] = [];
+		const reject = (): CanvasGraphResult => ({ ok: false, status: "rejected", diagnostics: [...this.diagnosticList, ...diagnostics] });
+		if (this.disposed || this.host === undefined) return reject();
+		const before = readSnapshotFromHost(this.host, diagnostics);
+		if (before === undefined) return reject();
+		if (expected !== undefined) {
+			const snapshot = makeSnapshot(extractExpectedDocument(expected), diagnostics);
+			if (snapshot === undefined || !structurallyEqual(snapshot.document, before.document)) {
+				addDiagnostic(diagnostics, "stale-document", "warning", "The Canvas document changed since the supplied expected snapshot.");
+				return reject();
+			}
+		}
+		const ids = Array.isArray(input?.ids) ? input.ids.filter((id): id is string => typeof id === "string" && id.length > 0) : [];
+		const wanted = new Set(ids);
+		if (wanted.size === 0) {
+			addDiagnostic(diagnostics, "delete-ids-invalid", "error", "Deleting needs at least one Canvas node ID.");
+			return reject();
+		}
+		for (const id of wanted) {
+			if (!before.nodes.some((node) => node.id === id)) {
+				addDiagnostic(diagnostics, "delete-node-missing", "error", `Canvas node ${id} does not exist.`);
+				return reject();
+			}
+			const decision = decideEditOperation(before.document, "delete", id);
+			if (!decision.valid || !decision.allowed) {
+				addDiagnostic(diagnostics, decision.reason === "review-mode" ? "delete-blocked-review" : "delete-blocked-lock", "warning",
+					decision.reason === "review-mode" ? "Canvas review mode blocks deleting." : "The Canvas interaction policy blocks deleting this element.");
+				return reject();
+			}
+		}
+		let document: UnknownRecord;
+		try {
+			document = cloneRecord(before.document);
+		} catch (error) {
+			addDiagnostic(diagnostics, "document-copy-failed", "error", `The Canvas document could not be copied: ${describeError(error)}.`);
+			return reject();
+		}
+		const nodesValue = safeRead(document, "nodes");
+		const edgesValue = safeRead(document, "edges");
+		if (!nodesValue.ok || !Array.isArray(nodesValue.value) || !edgesValue.ok || !Array.isArray(edgesValue.value)) {
+			addDiagnostic(diagnostics, "canvas-document-invalid", "error", "The target Canvas nodes or edges array is unavailable.");
+			return reject();
+		}
+		const keptNodes = (nodesValue.value as readonly unknown[]).filter((node) => {
+			const id = safeRead(node, "id");
+			return !(id.ok && typeof id.value === "string" && wanted.has(id.value));
+		});
+		// A connector cannot outlive the node it ended on.
+		const removedEdges: string[] = [];
+		const keptEdges = (edgesValue.value as readonly unknown[]).filter((edge) => {
+			const from = safeRead(edge, "fromNode"), to = safeRead(edge, "toNode"), id = safeRead(edge, "id");
+			const touches = (side: ReadResult): boolean => side.ok && typeof side.value === "string" && wanted.has(side.value);
+			if (!touches(from) && !touches(to)) return true;
+			if (id.ok && typeof id.value === "string") removedEdges.push(id.value);
+			return false;
+		});
+		setOwn(document, "nodes", keptNodes);
+		setOwn(document, "edges", keptEdges);
+		const metadataValue = safeRead(document, "miroCanvas");
+		if (metadataValue.ok && isPlainObject(metadataValue.value)) {
+			const metadata = readMetadataForUpdate(document, diagnostics);
+			if (metadata === undefined) return reject();
+			const overridesValue = safeRead(metadata, "localOverrides");
+			if (overridesValue.ok && isPlainObject(overridesValue.value)) {
+				let overrides: UnknownRecord;
+				try {
+					overrides = cloneRecord(overridesValue.value);
+				} catch (error) {
+					addDiagnostic(diagnostics, "metadata-overrides-invalid", "error", `Existing localOverrides could not be copied: ${describeError(error)}.`);
+					return reject();
+				}
+				for (const id of [...wanted, ...removedEdges]) {
+					if (hasOwn(overrides, id)) deleteOwn(overrides, id);
+				}
+				setOwn(metadata, "localOverrides", overrides);
+			}
+			if (!validateMiroCanvasMetadata(metadata).valid) {
+				addDiagnostic(diagnostics, "metadata-validation-failed", "error", "The metadata left behind failed validation; no graph import was attempted.");
+				return reject();
+			}
+			setOwn(document, "miroCanvas", metadata);
+		}
+		const verified = this.commitDocument(before, document, diagnostics);
+		if (verified === undefined) return reject();
+		return { ok: true, status: "applied", document: verified.document, diagnostics: [...this.diagnosticList, ...diagnostics] };
 	}
 
 	/** Apply one connector endpoint change through the same guarded native graph transaction. */

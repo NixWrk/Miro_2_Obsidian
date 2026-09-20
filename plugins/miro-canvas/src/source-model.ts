@@ -5,7 +5,7 @@ import { MAX_WAYPOINTS } from "./connector-route";
 import { stickyFill } from "./miro-palette";
 import { listCommentThreads } from "./local-comments";
 import { threadMessages, type ThreadMessage } from "./comment-thread";
-import { readLocalItem, type LocalItemType } from "./local-items";
+import { readLocalItem, type LocalItemType, type LocalStroke } from "./local-items";
 
 export type SourceItemKind = "shape" | "text" | "sticky" | "connector" | "frame" | "media" | "code" | "group";
 
@@ -107,6 +107,8 @@ export interface SourceStructuredDescriptor {
   readonly document?: SourceDocumentDescriptor;
   readonly embed?: SourceEmbedDescriptor;
   readonly table?: SourceTableDescriptor;
+  /** The stroke a drawing shows. */
+  readonly stroke?: LocalStroke;
   readonly deck?: SourceDeckDescriptor;
   readonly slide?: SourceSlideDescriptor;
   readonly comment?: SourceCommentDescriptor;
@@ -943,7 +945,8 @@ export function buildSourceScene(document: unknown): SourceScene {
       applyLocalCss(css, localOverride(document, canvasId));
       const rotation = effectiveRotationFor(document, canvasId);
       if (item !== undefined) {
-        const kind = item.type === "sticky_note" ? "sticky" : item.type === "table" ? "text" : item.type;
+        const kind = item.type === "sticky_note" ? "sticky"
+          : item.type === "table" || item.type === "drawing" ? "text" : item.type;
         items.set(canvasId, Object.freeze({
           kind, rotation, css: Object.freeze(css), localItem: item.type,
           ...(item.type === "code" ? {
@@ -951,6 +954,9 @@ export function buildSourceScene(document: unknown): SourceScene {
           } : {}),
           ...(item.type === "table" ? {
             structured: Object.freeze({ table: Object.freeze(item.title === undefined ? {} : { title: item.title }) }),
+          } : {}),
+          ...(item.type === "drawing" && item.stroke !== undefined ? {
+            structured: Object.freeze({ stroke: item.stroke }),
           } : {}),
         }));
         continue;

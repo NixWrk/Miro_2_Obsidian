@@ -9,7 +9,9 @@
 import { SHAPE_CATALOG, shapeCatalogEntry, shapeCatalogLabel } from "./shape-catalog";
 import { shapePicture } from "./selection-toolbar";
 
-export const QUICK_TOOLS = ["select", "text", "sticky", "shape", "connector", "comment", "frame", "code", "table", "link"] as const;
+export const QUICK_TOOLS = [
+  "select", "text", "sticky", "shape", "pen", "highlighter", "eraser", "connector", "comment", "frame", "code", "table", "link",
+] as const;
 export type QuickTool = (typeof QUICK_TOOLS)[number];
 
 interface ToolSpec {
@@ -26,6 +28,7 @@ const BAR_TOOLS: readonly ToolSpec[] = [
   { tool: "text", label: "Text", icon: "type", glyph: "T", key: "T" },
   { tool: "sticky", label: "Sticky note", icon: "sticky-note", glyph: "▢", key: "N" },
   { tool: "shape", label: "Shape", icon: "shapes", glyph: "◇", key: "S" },
+  { tool: "pen", label: "Pen", icon: "pen", glyph: "✎", key: "P" },
   { tool: "connector", label: "Connection line", icon: "move-up-right", glyph: "↗", key: "L" },
   { tool: "comment", label: "Comment", icon: "message-circle", glyph: "💬", key: "C" },
   { tool: "frame", label: "Frame", icon: "frame", glyph: "#", key: "F" },
@@ -43,12 +46,26 @@ export interface QuickToolsState {
   readonly armed: QuickTool;
   /** The shape the shape tool makes. */
   readonly shape: string;
+  /** What the pen draws with. */
+  readonly penColor: string;
+  readonly penWidth: number;
 }
 
 export interface QuickToolsActions {
   readonly onArm: (tool: QuickTool) => void;
   readonly onShape: (shape: string) => void;
+  readonly onPen: (settings: { readonly color?: string; readonly width?: number }) => void;
 }
+
+/** What Miro keeps in a pen preset: its own colours and three thicknesses. */
+export const PEN_COLORS = ["#1a1a1a", "#ffffff", "#f24726", "#ff9d48", "#ffd02f", "#67c6a0", "#2d9bf0", "#9b51e0"] as const;
+export const PEN_WIDTHS = [2, 5, 10] as const;
+
+const DRAWING_TOOLS: readonly ToolSpec[] = [
+  { tool: "pen", label: "Pen", icon: "pen", glyph: "✎" },
+  { tool: "highlighter", label: "Highlighter", icon: "highlighter", glyph: "▨" },
+  { tool: "eraser", label: "Eraser", icon: "eraser", glyph: "⌫" },
+];
 
 export interface QuickToolsOptions {
   readonly document?: Document;
@@ -67,6 +84,11 @@ export class QuickTools {
   private readonly document: Document;
   private readonly buttons = new Map<QuickTool, HTMLButtonElement>();
   private readonly shapeButtons = new Map<string, HTMLButtonElement>();
+  private readonly penColors = new Map<string, HTMLButtonElement>();
+  private readonly penWidths = new Map<number, HTMLButtonElement>();
+  private penButton: HTMLButtonElement | undefined;
+  /** The drawing tool the pen button goes back to. */
+  private drawingTool: QuickTool = "pen";
   private readonly panels: { readonly button: HTMLButtonElement; readonly panel: HTMLElement }[] = [];
   private readonly listeners: (() => void)[] = [];
   private shownShape = "";
@@ -102,6 +124,44 @@ export class QuickTools {
         }
         continue;
       }
+      if (spec.tool === "pen") {
+        // Miro keeps the pen, the highlighter, the eraser and their presets
+        // behind one button, which shows what it will draw with and arms the
+        // drawing tool last used; the tools themselves live in its panel.
+        const host = bar.appendChild(this.make("span", "miro-canvas-toolbar__popover"));
+        const button = host.appendChild(this.iconButton(`${spec.label}\n${spec.key}`, spec.icon, spec.glyph));
+        button.setAttribute("data-tool-group", "drawing");
+        this.listen(button, "click", () => this.actions.onArm(this.drawingTool));
+        this.penButton = button;
+        const panel = host.appendChild(this.panel(button, "miro-canvas-tools__pen"));
+        const tools = panel.appendChild(this.make("div", "miro-canvas-toolbar__row"));
+        for (const drawing of DRAWING_TOOLS) {
+          const option = tools.appendChild(this.toolButton(drawing));
+          this.listen(option, "click", () => this.closePanels());
+        }
+        const colors = panel.appendChild(this.make("div", "miro-canvas-toolbar__row miro-canvas-tools__swatches"));
+        for (const color of PEN_COLORS) {
+          const option = colors.appendChild(this.make("button", "miro-canvas-toolbar__button miro-canvas-toolbar__button--swatch"));
+          option.type = "button";
+          option.setAttribute("aria-label", color);
+          option.setAttribute("data-pen-color", color);
+          option.style?.setProperty?.("--miro-canvas-swatch", color);
+          this.listen(option, "click", () => this.actions.onPen({ color }));
+          this.penColors.set(color, option);
+        }
+        const widths = panel.appendChild(this.make("div", "miro-canvas-toolbar__row miro-canvas-tools__widths"));
+        for (const width of PEN_WIDTHS) {
+          const option = widths.appendChild(this.make("button", "miro-canvas-toolbar__button miro-canvas-tools__width"));
+          option.type = "button";
+          option.setAttribute("aria-label", `${width} point line`);
+          option.setAttribute("data-pen-width", String(width));
+          const dot = option.appendChild(this.make("span", "miro-canvas-tools__dot"));
+          dot.style?.setProperty?.("--miro-canvas-pen-width", `${width}px`);
+          this.listen(option, "click", () => this.actions.onPen({ width }));
+          this.penWidths.set(width, option);
+        }
+        continue;
+      }
       bar.appendChild(this.toolButton(spec));
     }
     const moreHost = bar.appendChild(this.make("span", "miro-canvas-toolbar__popover miro-canvas-tools__more"));
@@ -130,6 +190,18 @@ export class QuickTools {
     for (const [kind, button] of this.shapeButtons) {
       button.setAttribute("aria-pressed", kind === state.shape ? "true" : "false");
     }
+    for (const [color, button] of this.penColors) {
+      button.setAttribute("aria-pressed", color === state.penColor ? "true" : "false");
+    }
+    for (const [width, button] of this.penWidths) {
+      button.setAttribute("aria-pressed", width === state.penWidth ? "true" : "false");
+    }
+    // The pen button carries the colour it draws with, and stays marked while
+    // any of the drawing tools is the armed one.
+    if (state.armed === "pen" || state.armed === "highlighter" || state.armed === "eraser") this.drawingTool = state.armed;
+    this.penButton?.style?.setProperty?.("--miro-canvas-swatch", state.penColor);
+    this.penButton?.setAttribute("aria-pressed",
+      state.armed === "pen" || state.armed === "highlighter" || state.armed === "eraser" ? "true" : "false");
     const entry = shapeCatalogEntry(state.shape);
     const shapeButton = this.buttons.get("shape");
     if (entry !== undefined && shapeButton !== undefined && this.shownShape !== entry.kind) {

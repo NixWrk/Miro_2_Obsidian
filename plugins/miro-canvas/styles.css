@@ -1000,6 +1000,56 @@
   cursor: crosshair;
 }
 
+/* A drawing is only its stroke: the node that carries it shows nothing of its
+   own, and the stroke scales with the node. */
+.miro-source-drawing,
+.miro-source-drawing > .canvas-node-container,
+.miro-source-drawing .canvas-node-content {
+  background-color: transparent !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
+}
+
+.miro-source-drawing .canvas-node-content {
+  display: none;
+}
+
+/* The pen's own row of colours and thicknesses. */
+.miro-canvas-tools .miro-canvas-tools__pen {
+  gap: 10px;
+}
+
+.miro-canvas-tools__swatches,
+.miro-canvas-tools__widths {
+  gap: 4px;
+}
+
+.miro-canvas-tools .miro-canvas-tools__width {
+  display: grid;
+  place-items: center;
+  width: 32px;
+}
+
+.miro-canvas-tools__dot {
+  width: var(--miro-canvas-pen-width, 4px);
+  height: var(--miro-canvas-pen-width, 4px);
+  background: currentColor;
+  border-radius: 50%;
+}
+
+/* The pen button wears the colour it will draw with. */
+.miro-canvas-tools .miro-canvas-toolbar__button[data-tool-group="drawing"]::after {
+  position: absolute;
+  bottom: 3px;
+  left: 50%;
+  width: 14px;
+  height: 3px;
+  content: "";
+  background: var(--miro-canvas-swatch, currentColor);
+  border-radius: 2px;
+  transform: translateX(-50%);
+}
+
 .miro-canvas-tool-ghost {
   position: absolute;
   z-index: 99;
@@ -1021,8 +1071,28 @@
 }
 
 .miro-canvas-tool-ghost--comment,
-.miro-canvas-tool-ghost--link {
+.miro-canvas-tool-ghost--link,
+.miro-canvas-tool-ghost--eraser {
   display: none;
+}
+
+/* The line being drawn, over the board until it becomes an item. */
+.miro-canvas-tool-ghost--pen,
+.miro-canvas-tool-ghost--highlighter {
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  border: 0;
+  border-radius: 0;
+}
+
+/* Drawing is a pen gesture, not a place to press. */
+.miro-canvas-root[data-miro-canvas-tool="pen"] .canvas,
+.miro-canvas-root[data-miro-canvas-tool="highlighter"] .canvas,
+.miro-canvas-root[data-miro-canvas-tool="eraser"] .canvas {
+  cursor: crosshair;
+  touch-action: none;
 }
 
 .miro-canvas-link-prompt {

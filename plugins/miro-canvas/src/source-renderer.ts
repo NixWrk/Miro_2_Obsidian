@@ -414,6 +414,31 @@ function decorateCode(document: Document | undefined, layer: DomElementLike, des
   return true;
 }
 
+/** A freehand stroke, drawn again in the box it was made in so it scales with the node. */
+function decorateDrawing(document: Document | undefined, layer: DomElementLike, descriptor: SourceItemDescriptor): boolean {
+  const stroke = descriptor.structured?.stroke;
+  if (document === undefined || stroke === undefined) return false;
+  const svg = createSvg(document, "svg"), path = createSvg(document, "polyline");
+  if (svg === undefined || path === undefined) return false;
+  for (const [name, value] of Object.entries({
+    viewBox: `0 0 ${stroke.box.width} ${stroke.box.height}`,
+    preserveAspectRatio: "none", width: "100%", height: "100%",
+  })) setOwnedElementAttribute(svg, name, value);
+  setOwnedElementStyle(svg, "position", "absolute");
+  setOwnedElementStyle(svg, "inset", "0");
+  setOwnedElementStyle(svg, "overflow", "visible");
+  const pairs: string[] = [];
+  for (let index = 0; index + 1 < stroke.points.length; index += 2) pairs.push(`${stroke.points[index]},${stroke.points[index + 1]}`);
+  for (const [name, value] of Object.entries({
+    points: pairs.join(" "), fill: "none", stroke: stroke.color, "stroke-width": String(stroke.width),
+    "stroke-linecap": "round", "stroke-linejoin": "round",
+    ...(stroke.opacity === undefined ? {} : { "stroke-opacity": String(stroke.opacity) }),
+  })) setOwnedElementAttribute(path, name, value);
+  safeCall(svg, "appendChild", [path]);
+  safeCall(layer, "appendChild", [svg]);
+  return safeGet(svg, "parentNode") === layer;
+}
+
 /** A grid keeps its name above it, where a frame and a code block keep theirs. */
 function decorateTable(document: Document | undefined, layer: DomElementLike, descriptor: SourceItemDescriptor): boolean {
   if (document !== undefined) addCardLine(document, layer, "miro-source-caption", descriptor.structured?.table?.title);
@@ -1377,6 +1402,8 @@ function applyNode(
   const sourceComment = descriptor.structured?.comment;
   const sourceTable = descriptor.structured?.table;
   if (sourceTable !== undefined) patchClass(shell, "miro-source-table", patches);
+  const sourceStroke = descriptor.structured?.stroke;
+  if (sourceStroke !== undefined) patchClass(shell, "miro-source-drawing", patches);
   if (sourceComment !== undefined) {
     patchClass(shell, "miro-source-comment", patches);
     patchAttribute(shell, "data-miro-source-comment-state", sourceComment.resolved ? "resolved" : "open", patches);
@@ -1447,13 +1474,14 @@ function applyNode(
   }
 
   let layer: DomElementLike | undefined;
-  if (descriptor.kind === "shape" || descriptor.kind === "sticky" || descriptor.kind === "frame" || descriptor.kind === "media" || descriptor.kind === "code" || sourceAppCard !== undefined || sourceCard !== undefined || sourcePreview !== undefined || sourceMindmap !== undefined || sourceComment !== undefined || sourceTable !== undefined) {
+  if (descriptor.kind === "shape" || descriptor.kind === "sticky" || descriptor.kind === "frame" || descriptor.kind === "media" || descriptor.kind === "code" || sourceAppCard !== undefined || sourceCard !== undefined || sourcePreview !== undefined || sourceMindmap !== undefined || sourceComment !== undefined || sourceTable !== undefined || sourceStroke !== undefined) {
     const created = document === undefined ? undefined : createElement(document, "div");
     if (created !== undefined) {
       const decorationKind = sourceAppCard !== undefined ? "app-card" : sourceCard !== undefined ? "card"
         : sourcePreview !== undefined ? "preview" : sourceDocument !== undefined ? "document"
           : sourceEmbed !== undefined ? "embed" : sourceComment !== undefined ? "comment"
-            : sourceTable !== undefined ? "table" : sourceMindmap !== undefined ? "mindmap-node" : descriptor.kind;
+            : sourceTable !== undefined ? "table" : sourceStroke !== undefined ? "drawing"
+              : sourceMindmap !== undefined ? "mindmap-node" : descriptor.kind;
       // A card face covers the native content; any other layer lies under it.
       const covers = sourcePreview !== undefined || sourceComment !== undefined || (sourceDocument !== undefined && host !== "file");
       addOwnedElementClass(created, DECORATION_CLASS);
@@ -1470,7 +1498,9 @@ function applyNode(
         ? decorateShape(document, created, descriptor)
         : descriptor.kind === "code"
           ? decorateCode(document, created, descriptor)
-          : sourceTable !== undefined
+          : sourceStroke !== undefined
+            ? decorateDrawing(document, created, descriptor)
+            : sourceTable !== undefined
             ? decorateTable(document, created, descriptor)
             : sourceComment !== undefined
             ? decorateComment(document, created, descriptor)
