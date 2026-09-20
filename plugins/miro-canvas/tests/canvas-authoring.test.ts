@@ -6,6 +6,7 @@ import {
 	type ChangeZOrderInput,
 	type CanvasShapeAction,
 	type UpdateRotationInput,
+	type CreateItemInput,
 } from "../src/canvas-authoring";
 
 type CanvasDocument = Record<string, unknown>;
@@ -1108,3 +1109,93 @@ describe("Obsidian's own import semantics", () => {
 	});
 });
 
+describe("item creation", () => {
+	function itemAction(overrides: Partial<CreateItemInput> = {}): CreateItemInput {
+		return {
+			item: { type: "sticky_note", color: "light_yellow" },
+			x: 40,
+			y: 60,
+			width: 200,
+			height: 200,
+			...overrides,
+		};
+	}
+
+	/** The result carries the whole document back, not the node by itself. */
+	function nodeOf(document: Readonly<Record<string, unknown>> | undefined, id: string): CanvasDocument | undefined {
+		return (document?.nodes as CanvasDocument[] | undefined)?.find((item) => item.id === id);
+	}
+
+	it("creates a sticky note as one rounded-geometry text node, keeps its colour in local overrides, and uses a single history step", () => {
+		const runtime = new NativeGraph({ nodes: [], edges: [] });
+		const authoring = createCanvasAuthoring(runtime);
+
+		const result = authoring.createItem(itemAction({
+			id: "sticky-1", x: 10.4, y: -0.6, width: 200.2, height: 199.7, text: "Idea",
+		}));
+
+		expect(result.ok).toBe(true);
+		expect(result.status).toBe("applied");
+		expect(result.nodeId).toBe("sticky-1");
+		expect(nodeOf(result.document, "sticky-1")).toMatchObject({
+			type: "text", x: 10, y: -1, width: 200, height: 200, text: "Idea",
+		});
+		expect(runtime.getData()).toHaveProperty("miroCanvas.localOverrides.sticky-1.item", { type: "sticky_note", color: "light_yellow" });
+		// One native import and one history save, as createShape's own transaction does.
+		expect(runtime.importDataSpy).toHaveBeenCalledTimes(1);
+		expect(runtime.importDataSpy).toHaveBeenCalledWith(expect.any(Object), true);
+		expect(runtime.requestSaveSpy).toHaveBeenCalledTimes(1);
+		expect(runtime.requestSaveSpy).toHaveBeenCalledWith(true);
+		expect(runtime.history).toHaveLength(2);
+	});
+
+	it("creates a frame as a group node carrying its label, and records the frame type in local overrides", () => {
+		const runtime = new NativeGraph({ nodes: [], edges: [] });
+		const authoring = createCanvasAuthoring(runtime);
+
+		const result = authoring.createItem(itemAction({
+			id: "frame-1", item: { type: "frame" }, label: "Sprint backlog", width: 640, height: 400,
+		}));
+
+		expect(result.ok).toBe(true);
+		expect(nodeOf(result.document, "frame-1")).toMatchObject({ type: "group", label: "Sprint backlog" });
+		expect(runtime.getData()).toHaveProperty("miroCanvas.localOverrides.frame-1.item", { type: "frame" });
+	});
+
+	it("creates a link node with its web address and no local override for it", () => {
+		const runtime = new NativeGraph({ nodes: [], edges: [] });
+		const authoring = createCanvasAuthoring(runtime);
+
+		const result = authoring.createItem(itemAction({
+			id: "link-1", item: { type: "link" }, url: "https://example.test/doc",
+		}));
+
+		expect(result.ok).toBe(true);
+		expect(nodeOf(result.document, "link-1")).toMatchObject({ type: "link", url: "https://example.test/doc" });
+		expect(runtime.getData()).not.toHaveProperty("miroCanvas.localOverrides.link-1");
+	});
+
+	it("rejects a link address that is not on the web, and imports nothing", () => {
+		const runtime = new NativeGraph({ nodes: [], edges: [] });
+		const authoring = createCanvasAuthoring(runtime);
+
+		for (const url of ["javascript:alert(1)", "ftp://x"]) {
+			expect(authoring.createItem(itemAction({ item: { type: "link" }, url })).ok).toBe(false);
+		}
+		expect(runtime.importDataSpy).not.toHaveBeenCalled();
+		expect(runtime.getData().nodes).toEqual([]);
+	});
+
+	it("rejects a type the board tools do not make, a non-positive size, and a non-finite position, importing nothing", () => {
+		const runtime = new NativeGraph({ nodes: [], edges: [] });
+		const authoring = createCanvasAuthoring(runtime);
+
+		expect(authoring.createItem(itemAction({ item: { type: "bogus" } as never })).ok).toBe(false);
+		expect(authoring.createItem(itemAction({ width: 0 })).ok).toBe(false);
+		expect(authoring.createItem(itemAction({ height: -10 })).ok).toBe(false);
+		expect(authoring.createItem(itemAction({ x: Number.NaN })).ok).toBe(false);
+		expect(authoring.createItem(itemAction({ y: Number.POSITIVE_INFINITY })).ok).toBe(false);
+		expect(runtime.importDataSpy).not.toHaveBeenCalled();
+		expect(runtime.getData().nodes).toEqual([]);
+	});
+});

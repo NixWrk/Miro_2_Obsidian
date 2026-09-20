@@ -370,6 +370,23 @@ describe("source projection model", () => {
     expect(scene.items.get("title")?.structured?.backdrop).toBe("#ffffff");
   });
 
+  it("reads the Miro item a node made with the board tools stands for", () => {
+    const scene = buildSourceScene({
+      nodes: [{ id: "n1" }, { id: "n2" }, { id: "n3" }, { id: "n4" }],
+      miroCanvas: { localOverrides: {
+        n1: { item: { type: "sticky_note", color: "cyan" } },
+        n2: { item: { type: "code", title: "Code block" } },
+        n3: { item: { type: "table", title: "Grid" } },
+        n4: { item: { type: "nonsense" } },
+      } },
+    });
+    expect(scene.items.get("n1")).toMatchObject({ kind: "sticky", localItem: "sticky_note", css: { "background-color": "#8ae9e0" } });
+    expect(scene.items.get("n2")).toMatchObject({ kind: "code", localItem: "code", structured: { code: { title: "Code block", lineNumbersVisible: true } } });
+    // A grid is Markdown text; only its name is the plugin's.
+    expect(scene.items.get("n3")).toMatchObject({ kind: "text", localItem: "table", structured: { table: { title: "Grid" } } });
+    expect(scene.items.has("n4")).toBe(false);
+  });
+
   it("resolves ordinary card tags from source definitions without rendering tag records", () => {
     const scene = buildSourceScene({ miroSource: {
       items: [
