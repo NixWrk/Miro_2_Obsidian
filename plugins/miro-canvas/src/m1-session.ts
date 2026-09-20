@@ -156,6 +156,10 @@ const HIGHLIGHTER_OPACITY = 0.4;
 const HIGHLIGHTER_SCALE = 3;
 /** How far from a stroke the eraser still takes it, in screen pixels. */
 const ERASER_REACH = 8;
+/** How long after a stylus a touch is still taken for a palm. */
+const STYLUS_HOLD_MS = 1_500;
+const MIN_PRESSURE_SCALE = 0.5;
+const MAX_PRESSURE_SCALE = 1.6;
 
 /** The native side a connector end sits on, from where its anchor lies on the node. */
 function nativeSideOf(anchor: CanvasAnchor | undefined, fallback: ConnectorSide): ConnectorSide {
@@ -665,7 +669,11 @@ export class M1CanvasSession {
 	private penWidth = 5;
 	/** The board points a pen gesture has passed through, and what it erases. */
 	private penPoints: StrokePoint[] = [];
+	private penPressures: number[] = [];
 	private erasing = new Set<string>();
+	/** When a stylus was last used here, and whether one has been seen at all. */
+	private lastPenAt = 0;
+	private stylusSeen = false;
 	/** A tool being used on the board: where the press began and what it draws meanwhile. */
 	private toolGesture: {
 		readonly tool: QuickTool;
@@ -2018,13 +2026,24 @@ export class M1CanvasSession {
 	private startToolGesture(event: PointerEvent): void {
 		const tool = this.armedTool;
 		const root = this.root;
+		const pointer = typeof event.pointerType === "string" ? event.pointerType : "mouse";
+		if (pointer === "pen") {
+			this.lastPenAt = Date.now();
+			this.stylusSeen = true;
+		}
 		if (tool === "select" || root === undefined || event.button !== 0 || this.toolGesture !== undefined) return;
+		const drawingTool = tool === "pen" || tool === "highlighter" || tool === "eraser";
+		// A stylus rules the board it draws on: while one is in use a touch is a
+		// palm or a hand resting, and with a drawing tool armed a finger pans
+		// instead of drawing, as Miro's tablets behave.
+		if (pointer === "touch" && (Date.now() - this.lastPenAt < STYLUS_HOLD_MS || (drawingTool && this.stylusSeen))) return;
 		const target = event.target as Element | null;
 		if (target?.closest?.(PANEL_SELECTOR) != null) return;
 		const start = { x: event.clientX, y: event.clientY };
 		const drawing = tool === "pen" || tool === "highlighter";
-		if (drawing || tool === "eraser") {
+		if (drawingTool) {
 			this.penPoints = [];
+			this.penPressures = [];
 			this.erasing.clear();
 		}
 		let from: { readonly nodeId: string; readonly anchor: CanvasAnchor; readonly board: { readonly x: number; readonly y: number } } | undefined;
@@ -2092,8 +2111,13 @@ export class M1CanvasSession {
 		};
 		draw(start);
 		const move = (moved: Event): void => {
-			const pointer = moved as PointerEvent;
-			draw({ x: pointer.clientX, y: pointer.clientY });
+			const point = moved as PointerEvent;
+			if (point.pointerType === "pen") {
+				this.lastPenAt = Date.now();
+				// A stylus reports how hard it is pressed; a mouse always says 0.5.
+				if (drawing && point.pressure > 0) this.penPressures.push(point.pressure);
+			}
+			draw({ x: point.clientX, y: point.clientY });
 		};
 		const up = (released: Event): void => {
 			const pointer = released as PointerEvent;
@@ -2201,6 +2225,21 @@ export class M1CanvasSession {
 		return theme === "dark" ? "#ffffff" : "#1a1a1a";
 	}
 
+	/**
+	 * How much a stylus's pressure widens or narrows the line.
+	 *
+	 * The middle of the range leaves the chosen thickness alone, so a mouse,
+	 * a finger and an evenly pressed stylus all draw the line that was asked
+	 * for.  The typical pressure of the stroke is used, not its peak, which a
+	 * single hard moment would otherwise decide.
+	 */
+	private pressureScale(): number {
+		const samples = [...this.penPressures].sort((left, right) => left - right);
+		if (samples.length === 0) return 1;
+		const median = samples[Math.floor(samples.length / 2)]!;
+		return Math.min(Math.max(0.5 + median, MIN_PRESSURE_SCALE), MAX_PRESSURE_SCALE);
+	}
+
 	/** The drawings the eraser is over at a board point. */
 	private drawingsUnder(board: { readonly x: number; readonly y: number }): readonly string[] {
 		const { geometry, scene } = this.landingGeometry();
@@ -2224,7 +2263,8 @@ export class M1CanvasSession {
 		const points = simplifyPoints(this.penPoints, 0.5 / zoom);
 		this.penPoints = [];
 		if (points.length === 0) return;
-		const width = this.penWidth * (tool === "highlighter" ? HIGHLIGHTER_SCALE : 1);
+		const width = Math.round(this.penWidth * (tool === "highlighter" ? HIGHLIGHTER_SCALE : 1) * this.pressureScale() * 100) / 100;
+		this.penPressures = [];
 		const rect = strokeBounds(points.length === 1 ? [points[0]!, points[0]!] : points, width);
 		const stroke = {
 			color: this.penInk(),
@@ -2661,6 +2701,7 @@ export class M1CanvasSession {
 		let left = Number.POSITIVE_INFINITY;
 		let top = Number.POSITIVE_INFINITY;
 		let right = Number.NEGATIVE_INFINITY;
+		let bottom = Number.NEGATIVE_INFINITY;
 		for (const element of [...(this.adapter.getNodes() ?? []), ...(this.adapter.getEdges() ?? [])]) {
 			const id = readCanvasElementId(element);
 			if (id === undefined || !this.selectedIds.includes(id)) {
@@ -2676,11 +2717,29 @@ export class M1CanvasSession {
 			left = Math.min(left, rect.left);
 			top = Math.min(top, rect.top);
 			right = Math.max(right, rect.right);
+			bottom = Math.max(bottom, rect.bottom);
 		}
 		if (!Number.isFinite(left) || !Number.isFinite(top) || !Number.isFinite(right)) {
 			return undefined;
 		}
-		return { x: (left + right) / 2 - rootRect.left, y: top - rootRect.top };
+		// The toolbar is centred over the selection, but never off the view: a
+		// selection at an edge, or a narrow screen, would otherwise put its
+		// controls out of reach.  Without room above, it hangs below instead.
+		const area = clientSize(this.root);
+		const self = boundingRect(this.toolbar.element);
+		const width = self === undefined ? 320 : self.right - self.left;
+		const height = self === undefined ? 40 : self.bottom - self.top;
+		const margin = 8;
+		const half = Math.min(width, Math.max(area.width - margin * 2, 0)) / 2;
+		const centre = (left + right) / 2 - rootRect.left;
+		const x = Math.min(Math.max(centre, half + margin), Math.max(half + margin, area.width - half - margin));
+		const above = top - rootRect.top;
+		const below = above >= height + margin + 12 ? undefined : true;
+		return {
+			x,
+			y: below === undefined ? above : Math.min(bottom - rootRect.top, Math.max(0, area.height - height - margin - 12)),
+			...(below === undefined ? {} : { below }),
+		};
 	}
 
 	private addDiagnostic(message: string): void {

@@ -769,7 +769,7 @@
   display: none;
 }
 
-@media (max-width: 760px) {
+@media (max-width: 900px) {
   .miro-canvas-local-tools-modal {
     width: calc(100vw - 20px);
   }
@@ -815,6 +815,7 @@
    namespaced, so an ordinary Canvas without an active session is never
    restyled. */
 .miro-canvas-toolbar {
+  max-width: calc(100% - 16px);
   --miro-canvas-toolbar-bg: var(--background-primary);
   --miro-canvas-toolbar-border: var(--background-modifier-border);
   --miro-canvas-toolbar-size: 28px;
@@ -835,6 +836,11 @@
   font-size: var(--font-ui-small, 13px);
 }
 
+/* Without room above the selection the toolbar hangs below it instead. */
+.miro-canvas-toolbar[data-miro-canvas-placement="below"] {
+  transform: translate(-50%, 12px);
+}
+
 /* Author `display` rules outrank the browser's `[hidden]` rule, so the plugin
    must restore it explicitly or a hidden control would still be painted. */
 .miro-canvas-toolbar[hidden],
@@ -846,6 +852,10 @@
   display: flex;
   gap: 2px;
   align-items: center;
+  justify-content: center;
+  /* On a narrow screen the row wraps rather than running off the board. */
+  flex-wrap: wrap;
+  max-width: 100%;
   white-space: nowrap;
 }
 
@@ -998,6 +1008,66 @@
 /* With a tool armed the board is a place to draw it, not to select on. */
 .miro-canvas-root[data-miro-canvas-tool]:not([data-miro-canvas-tool="select"]) .canvas {
   cursor: crosshair;
+}
+
+/* Room for a finger, and for the smaller screens of a tablet or a phone:
+   bigger controls where there is no mouse, and the bars out of each other's
+   way where the board is narrow. */
+@media (pointer: coarse) {
+  .miro-canvas-toolbar {
+    --miro-canvas-toolbar-size: 40px;
+  }
+
+  .miro-canvas-toolbar .miro-canvas-toolbar__button > .svg-icon {
+    width: var(--icon-l, 22px);
+    height: var(--icon-l, 22px);
+  }
+
+  .miro-canvas-dock .miro-canvas-dock__button {
+    width: 36px;
+    height: 36px;
+  }
+
+  .miro-canvas-handles .miro-canvas-handle--resize {
+    width: 16px;
+    height: 16px;
+  }
+
+  .miro-canvas-handles .miro-canvas-handle--route {
+    width: 14px;
+    height: 14px;
+  }
+
+  .miro-canvas-markers .miro-canvas-comment-marker,
+  .miro-canvas-comment-markers .miro-canvas-comment-marker {
+    width: 40px;
+    height: 40px;
+    min-width: 40px !important;
+    min-height: 40px !important;
+  }
+}
+
+@media (max-width: 900px) {
+  /* The map takes most of a small screen; the dock keeps its buttons and sits
+     above the tools instead of beside them. */
+  .miro-canvas-dock {
+    bottom: 116px;
+  }
+
+  /* The map takes most of a small screen and the status bar covers the foot
+     of the view, so the bars sit above it. */
+  .miro-canvas-dock__map,
+  .miro-canvas-minimap {
+    display: none;
+  }
+
+  .miro-canvas-toolbar.miro-canvas-tools {
+    bottom: 34px;
+  }
+
+  .miro-canvas-slideshow {
+    bottom: 12px;
+  }
 }
 
 /* A drawing is only its stroke: the node that carries it shows nothing of its
@@ -1268,6 +1338,7 @@
 /* Popover panels are the only place a long list is allowed to appear. */
 .miro-canvas-toolbar__panel {
   position: absolute;
+  max-width: calc(100vw - 24px);
   top: calc(100% + 8px);
   left: -4px;
   z-index: 1;
@@ -2504,7 +2575,7 @@
   z-index: 110;
   display: flex;
   flex-direction: column;
-  width: 320px;
+  width: min(320px, calc(100vw - 24px));
   max-height: min(420px, calc(100% - 16px));
   color: var(--text-normal);
   font-size: var(--font-ui-small);

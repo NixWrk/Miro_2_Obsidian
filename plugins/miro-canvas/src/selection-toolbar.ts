@@ -60,6 +60,8 @@ export type { ShapeKind };
 
 /** Viewport pixels for the top-center of the selection, resolved by the host. */
 export interface SelectionToolbarPlacement {
+  /** True when the toolbar hangs below the selection, for want of room above. */
+  readonly below?: boolean;
   readonly x: number;
   readonly y: number;
 }
@@ -808,6 +810,7 @@ export class SelectionToolbar {
 
     root.style.left = `${state.placement!.x}px`;
     root.style.top = `${state.placement!.y}px`;
+    root.setAttribute("data-miro-canvas-placement", state.placement!.below === true ? "below" : "above");
     root.setAttribute("data-miro-canvas-editable", state.editable ? "true" : "false");
 
     const hasEdge = state.kinds.includes("edge");
