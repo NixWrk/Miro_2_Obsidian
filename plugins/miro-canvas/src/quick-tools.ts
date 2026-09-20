@@ -10,7 +10,8 @@ import { SHAPE_CATALOG, shapeCatalogEntry, shapeCatalogLabel } from "./shape-cat
 import { shapePicture } from "./selection-toolbar";
 
 export const QUICK_TOOLS = [
-  "select", "text", "sticky", "shape", "pen", "highlighter", "eraser", "connector", "comment", "frame", "code", "table", "link",
+  "select", "text", "sticky", "shape", "pen", "highlighter", "eraser", "lasso",
+  "connector", "comment", "frame", "code", "table", "link",
 ] as const;
 export type QuickTool = (typeof QUICK_TOOLS)[number];
 
@@ -65,6 +66,7 @@ const DRAWING_TOOLS: readonly ToolSpec[] = [
   { tool: "pen", label: "Pen", icon: "pen", glyph: "✎" },
   { tool: "highlighter", label: "Highlighter", icon: "highlighter", glyph: "▨" },
   { tool: "eraser", label: "Eraser", icon: "eraser", glyph: "⌫" },
+  { tool: "lasso", label: "Lasso", icon: "lasso", glyph: "◌" },
 ];
 
 export interface QuickToolsOptions {
@@ -198,10 +200,9 @@ export class QuickTools {
     }
     // The pen button carries the colour it draws with, and stays marked while
     // any of the drawing tools is the armed one.
-    if (state.armed === "pen" || state.armed === "highlighter" || state.armed === "eraser") this.drawingTool = state.armed;
+    if (DRAWING_TOOLS.some((spec) => spec.tool === state.armed)) this.drawingTool = state.armed;
     this.penButton?.style?.setProperty?.("--miro-canvas-swatch", state.penColor);
-    this.penButton?.setAttribute("aria-pressed",
-      state.armed === "pen" || state.armed === "highlighter" || state.armed === "eraser" ? "true" : "false");
+    this.penButton?.setAttribute("aria-pressed", DRAWING_TOOLS.some((spec) => spec.tool === state.armed) ? "true" : "false");
     const entry = shapeCatalogEntry(state.shape);
     const shapeButton = this.buttons.get("shape");
     if (entry !== undefined && shapeButton !== undefined && this.shownShape !== entry.kind) {

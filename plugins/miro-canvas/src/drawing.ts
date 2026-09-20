@@ -102,6 +102,25 @@ export function strokeHitsPoint(
   return distanceToStroke(stroke.points, local) <= reach;
 }
 
+/**
+ * Whether a point lies inside the ring a lasso drew.
+ *
+ * The ring is closed from its last point back to its first, and counted by
+ * crossings: a point is inside when a ray from it crosses the ring an odd
+ * number of times.
+ */
+export function pointInLasso(ring: readonly StrokePoint[], point: StrokePoint): boolean {
+  let inside = false;
+  for (let index = 0, previous = ring.length - 1; index < ring.length; previous = index, index += 1) {
+    const a = ring[index]!, b = ring[previous]!;
+    const straddles = (a.y > point.y) !== (b.y > point.y);
+    if (!straddles) continue;
+    const crossing = a.x + ((point.y - a.y) / (b.y - a.y)) * (b.x - a.x);
+    if (point.x < crossing) inside = !inside;
+  }
+  return inside;
+}
+
 function distanceToSegment(point: StrokePoint, from: StrokePoint, to: StrokePoint): number {
   const dx = to.x - from.x;
   const dy = to.y - from.y;

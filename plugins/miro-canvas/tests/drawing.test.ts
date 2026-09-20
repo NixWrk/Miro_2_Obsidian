@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { distanceToStroke, simplifyPoints, strokeBounds, strokeHitsPoint } from "../src/drawing";
+import { distanceToStroke, pointInLasso, simplifyPoints, strokeBounds, strokeHitsPoint } from "../src/drawing";
 
 describe("simplifyPoints", () => {
   it("keeps only the two ends when every interior point sits within the tolerance of the line between them", () => {
@@ -103,5 +103,27 @@ describe("strokeHitsPoint", () => {
   it("misses a rect with no width or no height", () => {
     expect(strokeHitsPoint(stroke, { x: 0, y: 0, width: 0, height: 10 }, { x: 5, y: 5 }, 1000)).toBe(false);
     expect(strokeHitsPoint(stroke, { x: 0, y: 0, width: 10, height: 0 }, { x: 5, y: 5 }, 1000)).toBe(false);
+  });
+});
+
+describe("pointInLasso", () => {
+  const RING = [{ x: 0, y: 0 }, { x: 100, y: 0 }, { x: 100, y: 60 }, { x: 0, y: 60 }];
+
+  it("catches what the ring goes round and leaves the rest", () => {
+    expect(pointInLasso(RING, { x: 50, y: 30 })).toBe(true);
+    expect(pointInLasso(RING, { x: 120, y: 30 })).toBe(false);
+    expect(pointInLasso(RING, { x: 50, y: -1 })).toBe(false);
+  });
+
+  it("closes the ring from its last point back to its first", () => {
+    // Drawn as three corners; the fourth side is the one the lasso implies.
+    const open = [{ x: 0, y: 0 }, { x: 100, y: 0 }, { x: 100, y: 60 }];
+    expect(pointInLasso(open, { x: 80, y: 30 })).toBe(true);
+    expect(pointInLasso(open, { x: 20, y: 50 })).toBe(false);
+  });
+
+  it("is false for a ring that encloses nothing", () => {
+    expect(pointInLasso([], { x: 1, y: 1 })).toBe(false);
+    expect(pointInLasso([{ x: 0, y: 0 }, { x: 10, y: 10 }], { x: 5, y: 5 })).toBe(false);
   });
 });

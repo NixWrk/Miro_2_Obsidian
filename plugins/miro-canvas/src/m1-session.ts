@@ -101,7 +101,7 @@ import { addLocalComment, addReply, listCommentThreads, setCommentResolved, type
 import { CommentThreadCard } from "./comment-thread";
 import { QUICK_TOOL_KEYS, QuickTools, type QuickTool } from "./quick-tools";
 import { LOCAL_ITEM_SIZES, TABLE_TEMPLATE, type LocalItem } from "./local-items";
-import { simplifyPoints, strokeBounds, strokeHitsPoint, type StrokePoint } from "./drawing";
+import { pointInLasso, simplifyPoints, strokeBounds, strokeHitsPoint, type StrokePoint } from "./drawing";
 import {
 	boundaryAnchorOnRect,
 	buildCanvasAnchorGeometry,
@@ -2032,7 +2032,7 @@ export class M1CanvasSession {
 			this.stylusSeen = true;
 		}
 		if (tool === "select" || root === undefined || event.button !== 0 || this.toolGesture !== undefined) return;
-		const drawingTool = tool === "pen" || tool === "highlighter" || tool === "eraser";
+		const drawingTool = tool === "pen" || tool === "highlighter" || tool === "eraser" || tool === "lasso";
 		// A stylus rules the board it draws on: while one is in use a touch is a
 		// palm or a hand resting, and with a drawing tool armed a finger pans
 		// instead of drawing, as Miro's tablets behave.
@@ -2040,7 +2040,7 @@ export class M1CanvasSession {
 		const target = event.target as Element | null;
 		if (target?.closest?.(PANEL_SELECTOR) != null) return;
 		const start = { x: event.clientX, y: event.clientY };
-		const drawing = tool === "pen" || tool === "highlighter";
+		const drawing = tool === "pen" || tool === "highlighter" || tool === "lasso";
 		if (drawingTool) {
 			this.penPoints = [];
 			this.penPressures = [];
@@ -2070,6 +2070,10 @@ export class M1CanvasSession {
 			line.setAttribute("stroke-linecap", "round");
 			line.setAttribute("stroke-linejoin", "round");
 			if (tool === "highlighter") line.setAttribute("stroke-opacity", String(HIGHLIGHTER_OPACITY));
+			if (tool === "lasso") {
+				line.setAttribute("stroke", "var(--interactive-accent)");
+				line.setAttribute("stroke-dasharray", "6 4");
+			}
 			ghost.appendChild(line);
 		}
 		root.appendChild(ghost);
@@ -2087,7 +2091,8 @@ export class M1CanvasSession {
 					return;
 				}
 				const zoom = finite(readRuntime(this.viewport.getViewport(), "zoom")) ?? 1;
-				line?.setAttribute("stroke-width", String(this.penWidth * zoom * (tool === "highlighter" ? HIGHLIGHTER_SCALE : 1)));
+				const shown = tool === "lasso" ? 2 : this.penWidth * zoom * (tool === "highlighter" ? HIGHLIGHTER_SCALE : 1);
+				line?.setAttribute("stroke-width", String(shown));
 				line?.setAttribute("points", this.penPoints
 					.map((item) => this.viewportPoint(item))
 					.filter((item): item is { readonly x: number; readonly y: number } => item !== undefined)
@@ -2161,6 +2166,10 @@ export class M1CanvasSession {
 		}
 		if (tool === "eraser") {
 			this.eraseDrawings();
+			return;
+		}
+		if (tool === "lasso") {
+			this.selectLassoed();
 			return;
 		}
 		const dragged = Math.hypot(end.x - start.x, end.y - start.y) > 6;
@@ -2285,6 +2294,34 @@ export class M1CanvasSession {
 			x: rect.x, y: rect.y, width: rect.width, height: rect.height,
 		});
 		if (!created.ok) this.addDiagnostic(firstProblem(created.diagnostics) ?? "Canvas rejected the drawing.");
+		this.refresh();
+	}
+
+	/**
+	 * Selects what a lasso went round, as Miro's does, and hands the board back
+	 * to the select tool so the catch can be moved at once.
+	 */
+	private selectLassoed(): void {
+		const ring = this.penPoints;
+		this.penPoints = [];
+		this.armedTool = "select";
+		this.updateQuickTools();
+		if (ring.length < 3) return;
+		const geometry = this.landingGeometry().geometry;
+		const caught: unknown[] = [];
+		for (const node of this.adapter.getNodes() ?? []) {
+			const id = readCanvasElementId(node);
+			const rect = id === undefined ? undefined : geometry.nodes?.[id];
+			if (rect === undefined) continue;
+			// An item is caught when the ring goes round its middle.
+			if (pointInLasso(ring, { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 })) caught.push(node);
+		}
+		if (caught.length === 0) {
+			this.callNative("deselectAll");
+			return;
+		}
+		this.callNative("selectOnly", [caught[0]]);
+		for (const node of caught.slice(1)) this.callNative("select", [node]);
 		this.refresh();
 	}
 
