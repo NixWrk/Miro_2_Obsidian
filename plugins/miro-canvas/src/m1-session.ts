@@ -97,8 +97,10 @@ import {
 	type SourceScene,
 } from "./source-model";
 import { CommentMarkers } from "./comment-markers";
-import { addReply, listCommentThreads, setCommentResolved, type CommentOrigin, type CommentMutationResult } from "./local-comments";
+import { addLocalComment, addReply, listCommentThreads, setCommentResolved, type CommentOrigin, type CommentMutationResult } from "./local-comments";
 import { CommentThreadCard } from "./comment-thread";
+import { QUICK_TOOL_KEYS, QuickTools, type QuickTool } from "./quick-tools";
+import { LOCAL_ITEM_SIZES, type LocalItem } from "./local-items";
 import {
 	boundaryAnchorOnRect,
 	buildCanvasAnchorGeometry,
@@ -148,6 +150,15 @@ const STICKY_PALETTE: readonly PaletteColor[] = Object.freeze(MIRO_STICKY_COLORS
 	id: `miro-sticky-${entry.token}`, label: entry.label, color: entry.color, source: "miro" as const,
 })));
 const LOCAL_COMMENT_AUTHOR = Object.freeze({ name: "Local user" });
+
+/** The native side a connector end sits on, from where its anchor lies on the node. */
+function nativeSideOf(anchor: CanvasAnchor | undefined, fallback: ConnectorSide): ConnectorSide {
+	if (anchor?.type !== "node") return fallback;
+	const candidates: readonly [ConnectorSide, number][] = [
+		["top", anchor.v], ["right", 1 - anchor.u], ["bottom", 1 - anchor.v], ["left", anchor.u],
+	];
+	return candidates.reduce((best, candidate) => candidate[1] < best[1] ? candidate : best)[0];
+}
 const PANEL_SELECTOR = ".miro-canvas-panel, .miro-canvas-dock, .miro-canvas-thread, .miro-canvas-slideshow, .miro-canvas-toolbar, .miro-canvas-comment-markers, .miro-canvas-handles, .miro-canvas-minimap";
 const DEFAULT_TOOLBAR_FONT = "Inter";
 const DEFAULT_TOOLBAR_FONT_SIZE = 16;
@@ -638,6 +649,19 @@ export class M1CanvasSession {
 	private commentThreadCache: { readonly document: unknown; readonly threads: ReturnType<typeof listCommentThreads> } | undefined;
 	private commentCard: CommentThreadCard | undefined;
 	private openThread: { readonly id: string; readonly origin: CommentOrigin } | undefined;
+	/** Where a comment being written will be pinned. */
+	private commentDraft: CanvasAnchor | undefined;
+	private readonly quickTools: QuickTools | undefined;
+	private armedTool: QuickTool = "select";
+	private toolShape = "rectangle";
+	/** A tool being used on the board: where the press began and what it draws meanwhile. */
+	private toolGesture: {
+		readonly tool: QuickTool;
+		readonly start: { readonly x: number; readonly y: number };
+		readonly from?: { readonly nodeId: string; readonly anchor: CanvasAnchor; readonly board: { readonly x: number; readonly y: number } };
+		readonly ghost: HTMLElement;
+		readonly end: () => void;
+	} | undefined;
 	private minimapDragStart: MinimapPoint | undefined;
 	private minimapDragViewport: ViewportTransform | undefined;
 	private refreshTimer: ReturnType<typeof setInterval> | undefined;
@@ -722,6 +746,16 @@ export class M1CanvasSession {
 		this.commentMarkers = controlDocument === undefined ? undefined : new CommentMarkers({
 			onOpenThread: (threadId, origin) => this.openCommentThread(threadId, origin),
 		}, { document: controlDocument });
+		this.quickTools = controlDocument === undefined ? undefined : new QuickTools({
+			onArm: (tool) => this.armTool(tool),
+			onShape: (shape) => {
+				this.toolShape = shape;
+				this.updateQuickTools();
+			},
+		}, {
+			document: controlDocument,
+			...(options.setIcon === undefined ? {} : { setIcon: options.setIcon }),
+		});
 	}
 
 	/**
@@ -1485,6 +1519,9 @@ export class M1CanvasSession {
 			if (isElement(this.commentMarkers?.element)) {
 				this.root.appendChild(this.commentMarkers.element);
 			}
+			if (isElement(this.quickTools?.element)) {
+				this.root.appendChild(this.quickTools.element);
+			}
 		} catch {
 			this.commentMarkers?.destroy();
 			this.handles.dispose();
@@ -1496,6 +1533,7 @@ export class M1CanvasSession {
 			return false;
 		}
 		this.adoptNativeMenu();
+		this.attachQuickTools();
 		this.attachGuards();
 		this.attachMinimapHandlers();
 		this.attachResizeObserver();
@@ -1696,6 +1734,7 @@ export class M1CanvasSession {
 		if (toolbarSignature !== this.lastToolbarSignature) {
 			this.lastToolbarSignature = toolbarSignature;
 			this.toolbar.update(toolbarState);
+			this.updateQuickTools();
 		}
 		this.lastToolbarState = toolbarState;
 		this.handles.update(this.handlesState(toolbarState.editable));
@@ -1728,11 +1767,18 @@ export class M1CanvasSession {
 	 * click away.  The card follows the pin while the board moves.
 	 */
 	private openCommentThread(threadId: string, origin: CommentOrigin): void {
-		const document = ownerDocument(this.root);
-		if (this.root === undefined || document === undefined) {
+		if (this.ensureCommentCard() === undefined) {
 			this.options.onOpenCommentThread?.(threadId, origin);
 			return;
 		}
+		this.commentDraft = undefined;
+		this.openThread = { id: threadId, origin };
+		this.updateCommentMarkers();
+	}
+
+	private ensureCommentCard(): CommentThreadCard | undefined {
+		const document = ownerDocument(this.root);
+		if (this.root === undefined || document === undefined) return undefined;
 		if (this.commentCard === undefined) {
 			const card = new CommentThreadCard(document, {
 				onReply: (id, text) => this.mutateComment("reply-comment", (draft) => addReply(draft, id, text, { author: LOCAL_COMMENT_AUTHOR })),
@@ -1742,13 +1788,14 @@ export class M1CanvasSession {
 					this.options.onOpenCommentThread?.(id, from);
 				},
 				onClose: () => this.closeCommentThread(),
+				onCreate: (text) => this.createComment(text),
 				...(this.options.setIcon === undefined ? {} : { setIcon: this.options.setIcon }),
 			});
 			this.root.appendChild(card.element);
 			// A press anywhere else on the board closes the card, as in Miro.
 			const outside = (event: Event): void => {
 				const target = event.target as Node | null;
-				if (this.openThread === undefined || target === null) return;
+				if ((this.openThread === undefined && !card.composingComment) || target === null) return;
 				if (card.element.contains(target) || this.commentMarkers?.element.contains(target)) return;
 				this.closeCommentThread();
 			};
@@ -1756,12 +1803,12 @@ export class M1CanvasSession {
 			this.disposers.push(() => this.root?.removeEventListener("pointerdown", outside, true));
 			this.commentCard = card;
 		}
-		this.openThread = { id: threadId, origin };
-		this.updateCommentMarkers();
+		return this.commentCard;
 	}
 
 	private closeCommentThread(): void {
 		this.openThread = undefined;
+		this.commentDraft = undefined;
 		this.commentCard?.hide();
 	}
 
@@ -1876,6 +1923,351 @@ export class M1CanvasSession {
 	 * button is hidden, because the toolbar's palettes already hold the Canvas
 	 * colours.  Disposal puts the element back where native Canvas keeps it.
 	 */
+	/**
+	 * The creation tools take the place of native Canvas's card menu, whose
+	 * buttons move into the tools' "more" menu and keep working there.  A
+	 * press on the board uses the armed tool; a letter arms one.
+	 */
+	private attachQuickTools(): void {
+		const tools = this.quickTools;
+		const root = this.root;
+		if (tools === undefined || root === undefined) return;
+		const cardMenu = readRuntime(this.nativeCanvas(), "cardMenuEl");
+		if (isElement(cardMenu)) {
+			const moved = Array.from(cardMenu.children);
+			for (const child of moved) tools.nativeSlot.appendChild(child);
+			root.classList.add("miro-canvas-has-tools");
+			this.disposers.push(() => {
+				root.classList.remove("miro-canvas-has-tools");
+				for (const child of moved) {
+					try {
+						if (child.parentElement === tools.nativeSlot) cardMenu.appendChild(child);
+					} catch {
+						// A menu native Canvas has already destroyed needs nothing back.
+					}
+				}
+			});
+		}
+		const down = (event: Event): void => this.startToolGesture(event as PointerEvent);
+		const key = (event: Event): void => this.handleToolKey(event as KeyboardEvent);
+		const document = root.ownerDocument;
+		root.addEventListener("pointerdown", down, true);
+		document.addEventListener("keydown", key);
+		this.disposers.push(() => {
+			root.removeEventListener("pointerdown", down, true);
+			document.removeEventListener("keydown", key);
+			this.toolGesture?.end();
+			tools.dispose();
+		});
+		this.updateQuickTools();
+	}
+
+	private updateQuickTools(): void {
+		const editable = this.appearance.settings.reviewMode !== true;
+		if (!editable && this.armedTool !== "select") this.armedTool = "select";
+		this.quickTools?.update({ editable, armed: this.armedTool, shape: this.toolShape });
+		if (this.root !== undefined) writeAttribute(this.root, "data-miro-canvas-tool", this.armedTool);
+	}
+
+	private armTool(tool: QuickTool): void {
+		this.toolGesture?.end();
+		this.armedTool = this.appearance.settings.reviewMode === true ? "select" : tool;
+		if (tool !== "select") this.closeCommentThread();
+		this.updateQuickTools();
+	}
+
+	/** Letters arm tools on the active board, never while text is being written. */
+	private handleToolKey(event: KeyboardEvent): void {
+		const root = this.root;
+		if (root === undefined || event.defaultPrevented || event.ctrlKey || event.metaKey || event.altKey) return;
+		if (root.closest(".workspace-leaf.mod-active") === null) return;
+		const target = event.target as HTMLElement | null;
+		if (target !== null && (target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/u.test(target.tagName))) return;
+		if (target !== null && target !== root.ownerDocument.body && !root.contains(target)) return;
+		if (event.key === "Escape" && this.armedTool !== "select") {
+			this.armTool("select");
+			event.preventDefault();
+			return;
+		}
+		const tool = event.shiftKey ? undefined : QUICK_TOOL_KEYS.get(event.key.toUpperCase());
+		if (tool === undefined) return;
+		this.armTool(tool);
+		event.preventDefault();
+	}
+
+	/** A press on the board with a tool armed: drag out the item, or click to drop it. */
+	private startToolGesture(event: PointerEvent): void {
+		const tool = this.armedTool;
+		const root = this.root;
+		if (tool === "select" || root === undefined || event.button !== 0 || this.toolGesture !== undefined) return;
+		const target = event.target as Element | null;
+		if (target?.closest?.(PANEL_SELECTOR) != null) return;
+		const start = { x: event.clientX, y: event.clientY };
+		let from: { readonly nodeId: string; readonly anchor: CanvasAnchor; readonly board: { readonly x: number; readonly y: number } } | undefined;
+		if (tool === "connector") {
+			const landing = this.connectorLanding(start, undefined, undefined);
+			if (landing?.nodeId === undefined) {
+				this.options.onNotice?.("Start a connection line on an item.");
+				return;
+			}
+			from = { nodeId: landing.nodeId, anchor: landing.anchor, board: landing.board };
+		}
+		event.preventDefault();
+		event.stopPropagation();
+		const document = root.ownerDocument;
+		const view = document.defaultView;
+		const ghost = document.createElement("div");
+		ghost.className = `miro-canvas-tool-ghost miro-canvas-tool-ghost--${tool}`;
+		root.appendChild(ghost);
+		const rootRect = root.getBoundingClientRect();
+		const origin = from === undefined ? start : this.viewportPoint(from.board) ?? start;
+		const draw = (point: { readonly x: number; readonly y: number }): void => {
+			if (tool === "connector") {
+				// A line from where the connector leaves to the pointer.
+				const dx = point.x - origin.x, dy = point.y - origin.y;
+				ghost.style.left = `${origin.x - rootRect.left}px`;
+				ghost.style.top = `${origin.y - rootRect.top}px`;
+				ghost.style.width = `${Math.hypot(dx, dy)}px`;
+				ghost.style.transform = `rotate(${Math.atan2(dy, dx)}rad)`;
+				return;
+			}
+			ghost.style.left = `${Math.min(start.x, point.x) - rootRect.left}px`;
+			ghost.style.top = `${Math.min(start.y, point.y) - rootRect.top}px`;
+			ghost.style.width = `${Math.abs(point.x - start.x)}px`;
+			ghost.style.height = `${Math.abs(point.y - start.y)}px`;
+		};
+		draw(start);
+		const move = (moved: Event): void => {
+			const pointer = moved as PointerEvent;
+			draw({ x: pointer.clientX, y: pointer.clientY });
+		};
+		const up = (released: Event): void => {
+			const pointer = released as PointerEvent;
+			const gesture = this.toolGesture;
+			end();
+			if (gesture !== undefined) this.finishToolGesture(gesture.tool, start, { x: pointer.clientX, y: pointer.clientY }, gesture.from);
+		};
+		const cancel = (): void => end();
+		const end = (): void => {
+			view?.removeEventListener("pointermove", move, true);
+			view?.removeEventListener("pointerup", up, true);
+			view?.removeEventListener("pointercancel", cancel, true);
+			ghost.remove();
+			this.toolGesture = undefined;
+		};
+		view?.addEventListener("pointermove", move, true);
+		view?.addEventListener("pointerup", up, true);
+		view?.addEventListener("pointercancel", cancel, true);
+		this.toolGesture = { tool, start, ...(from === undefined ? {} : { from }), ghost, end };
+	}
+
+	private finishToolGesture(
+		tool: QuickTool,
+		start: { readonly x: number; readonly y: number },
+		end: { readonly x: number; readonly y: number },
+		from: { readonly nodeId: string; readonly anchor: CanvasAnchor; readonly board: { readonly x: number; readonly y: number } } | undefined,
+	): void {
+		// One use, then back to selecting, as in Miro.  The click that ends the
+		// press must not reach the board, which would end the new item's editing.
+		this.swallowClickUntil = Date.now() + 400;
+		this.armedTool = "select";
+		this.updateQuickTools();
+		const a = this.boardPoint(start);
+		const b = this.boardPoint(end);
+		if (a === undefined || b === undefined) return;
+		const dragged = Math.hypot(end.x - start.x, end.y - start.y) > 6;
+		if (tool === "connector" && from !== undefined) {
+			this.connectFromTool(from, end);
+			return;
+		}
+		if (tool === "comment") {
+			this.composeComment(b, end);
+			return;
+		}
+		if (tool === "link") {
+			this.promptLink(a, start);
+			return;
+		}
+		const size = tool === "shape" ? { width: 200, height: 200 }
+			: LOCAL_ITEM_SIZES[tool === "sticky" ? "sticky_note" : tool as "text" | "code" | "frame"];
+		const rect = dragged
+			? { x: Math.min(a.x, b.x), y: Math.min(a.y, b.y), width: Math.max(20, Math.abs(b.x - a.x)), height: Math.max(20, Math.abs(b.y - a.y)) }
+			// Text starts where it was clicked; everything else is centred there.
+			: tool === "text"
+				? { x: a.x, y: a.y - size.height / 2, ...size }
+				: { x: a.x - size.width / 2, y: a.y - size.height / 2, ...size };
+		this.readInteractionState();
+		this.authoring ??= createCanvasAuthoring(this.view);
+		let created: { readonly ok: boolean; readonly nodeId?: string; readonly diagnostics: readonly { readonly level: string; readonly message: string }[] };
+		if (tool === "shape") {
+			created = this.authoring.createShape({ shape: this.toolShape, text: "", ...rect });
+		} else {
+			const item: LocalItem = tool === "sticky" ? { type: "sticky_note", color: "light_yellow" }
+				: tool === "code" ? { type: "code", title: "Code block" }
+					: { type: tool as "text" | "frame" };
+			const frames = (readRuntime(this.currentRawDocument, "nodes") as readonly unknown[] | undefined ?? [])
+				.filter((node) => readRuntime(node, "type") === "group").length;
+			created = this.authoring.createItem({
+				item, ...rect,
+				...(tool === "code" ? { text: "```\n\n```" } : {}),
+				...(tool === "frame" ? { label: `Frame ${frames + 1}` } : {}),
+			});
+		}
+		if (!created.ok || created.nodeId === undefined) {
+			this.addDiagnostic(firstProblem(created.diagnostics) ?? "Canvas rejected the new item.");
+			this.refresh();
+			return;
+		}
+		this.refresh();
+		const id = created.nodeId;
+		// After the press has finished, so its last events leave the caret alone.
+		// A code block is written between its fences.
+		if (tool !== "frame") ownerDocument(this.root)?.defaultView?.setTimeout(() => this.editNode(id, tool === "code" ? 1 : undefined), 0);
+	}
+
+	/** Selects a node just made and puts the caret in it, as native Canvas does. */
+	private editNode(id: string, line?: number): void {
+		const canvas = this.nativeCanvas();
+		const nodes = readRuntime(canvas, "nodes");
+		const node = nodes instanceof Map ? nodes.get(id) : undefined;
+		if (node === undefined) return;
+		this.callNative("selectOnly", [node]);
+		const start = readRuntime(node, "startEditing");
+		if (typeof start === "function") {
+			try {
+				Reflect.apply(start, node, []);
+			} catch {
+				// A node that cannot be edited yet stays selected.
+			}
+		}
+		if (line === undefined) return;
+		const child = readRuntime(node, "child");
+		const editor = readRuntime(child, "editor") ?? readRuntime(readRuntime(child, "editMode"), "editor");
+		const setCursor = readRuntime(editor, "setCursor");
+		if (typeof setCursor !== "function") return;
+		try {
+			Reflect.apply(setCursor, editor, [{ line, ch: 0 }]);
+		} catch {
+			// The caret stays where the editor put it.
+		}
+	}
+
+	private connectFromTool(
+		from: { readonly nodeId: string; readonly anchor: CanvasAnchor; readonly board: { readonly x: number; readonly y: number } },
+		end: { readonly x: number; readonly y: number },
+	): void {
+		const landing = this.connectorLanding(end, from.nodeId, from.board);
+		if (landing === undefined) return;
+		const side = nativeSideOf(from.anchor, "right");
+		if (landing.nodeId === undefined) {
+			const rect = this.landingGeometry().geometry.nodes?.[from.nodeId];
+			const facing = rect === undefined ? undefined : facingSideOfRect(rect, landing.board);
+			this.createConnectedNode(from.nodeId, facing ?? side, 0.5, landing.board);
+			return;
+		}
+		this.readInteractionState();
+		this.authoring ??= createCanvasAuthoring(this.view);
+		const result = this.authoring.createConnector({
+			fromNode: from.nodeId, toNode: landing.nodeId,
+			fromSide: side, toSide: nativeSideOf(landing.anchor, "left"),
+			fromAnchor: from.anchor, toAnchor: landing.anchor,
+		});
+		if (!result.ok) this.addDiagnostic(firstProblem(result.diagnostics) ?? "Canvas rejected the new connector.");
+		this.refresh();
+	}
+
+	/** A comment pinned where the board was clicked: on the item there, or on the board. */
+	private composeComment(board: { readonly x: number; readonly y: number }, client: { readonly x: number; readonly y: number }): void {
+		let anchor: CanvasAnchor = { type: "free", x: board.x, y: board.y };
+		let smallest = Number.POSITIVE_INFINITY;
+		for (const [nodeId, rect] of Object.entries(this.landingGeometry().geometry.nodes ?? {})) {
+			if (!(rect.width > 0) || !(rect.height > 0) || !insideRect(rect, board)) continue;
+			const area = rect.width * rect.height;
+			if (area >= smallest) continue;
+			smallest = area;
+			anchor = {
+				type: "node", nodeId,
+				u: Math.round(((board.x - rect.x) / rect.width) * 1000) / 1000,
+				v: Math.round(((board.y - rect.y) / rect.height) * 1000) / 1000,
+			};
+		}
+		const card = this.ensureCommentCard();
+		if (card === undefined || this.root === undefined) return;
+		this.openThread = undefined;
+		this.commentDraft = anchor;
+		card.compose();
+		const rootRect = this.root.getBoundingClientRect();
+		card.place({ x: client.x - rootRect.left, y: client.y - rootRect.top }, clientSize(this.root));
+	}
+
+	private createComment(text: string): void {
+		const anchor = this.commentDraft;
+		let createdId: string | undefined;
+		this.mutateComment("add-comment", (draft) => {
+			const result = addLocalComment(draft, { text, ...(anchor === undefined ? {} : { anchor }) }, { author: LOCAL_COMMENT_AUTHOR });
+			createdId = result.comment?.id;
+			return result;
+		});
+		this.commentDraft = undefined;
+		if (createdId === undefined) return;
+		this.openThread = { id: createdId, origin: "local" };
+		this.updateCommentMarkers();
+	}
+
+	/** A small field for the address of a link dropped on the board. */
+	private promptLink(board: { readonly x: number; readonly y: number }, client: { readonly x: number; readonly y: number }): void {
+		const root = this.root;
+		if (root === undefined) return;
+		const document = root.ownerDocument;
+		const form = document.createElement("form");
+		form.className = "miro-canvas-link-prompt";
+		const rootRect = root.getBoundingClientRect();
+		form.style.left = `${client.x - rootRect.left}px`;
+		form.style.top = `${client.y - rootRect.top}px`;
+		const input = document.createElement("input");
+		input.type = "url";
+		input.placeholder = "Paste a web address";
+		input.setAttribute("aria-label", "Web address");
+		form.appendChild(input);
+		const outside = (event: Event): void => {
+			const target = event.target as Node | null;
+			if (target !== null && form.contains(target)) return;
+			close();
+		};
+		const close = (): void => {
+			document.removeEventListener("pointerdown", outside, true);
+			try {
+				form.remove();
+			} catch {
+				// Something else already took the field away.
+			}
+		};
+		for (const type of ["pointerdown", "keydown", "keyup", "dblclick"]) {
+			form.addEventListener(type, (event) => {
+				if (type === "keydown" && (event as KeyboardEvent).key === "Escape") close();
+				event.stopPropagation();
+			});
+		}
+		// A press anywhere else on the board puts the field away, as Escape does.
+		document.addEventListener("pointerdown", outside, true);
+		form.addEventListener("submit", (event) => {
+			event.preventDefault();
+			const url = input.value.trim();
+			close();
+			if (url.length === 0) return;
+			this.readInteractionState();
+			this.authoring ??= createCanvasAuthoring(this.view);
+			const size = { width: 400, height: 240 };
+			const created = this.authoring.createItem({
+				item: { type: "link" }, url, x: board.x - size.width / 2, y: board.y - size.height / 2, ...size,
+			});
+			if (!created.ok) this.options.onNotice?.(firstProblem(created.diagnostics) ?? "Canvas rejected the link.");
+			this.refresh();
+		});
+		root.appendChild(form);
+		input.focus();
+	}
+
 	private adoptNativeMenu(): void {
 		if (!this.settings.selectionToolbarEnabled) return;
 		const slot = this.toolbar.nativeSlot;

@@ -15,6 +15,7 @@ import {
   isValidLineHeight,
 } from "./appearance";
 import { normalizeAnchor } from "./anchors";
+import { readLocalItem } from "./local-items";
 import type {
   AppearanceColor,
   PaletteColor,
@@ -272,7 +273,7 @@ const SETTINGS_FIELDS = new Set([
   "palette",
   "recentColors",
 ]);
-const OVERRIDE_FIELDS = new Set(["typography", "colors", "locked", "showAttachmentName", "rotation"]);
+const OVERRIDE_FIELDS = new Set(["typography", "colors", "locked", "showAttachmentName", "rotation", "item"]);
 const TYPOGRAPHY_FIELDS = new Set([
   "fontFamily",
   "fontSize",
@@ -1002,6 +1003,13 @@ function validateLocalOverrides(
       addError(diagnostics, "property-read-failed", pathFor(overridePath, "rotation"), "The rotation could not be read safely.");
     } else if (rotation.state === "present") {
       requireFiniteNumber(rotation.value, pathFor(overridePath, "rotation"), diagnostics);
+    }
+    const item = readOwn(property.value, "item");
+    if (item.state === "error") {
+      addError(diagnostics, "property-read-failed", pathFor(overridePath, "item"), "The item could not be read safely.");
+    } else if (item.state === "present" && readLocalItem(item.value) === undefined) {
+      addError(diagnostics, "item-invalid", pathFor(overridePath, "item"),
+        "A local item needs a known type, a Miro sticky colour name and a short title.");
     }
   }
 }

@@ -5,6 +5,7 @@ import { MAX_WAYPOINTS } from "./connector-route";
 import { stickyFill } from "./miro-palette";
 import { listCommentThreads } from "./local-comments";
 import { threadMessages, type ThreadMessage } from "./comment-thread";
+import { readLocalItem, type LocalItemType } from "./local-items";
 
 export type SourceItemKind = "shape" | "text" | "sticky" | "connector" | "frame" | "media" | "code" | "group";
 
@@ -142,6 +143,8 @@ export interface SourceItemDescriptor {
   readonly css: Readonly<Record<string, string>>;
   readonly connector?: SourceConnectorStyle;
   readonly structured?: SourceStructuredDescriptor;
+  /** The Miro item a node made with the plugin's tools stands for. */
+  readonly localItem?: LocalItemType;
 }
 
 export interface SourceScene {
@@ -929,8 +932,20 @@ export function buildSourceScene(document: unknown): SourceScene {
       if (items.has(canvasId) || edgeIds.has(canvasId)) continue;
       const shape = localShapeKind(document, canvasId);
       const css: Record<string, string> = {};
+      const item = shape === undefined ? readLocalItem(valueOf(localOverride(document, canvasId), "item")) : undefined;
+      if (item?.type === "sticky_note") css["background-color"] = stickyFill(item.color ?? "light_yellow")!;
       applyLocalCss(css, localOverride(document, canvasId));
       const rotation = effectiveRotationFor(document, canvasId);
+      if (item !== undefined) {
+        const kind = item.type === "sticky_note" ? "sticky" : item.type;
+        items.set(canvasId, Object.freeze({
+          kind, rotation, css: Object.freeze(css), localItem: item.type,
+          ...(item.type === "code" ? {
+            structured: Object.freeze({ code: Object.freeze({ lineNumbersVisible: true, ...(item.title === undefined ? {} : { title: item.title }) }) }),
+          } : {}),
+        }));
+        continue;
+      }
       // A node can be rotated or restyled locally without becoming a shape.
       // Without an entry here it would reach neither the renderer nor the
       // anchor geometry, so it would stay upright and its connectors would end

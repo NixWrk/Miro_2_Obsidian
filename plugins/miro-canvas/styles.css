@@ -922,6 +922,124 @@
   opacity: 0.45;
 }
 
+/* The creation tools sit where native Canvas keeps its card menu, whose
+   buttons now live in the tools' "more" menu.  Menus open upwards. */
+.miro-canvas-root.miro-canvas-has-tools .canvas-card-menu {
+  display: none;
+}
+
+.miro-canvas-toolbar.miro-canvas-tools {
+  --miro-canvas-toolbar-size: 32px;
+  top: auto;
+  bottom: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 4px;
+  box-shadow: var(--shadow-s, 0 6px 22px rgb(0 0 0 / 22%));
+}
+
+.miro-canvas-tools .miro-canvas-toolbar__button > .svg-icon {
+  width: var(--icon-m, 18px);
+  height: var(--icon-m, 18px);
+}
+
+.miro-canvas-tools .miro-canvas-toolbar__panel {
+  top: auto;
+  bottom: calc(100% + 10px);
+}
+
+.miro-canvas-tools__more {
+  margin-left: 3px;
+  padding-left: 5px;
+  border-left: 1px solid var(--miro-canvas-toolbar-border);
+}
+
+.miro-canvas-tools .miro-canvas-tools__menu {
+  right: -4px;
+  left: auto;
+  min-width: 180px;
+}
+
+.miro-canvas-tools .miro-canvas-toolbar__button.miro-canvas-tools__item {
+  justify-content: flex-start;
+  gap: 10px;
+  width: 100%;
+  padding: 0 8px;
+  color: var(--text-normal);
+}
+
+.miro-canvas-tools__native {
+  display: flex;
+  gap: 2px;
+  padding-top: 6px;
+  border-top: 1px solid var(--miro-canvas-toolbar-border);
+}
+
+.miro-canvas-tools__native .canvas-card-menu-button {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  color: var(--icon-color);
+  border-radius: var(--radius-s, 4px);
+  cursor: grab;
+}
+
+.miro-canvas-tools__native .canvas-card-menu-button:hover {
+  color: var(--icon-color-hover);
+  background: var(--background-modifier-hover);
+}
+
+.miro-canvas-tools__native .canvas-card-menu-button svg {
+  width: var(--icon-m, 18px);
+  height: var(--icon-m, 18px);
+}
+
+/* With a tool armed the board is a place to draw it, not to select on. */
+.miro-canvas-root[data-miro-canvas-tool]:not([data-miro-canvas-tool="select"]) .canvas {
+  cursor: crosshair;
+}
+
+.miro-canvas-tool-ghost {
+  position: absolute;
+  z-index: 99;
+  box-sizing: border-box;
+  border: 1.5px dashed var(--interactive-accent);
+  border-radius: 2px;
+  pointer-events: none;
+}
+
+.miro-canvas-tool-ghost--sticky {
+  background: rgb(255 247 161 / 35%);
+}
+
+.miro-canvas-tool-ghost--connector {
+  height: 0;
+  border-width: 0;
+  border-top: 2px dashed var(--interactive-accent);
+  transform-origin: 0 0;
+}
+
+.miro-canvas-tool-ghost--comment,
+.miro-canvas-tool-ghost--link {
+  display: none;
+}
+
+.miro-canvas-link-prompt {
+  position: absolute;
+  z-index: 110;
+  padding: 6px;
+  background: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  box-shadow: var(--shadow-s);
+  transform: translate(-50%, -50%);
+}
+
+.miro-canvas-link-prompt input {
+  width: 280px;
+}
+
 /* Font family: the button names it, the list shows each family in its face. */
 .miro-canvas-toolbar .miro-canvas-toolbar__button--font {
   justify-content: flex-start;
@@ -1575,12 +1693,12 @@
 }
 
 /* Miro text is only its words: no card around them, unless the item has a
-   fill of its own.  Only items from the board source are meant; a local node
-   the plugin merely turned keeps its card. */
-.miro-source-text[data-miro-source-id]:not([data-miro-source-card-kind], .miro-source-mindmap-node) > .canvas-node-container,
-.miro-source-text[data-miro-source-id]:not([data-miro-source-card-kind], .miro-source-mindmap-node) .canvas-node-content,
-.miro-source-text[data-miro-source-id]:not([data-miro-source-card-kind], .miro-source-mindmap-node) .markdown-preview-view,
-.miro-source-text[data-miro-source-id]:not([data-miro-source-card-kind], .miro-source-mindmap-node) .markdown-embed {
+   fill of its own.  Only Miro text is meant, from the board source or made
+   with the text tool; a Canvas card the plugin merely turned keeps its card. */
+.miro-source-text:is([data-miro-source-id], [data-miro-local-item="text"]):not([data-miro-source-card-kind], .miro-source-mindmap-node) > .canvas-node-container,
+.miro-source-text:is([data-miro-source-id], [data-miro-local-item="text"]):not([data-miro-source-card-kind], .miro-source-mindmap-node) .canvas-node-content,
+.miro-source-text:is([data-miro-source-id], [data-miro-local-item="text"]):not([data-miro-source-card-kind], .miro-source-mindmap-node) .markdown-preview-view,
+.miro-source-text:is([data-miro-source-id], [data-miro-local-item="text"]):not([data-miro-source-card-kind], .miro-source-mindmap-node) .markdown-embed {
   background-color: transparent !important;
   border-color: transparent !important;
   box-shadow: none !important;

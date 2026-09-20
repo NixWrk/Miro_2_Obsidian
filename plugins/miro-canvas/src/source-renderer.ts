@@ -1329,6 +1329,7 @@ function applyNode(
   patchAttribute(shell, "data-miro-source-kind", descriptor.kind, patches);
   if (descriptor.sourceId !== undefined) patchAttribute(shell, "data-miro-source-id", descriptor.sourceId, patches);
   else patchAttribute(shell, "data-miro-local-source", "true", patches);
+  if (descriptor.localItem !== undefined) patchAttribute(shell, "data-miro-local-item", descriptor.localItem, patches);
   if (descriptor.shape !== undefined) patchAttribute(shell, "data-miro-source-shape", descriptor.shape, patches);
   const sourceCode = descriptor.structured?.code;
   const sourceAppCard = descriptor.structured?.appCard;
@@ -1416,8 +1417,9 @@ function applyNode(
     }
   }
 
-  if (descriptor.kind === "shape" && descriptor.sourceId !== undefined) {
-    // Miro centres a shape's text both ways unless the item says otherwise.
+  if (descriptor.kind === "shape") {
+    // Miro centres a shape's text both ways unless the item says otherwise;
+    // a shape drawn with the plugin's tools behaves the same.
     patchAttribute(shell, "data-miro-source-valign", descriptor.css["vertical-align"] ?? "middle", patches);
     if (descriptor.css["text-align"] === undefined) patchStyle(content, "text-align", "center", patches);
   }

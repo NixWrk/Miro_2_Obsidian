@@ -64,6 +64,8 @@ export interface CommentThreadCardHost {
   /** Opens the thread in the full comments panel. */
   readonly onOpenPanel: (threadId: string, origin: CommentOrigin) => void;
   readonly onClose: () => void;
+  /** Starts a thread from the text written in a new comment. */
+  readonly onCreate?: (text: string) => void;
   readonly setIcon?: (element: HTMLElement, icon: string) => void;
 }
 
@@ -82,6 +84,8 @@ export class CommentThreadCard {
   private readonly input: HTMLInputElement;
   private readonly send: HTMLButtonElement;
   private readonly note: HTMLElement;
+  private readonly panelButton: HTMLButtonElement;
+  private composing = false;
 
   public constructor(private readonly document: Document, private readonly host: CommentThreadCardHost) {
     const card = this.make("div", "miro-canvas-thread");
@@ -99,6 +103,7 @@ export class CommentThreadCard {
     });
     header.appendChild(this.make("span", "miro-canvas-thread__spacer"));
     const panel = header.appendChild(this.button("Open in comments panel", "miro-canvas-thread__icon", "more-vertical", "⋮"));
+    this.panelButton = panel;
     panel.addEventListener("click", () => {
       if (this.thread !== undefined) this.host.onOpenPanel(this.thread.id, this.thread.origin);
     });
@@ -117,8 +122,10 @@ export class CommentThreadCard {
     this.composer.addEventListener("submit", (event) => {
       event.preventDefault();
       const text = this.input.value.trim();
-      if (this.thread === undefined || text.length === 0) return;
-      this.host.onReply(this.thread.id, text);
+      if (text.length === 0) return;
+      if (this.composing) this.host.onCreate?.(text);
+      else if (this.thread !== undefined) this.host.onReply(this.thread.id, text);
+      else return;
       this.input.value = "";
     });
     // The board must not start a drag, select or take the keys typed here.
@@ -135,8 +142,34 @@ export class CommentThreadCard {
     return this.element.hidden ? undefined : this.thread?.id;
   }
 
+  /** A new comment: only its text field, until it is written. */
+  public compose(): void {
+    this.composing = true;
+    this.thread = undefined;
+    this.element.hidden = false;
+    this.element.setAttribute("data-comment-state", "new");
+    this.toggle.hidden = true;
+    this.panelButton.hidden = true;
+    this.note.hidden = true;
+    this.composer.hidden = false;
+    this.input.placeholder = "Add a comment";
+    this.input.value = "";
+    while (this.list.firstChild !== null) this.list.removeChild(this.list.firstChild);
+    this.list.hidden = true;
+    this.input.focus?.();
+  }
+
+  public get composingComment(): boolean {
+    return this.composing && !this.element.hidden;
+  }
+
   public show(thread: CommentThread, options: CommentThreadCardOptions): void {
-    const changed = this.thread?.id !== thread.id;
+    const changed = this.thread?.id !== thread.id || this.composing;
+    this.composing = false;
+    this.toggle.hidden = false;
+    this.panelButton.hidden = false;
+    this.list.hidden = false;
+    this.input.placeholder = "Leave a reply";
     this.thread = thread;
     this.element.hidden = false;
     this.element.setAttribute("data-comment-state", thread.resolved ? "resolved" : "open");
@@ -155,6 +188,7 @@ export class CommentThreadCard {
   public hide(): void {
     this.element.hidden = true;
     this.thread = undefined;
+    this.composing = false;
   }
 
   /** Places the card beside a pin, kept inside the given area. */

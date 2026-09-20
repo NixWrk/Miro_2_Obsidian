@@ -275,7 +275,7 @@ function addPath(document: Document, svg: SVGSVGElement, d: string, attributes: 
 }
 
 /** An outline picture of a catalogue entry. */
-function shapePicture(document: Document, item: ShapeCatalogEntry): SVGSVGElement | undefined {
+export function shapePicture(document: Document, item: ShapeCatalogEntry): SVGSVGElement | undefined {
   const d = shapePath(item.kind);
   if (d === undefined) return undefined;
   // Some outlines bulge a little past the 0..100 box, as a cloud does.

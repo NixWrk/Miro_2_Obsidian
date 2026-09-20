@@ -23,6 +23,7 @@ import {
 	type UpdateConnectorEndpointInput,
 } from "./connector-endpoints";
 import type { CanvasAnchor } from "./anchors";
+import { readLocalItem, type LocalItem } from "./local-items";
 import { isSafeColor, normalizeColor } from "./appearance";
 import {
 	LOCAL_SHAPE_KINDS, CONNECTOR_CAPS, CONNECTOR_ROUTES, CONNECTOR_STROKES,
@@ -69,6 +70,28 @@ export interface CreateConnectorInput {
 
 export interface CreateConnectorResult extends CanvasGraphResult {
 	readonly edgeId?: string;
+}
+
+/**
+ * One node made with a board tool: a Miro item Canvas lacks, stored as a
+ * card or a group that remembers the item, or a plain web link.
+ */
+export interface CreateItemInput {
+	readonly item: LocalItem | { readonly type: "link" };
+	readonly x: number;
+	readonly y: number;
+	readonly width: number;
+	readonly height: number;
+	readonly text?: string;
+	/** A frame's name. */
+	readonly label?: string;
+	/** A link's web address. */
+	readonly url?: string;
+	readonly id?: string;
+}
+
+export interface CreateItemResult extends CanvasGraphResult {
+	readonly nodeId?: string;
 }
 
 export interface UpdateElementStyleInput {
@@ -704,11 +727,18 @@ function nativeKeepsRequested(kind: "nodes" | "edges", key: string, observed: Re
  * carries its own default, and round node geometry; anything else is named by
  * kind, id and field - never by value, which can be user content.
  */
-function graphItemsNativeMismatch(observed: unknown, requested: unknown, kind: "nodes" | "edges"): string | undefined {
+function graphItemsNativeMismatch(
+	observed: unknown,
+	requested: unknown,
+	kind: "nodes" | "edges",
+	/** Native Canvas decides where a new group sits among the others. */
+	allowReorder = false,
+): string | undefined {
 	if (!Array.isArray(observed) || !Array.isArray(requested)) return `${kind} unreadable`;
 	if (observed.length !== requested.length) return `${kind} count ${requested.length} -> ${observed.length}`;
+	const ordered = allowReorder ? matchOrderById(observed, requested) : observed;
 	for (let index = 0; index < requested.length; index += 1) {
-		const actual = observed[index];
+		const actual = ordered[index];
 		const wanted = requested[index];
 		if (!isPlainObject(actual) || !isPlainObject(wanted)) return `${kind}[${index}] unreadable`;
 		const actualKeys = ownKeys(actual);
@@ -739,11 +769,36 @@ function graphItemsNativeMismatch(observed: unknown, requested: unknown, kind: "
 }
 
 /**
+ * The observed items in the requested order, when both hold the same ids.
+ *
+ * Only the order changes: every item is still compared field by field, so a
+ * host that rewrote an item is still caught.  A list whose ids differ is left
+ * alone, and the comparison reports it.
+ */
+function matchOrderById(observed: readonly unknown[], requested: readonly unknown[]): readonly unknown[] {
+	const byId = new Map<string, unknown>();
+	for (const item of observed) {
+		const id = isPlainObject(item) ? safeRead(item, "id") : { ok: false as const, value: undefined };
+		if (!id.ok || typeof id.value !== "string" || byId.has(id.value)) return observed;
+		byId.set(id.value, item);
+	}
+	const result: unknown[] = [];
+	for (const item of requested) {
+		const id = isPlainObject(item) ? safeRead(item, "id") : { ok: false as const, value: undefined };
+		if (!id.ok || typeof id.value !== "string") return observed;
+		const match = byId.get(id.value);
+		if (match === undefined) return observed;
+		result.push(match);
+	}
+	return result;
+}
+
+/**
  * Why an imported document is not the requested one, if it is not.  Host
  * defaults are accepted only inside nodes and edges, never in plugin or
  * source roots.
  */
-function nativeGraphMismatch(observed: UnknownRecord, requested: UnknownRecord): string | undefined {
+function nativeGraphMismatch(observed: UnknownRecord, requested: UnknownRecord, allowReorder = false): string | undefined {
 	const observedKeys = ownKeys(observed);
 	const requestedKeys = ownKeys(requested);
 	if (observedKeys === undefined || requestedKeys === undefined) return "document unreadable";
@@ -756,7 +811,7 @@ function nativeGraphMismatch(observed: UnknownRecord, requested: UnknownRecord):
 		const wanted = safeRead(requested, key);
 		if (!actual.ok || !wanted.ok) return `${key} unreadable`;
 		if (key === "nodes" || key === "edges") {
-			const reason = graphItemsNativeMismatch(actual.value, wanted.value, key);
+			const reason = graphItemsNativeMismatch(actual.value, wanted.value, key, allowReorder && key === "nodes");
 			if (reason !== undefined) return reason;
 		} else if (!structurallyEqual(actual.value, wanted.value)) {
 			return `${key} changed`;
@@ -783,10 +838,12 @@ function restoreDiscardedRootMetadata(
 	diagnostics: CanvasAuthoringDiagnostic[],
 	/** The document whose root values the host may still be holding. */
 	prior?: UnknownRecord,
+	/** A new group is placed among the others by native Canvas, not by this plugin. */
+	allowReorder = false,
 ): InternalSnapshot | undefined {
 	const requestedSnapshot = makeSnapshot(requested, diagnostics);
 	if (requestedSnapshot === undefined
-		|| graphItemsNativeMismatch(imported.nodes, requestedSnapshot.nodes, "nodes") !== undefined
+		|| graphItemsNativeMismatch(imported.nodes, requestedSnapshot.nodes, "nodes", allowReorder) !== undefined
 		|| graphItemsNativeMismatch(imported.edges, requestedSnapshot.edges, "edges") !== undefined) {
 		return imported;
 	}
@@ -818,7 +875,7 @@ function restoreDiscardedRootMetadata(
 	}
 	// Extra or graph-level host changes are not metadata loss and remain a hard
 	// verification failure.
-	if (repairs.length === 0 || nativeGraphMismatch(candidate, requested) !== undefined) return imported;
+	if (repairs.length === 0 || nativeGraphMismatch(candidate, requested, allowReorder) !== undefined) return imported;
 	const data = safeRead(host.runtime, "data");
 	if (!data.ok || !isPlainObject(data.value)) return imported;
 	try {
@@ -827,7 +884,7 @@ function restoreDiscardedRootMetadata(
 		return imported;
 	}
 	const repaired = readSnapshotFromHost(host, diagnostics);
-	if (repaired !== undefined && nativeGraphMismatch(repaired.document, requested) === undefined) {
+	if (repaired !== undefined && nativeGraphMismatch(repaired.document, requested, allowReorder) === undefined) {
 		addDiagnostic(
 			diagnostics,
 			"native-import-root-metadata-restored",
@@ -1862,6 +1919,109 @@ export class CanvasAuthoring {
 		return { ok: true, status: "applied", edgeId: allocation.id, document: verified.document, diagnostics: [...this.diagnosticList, ...diagnostics] };
 	}
 
+	/**
+	 * Add one node made with a board tool, and the item it stands for, in one
+	 * native history step.
+	 */
+	public createItem(input: CreateItemInput, expected?: CanvasAuthoringExpected): CreateItemResult {
+		const diagnostics: CanvasAuthoringDiagnostic[] = [];
+		const reject = (): CreateItemResult => ({ ok: false, status: "rejected", diagnostics: [...this.diagnosticList, ...diagnostics] });
+		if (this.disposed || this.host === undefined) return reject();
+		const before = readSnapshotFromHost(this.host, diagnostics);
+		if (before === undefined) return reject();
+		if (expected !== undefined) {
+			const snapshot = makeSnapshot(extractExpectedDocument(expected), diagnostics);
+			if (snapshot === undefined || !structurallyEqual(snapshot.document, before.document)) {
+				addDiagnostic(diagnostics, "stale-document", "warning", "The Canvas document changed since the supplied expected snapshot.");
+				return reject();
+			}
+		}
+		const link = input?.item?.type === "link";
+		const item = link ? undefined : readLocalItem(input?.item);
+		if (!link && item === undefined) {
+			addDiagnostic(diagnostics, "item-invalid", "error", "The item to create is not one the board tools make.");
+			return reject();
+		}
+		const { x, y, width, height } = input;
+		if (![x, y, width, height].every(isFiniteNumber) || !(width > 0) || !(height > 0)) {
+			addDiagnostic(diagnostics, "item-geometry-invalid", "error", "An item needs a finite position and a positive size.");
+			return reject();
+		}
+		const text = input.text ?? "";
+		const label = input.label;
+		if (typeof text !== "string" || text.length > MAX_TEXT_LENGTH || (label !== undefined && (typeof label !== "string" || label.length > 256))) {
+			addDiagnostic(diagnostics, "item-text-invalid", "error", "An item's text and name must be bounded strings.");
+			return reject();
+		}
+		let url: string | undefined;
+		if (link) {
+			try {
+				const parsed = new URL(String(input.url));
+				if (parsed.protocol === "http:" || parsed.protocol === "https:") url = parsed.href;
+			} catch {
+				url = undefined;
+			}
+			if (url === undefined) {
+				addDiagnostic(diagnostics, "item-url-invalid", "error", "A link needs a web address.");
+				return reject();
+			}
+		}
+		if (policyAllowsCreate(before.document, diagnostics) === undefined) return reject();
+		const allocation = allocateId(input.id, collectDocumentIds(before), this.idPrefix, this.idCounter);
+		if (allocation.id === undefined) {
+			addDiagnostic(diagnostics, input.id === undefined ? "item-id-generation-failed" : "item-id-collision", "error",
+				input.id === undefined ? "A collision-free Canvas node ID could not be generated." : "The explicit Canvas node ID is already in use.");
+			return reject();
+		}
+		this.idCounter = allocation.nextCounter;
+		const id = allocation.id;
+		const geometry = { x: Math.round(x), y: Math.round(y), width: Math.round(width), height: Math.round(height) };
+		const node: UnknownRecord = link
+			? { id, type: "link", ...geometry, url }
+			: item!.type === "frame"
+				? { id, type: "group", ...geometry, ...(label === undefined ? {} : { label }) }
+				: { id, type: "text", ...geometry, text };
+		let document: UnknownRecord;
+		try {
+			document = cloneRecord(before.document);
+		} catch (error) {
+			addDiagnostic(diagnostics, "document-copy-failed", "error", `The Canvas document could not be copied: ${describeError(error)}.`);
+			return reject();
+		}
+		const nodesValue = safeRead(document, "nodes");
+		if (!nodesValue.ok || !Array.isArray(nodesValue.value)) {
+			addDiagnostic(diagnostics, "canvas-document-invalid", "error", "The target Canvas nodes array is unavailable.");
+			return reject();
+		}
+		setOwn(document, "nodes", [...nodesValue.value, node]);
+		if (item !== undefined) {
+			const metadata = readMetadataForUpdate(document, diagnostics);
+			if (metadata === undefined) return reject();
+			const overridesValue = safeRead(metadata, "localOverrides");
+			if (!overridesValue.ok || (overridesValue.value !== undefined && !isPlainObject(overridesValue.value))) {
+				addDiagnostic(diagnostics, "metadata-overrides-invalid", "error", "Existing localOverrides are not a safe object map.");
+				return reject();
+			}
+			let overrides: UnknownRecord;
+			try {
+				overrides = overridesValue.value === undefined ? {} : cloneRecord(overridesValue.value);
+			} catch (error) {
+				addDiagnostic(diagnostics, "metadata-overrides-invalid", "error", `Existing localOverrides could not be copied: ${describeError(error)}.`);
+				return reject();
+			}
+			setOwn(overrides, id, { item: { ...item } });
+			setOwn(metadata, "localOverrides", overrides);
+			if (!validateMiroCanvasMetadata(metadata).valid) {
+				addDiagnostic(diagnostics, "metadata-validation-failed", "error", "The new item's metadata failed validation; no graph import was attempted.");
+				return reject();
+			}
+			setOwn(document, "miroCanvas", metadata);
+		}
+		const verified = this.commitDocument(before, document, diagnostics, item?.type === "frame");
+		if (verified === undefined) return reject();
+		return { ok: true, status: "applied", nodeId: id, document: verified.document, diagnostics: [...this.diagnosticList, ...diagnostics] };
+	}
+
 	/** Apply one connector endpoint change through the same guarded native graph transaction. */
 	public updateConnectorEndpoint(
 		input: UpdateConnectorEndpointInput,
@@ -2126,6 +2286,8 @@ export class CanvasAuthoring {
 		before: InternalSnapshot,
 		document: UnknownRecord,
 		diagnostics: CanvasAuthoringDiagnostic[],
+		/** A new group is placed among the others by native Canvas, not by this plugin. */
+		allowReorder = false,
 	): InternalSnapshot | undefined {
 		if (this.host === undefined) return undefined;
 		const beforeSource = optionalValue(before.document, "miroSource");
@@ -2143,9 +2305,9 @@ export class CanvasAuthoring {
 		}
 		let imported = readSnapshotFromHost(this.host, diagnostics);
 		if (imported !== undefined && !structurallyEqual(imported.document, document)) {
-			imported = restoreDiscardedRootMetadata(this.host, imported, document, diagnostics, before.document);
+			imported = restoreDiscardedRootMetadata(this.host, imported, document, diagnostics, before.document, allowReorder);
 		}
-		const importMismatch = imported === undefined ? "unreadable" : nativeGraphMismatch(imported.document, document);
+		const importMismatch = imported === undefined ? "unreadable" : nativeGraphMismatch(imported.document, document, allowReorder);
 		if (imported === undefined || importMismatch !== undefined) {
 			addDiagnostic(diagnostics, "native-import-verification-failed", "error",
 				`The imported Canvas graph did not match the requested document (${importMismatch}); history was not requested.`);
@@ -2160,7 +2322,7 @@ export class CanvasAuthoring {
 			return undefined;
 		}
 		const verified = readSnapshotFromHost(this.host, diagnostics);
-		const historyMismatch = verified === undefined ? "unreadable" : nativeGraphMismatch(verified.document, document);
+		const historyMismatch = verified === undefined ? "unreadable" : nativeGraphMismatch(verified.document, document, allowReorder);
 		if (verified === undefined || historyMismatch !== undefined) {
 			addDiagnostic(diagnostics, "native-history-verification-failed", "error",
 				`The native history/save boundary did not preserve the requested Canvas graph (${historyMismatch}).`);
