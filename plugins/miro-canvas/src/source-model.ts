@@ -60,6 +60,11 @@ export interface SourceSlideDescriptor {
   readonly index: number;
 }
 
+/** A grid made with the table tool: Markdown a person edits, with a name. */
+export interface SourceTableDescriptor {
+  readonly title?: string;
+}
+
 export interface SourceEmbedDescriptor {
   readonly provider?: string;
   readonly title?: string;
@@ -101,6 +106,7 @@ export interface SourceStructuredDescriptor {
   readonly preview?: SourcePreviewDescriptor;
   readonly document?: SourceDocumentDescriptor;
   readonly embed?: SourceEmbedDescriptor;
+  readonly table?: SourceTableDescriptor;
   readonly deck?: SourceDeckDescriptor;
   readonly slide?: SourceSlideDescriptor;
   readonly comment?: SourceCommentDescriptor;
@@ -937,11 +943,14 @@ export function buildSourceScene(document: unknown): SourceScene {
       applyLocalCss(css, localOverride(document, canvasId));
       const rotation = effectiveRotationFor(document, canvasId);
       if (item !== undefined) {
-        const kind = item.type === "sticky_note" ? "sticky" : item.type;
+        const kind = item.type === "sticky_note" ? "sticky" : item.type === "table" ? "text" : item.type;
         items.set(canvasId, Object.freeze({
           kind, rotation, css: Object.freeze(css), localItem: item.type,
           ...(item.type === "code" ? {
             structured: Object.freeze({ code: Object.freeze({ lineNumbersVisible: true, ...(item.title === undefined ? {} : { title: item.title }) }) }),
+          } : {}),
+          ...(item.type === "table" ? {
+            structured: Object.freeze({ table: Object.freeze(item.title === undefined ? {} : { title: item.title }) }),
           } : {}),
         }));
         continue;

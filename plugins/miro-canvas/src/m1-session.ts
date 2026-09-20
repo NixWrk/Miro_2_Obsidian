@@ -100,7 +100,7 @@ import { CommentMarkers } from "./comment-markers";
 import { addLocalComment, addReply, listCommentThreads, setCommentResolved, type CommentOrigin, type CommentMutationResult } from "./local-comments";
 import { CommentThreadCard } from "./comment-thread";
 import { QUICK_TOOL_KEYS, QuickTools, type QuickTool } from "./quick-tools";
-import { LOCAL_ITEM_SIZES, type LocalItem } from "./local-items";
+import { LOCAL_ITEM_SIZES, TABLE_TEMPLATE, type LocalItem } from "./local-items";
 import {
 	boundaryAnchorOnRect,
 	buildCanvasAnchorGeometry,
@@ -2089,7 +2089,7 @@ export class M1CanvasSession {
 			return;
 		}
 		const size = tool === "shape" ? { width: 200, height: 200 }
-			: LOCAL_ITEM_SIZES[tool === "sticky" ? "sticky_note" : tool as "text" | "code" | "frame"];
+			: LOCAL_ITEM_SIZES[tool === "sticky" ? "sticky_note" : tool as "text" | "code" | "frame" | "table"];
 		const rect = dragged
 			? { x: Math.min(a.x, b.x), y: Math.min(a.y, b.y), width: Math.max(20, Math.abs(b.x - a.x)), height: Math.max(20, Math.abs(b.y - a.y)) }
 			// Text starts where it was clicked; everything else is centred there.
@@ -2104,12 +2104,14 @@ export class M1CanvasSession {
 		} else {
 			const item: LocalItem = tool === "sticky" ? { type: "sticky_note", color: "light_yellow" }
 				: tool === "code" ? { type: "code", title: "Code block" }
-					: { type: tool as "text" | "frame" };
+					: tool === "table" ? { type: "table", title: "Grid" }
+						: { type: tool as "text" | "frame" };
 			const frames = (readRuntime(this.currentRawDocument, "nodes") as readonly unknown[] | undefined ?? [])
 				.filter((node) => readRuntime(node, "type") === "group").length;
 			created = this.authoring.createItem({
 				item, ...rect,
 				...(tool === "code" ? { text: "```\n\n```" } : {}),
+				...(tool === "table" ? { text: TABLE_TEMPLATE } : {}),
 				...(tool === "frame" ? { label: `Frame ${frames + 1}` } : {}),
 			});
 		}

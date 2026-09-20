@@ -1795,6 +1795,56 @@
   margin: 0;
 }
 
+/* A grid is an ordinary Markdown table, which Canvas renders and edits on its
+   own, drawn the way Miro draws a grid: columns of one width, thin edges, no
+   heading of its own, and its name above it. */
+.miro-source-table,
+.miro-source-table > .canvas-node-container,
+.miro-source-table .canvas-node-content,
+.miro-source-table .markdown-preview-view,
+.miro-source-table .markdown-embed {
+  background-color: transparent !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
+}
+
+.miro-source-table .markdown-preview-view {
+  padding: 0 !important;
+  overflow: auto;
+}
+
+/* The grid fills the node, as Miro's does: every row shares its height. */
+.miro-source-table .markdown-preview-view > .markdown-preview-sizer {
+  height: 100% !important;
+  min-height: 0 !important;
+  padding: 0 !important;
+}
+
+.miro-source-table .markdown-preview-sizer > :is(.el-table, .table-wrapper, div) {
+  height: 100%;
+}
+
+.miro-source-table .markdown-preview-pusher {
+  display: none;
+}
+
+.miro-source-table table {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  table-layout: fixed;
+  border-collapse: collapse;
+}
+
+.miro-source-table :is(th, td) {
+  padding: 8px 10px;
+  font-weight: inherit;
+  text-align: left;
+  vertical-align: top;
+  background: transparent;
+  border: 1px solid var(--background-modifier-border);
+}
+
 /* A code block is Miro's navy panel: light monospace text, the line numbers
    in a dim gutter and the title above the panel.  The Canvas text stays
    editable and remains the only copy of the code; the layer draws the panel

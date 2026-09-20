@@ -9,7 +9,7 @@
 import { SHAPE_CATALOG, shapeCatalogEntry, shapeCatalogLabel } from "./shape-catalog";
 import { shapePicture } from "./selection-toolbar";
 
-export const QUICK_TOOLS = ["select", "text", "sticky", "shape", "connector", "comment", "frame", "code", "link"] as const;
+export const QUICK_TOOLS = ["select", "text", "sticky", "shape", "connector", "comment", "frame", "code", "table", "link"] as const;
 export type QuickTool = (typeof QUICK_TOOLS)[number];
 
 interface ToolSpec {
@@ -33,6 +33,7 @@ const BAR_TOOLS: readonly ToolSpec[] = [
 
 const MORE_TOOLS: readonly ToolSpec[] = [
   { tool: "code", label: "Code block", icon: "code-xml", glyph: "</>" },
+  { tool: "table", label: "Grid", icon: "table", glyph: "▦" },
   { tool: "link", label: "Web link", icon: "link", glyph: "🔗" },
 ];
 

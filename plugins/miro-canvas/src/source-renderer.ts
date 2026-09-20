@@ -414,6 +414,12 @@ function decorateCode(document: Document | undefined, layer: DomElementLike, des
   return true;
 }
 
+/** A grid keeps its name above it, where a frame and a code block keep theirs. */
+function decorateTable(document: Document | undefined, layer: DomElementLike, descriptor: SourceItemDescriptor): boolean {
+  if (document !== undefined) addCardLine(document, layer, "miro-source-caption", descriptor.structured?.table?.title);
+  return true;
+}
+
 /** A converted comment node, drawn as the thread Miro opens beside its pin. */
 function decorateComment(document: Document | undefined, layer: DomElementLike, descriptor: SourceItemDescriptor): boolean {
   const comment = descriptor.structured?.comment;
@@ -1369,6 +1375,8 @@ function applyNode(
   const sourceDocument = descriptor.structured?.document;
   const sourceEmbed = descriptor.structured?.embed;
   const sourceComment = descriptor.structured?.comment;
+  const sourceTable = descriptor.structured?.table;
+  if (sourceTable !== undefined) patchClass(shell, "miro-source-table", patches);
   if (sourceComment !== undefined) {
     patchClass(shell, "miro-source-comment", patches);
     patchAttribute(shell, "data-miro-source-comment-state", sourceComment.resolved ? "resolved" : "open", patches);
@@ -1439,13 +1447,13 @@ function applyNode(
   }
 
   let layer: DomElementLike | undefined;
-  if (descriptor.kind === "shape" || descriptor.kind === "sticky" || descriptor.kind === "frame" || descriptor.kind === "media" || descriptor.kind === "code" || sourceAppCard !== undefined || sourceCard !== undefined || sourcePreview !== undefined || sourceMindmap !== undefined || sourceComment !== undefined) {
+  if (descriptor.kind === "shape" || descriptor.kind === "sticky" || descriptor.kind === "frame" || descriptor.kind === "media" || descriptor.kind === "code" || sourceAppCard !== undefined || sourceCard !== undefined || sourcePreview !== undefined || sourceMindmap !== undefined || sourceComment !== undefined || sourceTable !== undefined) {
     const created = document === undefined ? undefined : createElement(document, "div");
     if (created !== undefined) {
       const decorationKind = sourceAppCard !== undefined ? "app-card" : sourceCard !== undefined ? "card"
         : sourcePreview !== undefined ? "preview" : sourceDocument !== undefined ? "document"
           : sourceEmbed !== undefined ? "embed" : sourceComment !== undefined ? "comment"
-            : sourceMindmap !== undefined ? "mindmap-node" : descriptor.kind;
+            : sourceTable !== undefined ? "table" : sourceMindmap !== undefined ? "mindmap-node" : descriptor.kind;
       // A card face covers the native content; any other layer lies under it.
       const covers = sourcePreview !== undefined || sourceComment !== undefined || (sourceDocument !== undefined && host !== "file");
       addOwnedElementClass(created, DECORATION_CLASS);
@@ -1462,7 +1470,9 @@ function applyNode(
         ? decorateShape(document, created, descriptor)
         : descriptor.kind === "code"
           ? decorateCode(document, created, descriptor)
-          : sourceComment !== undefined
+          : sourceTable !== undefined
+            ? decorateTable(document, created, descriptor)
+            : sourceComment !== undefined
             ? decorateComment(document, created, descriptor)
             : sourcePreview !== undefined
             ? decoratePreview(document, created, descriptor, linkHost(runtime))
