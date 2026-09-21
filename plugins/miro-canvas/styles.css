@@ -499,6 +499,25 @@
   padding-bottom: 2px;
 }
 
+/* Opened from a comment: only the comments panel, in a narrower dialog. */
+.miro-canvas-local-tools-modal.miro-canvas-local-tools-modal--comments {
+  width: min(520px, calc(100vw - 48px));
+}
+
+.miro-canvas-m2-tools.miro-canvas-m2-tools--comments {
+  display: block;
+}
+
+.miro-canvas-m2-tools--comments > :not(.miro-canvas-m2-tools__comments, .miro-canvas-m2-tools__status) {
+  display: none;
+}
+
+/* The dialog is titled already, and a status with nothing to say takes no room. */
+.miro-canvas-m2-tools--comments .miro-canvas-comments-panel__title,
+.miro-canvas-m2-tools--comments .miro-canvas-m2-tools__status:empty {
+  display: none;
+}
+
 .miro-canvas-m2-tools {
   display: grid;
   grid-template-columns: minmax(280px, .85fr) minmax(360px, 1.15fr);

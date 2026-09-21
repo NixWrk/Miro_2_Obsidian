@@ -13,6 +13,7 @@ import {
   type CommentThread,
 } from "./local-comments";
 import type { CanvasAnchor } from "./anchors";
+import { openingIsListed } from "./comment-thread";
 
 export interface CommentsPanelState {
   readonly threads: readonly CommentThread[];
@@ -269,7 +270,9 @@ export class CommentsPanel {
     const replies = append(card, make(document, "div"));
     replies.className = "miro-canvas-comment-card__replies";
     replies.setAttribute("data-comment-region", "replies");
-    for (const reply of thread.replies) {
+    // The opening message is the card's own text, even where an export lists
+    // it among the replies.
+    for (const reply of openingIsListed(thread) ? thread.replies.slice(1) : thread.replies) {
       const row = append(replies, make(document, "article"));
       row.className = "miro-canvas-comment-card__reply";
       row.setAttribute("data-comment-reply-id", reply.id);

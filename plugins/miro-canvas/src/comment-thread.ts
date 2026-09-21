@@ -15,13 +15,20 @@ export interface ThreadMessage {
 
 const AVATAR_COLORS = ["#7b2fbe", "#2f5fd0", "#138a5b", "#d9601a", "#c6334a", "#11808f", "#8c4bd6", "#5b6472"] as const;
 
+/**
+ * Whether an exported Miro thread lists its opening message among its
+ * messages; it then has no text of its own apart from that message's, and
+ * showing both would show the comment twice.
+ */
+export function openingIsListed(thread: CommentThread): boolean {
+  const first = thread.replies[0];
+  return thread.origin === "imported" && first !== undefined && first.text === thread.text
+    && (thread.createdAt === undefined || !first.createdAt || first.createdAt === thread.createdAt);
+}
+
 /** Every message of a thread in reading order, the opening one first. */
 export function threadMessages(thread: CommentThread): readonly ThreadMessage[] {
-  // An exported Miro thread may list its opening message among its
-  // messages; it then has no text of its own apart from that message's.
-  const first = thread.replies[0];
-  const listed = thread.origin === "imported" && first !== undefined && first.text === thread.text
-    && (thread.createdAt === undefined || !first.createdAt || first.createdAt === thread.createdAt);
+  const listed = openingIsListed(thread);
   const opening: ThreadMessage[] = listed
     ? []
     : [{ id: thread.id, author: commentAuthorLabel(thread), text: thread.text,

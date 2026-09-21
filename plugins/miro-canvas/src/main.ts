@@ -357,10 +357,15 @@ export default class MiroCanvasPlugin extends Plugin {
     this.toolsModal = modal;
     modal.modalEl.classList.add("miro-canvas-local-tools-modal");
     modal.contentEl.classList.add("miro-canvas-local-tools-modal__content");
-    modal.setTitle("Miro Canvas · Local tools");
+    // Opened from a comment, the dialog is the comments panel and nothing
+    // else: the shape, anchor, connector and layer tools have no part in it.
+    const commentsOnly = initialComment !== undefined;
+    if (commentsOnly) modal.modalEl.classList.add("miro-canvas-local-tools-modal--comments");
+    modal.setTitle(commentsOnly ? "Comments" : "Miro Canvas · Local tools");
     const tools = new M2CanvasTools(session, createObsidianDocumentHost(
       this.app, (message) => new Notice(message), (value): value is TFile => value instanceof TFile,
     ), modal.contentEl.ownerDocument, initialComment);
+    if (commentsOnly) tools.element.classList.add("miro-canvas-m2-tools--comments");
     modal.contentEl.append(tools.element);
     modal.onClose = () => {
       tools.dispose();
