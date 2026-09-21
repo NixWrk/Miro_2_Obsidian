@@ -8,6 +8,7 @@
  */
 import { SHAPE_CATALOG, shapeCatalogEntry, shapeCatalogLabel } from "./shape-catalog";
 import { shapePicture } from "./selection-toolbar";
+import { LINE_KINDS, lineKind, type LineKindSpec } from "./free-line";
 
 export const QUICK_TOOLS = [
   "select", "text", "sticky", "shape", "pen", "highlighter", "smart", "eraser", "erase-part", "lasso",
@@ -75,6 +76,20 @@ const DRAWING_TOOLS: readonly ToolSpec[] = [
   { tool: "eraser", label: "Eraser", icon: "eraser", glyph: "⌫" },
   { tool: "erase-part", label: "Precision eraser", icon: "scissors", glyph: "✁" },
 ];
+
+/** A line kind's picture: its course, and a block arrow filled. */
+function linePicture(document: Document, spec: LineKindSpec): SVGSVGElement | undefined {
+  if (typeof document.createElementNS !== "function") return undefined;
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("viewBox", "0 0 24 24");
+  svg.setAttribute("class", "miro-canvas-shape-icon miro-canvas-shape-icon--square miro-canvas-line-icon");
+  svg.setAttribute("aria-hidden", "true");
+  const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+  path.setAttribute("d", spec.icon);
+  if (spec.block === true) path.setAttribute("fill", "currentColor");
+  svg.appendChild(path);
+  return svg;
+}
 
 /** The largest sample the pen's row draws; a larger size is shown at this. */
 const MAX_PREVIEW = 28;
@@ -181,22 +196,33 @@ export class QuickTools {
         const host = bar.appendChild(this.make("span", "miro-canvas-toolbar__popover"));
         const button = host.appendChild(this.toolButton(spec));
         const panel = host.appendChild(this.panel(button, "miro-canvas-toolbar__panel--shapes"));
-        const grid = panel.appendChild(this.make("div", "miro-canvas-toolbar__pictures miro-canvas-toolbar__pictures--shapes"));
-        // The quick set Miro offers first; the selection toolbar has the rest.
-        for (const entry of SHAPE_CATALOG.filter((item) => item.section === "basic")) {
-          const option = grid.appendChild(this.make("button", "miro-canvas-toolbar__button miro-canvas-toolbar__button--picture"));
-          option.type = "button";
-          option.setAttribute("aria-label", shapeCatalogLabel(entry));
-          option.setAttribute("data-shape", entry.kind);
-          const picture = shapePicture(document, entry);
-          if (picture !== undefined) option.appendChild(picture);
-          else option.textContent = entry.name;
-          this.listen(option, "click", () => {
+        // Lines first, as Miro lists them, then the basic shapes and the
+        // flowchart's own symbols.
+        const option = (grid: HTMLElement, kind: string, label: string, picture: Element | undefined, glyph: string): void => {
+          const choice = grid.appendChild(this.make("button", "miro-canvas-toolbar__button miro-canvas-toolbar__button--picture"));
+          choice.type = "button";
+          choice.setAttribute("aria-label", label);
+          choice.setAttribute("data-shape", kind);
+          if (picture !== undefined) choice.appendChild(picture);
+          else choice.textContent = glyph;
+          this.listen(choice, "click", () => {
             this.closePanels();
-            this.actions.onShape(entry.kind);
+            this.actions.onShape(kind);
             this.actions.onArm("shape");
           });
-          this.shapeButtons.set(entry.kind, option);
+          this.shapeButtons.set(kind, choice);
+        };
+        const section = (title: string): HTMLElement => {
+          panel.appendChild(this.make("div", "miro-canvas-toolbar__heading", title));
+          return panel.appendChild(this.make("div", "miro-canvas-toolbar__pictures miro-canvas-toolbar__pictures--shapes"));
+        };
+        const lines = section("Lines");
+        for (const spec of LINE_KINDS) option(lines, spec.kind, spec.label, linePicture(document, spec), spec.label.split("\n")[0]!);
+        for (const [part, title] of [["basic", "Basic"], ["flowchart", "Flowchart"]] as const) {
+          const grid = section(title);
+          for (const entry of SHAPE_CATALOG.filter((item) => item.section === part)) {
+            option(grid, entry.kind, shapeCatalogLabel(entry), shapePicture(document, entry), entry.name);
+          }
         }
         continue;
       }
@@ -273,14 +299,15 @@ export class QuickTools {
       this.sizePreview.style?.setProperty?.("--miro-canvas-preview-color", state.penColor);
     }
     const entry = shapeCatalogEntry(state.shape);
+    const line = lineKind(state.shape);
     const shapeButton = this.buttons.get("shape");
-    if (entry !== undefined && shapeButton !== undefined && this.shownShape !== entry.kind) {
-      // The button shows the shape it will make.
-      const picture = shapePicture(this.document, entry);
+    if ((entry !== undefined || line !== undefined) && shapeButton !== undefined && this.shownShape !== state.shape) {
+      // The button shows the shape or the line it will make.
+      const picture = line !== undefined ? linePicture(this.document, line) : shapePicture(this.document, entry!);
       if (picture !== undefined) {
         while (shapeButton.firstChild !== null) shapeButton.removeChild(shapeButton.firstChild);
         shapeButton.appendChild(picture);
-        this.shownShape = entry.kind;
+        this.shownShape = state.shape;
       }
     }
     if (!state.editable) this.closePanels();

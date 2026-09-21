@@ -31,7 +31,7 @@ import {
 } from "./canvas-adapter";
 import { CANVAS_SHAPE_KINDS, createCanvasAuthoring, type CanvasAuthoring, type ConnectorSide } from "./canvas-authoring";
 import {
-	MAX_WAYPOINTS, gripNear, moveElbowSegment, placeWaypoint, planRoute, removeWaypoint, routeBends, routeHandles, simplifyCorners,
+	MAX_WAYPOINTS, gripNear, moveElbowSegment, placeWaypoint, planRoute, removeWaypoint, routeBends, routeHandles, routePath, simplifyCorners,
 	type PlannedRoute, type RouteEnd,
 } from "./connector-route";
 import {
@@ -101,7 +101,10 @@ import { CommentMarkers } from "./comment-markers";
 import { addLocalComment, addReply, listCommentThreads, setCommentResolved, type CommentOrigin, type CommentMutationResult } from "./local-comments";
 import { CommentThreadCard } from "./comment-thread";
 import { QUICK_TOOL_KEYS, QuickTools, isDrawingTool, type QuickTool } from "./quick-tools";
-import { LOCAL_ITEM_SIZES, MAX_STROKE_POINTS, TABLE_TEMPLATE, type LocalItem } from "./local-items";
+import { LOCAL_ITEM_SIZES, MAX_LINE_POINTS, MAX_STROKE_POINTS, TABLE_TEMPLATE, type LocalItem, type LocalLine } from "./local-items";
+import {
+	blockArrowOutline, bowPoint, lineBoardPoints, lineFromBoard, lineKind, planLine, type LineKindSpec, type LinePoint,
+} from "./free-line";
 import {
 	eraseFromStroke, pointInLasso, recogniseStroke, simplifyPoints, snapAngle, strokeBounds, strokeHitsPoint, strokeHitsSegment,
 	type StrokePoint,
@@ -666,6 +669,13 @@ export class M1CanvasSession {
 	private readonly quickTools: QuickTools | undefined;
 	private armedTool: QuickTool = "select";
 	private toolShape = "rectangle";
+	/** A polyline or spline being placed a click at a time. */
+	private linePlacing: {
+		readonly spec: LineKindSpec;
+		readonly points: StrokePoint[];
+		readonly place: (point: { readonly x: number; readonly y: number }, straight: boolean) => void;
+		readonly finish: () => void;
+	} | undefined;
 	/** The pen writes in the board's own ink until a colour is picked. */
 	private penColor: string | undefined;
 	private penWidth = 5;
@@ -933,6 +943,11 @@ export class M1CanvasSession {
 		readonly ends: { readonly from: RouteEnd; readonly to: RouteEnd };
 		readonly imported: boolean;
 	}) | undefined {
+		const drawn = this.lineOf(edgeId);
+		if (drawn !== undefined) {
+			const plan = planLine(drawn.route, drawn.points);
+			return { ...plan, ends: { from: { point: plan.start }, to: { point: plan.end } }, imported: false };
+		}
 		const geometry = this.landingGeometry().geometry.edges?.[edgeId] as Record<string, unknown> | undefined;
 		if (geometry === undefined || !Array.isArray(geometry.corners) || !Array.isArray(geometry.segments)
 			|| !isObject(geometry.ends) || typeof geometry.route !== "string") return undefined;
@@ -941,6 +956,8 @@ export class M1CanvasSession {
 
 	/** Where the selected connector's route can be grabbed, in overlay pixels. */
 	private routeGrips(edgeId: string): RouteGrip[] | undefined {
+		// A block arrow runs straight from tail to tip: only its ends move.
+		if (this.lineOf(edgeId)?.line.block === true) return [];
 		const plan = this.plannedRoute(edgeId);
 		const origin = this.overlayOrigin();
 		if (plan === undefined || origin === undefined) return undefined;
@@ -1039,6 +1056,34 @@ export class M1CanvasSession {
 		this.handles.grabRoute(id, grip, event);
 	}
 
+	/**
+	 * A press on a line drawn on its own moves it, as a press on any node
+	 * does.  Native Canvas starts that drag from the node's inner container,
+	 * which a line lets presses through; only its course takes them, so the
+	 * press is handed on to the node from there.
+	 */
+	private grabDrawnLine(event: Event): void {
+		const hit = this.closestTarget(event, ".miro-source-line-hit");
+		if (!hit) return;
+		const target = eventTarget(event);
+		const node = [...(this.adapter.getNodes() ?? [])].find((item) => {
+			const element = readRuntime(item, "nodeEl");
+			const contains = readRuntime(element, "contains");
+			try {
+				return typeof contains === "function" && Reflect.apply(contains, element, [target]) === true;
+			} catch {
+				return false;
+			}
+		});
+		const press = readRuntime(node, "onPointerdown");
+		if (typeof press !== "function") return;
+		try {
+			Reflect.apply(press, node, [event]);
+		} catch {
+			// A host without the native drag leaves the line where it is.
+		}
+	}
+
 	private reshapeConnector(edgeId: string, grip: RouteGrip, point: { readonly x: number; readonly y: number }): void {
 		// The release that ends a drag must not also click the board clear.
 		this.swallowClickUntil = Date.now() + 400;
@@ -1062,6 +1107,12 @@ export class M1CanvasSession {
 	 * describing the same kind of line whatever the default becomes.
 	 */
 	private writeBends(edgeId: string, route: PlannedRoute["route"], bends: readonly { readonly x: number; readonly y: number }[]): void {
+		const drawn = this.lineOf(edgeId);
+		if (drawn !== undefined) {
+			const points = drawn.points;
+			this.writeLine(edgeId, [points[0]!, ...bends, points[points.length - 1]!]);
+			return;
+		}
 		this.readInteractionState();
 		if (!this.editAllowed("restyle", [edgeId])) {
 			this.refresh();
@@ -1212,6 +1263,7 @@ export class M1CanvasSession {
 		if (gesture.kind === "connect") {
 			landing = this.connectorLanding(point, gesture.sourceId, this.pulledFrom(gesture.sourceId, gesture.side, gesture.position));
 		} else {
+			if (this.lineOf(gesture.edgeId) !== undefined) return point;
 			const other = this.oppositeEnd(gesture.edgeId, gesture.end);
 			landing = this.connectorLanding(point, other.nodeId, other.point);
 		}
@@ -1267,6 +1319,17 @@ export class M1CanvasSession {
 	 * fallback.  It never lands on the node the other end already holds.
 	 */
 	private moveConnectorEnd(edgeId: string, end: "from" | "to", point: { readonly x: number; readonly y: number }): void {
+		const drawn = this.lineOf(edgeId);
+		if (drawn !== undefined) {
+			// A line's end goes where it is dropped; it holds on to nothing.
+			const board = this.boardPoint(point);
+			if (board !== undefined) {
+				const points = [...drawn.points];
+				points[end === "from" ? 0 : points.length - 1] = board;
+				this.writeLine(edgeId, points);
+			}
+			return;
+		}
 		this.readInteractionState();
 		const other = this.oppositeEnd(edgeId, end);
 		const landing = this.connectorLanding(point, other.nodeId, other.point);
@@ -1285,7 +1348,10 @@ export class M1CanvasSession {
 
 	/** Where a selected connector's ends are, in the handle overlay's coordinates. */
 	private connectorEnds(edgeId: string): SelectionHandlesState["endpoints"] {
-		const route = this.landingGeometry().geometry.edges?.[edgeId];
+		const drawn = this.lineOf(edgeId);
+		const route = drawn === undefined
+			? this.landingGeometry().geometry.edges?.[edgeId]
+			: { start: drawn.points[0], end: drawn.points[drawn.points.length - 1] };
 		const overlay = this.overlayOrigin();
 		if (route?.start === undefined || route.end === undefined || overlay === undefined) return undefined;
 		const local = (point: { readonly x: number; readonly y: number }) => {
@@ -1354,7 +1420,14 @@ export class M1CanvasSession {
 			return;
 		}
 		this.authoring ??= createCanvasAuthoring(this.view);
-		const result = this.authoring.updateElementStyles(this.selectedIds.map((id) => {
+		const lines = this.selectedIds.filter((id) => this.lineOf(id) !== undefined);
+		if (lines.length > 0) this.restyleLines(lines, patch);
+		const others = this.selectedIds.filter((id) => !lines.includes(id));
+		if (others.length === 0) {
+			this.refresh();
+			return;
+		}
+		const result = this.authoring.updateElementStyles(others.map((id) => {
 			// A connector changing its kind of route starts unbent: bends made for
 			// one kind of line do not describe another.
 			const route = patch.connector?.route;
@@ -1367,6 +1440,57 @@ export class M1CanvasSession {
 			this.addDiagnostic(reason ?? "Canvas rejected the style change.");
 		}
 		this.refresh();
+	}
+
+	/**
+	 * A line drawn on its own: its stored record, where its points are on the
+	 * board now, and the route it takes.
+	 */
+	private lineOf(id: string): { readonly line: LocalLine; readonly points: LinePoint[]; readonly route: LocalLine["route"] } | undefined {
+		const line = this.landingGeometry().scene.items.get(id)?.structured?.line;
+		const rect = line === undefined ? undefined : this.nodeRect(id);
+		if (line === undefined || rect === undefined) return undefined;
+		return { line, points: lineBoardPoints(line, rect), route: line.route };
+	}
+
+	/** Store a line along new board points, its node moved to wrap them, in one step. */
+	private writeLine(id: string, points: readonly LinePoint[], style: Partial<Omit<LocalLine, "box" | "points">> = {}): boolean {
+		// The release that ends a drag must not also click the board clear.
+		this.swallowClickUntil = Date.now() + 400;
+		const drawn = this.lineOf(id);
+		this.readInteractionState();
+		if (drawn === undefined || !this.editAllowed("restyle", [id])) {
+			this.refresh();
+			return false;
+		}
+		const { box: _box, points: _points, ...kept } = drawn.line;
+		const merged = { ...kept, ...style };
+		for (const key of ["startCap", "endCap", "strokeStyle"] as const) {
+			if (merged[key] === undefined || merged[key] === "none" || merged[key] === "solid") delete merged[key];
+		}
+		const { rect, line } = lineFromBoard(points, merged);
+		this.authoring ??= createCanvasAuthoring(this.view);
+		const result = this.authoring.changeItems({ updates: [{ id, item: { type: "line", line }, rect }] });
+		if (!result.ok) this.addDiagnostic(firstProblem(result.diagnostics) ?? "Canvas rejected the line.");
+		this.refresh();
+		return result.ok;
+	}
+
+	/** What the connector settings mean for lines: their route, ends, dashes and width. */
+	private restyleLines(ids: readonly string[], patch: SelectionStylePatch): void {
+		const connector = patch.connector;
+		if (connector === undefined) return;
+		for (const id of ids) {
+			const drawn = this.lineOf(id);
+			if (drawn === undefined) continue;
+			this.writeLine(id, drawn.points, {
+				...(connector.route === undefined ? {} : { route: connector.route }),
+				...(connector.strokeStyle === undefined ? {} : { strokeStyle: connector.strokeStyle as LocalLine["strokeStyle"] }),
+				...(connector.startCap === undefined ? {} : { startCap: connector.startCap }),
+				...(connector.endCap === undefined ? {} : { endCap: connector.endCap }),
+				...(connector.width === undefined ? {} : { width: connector.width }),
+			});
+		}
 	}
 
 	public get status(): M1SessionStatus {
@@ -2070,6 +2194,11 @@ export class M1CanvasSession {
 		const target = event.target as HTMLElement | null;
 		if (target !== null && (target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/u.test(target.tagName))) return;
 		if (target !== null && target !== root.ownerDocument.body && !root.contains(target)) return;
+		if (event.key === "Enter" && this.linePlacing !== undefined) {
+			this.linePlacing.finish();
+			event.preventDefault();
+			return;
+		}
 		if (event.key === "Escape" && this.armedTool !== "select") {
 			this.armTool("select");
 			event.preventDefault();
@@ -2090,7 +2219,21 @@ export class M1CanvasSession {
 			this.lastPenAt = Date.now();
 			this.stylusSeen = true;
 		}
+		// Each click of a polyline or a spline being placed adds a point to it.
+		if (this.linePlacing !== undefined && event.button === 0 && (event.target as Element | null)?.closest?.(PANEL_SELECTOR) == null) {
+			event.preventDefault();
+			event.stopImmediatePropagation();
+			this.linePlacing.place({ x: event.clientX, y: event.clientY }, event.shiftKey === true);
+			return;
+		}
 		if (tool === "select" || root === undefined || event.button !== 0 || this.toolGesture !== undefined) return;
+		const shapeLine = tool === "shape" ? lineKind(this.toolShape) : undefined;
+		if (shapeLine !== undefined) {
+			if (pointer === "touch" && Date.now() - this.lastPenAt < STYLUS_HOLD_MS) return;
+			if ((event.target as Element | null)?.closest?.(PANEL_SELECTOR) != null) return;
+			this.startLine(shapeLine, event);
+			return;
+		}
 		const drawingTool = isDrawingTool(tool) || tool === "lasso";
 		const erasing = tool === "eraser" || tool === "erase-part";
 		// A stylus rules the board it draws on: while one is in use a touch is a
@@ -2109,8 +2252,9 @@ export class M1CanvasSession {
 		let from: { readonly nodeId: string; readonly anchor: CanvasAnchor; readonly board: { readonly x: number; readonly y: number } } | undefined;
 		if (tool === "connector") {
 			const landing = this.connectorLanding(start, undefined, undefined);
+			// Started on empty board, a connection line is an arrow of its own.
 			if (landing?.nodeId === undefined) {
-				this.options.onNotice?.("Start a connection line on an item.");
+				this.startLine(lineKind("arrow")!, event);
 				return;
 			}
 			from = { nodeId: landing.nodeId, anchor: landing.anchor, board: landing.board };
@@ -2320,6 +2464,165 @@ export class M1CanvasSession {
 		// After the press has finished, so its last events leave the caret alone.
 		// A code block is written between its fences.
 		if (tool !== "frame") ownerDocument(this.root)?.defaultView?.setTimeout(() => this.editNode(id, tool === "code" ? 1 : undefined), 0);
+	}
+
+	/**
+	 * Draw a line from a press: dragged out for a line, an arrow or a curve,
+	 * or a click at a time for a polyline or a spline, which Enter, a
+	 * double-click or a click on its last point finishes.  Shift keeps each
+	 * stretch level, upright or at 45 degrees.
+	 */
+	private startLine(spec: LineKindSpec, event: PointerEvent): void {
+		const root = this.root;
+		const first = this.boardPoint({ x: event.clientX, y: event.clientY });
+		if (root === undefined || first === undefined) return;
+		event.preventDefault();
+		event.stopImmediatePropagation();
+		const document = root.ownerDocument;
+		const view = document.defaultView;
+		const ghost = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+		ghost.setAttribute("class", "miro-canvas-tool-ghost miro-canvas-tool-ghost--line");
+		const shape = document.createElementNS("http://www.w3.org/2000/svg", spec.block === true ? "polygon" : "path");
+		shape.setAttribute("class", "miro-canvas-tool-ghost__line");
+		ghost.appendChild(shape);
+		root.appendChild(ghost);
+		const rootRect = root.getBoundingClientRect();
+		const local = (point: StrokePoint): StrokePoint => {
+			const screen = this.viewportPoint(point) ?? point;
+			return { x: screen.x - rootRect.left, y: screen.y - rootRect.top };
+		};
+		const course = (tip: StrokePoint, placed: readonly StrokePoint[]): StrokePoint[] =>
+			spec.input === "points" ? [...placed, tip]
+				: spec.route === "curved" ? [placed[0]!, bowPoint(placed[0]!, tip), tip] : [placed[0]!, tip];
+		const width = spec.width ?? 2;
+		const show = (tip: StrokePoint, placed: readonly StrokePoint[]): void => {
+			const through = course(tip, placed);
+			if (spec.block === true) {
+				shape.setAttribute("points", blockArrowOutline(local(through[0]!), local(tip), width * this.zoom())
+					.map((point) => `${point.x},${point.y}`).join(" "));
+				return;
+			}
+			const plan = planLine(spec.route, through);
+			shape.setAttribute("d", routePath(plan.start, plan.segments, local));
+		};
+		// With Shift a stretch keeps to level, upright or 45 degrees.
+		const aim = (client: StrokePoint, from: StrokePoint, straight: boolean): StrokePoint | undefined => {
+			if (!straight) return this.boardPoint(client);
+			const anchor = this.viewportPoint(from);
+			return anchor === undefined ? this.boardPoint(client) : this.boardPoint(snapAngle(anchor, client));
+		};
+		const points: StrokePoint[] = [first];
+		let tip = first;
+		show(tip, points);
+		let done = false;
+		const swallow = (dbl: Event): void => {
+			dbl.preventDefault();
+			dbl.stopImmediatePropagation();
+		};
+		const end = (): void => {
+			if (done) return;
+			done = true;
+			view?.removeEventListener("pointermove", move, true);
+			view?.removeEventListener("pointerup", up, true);
+			view?.removeEventListener("pointercancel", cancel, true);
+			ghost.remove();
+			this.toolGesture = undefined;
+			this.linePlacing = undefined;
+			// The double-click that finishes a line must not make a card as well.
+			view?.setTimeout(() => root.removeEventListener("dblclick", swallow, true), 500);
+		};
+		root.addEventListener("dblclick", swallow, true);
+		const move = (moved: Event): void => {
+			const pointer = moved as PointerEvent;
+			const from = spec.input === "points" ? points[points.length - 1]! : first;
+			const next = aim({ x: pointer.clientX, y: pointer.clientY }, from, pointer.shiftKey === true);
+			if (next === undefined) return;
+			tip = next;
+			show(tip, points);
+		};
+		const cancel = (): void => {
+			end();
+			this.armTool("select");
+		};
+		const up = (released: Event): void => {
+			const pointer = released as PointerEvent;
+			const at = aim({ x: pointer.clientX, y: pointer.clientY }, first, pointer.shiftKey === true) ?? tip;
+			end();
+			// A click without a drag leaves a line of Miro's length to the right.
+			const reach = Math.hypot(at.x - first.x, at.y - first.y) * this.zoom();
+			this.createLine(spec, course(reach < 6 ? { x: first.x + 160, y: first.y } : at, [first]));
+		};
+		view?.addEventListener("pointermove", move, true);
+		view?.addEventListener("pointercancel", cancel, true);
+		if (spec.input === "drag") view?.addEventListener("pointerup", up, true);
+		this.toolGesture = { tool: "shape", start: { x: event.clientX, y: event.clientY }, ghost: ghost as unknown as HTMLElement, end };
+		if (spec.input !== "points") return;
+		const finish = (): void => {
+			end();
+			this.createLine(spec, points);
+		};
+		this.linePlacing = {
+			spec, points, finish,
+			place: (client, straight) => {
+				const point = aim(client, points[points.length - 1]!, straight);
+				if (point === undefined) return;
+				const last = this.viewportPoint(points[points.length - 1]!);
+				// A second click where the last one was is a double-click: done.
+				if (last !== undefined && Math.hypot(client.x - last.x, client.y - last.y) < 6) {
+					finish();
+					return;
+				}
+				points.push(point);
+				tip = point;
+				show(tip, points);
+				if (points.length >= MAX_LINE_POINTS) finish();
+			},
+		};
+	}
+
+	/** The board's zoom: screen pixels to a board unit. */
+	private zoom(): number {
+		const zoom = finite(readRuntime(this.viewport.getViewport(), "zoom")) ?? 1;
+		return zoom > 0 ? zoom : 1;
+	}
+
+	/** Put a finished line on the board, selected, with the select tool back. */
+	private createLine(spec: LineKindSpec, points: readonly StrokePoint[]): void {
+		this.swallowClickUntil = Date.now() + 400;
+		this.armedTool = "select";
+		this.updateQuickTools();
+		if (points.length < 2) {
+			this.refresh();
+			return;
+		}
+		const { rect, line } = lineFromBoard(points, {
+			route: spec.route,
+			color: this.boardInk(),
+			width: spec.width ?? 2,
+			...(spec.endCap === undefined ? {} : { endCap: spec.endCap }),
+			...(spec.block === true ? { block: true as const } : {}),
+		});
+		this.readInteractionState();
+		this.authoring ??= createCanvasAuthoring(this.view);
+		const created = this.authoring.createItem({ item: { type: "line", line }, ...rect });
+		if (!created.ok || created.nodeId === undefined) {
+			this.addDiagnostic(firstProblem(created.diagnostics) ?? "Canvas rejected the line.");
+			this.refresh();
+			return;
+		}
+		this.refresh();
+		const node = [...(this.adapter.getNodes() ?? [])].find((item) => readCanvasElementId(item) === created.nodeId);
+		if (node !== undefined) {
+			this.adapter.invoke("selectOnly", node);
+			this.readInteractionState();
+			this.refresh();
+		}
+	}
+
+	/** Ink that shows on the board whatever its theme: near-black on light, near-white on dark. */
+	private boardInk(): string {
+		const theme = this.root === undefined ? undefined : this.root.getAttribute("data-miro-canvas-resolved-theme");
+		return theme === "dark" ? "#e6e6e6" : "#1a1a1a";
 	}
 
 	/**
@@ -2772,16 +3075,17 @@ export class M1CanvasSession {
 					? this.rotationPreview.rotation
 					: scene.items.get(id)?.rotation ?? this.rotationFor(id),
 			editable,
-			isEdge: id !== undefined && geometry.edges?.[id] !== undefined,
+			isEdge: id !== undefined && (geometry.edges?.[id] !== undefined || this.lineOf(id) !== undefined),
+			...(id !== undefined && this.lineOf(id) !== undefined ? { freeEnds: true } : {}),
 			...(() => {
 				const origin = this.overlayOrigin();
 				return origin === undefined ? {} : { origin: { x: origin.left, y: origin.top } };
 			})(),
 			...(id === undefined ? {} : { shape: this.selectedShape(id) }),
 			...(id === undefined ? {} : { rect: this.handleRect(id) }),
-			...(id === undefined || geometry.edges?.[id] === undefined ? {} : { endpoints: this.connectorEnds(id) }),
+			...(id === undefined || (geometry.edges?.[id] === undefined && this.lineOf(id) === undefined) ? {} : { endpoints: this.connectorEnds(id) }),
 			...(() => {
-				const grips = id === undefined || geometry.edges?.[id] === undefined ? undefined : this.routeGrips(id);
+				const grips = id === undefined || (geometry.edges?.[id] === undefined && this.lineOf(id) === undefined) ? undefined : this.routeGrips(id);
 				return grips === undefined ? {} : { routeGrips: grips };
 			})(),
 			...(() => {
@@ -2967,6 +3271,11 @@ export class M1CanvasSession {
 				? (nodes as readonly unknown[]).find((item) => readRuntime(item, "id") === id)
 				: undefined;
 			const descriptor = source.items.get(id);
+			// A line is set like a connector: its ends, route, dashes and colour.
+			if (descriptor?.structured?.line !== undefined) {
+				kinds.add("edge");
+				continue;
+			}
 			// Any card that only holds text can be given a shape, as a shape can.
 			if (takesShape(descriptor, readRuntime(node, "type"))) {
 				kinds.add("shape");
@@ -4368,6 +4677,7 @@ export class M1CanvasSession {
 			});
 		}
 		listen("pointerdown", (event) => this.grabConnectorLine(event));
+		listen("pointerdown", (event) => this.grabDrawnLine(event));
 		listen("click", (event) => {
 			if (Date.now() > this.swallowClickUntil) return;
 			this.swallowClickUntil = 0;

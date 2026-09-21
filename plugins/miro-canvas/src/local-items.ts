@@ -6,7 +6,7 @@
  */
 import { MIRO_STICKY_COLORS } from "./miro-palette";
 
-export const LOCAL_ITEM_TYPES = ["text", "sticky_note", "code", "frame", "table", "drawing"] as const;
+export const LOCAL_ITEM_TYPES = ["text", "sticky_note", "code", "frame", "table", "drawing", "line"] as const;
 export type LocalItemType = (typeof LOCAL_ITEM_TYPES)[number];
 
 /**
@@ -28,6 +28,29 @@ export interface LocalStroke {
   readonly breaks?: readonly number[];
 }
 
+/**
+ * A line drawn on its own, as the shape tool's lines are: a connector whose
+ * ends hold on to nothing.  Its start, the points it bends through and its
+ * end live in the box it was drawn in, as a stroke's points do, so the line
+ * follows the node when the node is moved or resized.
+ */
+export interface LocalLine {
+  readonly route: LineRoute;
+  readonly color: string;
+  readonly width: number;
+  readonly strokeStyle?: "dashed" | "dotted";
+  /** How each end is drawn, by the connector's name for it; no end is left out. */
+  readonly startCap?: string;
+  readonly endCap?: string;
+  /** Drawn as Miro's block arrow: a filled arrow from start to end, `width` thick. */
+  readonly block?: true;
+  readonly box: { readonly width: number; readonly height: number };
+  /** x and y in turn: the start, every bend, the end. */
+  readonly points: readonly number[];
+}
+
+export type LineRoute = "straight" | "elbowed" | "curved";
+
 export interface LocalItem {
   readonly type: LocalItemType;
   /** A sticky note's colour, by Miro's name for it. */
@@ -36,6 +59,8 @@ export interface LocalItem {
   readonly title?: string;
   /** What the pen drew, for a drawing. */
   readonly stroke?: LocalStroke;
+  /** Where a line runs and how it looks, for a line. */
+  readonly line?: LocalLine;
 }
 
 const MAX_TITLE_LENGTH = 256;
@@ -49,6 +74,7 @@ export const LOCAL_ITEM_SIZES: Readonly<Record<LocalItemType, { readonly width: 
   frame: { width: 640, height: 400 },
   table: { width: 720, height: 200 },
   drawing: { width: 200, height: 200 },
+  line: { width: 200, height: 24 },
 });
 
 /** The most points a stored stroke may hold. */
@@ -86,6 +112,42 @@ export function readLocalStroke(value: unknown): LocalStroke | undefined {
   });
 }
 
+/** The most points a line bends through, with its two ends. */
+export const MAX_LINE_POINTS = 66;
+const LINE_ROUTES = new Set<string>(["straight", "elbowed", "curved"]);
+const CAP_NAME = /^[a-z_]{1,32}$/u;
+
+/** A line this plugin can draw again, or undefined when the record is not one. */
+export function readLocalLine(value: unknown): LocalLine | undefined {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const route = own(value, "route"), color = own(value, "color"), width = own(value, "width");
+  const strokeStyle = own(value, "strokeStyle"), startCap = own(value, "startCap"), endCap = own(value, "endCap");
+  const box = own(value, "box"), points = own(value, "points"), block = own(value, "block");
+  if (typeof route !== "string" || !LINE_ROUTES.has(route)) return undefined;
+  if (block !== undefined && block !== true) return undefined;
+  if (typeof color !== "string" || !HEX_COLOR.test(color)) return undefined;
+  if (typeof width !== "number" || !Number.isFinite(width) || width <= 0 || width > 100) return undefined;
+  if (strokeStyle !== undefined && strokeStyle !== "dashed" && strokeStyle !== "dotted") return undefined;
+  for (const cap of [startCap, endCap]) if (cap !== undefined && (typeof cap !== "string" || !CAP_NAME.test(cap))) return undefined;
+  if (box === null || typeof box !== "object") return undefined;
+  const boxWidth = own(box, "width"), boxHeight = own(box, "height");
+  const positive = (side: unknown): side is number => typeof side === "number" && Number.isFinite(side) && side > 0 && side <= MAX_STROKE_SIZE;
+  if (!positive(boxWidth) || !positive(boxHeight)) return undefined;
+  if (!Array.isArray(points) || points.length < 4 || points.length > MAX_LINE_POINTS * 2 || points.length % 2 !== 0) return undefined;
+  if (points.some((point) => typeof point !== "number" || !Number.isFinite(point) || Math.abs(point) > MAX_STROKE_SIZE)) return undefined;
+  return Object.freeze({
+    route: route as LineRoute,
+    color: color.toLowerCase(),
+    width,
+    ...(strokeStyle === undefined ? {} : { strokeStyle: strokeStyle as "dashed" | "dotted" }),
+    ...(startCap === undefined || startCap === "none" ? {} : { startCap: startCap as string }),
+    ...(endCap === undefined || endCap === "none" ? {} : { endCap: endCap as string }),
+    ...(block === true ? { block: true as const } : {}),
+    box: Object.freeze({ width: boxWidth, height: boxHeight }),
+    points: Object.freeze([...points as readonly number[]]),
+  });
+}
+
 /**
  * The grid a new table starts as: an ordinary Markdown table, which Canvas
  * renders and edits on its own.  Miro's grid opens with three columns and two
@@ -111,10 +173,15 @@ export function readLocalItem(value: unknown): LocalItem | undefined {
   const stroke = rawStroke === undefined ? undefined : readLocalStroke(rawStroke);
   // A drawing is nothing without its stroke, and nothing else carries one.
   if (type === "drawing" ? stroke === undefined : rawStroke !== undefined) return undefined;
+  const rawLine = own(value, "line");
+  const line = rawLine === undefined ? undefined : readLocalLine(rawLine);
+  // Nor is a line without its course.
+  if (type === "line" ? line === undefined : rawLine !== undefined) return undefined;
   return Object.freeze({
     type: type as LocalItemType,
     ...(color === undefined ? {} : { color }),
     ...(title === undefined ? {} : { title }),
     ...(stroke === undefined ? {} : { stroke }),
+    ...(line === undefined ? {} : { line }),
   });
 }

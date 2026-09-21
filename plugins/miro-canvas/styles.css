@@ -1098,6 +1098,28 @@
   display: none;
 }
 
+/* A line takes presses on its course only: the rest of its box lets them
+   through to whatever lies under it.  Its own grips replace the box's. */
+.canvas-node.miro-source-line {
+  pointer-events: none;
+}
+
+.miro-source-line .miro-source-line-hit {
+  pointer-events: visiblePainted;
+  cursor: move;
+}
+
+.miro-source-line .canvas-node-resizer,
+.miro-source-line .canvas-node-connection-point {
+  display: none;
+}
+
+.miro-source-line.is-focused > .canvas-node-container,
+.miro-source-line.is-selected > .canvas-node-container {
+  box-shadow: none !important;
+  outline: none !important;
+}
+
 /* The pen's own row, above the tool bar while one of its tools is armed:
    the tools, the colours and a slider for the size. */
 .miro-canvas-tools .miro-canvas-tools__drawing {
@@ -1234,6 +1256,7 @@
 /* The line being drawn, the ring a lasso closes and the trail an eraser
    wipes, over the board until the gesture ends. */
 .miro-canvas-tool-ghost:is(
+  .miro-canvas-tool-ghost--line,
   .miro-canvas-tool-ghost--pen,
   .miro-canvas-tool-ghost--highlighter,
   .miro-canvas-tool-ghost--smart,
@@ -1247,6 +1270,18 @@
   overflow: visible;
   border: 0;
   border-radius: 0;
+}
+
+.miro-canvas-tool-ghost--line .miro-canvas-tool-ghost__line {
+  fill: none;
+  stroke: var(--interactive-accent);
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.miro-canvas-tool-ghost--line polygon.miro-canvas-tool-ghost__line {
+  fill: color-mix(in srgb, var(--interactive-accent) 30%, transparent);
 }
 
 .miro-canvas-tool-ghost--lasso .miro-canvas-tool-ghost__line {

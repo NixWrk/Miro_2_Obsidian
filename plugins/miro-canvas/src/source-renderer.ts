@@ -10,6 +10,7 @@ import { authorColor, authorInitial, shortTime } from "./comment-thread";
 import { planRoute, routePath, type RouteEnd as PlannedEnd, type RouteSegment } from "./connector-route";
 import { normalizeAnchor, resolveAnchor, type AnchorEdgeGeometry, type AnchorPoint, type AnchorRect } from "./anchors";
 import { readCanvasElementId } from "./canvas-elements";
+import { blockArrowOutline, linePoints, planLine } from "./free-line";
 import { buildSourceScene, type SourceItemDescriptor, type SourceScene } from "./source-model";
 
 type UnknownRecord = Record<PropertyKey, unknown>;
@@ -447,6 +448,62 @@ function decorateDrawing(document: Document | undefined, layer: DomElementLike, 
   safeCall(layer, "appendChild", [svg]);
   // Both halves are checked: a line that never reached its drawing would
   // otherwise count as drawn, and the empty node would say nothing about it.
+  return safeGet(svg, "parentNode") === layer && safeGet(path, "parentNode") === svg;
+}
+
+/**
+ * A line drawn on its own, along the route a connector with free ends takes,
+ * with a connector's ends and dashes.  Under it lies a wider, unseen copy of
+ * its course: that is what a press lands on, so a thin line is easy to take
+ * and the rest of its box lets presses through to what lies beneath.
+ */
+function decorateLine(document: Document | undefined, layer: DomElementLike, descriptor: SourceItemDescriptor): boolean {
+  const line = descriptor.structured?.line;
+  if (document === undefined || line === undefined) return false;
+  const connector = descriptor.connector;
+  const color = descriptor.css.stroke ?? line.color;
+  const width = Number(descriptor.css["stroke-width"] ?? line.width) || line.width;
+  const points = linePoints(line);
+  const svg = createSvg(document, "svg");
+  const block = line.block === true;
+  const path = createSvg(document, block ? "polygon" : "path"), hit = createSvg(document, block ? "polygon" : "path");
+  if (svg === undefined || path === undefined || hit === undefined) return false;
+  for (const [name, value] of Object.entries({
+    viewBox: `0 0 ${line.box.width} ${line.box.height}`,
+    preserveAspectRatio: "none", width: "100%", height: "100%", class: "miro-source-line-svg",
+  })) setOwnedElementAttribute(svg, name, value);
+  setOwnedElementStyle(svg, "position", "absolute");
+  setOwnedElementStyle(svg, "inset", "0");
+  setOwnedElementStyle(svg, "overflow", "visible");
+  const route = (connector?.shape === "elbowed" || connector?.shape === "curved" || connector?.shape === "straight")
+    ? connector.shape : line.route;
+  if (block) {
+    const outline = blockArrowOutline(points[0]!, points[points.length - 1]!, width)
+      .map((point) => `${Math.round(point.x * 100) / 100},${Math.round(point.y * 100) / 100}`).join(" ");
+    for (const [name, value] of Object.entries({ points: outline, fill: color, stroke: color, "stroke-width": "1", "stroke-linejoin": "round" })) {
+      setOwnedElementAttribute(path, name, value);
+    }
+    for (const [name, value] of Object.entries({ points: outline, fill: "transparent", class: "miro-source-line-hit" })) setOwnedElementAttribute(hit, name, value);
+  } else {
+    const d = planLine(route, points).path;
+    const dash = strokeDash(connector?.strokeStyle);
+    const scale = Math.max(1, width / 2);
+    const owned: RestorePatch[] = [];
+    const start = marker(document, connector?.startCap ?? "none", color, owned, svg, LOCAL_CAP_SCALE);
+    const end = marker(document, connector?.endCap ?? "none", color, owned, svg, LOCAL_CAP_SCALE);
+    for (const [name, value] of Object.entries({
+      d, fill: "none", stroke: color, "stroke-width": String(width), "stroke-linecap": "round", "stroke-linejoin": "round",
+      ...(dash === "none" ? {} : { "stroke-dasharray": dash.split(" ").map((part) => String(Number(part) * scale)).join(" ") }),
+      ...(start === undefined || start === "none" ? {} : { "marker-start": start }),
+      ...(end === undefined || end === "none" ? {} : { "marker-end": end }),
+    })) setOwnedElementAttribute(path, name, value);
+    for (const [name, value] of Object.entries({
+      d, fill: "none", stroke: "transparent", "stroke-width": String(Math.max(width, 14)), "stroke-linecap": "round", class: "miro-source-line-hit",
+    })) setOwnedElementAttribute(hit, name, value);
+  }
+  safeCall(svg, "appendChild", [hit]);
+  safeCall(svg, "appendChild", [path]);
+  safeCall(layer, "appendChild", [svg]);
   return safeGet(svg, "parentNode") === layer && safeGet(path, "parentNode") === svg;
 }
 
@@ -1414,7 +1471,10 @@ function applyNode(
   const sourceTable = descriptor.structured?.table;
   if (sourceTable !== undefined) patchClass(shell, "miro-source-table", patches);
   const sourceStroke = descriptor.structured?.stroke;
-  if (sourceStroke !== undefined) patchClass(shell, "miro-source-drawing", patches);
+  const sourceLine = descriptor.structured?.line;
+  // A line, like a drawing, is only what it draws.
+  if (sourceStroke !== undefined || sourceLine !== undefined) patchClass(shell, "miro-source-drawing", patches);
+  if (sourceLine !== undefined) patchClass(shell, "miro-source-line", patches);
   if (sourceComment !== undefined) {
     patchClass(shell, "miro-source-comment", patches);
     patchAttribute(shell, "data-miro-source-comment-state", sourceComment.resolved ? "resolved" : "open", patches);
@@ -1485,13 +1545,13 @@ function applyNode(
   }
 
   let layer: DomElementLike | undefined;
-  if (descriptor.kind === "shape" || descriptor.kind === "sticky" || descriptor.kind === "frame" || descriptor.kind === "media" || descriptor.kind === "code" || sourceAppCard !== undefined || sourceCard !== undefined || sourcePreview !== undefined || sourceMindmap !== undefined || sourceComment !== undefined || sourceTable !== undefined || sourceStroke !== undefined) {
+  if (descriptor.kind === "shape" || descriptor.kind === "sticky" || descriptor.kind === "frame" || descriptor.kind === "media" || descriptor.kind === "code" || sourceAppCard !== undefined || sourceCard !== undefined || sourcePreview !== undefined || sourceMindmap !== undefined || sourceComment !== undefined || sourceTable !== undefined || sourceStroke !== undefined || sourceLine !== undefined) {
     const created = document === undefined ? undefined : createElement(document, "div");
     if (created !== undefined) {
       const decorationKind = sourceAppCard !== undefined ? "app-card" : sourceCard !== undefined ? "card"
         : sourcePreview !== undefined ? "preview" : sourceDocument !== undefined ? "document"
           : sourceEmbed !== undefined ? "embed" : sourceComment !== undefined ? "comment"
-            : sourceTable !== undefined ? "table" : sourceStroke !== undefined ? "drawing"
+            : sourceTable !== undefined ? "table" : sourceStroke !== undefined ? "drawing" : sourceLine !== undefined ? "line"
               : sourceMindmap !== undefined ? "mindmap-node" : descriptor.kind;
       // A card face covers the native content; any other layer lies under it.
       const covers = sourcePreview !== undefined || sourceComment !== undefined || (sourceDocument !== undefined && host !== "file");
@@ -1511,6 +1571,8 @@ function applyNode(
           ? decorateCode(document, created, descriptor)
           : sourceStroke !== undefined
             ? decorateDrawing(document, created, descriptor)
+            : sourceLine !== undefined
+            ? decorateLine(document, created, descriptor)
             : sourceTable !== undefined
             ? decorateTable(document, created, descriptor)
             : sourceComment !== undefined

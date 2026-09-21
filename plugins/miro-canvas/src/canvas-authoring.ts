@@ -107,6 +107,11 @@ export interface ChangeItemsInput {
 export interface UpdateItemInput {
 	readonly id: string;
 	readonly item: LocalItem;
+	/**
+	 * Where the node goes with it, when the item's new form needs another
+	 * box - a line whose end was dragged out, say - in the same step.
+	 */
+	readonly rect?: { readonly x: number; readonly y: number; readonly width: number; readonly height: number };
 }
 
 export interface UpdateElementStyleInput {
@@ -2107,6 +2112,12 @@ export class CanvasAuthoring {
 				addDiagnostic(diagnostics, "item-invalid", "error", "The item to store is not one the board tools make.");
 				return reject();
 			}
+			const rect = change.rect;
+			if (rect !== undefined && ![rect.x, rect.y, rect.width, rect.height].every((value) => typeof value === "number" && Number.isFinite(value))
+				|| rect !== undefined && !(rect.width > 0 && rect.height > 0)) {
+				addDiagnostic(diagnostics, "item-rect-invalid", "error", "An item's new box needs a finite position and a positive size.");
+				return reject();
+			}
 			if (!policyAllowsGraphEdit(before.document, "edit", change.id, "element-style", diagnostics)) return reject();
 		}
 		for (const id of removals) {
@@ -2127,6 +2138,26 @@ export class CanvasAuthoring {
 		} catch (error) {
 			addDiagnostic(diagnostics, "document-copy-failed", "error", `The Canvas document could not be copied: ${describeError(error)}.`);
 			return reject();
+		}
+		// A node moved or resized with its item keeps everything else it had.
+		const placed = changes.filter((change) => change.rect !== undefined);
+		if (placed.length > 0) {
+			const nodesValue = safeRead(document, "nodes");
+			if (!nodesValue.ok || !Array.isArray(nodesValue.value)) {
+				addDiagnostic(diagnostics, "canvas-document-invalid", "error", "The target Canvas nodes array is unavailable.");
+				return reject();
+			}
+			for (const change of placed) {
+				const node = (nodesValue.value as readonly unknown[]).find((candidate) => {
+					const id = safeRead(candidate, "id");
+					return id.ok && id.value === change.id;
+				});
+				if (!isPlainObject(node)) continue;
+				setOwn(node, "x", Math.round(change.rect!.x));
+				setOwn(node, "y", Math.round(change.rect!.y));
+				setOwn(node, "width", Math.max(1, Math.round(change.rect!.width)));
+				setOwn(node, "height", Math.max(1, Math.round(change.rect!.height)));
+			}
 		}
 		const removedEdges: string[] = [];
 		if (removals.size > 0) {

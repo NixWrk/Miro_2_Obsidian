@@ -1,21 +1,36 @@
 import { describe, expect, it } from "vitest";
 
 import { MIRO_STICKY_COLORS } from "../src/miro-palette";
-import { LOCAL_ITEM_SIZES, LOCAL_ITEM_TYPES, readLocalItem, readLocalStroke } from "../src/local-items";
+import { LOCAL_ITEM_SIZES, LOCAL_ITEM_TYPES, readLocalItem, readLocalLine, readLocalStroke } from "../src/local-items";
 
 const STROKE = { color: "#1a1a1a", width: 5, box: { width: 40, height: 20 }, points: [0, 0, 20, 10, 40, 20] };
+const LINE = { route: "straight", color: "#1a1a1a", width: 2, endCap: "stealth", box: { width: 108, height: 10 }, points: [4, 5, 104, 5] };
 
 describe("readLocalItem", () => {
   it("accepts every type the board tools make", () => {
     for (const type of LOCAL_ITEM_TYPES) {
-      // A drawing is its stroke; every other item stands on its type alone.
-      if (type === "drawing") continue;
+      // A drawing is its stroke, a line its course; every other item stands
+      // on its type alone.
+      if (type === "drawing" || type === "line") continue;
       expect(readLocalItem({ type })).toEqual({ type });
     }
     expect(readLocalItem({ type: "drawing" })).toBeUndefined();
     expect(readLocalItem({ type: "drawing", stroke: STROKE })).toEqual({ type: "drawing", stroke: STROKE });
     // Only a drawing carries one.
     expect(readLocalItem({ type: "text", stroke: STROKE })).toBeUndefined();
+    expect(readLocalItem({ type: "line" })).toBeUndefined();
+    expect(readLocalItem({ type: "line", line: LINE })).toEqual({ type: "line", line: LINE });
+    expect(readLocalItem({ type: "text", line: LINE })).toBeUndefined();
+  });
+
+  it("keeps a line's route, look and course, and refuses a malformed one", () => {
+    expect(readLocalLine({ ...LINE, strokeStyle: "dashed", startCap: "none", block: true }))
+      .toEqual({ ...LINE, strokeStyle: "dashed", block: true });
+    for (const broken of [
+      { ...LINE, route: "zigzag" }, { ...LINE, color: "red" }, { ...LINE, width: 0 }, { ...LINE, strokeStyle: "wavy" },
+      { ...LINE, endCap: "<b>" }, { ...LINE, block: "yes" }, { ...LINE, points: [1, 2] }, { ...LINE, points: [1, 2, 3] },
+      { ...LINE, points: Array.from({ length: 200 }, () => 1) }, { ...LINE, box: { width: 0, height: 5 } },
+    ]) expect(readLocalLine(broken)).toBeUndefined();
   });
 
   it("keeps a valid Miro sticky colour name and a short title", () => {

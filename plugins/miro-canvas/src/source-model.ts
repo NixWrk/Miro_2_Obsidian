@@ -5,7 +5,7 @@ import { MAX_WAYPOINTS } from "./connector-route";
 import { stickyFill } from "./miro-palette";
 import { listCommentThreads } from "./local-comments";
 import { threadMessages, type ThreadMessage } from "./comment-thread";
-import { readLocalItem, type LocalItemType, type LocalStroke } from "./local-items";
+import { readLocalItem, type LocalItemType, type LocalLine, type LocalStroke } from "./local-items";
 
 export type SourceItemKind = "shape" | "text" | "sticky" | "connector" | "frame" | "media" | "code" | "group";
 
@@ -109,6 +109,8 @@ export interface SourceStructuredDescriptor {
   readonly table?: SourceTableDescriptor;
   /** The stroke a drawing shows. */
   readonly stroke?: LocalStroke;
+  /** The course of a line drawn on its own. */
+  readonly line?: LocalLine;
   readonly deck?: SourceDeckDescriptor;
   readonly slide?: SourceSlideDescriptor;
   readonly comment?: SourceCommentDescriptor;
@@ -691,6 +693,11 @@ function applyLocalConnector(
   return Object.freeze(result);
 }
 
+/** A line's end as a connector names it; one it does not know is drawn plain. */
+function knownCap(cap: string | undefined): string {
+  return cap !== undefined && (CONNECTOR_CAPS as readonly string[]).includes(cap) ? cap : "none";
+}
+
 function connectorStyle(item: UnknownRecord, diagnostics: string[], sourceId: string): SourceConnectorStyle | undefined {
   const style = valueOf(item, "style");
   const rawShape = valueOf(item, "shape");
@@ -955,13 +962,26 @@ export function buildSourceScene(document: unknown): SourceScene {
       const css: Record<string, string> = {};
       const item = shape === undefined ? readLocalItem(valueOf(localOverride(document, canvasId), "item")) : undefined;
       if (item?.type === "sticky_note") css["background-color"] = stickyFill(item.color ?? "light_yellow")!;
+      if (item?.line !== undefined) {
+        css.stroke = item.line.color;
+        css["stroke-width"] = String(item.line.width);
+      }
       applyLocalCss(css, localOverride(document, canvasId));
       const rotation = effectiveRotationFor(document, canvasId);
       if (item !== undefined) {
         const kind = item.type === "sticky_note" ? "sticky"
-          : item.type === "table" || item.type === "drawing" ? "text" : item.type;
+          : item.type === "table" || item.type === "drawing" || item.type === "line" ? "text" : item.type;
+        // A line looks the way a connector does, and takes a connector's
+        // settings: the toolbar restyles both the same way.
+        const connector = item.line === undefined ? undefined : applyLocalConnector(Object.freeze({
+          shape: item.line.route,
+          strokeStyle: item.line.strokeStyle ?? "solid",
+          startCap: knownCap(item.line.startCap),
+          endCap: knownCap(item.line.endCap),
+        }), localOverride(document, canvasId), css);
         items.set(canvasId, Object.freeze({
           kind, rotation, css: Object.freeze(css), localItem: item.type,
+          ...(connector === undefined ? {} : { connector }),
           ...(item.type === "code" ? {
             structured: Object.freeze({ code: Object.freeze({ lineNumbersVisible: true, ...(item.title === undefined ? {} : { title: item.title }) }) }),
           } : {}),
@@ -970,6 +990,9 @@ export function buildSourceScene(document: unknown): SourceScene {
           } : {}),
           ...(item.type === "drawing" && item.stroke !== undefined ? {
             structured: Object.freeze({ stroke: item.stroke }),
+          } : {}),
+          ...(item.type === "line" && item.line !== undefined ? {
+            structured: Object.freeze({ line: item.line }),
           } : {}),
         }));
         continue;

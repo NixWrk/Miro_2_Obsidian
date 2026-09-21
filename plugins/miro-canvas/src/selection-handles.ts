@@ -50,6 +50,8 @@ export interface SelectionHandlesState {
   readonly minSize?: number;
   /** Overlay-local places where a selected connector's route can be reshaped. */
   readonly routeGrips?: readonly RouteGrip[];
+  /** A line drawn on its own, whose ends hold on to nothing. */
+  readonly freeEnds?: boolean;
 }
 
 /**
@@ -781,6 +783,7 @@ export class SelectionHandles {
       const grip = refs.ends[end];
       const at = state.endpoints?.[end];
       grip.hidden = !shown || at === undefined;
+      grip.setAttribute("aria-label", state.freeEnds === true ? "Drag to move this end" : "Drag to move this end anywhere on a node's outline");
       if (at === undefined) continue;
       grip.style.left = `${at.x}px`;
       grip.style.top = `${at.y}px`;
