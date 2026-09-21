@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import {
   SelectionHandles,
+  ROTATE_LABEL,
+  magnetAngle,
   normalizeAngle,
   nearestSide,
   rightAngleStep,
@@ -164,6 +166,15 @@ describe("selection handle geometry", () => {
     expect(normalizeAngle(7, 15)).toBe(0);
     expect(normalizeAngle(23, 15)).toBe(30);
   });
+
+  it("draws a turn near a multiple of 45 degrees onto it and leaves any other angle free", () => {
+    expect(magnetAngle(43)).toBe(45);
+    expect(magnetAngle(-88)).toBe(-90);
+    expect(magnetAngle(3.5)).toBe(0);
+    expect(magnetAngle(182)).toBe(-180);
+    expect(magnetAngle(30)).toBe(30);
+    expect(magnetAngle(50)).toBe(50);
+  });
 });
 
 describe("selection handles", () => {
@@ -190,7 +201,7 @@ describe("selection handles", () => {
 
   it("marks the gesture and reports nothing until the pointer moves", () => {
     const { root, rotations, handles } = build();
-    byLabel(root, "Rotate").dispatch("pointerdown", { clientX: 200, clientY: 250, pointerId: 1 });
+    byLabel(root, ROTATE_LABEL).dispatch("pointerdown", { clientX: 200, clientY: 250, pointerId: 1 });
     expect(root.getAttribute("data-miro-canvas-rotating")).toBe("true");
     expect(handles.gestureActive).toBe(true);
     expect(rotations).toEqual([]);
@@ -198,7 +209,7 @@ describe("selection handles", () => {
 
   it("keeps the grab offset so rotation does not jump on the first move", () => {
     const { root, rotations, handles } = build({ rotation: 45 });
-    byLabel(root, "Rotate").dispatch("pointerdown", { clientX: 200, clientY: 250, pointerId: 1 });
+    byLabel(root, ROTATE_LABEL).dispatch("pointerdown", { clientX: 200, clientY: 250, pointerId: 1 });
     handles.handlePointerMove({ clientX: 200, clientY: 250 });
     // Same point as the grab: the rotation is unchanged, not reset to 90.
     expect(rotations[0]).toEqual({ degrees: 45, commit: false });
@@ -211,14 +222,14 @@ describe("selection handles", () => {
 
   it("snaps rotation while Shift is held", () => {
     const { root, rotations, handles } = build();
-    byLabel(root, "Rotate").dispatch("pointerdown", { clientX: 200, clientY: 250, pointerId: 1 });
+    byLabel(root, ROTATE_LABEL).dispatch("pointerdown", { clientX: 200, clientY: 250, pointerId: 1 });
     handles.handlePointerMove({ clientX: 260, clientY: 245, shiftKey: true });
     expect(Number.isInteger(rotations[0]!.degrees / 15)).toBe(true);
   });
 
   it("cancels a preview without committing it", () => {
     const { root, rotations, handles, cancellations } = build({ rotation: 20 });
-    byLabel(root, "Rotate").dispatch("pointerdown", { clientX: 200, clientY: 250, pointerId: 1 });
+    byLabel(root, ROTATE_LABEL).dispatch("pointerdown", { clientX: 200, clientY: 250, pointerId: 1 });
     handles.handlePointerMove({ clientX: 400, clientY: 150 });
     handles.cancelGesture();
     expect(rotations.filter((item) => item.commit)).toEqual([]);
@@ -257,19 +268,19 @@ describe("selection handles", () => {
 
   it("offers no rotation or connection on a connector or a locked selection", () => {
     const { root, rotations, connects, update, handles } = build({ isEdge: true });
-    expect(byLabel(root, "Rotate").hidden).toBe(true);
+    expect(byLabel(root, ROTATE_LABEL).hidden).toBe(true);
     bySide(root, "right").dispatch("pointerdown", { clientX: 300, clientY: 150, pointerId: 3 });
     handles.handlePointerUp({ clientX: 500, clientY: 150 });
     expect(connects).toEqual([]);
     update({ isEdge: false, editable: false });
-    byLabel(root, "Rotate").dispatch("pointerdown", { clientX: 200, clientY: 250, pointerId: 4 });
+    byLabel(root, ROTATE_LABEL).dispatch("pointerdown", { clientX: 200, clientY: 250, pointerId: 4 });
     expect(rotations).toEqual([]);
   });
 
   it("keeps the geometry a gesture started with only while none is reported", () => {
     const { root, update, handles } = build();
     const frame = root.children[0]!;
-    byLabel(root, "Rotate").dispatch("pointerdown", { clientX: 200, clientY: 250, pointerId: 5 });
+    byLabel(root, ROTATE_LABEL).dispatch("pointerdown", { clientX: 200, clientY: 250, pointerId: 5 });
     // Pressing the grip can clear the selection: geometry that is not
     // reported must not be adopted as gone.
     update({ rect: undefined, selectedIds: [] });
@@ -286,7 +297,7 @@ describe("selection handles", () => {
   it("keeps gesture geometry, follows preview rotation, and commits once", () => {
     const { root, rotations, update, handles } = build({ rotation: 20 });
     const frame = root.children[0]!;
-    byLabel(root, "Rotate").dispatch("pointerdown", { clientX: 200, clientY: 250, pointerId: 13 });
+    byLabel(root, ROTATE_LABEL).dispatch("pointerdown", { clientX: 200, clientY: 250, pointerId: 13 });
     handles.handlePointerMove({ clientX: 400, clientY: 150 });
     update({ rect: undefined, selectedIds: [], rotation: 33 });
     expect(frame.style.left).toBe("100px");
@@ -389,7 +400,7 @@ describe("rotation controls", () => {
     // The free grip sits in the corner, the clockwise turn above it and the
     // other turn beside it.
     expect(bar.children.map((child) => child.getAttribute("aria-label"))).toEqual([
-      "Turn to the next right angle", "Rotate", "Turn to the previous right angle",
+      "Turn to the next right angle", ROTATE_LABEL, "Turn to the previous right angle",
     ]);
     // Turned a quarter, the node covers 100 x 200 around (200, 150).
     update({ rotation: 90 });

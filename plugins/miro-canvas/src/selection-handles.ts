@@ -257,6 +257,22 @@ export function rightAngleStep(degrees: number, direction: 1 | -1): number {
   return normalizeAngle(target * 90);
 }
 
+/** The rotate grip's hover text: what it does and how it settles. */
+export const ROTATE_LABEL = "Rotate\nSettles on every 45°; hold Shift for 15° steps";
+
+/** How close a turn must come to a multiple of 45 degrees to be drawn onto it. */
+export const MAGNET_REACH = 4;
+
+/**
+ * An angle drawn onto the nearest multiple of 45 degrees when it comes
+ * within `reach` of it, so level, upright and diagonal are easy to hit
+ * while every other angle stays free; normalized as `normalizeAngle` does.
+ */
+export function magnetAngle(degrees: number, reach = MAGNET_REACH): number {
+  const nearest = Math.round(degrees / 45) * 45;
+  return normalizeAngle(Math.abs(degrees - nearest) <= reach ? nearest : degrees);
+}
+
 /**
  * Normalize to [-180, 180) and snap when asked, matching the range the
  * authoring layer stores so a committed rotation is not renormalized to a
@@ -435,7 +451,7 @@ export class SelectionHandles {
     const turnOn = rotateBar.appendChild(makeGrip(
       document, "miro-canvas-handle--turn miro-canvas-handle--turn-next", "↷", "Turn to the next right angle",
     ));
-    const rotate = rotateBar.appendChild(makeGrip(document, "miro-canvas-handle--rotate", "↻", "Rotate"));
+    const rotate = rotateBar.appendChild(makeGrip(document, "miro-canvas-handle--rotate", "↻", ROTATE_LABEL));
     const turnBack = rotateBar.appendChild(makeGrip(
       document, "miro-canvas-handle--turn miro-canvas-handle--turn-back", "↶", "Turn to the previous right angle",
     ));
@@ -676,8 +692,13 @@ export class SelectionHandles {
     if (!this.rotating || rect === undefined) return;
     if (point === undefined) return;
     const shift = (event as { shiftKey?: unknown }).shiftKey === true;
-    const degrees = normalizeAngle(pointerAngle(rect, this.local(point)) + this.rotationOffset, shift ? this.snapDegrees : 0);
+    const degrees = this.turnedTo(pointerAngle(rect, this.local(point)) + this.rotationOffset, shift);
     this.actions.onRotate(degrees, false);
+  }
+
+  /** The angle a rotation drag leaves: in steps with Shift, else drawn to the nearest 45 degrees when close. */
+  private turnedTo(degrees: number, shift: boolean): number {
+    return shift ? normalizeAngle(degrees, this.snapDegrees) : magnetAngle(degrees);
   }
 
   public handlePointerUp(event: unknown): void {
@@ -705,7 +726,7 @@ export class SelectionHandles {
       const shift = (event as { shiftKey?: unknown }).shiftKey === true;
       const degrees = point === undefined
         ? this.state.rotation
-        : normalizeAngle(pointerAngle(rect, this.local(point)) + this.rotationOffset, shift ? this.snapDegrees : 0);
+        : this.turnedTo(pointerAngle(rect, this.local(point)) + this.rotationOffset, shift);
       this.rotating = false;
       this.actions.onRotate(degrees, true);
     }
