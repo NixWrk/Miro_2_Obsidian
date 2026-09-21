@@ -24,6 +24,8 @@ export interface LocalStroke {
   readonly box: { readonly width: number; readonly height: number };
   /** x and y in turn, inside the box. */
   readonly points: readonly number[];
+  /** Where a new piece of the same stroke starts, in points, after an erase. */
+  readonly breaks?: readonly number[];
 }
 
 export interface LocalItem {
@@ -70,12 +72,16 @@ export function readLocalStroke(value: unknown): LocalStroke | undefined {
   if (!positive(boxWidth) || !positive(boxHeight)) return undefined;
   if (!Array.isArray(points) || points.length < 4 || points.length > MAX_STROKE_POINTS * 2 || points.length % 2 !== 0) return undefined;
   if (points.some((point) => typeof point !== "number" || !Number.isFinite(point) || Math.abs(point) > MAX_STROKE_SIZE)) return undefined;
+  const breaks = own(value, "breaks");
+  if (breaks !== undefined && (!Array.isArray(breaks) || breaks.length > MAX_STROKE_POINTS
+    || breaks.some((at) => typeof at !== "number" || !Number.isInteger(at) || at <= 0 || at >= points.length / 2))) return undefined;
   return Object.freeze({
     color: color.toLowerCase(),
     width,
     ...(opacity === undefined ? {} : { opacity }),
     box: Object.freeze({ width: boxWidth, height: boxHeight }),
     points: Object.freeze([...points as readonly number[]]),
+    ...(breaks === undefined ? {} : { breaks: Object.freeze([...breaks as readonly number[]]) }),
   });
 }
 

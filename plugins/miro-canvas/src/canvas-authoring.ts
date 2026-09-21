@@ -98,6 +98,11 @@ export interface DeleteItemsInput {
 	readonly ids: readonly string[];
 }
 
+export interface UpdateItemInput {
+	readonly id: string;
+	readonly item: LocalItem;
+}
+
 export interface UpdateElementStyleInput {
 	readonly id: string;
 	readonly shape?: CanvasShapeKind;
@@ -2033,6 +2038,76 @@ export class CanvasAuthoring {
 		const verified = this.commitDocument(before, document, diagnostics, item?.type === "frame");
 		if (verified === undefined) return reject();
 		return { ok: true, status: "applied", nodeId: id, document: verified.document, diagnostics: [...this.diagnosticList, ...diagnostics] };
+	}
+
+	/**
+	 * Rewrite what one or more nodes stand for, leaving the graph alone: only
+	 * the plugin's own record of the item changes, in one history step.
+	 */
+	public updateItems(inputs: readonly UpdateItemInput[], expected?: CanvasAuthoringExpected): CanvasGraphResult {
+		const diagnostics: CanvasAuthoringDiagnostic[] = [];
+		const reject = (): CanvasGraphResult => ({ ok: false, status: "rejected", diagnostics: [...this.diagnosticList, ...diagnostics] });
+		if (this.disposed || this.host === undefined) return reject();
+		const before = readSnapshotFromHost(this.host, diagnostics);
+		if (before === undefined) return reject();
+		if (expected !== undefined) {
+			const snapshot = makeSnapshot(extractExpectedDocument(expected), diagnostics);
+			if (snapshot === undefined || !structurallyEqual(snapshot.document, before.document)) {
+				addDiagnostic(diagnostics, "stale-document", "warning", "The Canvas document changed since the supplied expected snapshot.");
+				return reject();
+			}
+		}
+		const changes = Array.isArray(inputs) ? inputs : [];
+		if (changes.length === 0) {
+			addDiagnostic(diagnostics, "item-update-empty", "error", "Updating needs at least one item.");
+			return reject();
+		}
+		for (const change of changes) {
+			if (typeof change?.id !== "string" || !before.nodes.some((node) => node.id === change.id)) {
+				addDiagnostic(diagnostics, "item-update-missing", "error", "An item update names a node the board does not have.");
+				return reject();
+			}
+			if (readLocalItem(change.item) === undefined) {
+				addDiagnostic(diagnostics, "item-invalid", "error", "The item to store is not one the board tools make.");
+				return reject();
+			}
+			if (!policyAllowsGraphEdit(before.document, "edit", change.id, "element-style", diagnostics)) return reject();
+		}
+		let document: UnknownRecord;
+		try {
+			document = cloneRecord(before.document);
+		} catch (error) {
+			addDiagnostic(diagnostics, "document-copy-failed", "error", `The Canvas document could not be copied: ${describeError(error)}.`);
+			return reject();
+		}
+		const metadata = readMetadataForUpdate(document, diagnostics);
+		if (metadata === undefined) return reject();
+		const overridesValue = safeRead(metadata, "localOverrides");
+		if (!overridesValue.ok || (overridesValue.value !== undefined && !isPlainObject(overridesValue.value))) {
+			addDiagnostic(diagnostics, "metadata-overrides-invalid", "error", "Existing localOverrides are not a safe object map.");
+			return reject();
+		}
+		let overrides: UnknownRecord;
+		try {
+			overrides = overridesValue.value === undefined ? {} : cloneRecord(overridesValue.value);
+		} catch (error) {
+			addDiagnostic(diagnostics, "metadata-overrides-invalid", "error", `Existing localOverrides could not be copied: ${describeError(error)}.`);
+			return reject();
+		}
+		for (const change of changes) {
+			const existing = safeRead(overrides, change.id);
+			const kept = existing.ok && isPlainObject(existing.value) ? existing.value : {};
+			setOwn(overrides, change.id, { ...kept, item: { ...change.item } });
+		}
+		setOwn(metadata, "localOverrides", overrides);
+		if (!validateMiroCanvasMetadata(metadata).valid) {
+			addDiagnostic(diagnostics, "metadata-validation-failed", "error", "The proposed item metadata failed validation; no graph import was attempted.");
+			return reject();
+		}
+		setOwn(document, "miroCanvas", metadata);
+		const verified = this.commitDocument(before, document, diagnostics);
+		if (verified === undefined) return reject();
+		return { ok: true, status: "applied", document: verified.document, diagnostics: [...this.diagnosticList, ...diagnostics] };
 	}
 
 	/**

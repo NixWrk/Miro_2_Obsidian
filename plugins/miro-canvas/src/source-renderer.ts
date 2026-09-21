@@ -418,7 +418,9 @@ function decorateCode(document: Document | undefined, layer: DomElementLike, des
 function decorateDrawing(document: Document | undefined, layer: DomElementLike, descriptor: SourceItemDescriptor): boolean {
   const stroke = descriptor.structured?.stroke;
   if (document === undefined || stroke === undefined) return false;
-  const svg = createSvg(document, "svg"), path = createSvg(document, "polyline");
+  // A stroke erased in the middle is several lines, which one path can draw.
+  const pieces = stroke.breaks ?? [];
+  const svg = createSvg(document, "svg"), path = createSvg(document, pieces.length === 0 ? "polyline" : "path");
   if (svg === undefined || path === undefined) return false;
   for (const [name, value] of Object.entries({
     viewBox: `0 0 ${stroke.box.width} ${stroke.box.height}`,
@@ -428,9 +430,16 @@ function decorateDrawing(document: Document | undefined, layer: DomElementLike, 
   setOwnedElementStyle(svg, "inset", "0");
   setOwnedElementStyle(svg, "overflow", "visible");
   const pairs: string[] = [];
-  for (let index = 0; index + 1 < stroke.points.length; index += 2) pairs.push(`${stroke.points[index]},${stroke.points[index + 1]}`);
+  const starts = new Set(pieces);
+  let drawn = "";
+  for (let index = 0; index + 1 < stroke.points.length; index += 2) {
+    pairs.push(`${stroke.points[index]},${stroke.points[index + 1]}`);
+    const command = index === 0 || starts.has(index / 2) ? "M" : "L";
+    drawn += `${drawn === "" ? "" : " "}${command}${stroke.points[index]} ${stroke.points[index + 1]}`;
+  }
   for (const [name, value] of Object.entries({
-    points: pairs.join(" "), fill: "none", stroke: stroke.color, "stroke-width": String(stroke.width),
+    ...(pieces.length === 0 ? { points: pairs.join(" ") } : { d: drawn }),
+    fill: "none", stroke: stroke.color, "stroke-width": String(stroke.width),
     "stroke-linecap": "round", "stroke-linejoin": "round",
     ...(stroke.opacity === undefined ? {} : { "stroke-opacity": String(stroke.opacity) }),
   })) setOwnedElementAttribute(path, name, value);

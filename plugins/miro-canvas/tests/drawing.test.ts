@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { distanceToStroke, pointInLasso, simplifyPoints, strokeBounds, strokeHitsPoint } from "../src/drawing";
+import { distanceToStroke, eraseFromStroke, pointInLasso, simplifyPoints, strokeBounds, strokeHitsPoint } from "../src/drawing";
 
 describe("simplifyPoints", () => {
   it("keeps only the two ends when every interior point sits within the tolerance of the line between them", () => {
@@ -125,5 +125,38 @@ describe("pointInLasso", () => {
   it("is false for a ring that encloses nothing", () => {
     expect(pointInLasso([], { x: 1, y: 1 })).toBe(false);
     expect(pointInLasso([{ x: 0, y: 0 }, { x: 10, y: 10 }], { x: 5, y: 5 })).toBe(false);
+  });
+});
+
+describe("eraseFromStroke", () => {
+  // A straight line kept as its two ends: the eraser must still cut its middle.
+  const LINE = [0, 0, 100, 0];
+
+  it("cuts the middle out and leaves the two ends as pieces of one stroke", () => {
+    const left = eraseFromStroke(LINE, [], [50, -5, 50, 5], 4)!;
+    expect(left.breaks).toHaveLength(1);
+    const cut = left.breaks[0]! * 2;
+    expect(left.points.slice(0, 2)).toEqual([0, 0]);
+    expect(left.points[cut - 2]).toBeLessThan(50);
+    expect(left.points[cut]).toBeGreaterThan(50);
+    expect(left.points.slice(-2)).toEqual([100, 0]);
+  });
+
+  it("keeps the far end when only one end is erased", () => {
+    const left = eraseFromStroke(LINE, [], [0, -5, 0, 5], 8)!;
+    expect(left.breaks).toEqual([]);
+    expect(left.points.slice(-2)).toEqual([100, 0]);
+    expect(left.points[0]).toBeGreaterThan(0);
+  });
+
+  it("reports nothing left when the whole stroke is erased", () => {
+    expect(eraseFromStroke(LINE, [], [0, 0, 100, 0], 5)).toBeUndefined();
+  });
+
+  it("erases inside one piece of an already cut stroke and leaves the other", () => {
+    const left = eraseFromStroke([0, 0, 40, 0, 60, 0, 100, 0], [2], [20, -2, 20, 2], 3)!;
+    // Three pieces now: both halves of the first, and the second untouched.
+    expect(left.breaks).toHaveLength(2);
+    expect(left.points.slice(-2)).toEqual([100, 0]);
   });
 });

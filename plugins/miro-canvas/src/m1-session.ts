@@ -101,7 +101,7 @@ import { addLocalComment, addReply, listCommentThreads, setCommentResolved, type
 import { CommentThreadCard } from "./comment-thread";
 import { QUICK_TOOL_KEYS, QuickTools, type QuickTool } from "./quick-tools";
 import { LOCAL_ITEM_SIZES, TABLE_TEMPLATE, type LocalItem } from "./local-items";
-import { pointInLasso, simplifyPoints, strokeBounds, strokeHitsPoint, type StrokePoint } from "./drawing";
+import { eraseFromStroke, pointInLasso, simplifyPoints, strokeBounds, strokeHitsPoint, type StrokePoint } from "./drawing";
 import {
 	boundaryAnchorOnRect,
 	buildCanvasAnchorGeometry,
@@ -2032,7 +2032,8 @@ export class M1CanvasSession {
 			this.stylusSeen = true;
 		}
 		if (tool === "select" || root === undefined || event.button !== 0 || this.toolGesture !== undefined) return;
-		const drawingTool = tool === "pen" || tool === "highlighter" || tool === "eraser" || tool === "lasso";
+		const drawingTool = tool === "pen" || tool === "highlighter" || tool === "eraser"
+			|| tool === "erase-part" || tool === "lasso";
 		// A stylus rules the board it draws on: while one is in use a touch is a
 		// palm or a hand resting, and with a drawing tool armed a finger pans
 		// instead of drawing, as Miro's tablets behave.
@@ -2080,13 +2081,13 @@ export class M1CanvasSession {
 		const rootRect = root.getBoundingClientRect();
 		const origin = from === undefined ? start : this.viewportPoint(from.board) ?? start;
 		const draw = (point: { readonly x: number; readonly y: number }): void => {
-			if (drawing || tool === "eraser") {
+			if (drawingTool) {
 				const board = this.boardPoint(point);
 				if (board === undefined) return;
 				const previous = this.penPoints[this.penPoints.length - 1];
 				if (previous !== undefined && Math.hypot(board.x - previous.x, board.y - previous.y) < 1) return;
 				this.penPoints.push(board);
-				if (tool === "eraser") {
+				if (tool === "eraser" || tool === "erase-part") {
 					for (const id of this.drawingsUnder(board)) this.erasing.add(id);
 					return;
 				}
@@ -2166,6 +2167,10 @@ export class M1CanvasSession {
 		}
 		if (tool === "eraser") {
 			this.eraseDrawings();
+			return;
+		}
+		if (tool === "erase-part") {
+			this.erasePartOfDrawings();
 			return;
 		}
 		if (tool === "lasso") {
@@ -2322,6 +2327,52 @@ export class M1CanvasSession {
 		}
 		this.callNative("selectOnly", [caught[0]]);
 		for (const node of caught.slice(1)) this.callNative("select", [node]);
+		this.refresh();
+	}
+
+	/**
+	 * Takes only the part of each drawing the eraser went over, leaving the
+	 * rest of the stroke where it was; a drawing erased away altogether goes
+	 * with the others.
+	 */
+	private erasePartOfDrawings(): void {
+		const ids = [...this.erasing];
+		const path = this.penPoints;
+		this.erasing.clear();
+		this.penPoints = [];
+		if (ids.length === 0 || path.length === 0) return;
+		const { geometry, scene } = this.landingGeometry();
+		const zoom = finite(readRuntime(this.viewport.getViewport(), "zoom")) ?? 1;
+		const changes: { readonly id: string; readonly item: LocalItem }[] = [];
+		const gone: string[] = [];
+		for (const id of ids) {
+			const stroke = scene.items.get(id)?.structured?.stroke;
+			const rect = geometry.nodes?.[id];
+			if (stroke === undefined || rect === undefined || !(rect.width > 0) || !(rect.height > 0)) continue;
+			// The eraser's own line is measured in the stroke's space, as its
+			// width and its points are.
+			const scaleX = stroke.box.width / rect.width;
+			const scaleY = stroke.box.height / rect.height;
+			const local = path.flatMap((point) => [(point.x - rect.x) * scaleX, (point.y - rect.y) * scaleY]);
+			const reach = stroke.width / 2 + (ERASER_REACH / zoom) * Math.min(scaleX, scaleY);
+			const left = eraseFromStroke(stroke.points, stroke.breaks ?? [], local, reach);
+			if (left === undefined) {
+				gone.push(id);
+				continue;
+			}
+			if (left.points.length === stroke.points.length) continue;
+			changes.push({ id, item: { type: "drawing", stroke: { ...stroke, points: left.points, ...(left.breaks.length === 0 ? {} : { breaks: left.breaks }) } } });
+		}
+		this.readInteractionState();
+		this.authoring ??= createCanvasAuthoring(this.view);
+		if (changes.length > 0) {
+			const updated = this.authoring.updateItems(changes);
+			if (!updated.ok) this.addDiagnostic(firstProblem(updated.diagnostics) ?? "Canvas rejected the erase.");
+		}
+		if (gone.length > 0) {
+			const removed = this.authoring.deleteItems({ ids: gone });
+			if (!removed.ok) this.addDiagnostic(firstProblem(removed.diagnostics) ?? "Canvas rejected the erase.");
+		}
 		this.refresh();
 	}
 

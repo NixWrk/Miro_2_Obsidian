@@ -103,6 +103,56 @@ export function strokeHitsPoint(
 }
 
 /**
+ * What is left of a stroke after the eraser passed over part of it.
+ *
+ * Points within the reach of the eraser's own line go; what remains is kept as
+ * separate pieces of the same stroke, since a stroke erased in the middle is
+ * two lines afterwards.  Nothing left means the whole drawing goes.
+ */
+export function eraseFromStroke(
+  points: readonly number[],
+  breaks: readonly number[],
+  eraser: readonly number[],
+  reach: number,
+): { readonly points: readonly number[]; readonly breaks: readonly number[] } | undefined {
+  // A line is kept as the few points that carry its shape, so a long stretch
+  // may be one segment.  Stepping along it first lets the eraser cut anywhere,
+  // and what survives is reduced again afterwards.
+  const step = Math.max(reach / 2, 0.5);
+  const pieces: number[][] = [];
+  let piece: StrokePoint[] = [];
+  const starts = new Set(breaks);
+  const finish = (): void => {
+    const line = piece.length >= 2 ? simplifyPoints(piece, step / 2) : [];
+    if (line.length >= 2) pieces.push(line.flatMap((point) => [point.x, point.y]));
+    piece = [];
+  };
+  let previous: StrokePoint | undefined;
+  for (let index = 0; index + 1 < points.length; index += 2) {
+    const point = { x: points[index]!, y: points[index + 1]! };
+    if (starts.has(index / 2)) {
+      finish();
+      previous = undefined;
+    }
+    const walk = previous === undefined ? [point] : along(previous, point, step);
+    for (const stop of walk) {
+      if (distanceToStroke(eraser, stop) <= reach) finish();
+      else piece.push(stop);
+    }
+    previous = point;
+  }
+  finish();
+  if (pieces.length === 0) return undefined;
+  const result: number[] = [];
+  const nextBreaks: number[] = [];
+  for (const item of pieces) {
+    if (result.length > 0) nextBreaks.push(result.length / 2);
+    result.push(...item);
+  }
+  return { points: result, breaks: nextBreaks };
+}
+
+/**
  * Whether a point lies inside the ring a lasso drew.
  *
  * The ring is closed from its last point back to its first, and counted by
@@ -119,6 +169,18 @@ export function pointInLasso(ring: readonly StrokePoint[], point: StrokePoint): 
     if (point.x < crossing) inside = !inside;
   }
   return inside;
+}
+
+/** The points along a segment, no further apart than one step, its end last. */
+function along(from: StrokePoint, to: StrokePoint, step: number): StrokePoint[] {
+  const distance = Math.hypot(to.x - from.x, to.y - from.y);
+  const stops = Math.max(1, Math.ceil(distance / step));
+  const walk: StrokePoint[] = [];
+  for (let index = 1; index <= stops; index += 1) {
+    const at = index / stops;
+    walk.push({ x: from.x + (to.x - from.x) * at, y: from.y + (to.y - from.y) * at });
+  }
+  return walk;
 }
 
 function distanceToSegment(point: StrokePoint, from: StrokePoint, to: StrokePoint): number {

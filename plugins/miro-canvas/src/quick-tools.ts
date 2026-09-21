@@ -10,7 +10,7 @@ import { SHAPE_CATALOG, shapeCatalogEntry, shapeCatalogLabel } from "./shape-cat
 import { shapePicture } from "./selection-toolbar";
 
 export const QUICK_TOOLS = [
-  "select", "text", "sticky", "shape", "pen", "highlighter", "eraser", "lasso",
+  "select", "text", "sticky", "shape", "pen", "highlighter", "eraser", "erase-part", "lasso",
   "connector", "comment", "frame", "code", "table", "link",
 ] as const;
 export type QuickTool = (typeof QUICK_TOOLS)[number];
@@ -66,6 +66,7 @@ const DRAWING_TOOLS: readonly ToolSpec[] = [
   { tool: "pen", label: "Pen", icon: "pen", glyph: "✎" },
   { tool: "highlighter", label: "Highlighter", icon: "highlighter", glyph: "▨" },
   { tool: "eraser", label: "Eraser", icon: "eraser", glyph: "⌫" },
+  { tool: "erase-part", label: "Precision eraser", icon: "scissors", glyph: "✁" },
   { tool: "lasso", label: "Lasso", icon: "lasso", glyph: "◌" },
 ];
 
