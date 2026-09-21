@@ -243,3 +243,20 @@ describe("strokeHitsSegment", () => {
     expect(strokeHitsSegment(STROKE, RECT, { x: 0, y: 50 }, { x: 40, y: 50 }, 1)).toBe(false);
   });
 });
+
+describe("erasing a very long line", () => {
+  it("cuts a line of tens of thousands of units in bounded time and points", () => {
+    const started = Date.now();
+    // An eraser 2 units across, at no round place along the line.
+    const left = eraseFromStroke([0, 0, 90_000, 0], [], [45_013.7, -5, 45_013.7, 5], 1)!;
+    expect(Date.now() - started).toBeLessThan(500);
+    expect(left.changed).toBe(true);
+    expect(left.breaks).toHaveLength(1);
+    // Only the stretch the eraser came near was stepped along, and what
+    // survives is simplified back to a few points.
+    expect(left.points.length / 2).toBeLessThan(16);
+    const cut = left.breaks[0]! * 2;
+    expect(left.points[cut - 2]).toBeGreaterThan(45_011);
+    expect(left.points[cut]).toBeLessThan(45_016.5);
+  });
+});

@@ -131,11 +131,18 @@ export function eraseFromStroke(
     if (originals.length === 0 || starts.has(index / 2)) originals.push([]);
     originals[originals.length - 1]!.push({ x: points[index]!, y: points[index + 1]! });
   }
+  // Only the part of the line inside the box the eraser's path covers is
+  // stepped along; the rest keeps its ends.  Stepping a long line end to end
+  // would make hundreds of thousands of points out of one, and a cap on the
+  // steps would make the cut coarse exactly where it is made.
+  // The box reaches a little past the ring, so the points where the line
+  // enters and leaves it are kept and the pieces end where the ring does.
+  const area = eraserBox(eraser, reach + step * 2);
   const pieces: number[][] = [];
   let changed = false;
   for (const original of originals) {
     const walk: StrokePoint[] = [original[0]!];
-    for (let index = 1; index < original.length; index += 1) walk.push(...along(original[index - 1]!, original[index]!, step));
+    for (let index = 1; index < original.length; index += 1) walk.push(...stepsWithin(original[index - 1]!, original[index]!, area, step));
     const erased = walk.map((stop) => distanceToStroke(eraser, stop) <= reach);
     if (!erased.includes(true)) {
       if (original.length >= 2) pieces.push(original.flatMap((point) => [point.x, point.y]));
@@ -275,16 +282,59 @@ function shoelace(points: readonly StrokePoint[]): number {
   return sum;
 }
 
-/** The points along a segment, no further apart than one step, its end last. */
-function along(from: StrokePoint, to: StrokePoint, step: number): StrokePoint[] {
-  const distance = Math.hypot(to.x - from.x, to.y - from.y);
-  const stops = Math.max(1, Math.ceil(distance / step));
-  const walk: StrokePoint[] = [];
-  for (let index = 1; index <= stops; index += 1) {
-    const at = index / stops;
-    walk.push({ x: from.x + (to.x - from.x) * at, y: from.y + (to.y - from.y) * at });
+/** The most steps the part of one stretch inside the eraser's box is cut into. */
+const MAX_STEPS = 4_096;
+
+/** The box the eraser's path covers, grown by its reach. */
+function eraserBox(path: readonly number[], reach: number): StrokeBox | undefined {
+  if (path.length < 2) return undefined;
+  let minX = Number.POSITIVE_INFINITY, minY = Number.POSITIVE_INFINITY;
+  let maxX = Number.NEGATIVE_INFINITY, maxY = Number.NEGATIVE_INFINITY;
+  for (let index = 0; index + 1 < path.length; index += 2) {
+    minX = Math.min(minX, path[index]!);
+    maxX = Math.max(maxX, path[index]!);
+    minY = Math.min(minY, path[index + 1]!);
+    maxY = Math.max(maxY, path[index + 1]!);
   }
+  return { x: minX - reach, y: minY - reach, width: maxX - minX + reach * 2, height: maxY - minY + reach * 2 };
+}
+
+/**
+ * The points a stretch of a line is tested at: its end, and in small steps
+ * across the part of it inside the eraser's box, so a cut lands close to where
+ * the eraser's ring really ends however long the stretch is.
+ */
+function stepsWithin(from: StrokePoint, to: StrokePoint, box: StrokeBox | undefined, step: number): StrokePoint[] {
+  const span = box === undefined ? undefined : clipToBox(from, to, box);
+  if (span === undefined) return [to];
+  const [start, end] = span;
+  const at = (t: number): StrokePoint => ({ x: from.x + (to.x - from.x) * t, y: from.y + (to.y - from.y) * t });
+  const length = Math.hypot(to.x - from.x, to.y - from.y) * (end - start);
+  const stops = Math.min(Math.max(1, Math.ceil(length / step)), MAX_STEPS);
+  const walk: StrokePoint[] = start > 0 ? [at(start)] : [];
+  for (let index = 1; index <= stops; index += 1) walk.push(at(start + ((end - start) * index) / stops));
+  if (end < 1) walk.push(to);
   return walk;
+}
+
+/** Where along a segment, from 0 to 1, it runs inside a box; nothing when it misses. */
+function clipToBox(from: StrokePoint, to: StrokePoint, box: StrokeBox): [number, number] | undefined {
+  let start = 0, end = 1;
+  const dx = to.x - from.x, dy = to.y - from.y;
+  for (const [p, q] of [
+    [-dx, from.x - box.x], [dx, box.x + box.width - from.x],
+    [-dy, from.y - box.y], [dy, box.y + box.height - from.y],
+  ] as const) {
+    if (p === 0) {
+      if (q < 0) return undefined;
+      continue;
+    }
+    const t = q / p;
+    if (p < 0) start = Math.max(start, t);
+    else end = Math.min(end, t);
+    if (start > end) return undefined;
+  }
+  return [start, end];
 }
 
 function distanceToSegment(point: StrokePoint, from: StrokePoint, to: StrokePoint): number {
