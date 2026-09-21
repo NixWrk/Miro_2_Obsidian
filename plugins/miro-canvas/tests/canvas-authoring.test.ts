@@ -740,6 +740,24 @@ describe("CanvasAuthoring", () => {
 		expect((overrides().e1!.connector as CanvasDocument).waypoints).toEqual([]);
 	});
 
+	it("gives a shape to a card that only holds text, and not to a sticky", () => {
+		const runtime = new NativeGraph({
+			nodes: [
+				{ id: "card", type: "text", text: "<div><p><strong>Card</strong></p></div>", x: 0, y: 0, width: 200, height: 100 },
+				{ id: "note", type: "text", text: "note", x: 300, y: 0, width: 200, height: 200 },
+			],
+			edges: [],
+			miroCanvas: { schemaVersion: 1, localOverrides: { card: { colors: { fill: "#ffeeaa" } }, note: { item: { type: "sticky_note" } } } },
+		});
+		const authoring = createCanvasAuthoring(runtime);
+		expect(authoring.updateElementStyles([{ id: "card", shape: "ellipse" }]).ok).toBe(true);
+		const overrides = (runtime.getData().miroCanvas as CanvasDocument).localOverrides as Record<string, CanvasDocument>;
+		expect(overrides.card).toMatchObject({ colors: { fill: "#ffeeaa" }, shape: { kind: "ellipse" } });
+		const refused = authoring.updateElementStyles([{ id: "note", shape: "ellipse" }]);
+		expect(refused.ok).toBe(false);
+		expect(refused.diagnostics.map((item) => item.code)).toContain("element-style-target-invalid");
+	});
+
 	it("rejects a multi-selection style atomically when one target is locked", () => {
 		const initial = endpointDocument();
 		((initial.miroCanvas as CanvasDocument).localOverrides as Record<string, CanvasDocument>).b = { locked: true };

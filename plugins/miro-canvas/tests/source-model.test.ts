@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { buildSourceScene, effectiveRotation, rotatePoint, rotatedBounds } from "../src/source-model";
+import { buildSourceScene, effectiveRotation, rotatePoint, rotatedBounds, takesShape } from "../src/source-model";
 
 function clone<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;
@@ -158,6 +158,30 @@ describe("source projection model", () => {
     const local = buildSourceScene({ miroCanvas: { localOverrides } });
     expect([...local.items.values()].map((item) => item.shape)).toEqual(kinds);
     expect([...local.items.values()].every((item) => item.kind === "shape" && item.sourceId === undefined)).toBe(true);
+  });
+
+  it("draws a text item given a shape as that shape, and says which cards take one", () => {
+    const scene = buildSourceScene({
+      nodes: [
+        { id: "t", type: "text" }, { id: "plain", type: "text" }, { id: "note", type: "text" },
+        { id: "grid", type: "text" }, { id: "restyled", type: "text" }, { id: "page", type: "file" },
+      ],
+      miroSource: { items: [{ id: "t", type: "text", style: { color: "#123456" } }] },
+      miroCanvas: { localOverrides: {
+        t: { shape: { kind: "ellipse", fallback: "text" } },
+        note: { item: { type: "sticky_note" } },
+        grid: { item: { type: "table" } },
+        restyled: { colors: { fill: "#ffeeaa" } },
+      } },
+    });
+    expect(scene.items.get("t")).toMatchObject({ sourceId: "t", kind: "shape", shape: "ellipse", css: { color: "#123456" } });
+    const takes = (id: string, type = "text"): boolean => takesShape(scene.items.get(id), type);
+    expect(takes("t")).toBe(true);
+    expect(takes("plain")).toBe(true);
+    expect(takes("restyled")).toBe(true);
+    expect(takes("note")).toBe(false);
+    expect(takes("grid")).toBe(false);
+    expect(takes("page", "file")).toBe(false);
   });
 
   it("projects every M3 renderer family without reading active source content", () => {

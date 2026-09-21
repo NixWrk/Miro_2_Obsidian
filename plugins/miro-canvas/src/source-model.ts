@@ -834,21 +834,23 @@ function localShapeKind(document: unknown, canvasId: string): string | undefined
 }
 
 function descriptorFor(document: unknown, canvasId: string, sourceId: string, source: UnknownRecord, forcedConnector: boolean, diagnostics: string[], tagDefinitions: ReadonlyMap<string, SourceTagDescriptor>): SourceItemDescriptor | undefined {
-  const kind = sourceKind(source, forcedConnector);
-  if (kind === undefined) {
+  const sourced = sourceKind(source, forcedConnector);
+  if (sourced === undefined) {
     const rawType = valueOf(source, "type");
     diagnostics.push(typeof rawType === "string" && rawType.toLowerCase() === "mindmap"
       ? `source-mindmap-legacy-limited: ${sourceId}.`
       : `source-type-unsupported: ${sourceId}.`);
     return undefined;
   }
+  const localShape = localShapeKind(document, canvasId);
+  // A text item given a shape on this board is drawn as that shape.
+  const kind: SourceItemKind = sourced === "text" && localShape !== undefined ? "shape" : sourced;
   let shape: string | undefined;
-  if (kind === "shape") {
+  if (sourced === "shape") {
     const subtype = sourceSubtype(source);
     if (subtype !== undefined && KNOWN_MIRO_SHAPES.has(subtype)) shape = subtype;
     else if (subtype !== undefined) diagnostics.push(`shape-subtype-unknown: ${sourceId} (${subtype}).`);
   }
-  const localShape = localShapeKind(document, canvasId);
   if (kind === "shape" && localShape !== undefined) shape = localShape;
   const css = sourceCss(source, kind);
   applyLocalCss(css, localOverride(document, canvasId));
@@ -891,6 +893,17 @@ function explicitOrder(value: unknown, scene: ReadonlyMap<string, SourceItemDesc
   for (const id of scene.keys()) if (!seen.has(id)) result.push(id);
   if ([...scene.keys()].some((id) => !seen.has(id))) diagnostics.push(`${label}-partial: unranked projected items keep deterministic source order.`);
   return result;
+}
+
+/**
+ * Whether a node can be given a shape: a shape already, or a card that only
+ * holds text - a Miro text item, a plain Canvas card, or text the tools made.
+ * A sticky, code block, grid or drawing keeps the form it has.
+ */
+export function takesShape(descriptor: SourceItemDescriptor | undefined, nodeType: unknown): boolean {
+  if (nodeType !== "text") return false;
+  if (descriptor === undefined || descriptor.kind === "shape") return true;
+  return descriptor.kind === "text" && (descriptor.localItem === undefined || descriptor.localItem === "text");
 }
 
 /** Build a renderer-facing scene without mutating or freezing any caller-owned input. */

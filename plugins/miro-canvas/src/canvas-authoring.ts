@@ -27,7 +27,7 @@ import { readLocalItem, type LocalItem } from "./local-items";
 import { isSafeColor, normalizeColor } from "./appearance";
 import {
 	LOCAL_SHAPE_KINDS, CONNECTOR_CAPS, CONNECTOR_ROUTES, CONNECTOR_STROKES,
-	buildSourceScene, readWaypoints, type LocalConnectorSettings,
+	buildSourceScene, readWaypoints, takesShape, type LocalConnectorSettings,
 } from "./source-model";
 
 export const CANVAS_SHAPE_KINDS = LOCAL_SHAPE_KINDS;
@@ -2276,8 +2276,7 @@ export class CanvasAuthoring {
 				if (id === undefined) return reject();
 				const node = before.nodes.find((item) => item.id === id);
 				const edge = before.edges.find((item) => item.id === id);
-				const sourceKind = node === undefined ? undefined : scene.items.get(id)?.kind;
-				if (edge === undefined && (node === undefined || (sourceKind !== undefined ? sourceKind !== "shape" : node.type !== "text"))) {
+				if (edge === undefined && (node === undefined || !takesShape(scene.items.get(id), node.type))) {
 					addDiagnostic(diagnostics, "element-style-target-invalid", "error", "The target must be an existing Canvas shape, text node, or connector.");
 					return reject();
 				}

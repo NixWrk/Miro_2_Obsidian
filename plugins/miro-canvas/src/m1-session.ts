@@ -94,6 +94,7 @@ import {
 	CONNECTOR_CAPS,
 	CONNECTOR_ROUTES,
 	CONNECTOR_STROKES,
+	takesShape,
 	type SourceScene,
 } from "./source-model";
 import { CommentMarkers } from "./comment-markers";
@@ -2944,14 +2945,20 @@ export class M1CanvasSession {
 				kinds.add("edge");
 				continue;
 			}
-			const kind = source.items.get(id)?.kind;
+			const node = Array.isArray(nodes)
+				? (nodes as readonly unknown[]).find((item) => readRuntime(item, "id") === id)
+				: undefined;
+			const descriptor = source.items.get(id);
+			// Any card that only holds text can be given a shape, as a shape can.
+			if (takesShape(descriptor, readRuntime(node, "type"))) {
+				kinds.add("shape");
+				continue;
+			}
+			const kind = descriptor?.kind;
 			if (kind !== undefined) {
 				kinds.add(kind === "connector" ? "edge" : kind === "code" ? "text" : kind === "group" ? "frame" : kind);
 				continue;
 			}
-			const node = Array.isArray(nodes)
-				? (nodes as readonly unknown[]).find((item) => readRuntime(item, "id") === id)
-				: undefined;
 			kinds.add(readRuntime(node, "type") === "file" ? "media" : readRuntime(node, "type") === "group" ? "frame" : "text");
 		}
 		return [...kinds];
