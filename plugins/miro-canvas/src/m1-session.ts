@@ -102,7 +102,8 @@ import { CommentThreadCard } from "./comment-thread";
 import { QUICK_TOOL_KEYS, QuickTools, isDrawingTool, type QuickTool } from "./quick-tools";
 import { LOCAL_ITEM_SIZES, TABLE_TEMPLATE, type LocalItem } from "./local-items";
 import {
-	eraseFromStroke, pointInLasso, recogniseStroke, simplifyPoints, strokeBounds, strokeHitsPoint, type StrokePoint,
+	eraseFromStroke, pointInLasso, recogniseStroke, simplifyPoints, strokeBounds, strokeHitsPoint, strokeHitsSegment,
+	type StrokePoint,
 } from "./drawing";
 import {
 	boundaryAnchorOnRect,
@@ -2156,7 +2157,7 @@ export class M1CanvasSession {
 				shown.push(`${point.x - rootRect.left},${point.y - rootRect.top}`);
 				line?.setAttribute("points", shown.join(" "));
 				if (erasing) {
-					for (const id of this.drawingsUnder(board)) {
+					for (const id of this.drawingsUnder(board, previous)) {
 						if (this.erasing.has(id)) continue;
 						this.erasing.add(id);
 						this.markErasing(id, true);
@@ -2339,8 +2340,11 @@ export class M1CanvasSession {
 		this.erasing.clear();
 	}
 
-	/** The drawings the eraser is over at a board point. */
-	private drawingsUnder(board: { readonly x: number; readonly y: number }): readonly string[] {
+	/** The drawings the eraser is over at a board point, or crossed coming from the one before. */
+	private drawingsUnder(
+		board: { readonly x: number; readonly y: number },
+		previous?: { readonly x: number; readonly y: number },
+	): readonly string[] {
 		const { geometry, scene } = this.landingGeometry();
 		const zoom = finite(readRuntime(this.viewport.getViewport(), "zoom")) ?? 1;
 		const reach = this.eraserSize / 2 / zoom;
@@ -2349,7 +2353,10 @@ export class M1CanvasSession {
 			const stroke = item.structured?.stroke;
 			const rect = geometry.nodes?.[id];
 			if (stroke === undefined || rect === undefined) continue;
-			if (strokeHitsPoint(stroke, rect, board, reach)) found.push(id);
+			const hit = previous === undefined
+				? strokeHitsPoint(stroke, rect, board, reach)
+				: strokeHitsSegment(stroke, rect, previous, board, reach);
+			if (hit) found.push(id);
 		}
 		return found;
 	}
@@ -2480,13 +2487,15 @@ export class M1CanvasSession {
 			const scaleX = stroke.box.width / rect.width;
 			const scaleY = stroke.box.height / rect.height;
 			const local = path.flatMap((point) => [(point.x - rect.x) * scaleX, (point.y - rect.y) * scaleY]);
-			const reach = stroke.width / 2 + (this.eraserSize / 2 / zoom) * Math.min(scaleX, scaleY);
+			// Only what the ring covers goes: the line's own middle within the
+			// eraser's reach, not everything its width happens to touch.
+			const reach = (this.eraserSize / 2 / zoom) * Math.min(scaleX, scaleY);
 			const left = eraseFromStroke(stroke.points, stroke.breaks ?? [], local, reach);
 			if (left === undefined) {
 				gone.push(id);
 				continue;
 			}
-			if (left.points.length === stroke.points.length) continue;
+			if (!left.changed) continue;
 			changes.push({ id, item: { type: "drawing", stroke: { ...stroke, points: left.points, ...(left.breaks.length === 0 ? {} : { breaks: left.breaks }) } } });
 		}
 		this.readInteractionState();

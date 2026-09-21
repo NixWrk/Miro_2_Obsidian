@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   distanceToStroke, eraseFromStroke, pointInLasso, recogniseStroke, simplifyPoints, strokeBounds, strokeHitsPoint,
+  strokeHitsSegment,
 } from "../src/drawing";
 
 describe("simplifyPoints", () => {
@@ -197,5 +198,48 @@ describe("recogniseStroke", () => {
     expect(recogniseStroke(ring(6, 6))).toBeUndefined();
     expect(recogniseStroke([{ x: 0, y: 0 }, { x: 80, y: 60 }, { x: 160, y: 0 }, { x: 240, y: 90 }])).toBeUndefined();
     expect(recogniseStroke([{ x: 5, y: 5 }])).toBeUndefined();
+  });
+});
+
+describe("precise erasing", () => {
+  const LINE = [0, 0, 100, 0];
+
+  it("takes only what the eraser covers, however short the cut", () => {
+    // An eraser 4 units across over the middle of a 100-unit line.
+    const left = eraseFromStroke(LINE, [], [50, -5, 50, 5], 2)!;
+    expect(left.changed).toBe(true);
+    const cut = left.breaks[0]! * 2;
+    const gapStart = left.points[cut - 2]!, gapEnd = left.points[cut]!;
+    expect(gapStart).toBeGreaterThan(47);
+    expect(gapEnd).toBeLessThan(53);
+  });
+
+  it("leaves a stroke it never reached exactly as it was", () => {
+    const stroke = [0, 0, 30, 12, 60, 3, 100, 20];
+    const left = eraseFromStroke(stroke, [], [0, 80, 100, 80], 3)!;
+    expect(left.changed).toBe(false);
+    expect(left.points).toEqual(stroke);
+  });
+
+  it("keeps an untouched piece of an erased stroke point for point", () => {
+    const stroke = [0, 0, 40, 0, 60, 10, 70, 30, 90, 10];
+    const left = eraseFromStroke(stroke, [2], [20, -3, 20, 3], 2)!;
+    expect(left.changed).toBe(true);
+    // The second piece, which the eraser never touched, ends the result as it was.
+    expect(left.points.slice(-6)).toEqual([60, 10, 70, 30, 90, 10]);
+  });
+});
+
+describe("strokeHitsSegment", () => {
+  const STROKE = { points: [50, 0, 50, 100], width: 1, box: { width: 100, height: 100 } };
+  const RECT = { x: 0, y: 0, width: 100, height: 100 };
+
+  it("catches a thin line swept across between two far points", () => {
+    // Neither end of the sweep is near the line; the sweep crosses it.
+    expect(strokeHitsSegment(STROKE, RECT, { x: 0, y: 50 }, { x: 100, y: 50 }, 1)).toBe(true);
+  });
+
+  it("misses a line the sweep stays clear of", () => {
+    expect(strokeHitsSegment(STROKE, RECT, { x: 0, y: 50 }, { x: 40, y: 50 }, 1)).toBe(false);
   });
 });

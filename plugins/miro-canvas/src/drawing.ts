@@ -108,43 +108,52 @@ export function strokeHitsPoint(
 /**
  * What is left of a stroke after the eraser passed over part of it.
  *
- * Points within the reach of the eraser's own line go; what remains is kept as
- * separate pieces of the same stroke, since a stroke erased in the middle is
- * two lines afterwards.  Nothing left means the whole drawing goes.
+ * The part of the line within `reach` of the eraser's own path goes, and
+ * nothing else: what remains is kept as separate pieces of the same stroke,
+ * since a stroke erased in the middle is two lines afterwards.  A piece the
+ * eraser never reached is kept point for point.  `changed` says whether
+ * anything went at all; nothing left means the whole drawing goes.
  */
 export function eraseFromStroke(
   points: readonly number[],
   breaks: readonly number[],
   eraser: readonly number[],
   reach: number,
-): { readonly points: readonly number[]; readonly breaks: readonly number[] } | undefined {
+): { readonly points: readonly number[]; readonly breaks: readonly number[]; readonly changed: boolean } | undefined {
   // A line is kept as the few points that carry its shape, so a long stretch
-  // may be one segment.  Stepping along it first lets the eraser cut anywhere,
-  // and what survives is reduced again afterwards.
-  const step = Math.max(reach / 2, 0.5);
-  const pieces: number[][] = [];
-  let piece: StrokePoint[] = [];
+  // may be one segment.  Stepping along it in small steps lets the eraser cut
+  // anywhere, close to where its ring really ends, and what survives of a
+  // piece it cut is reduced again afterwards.
+  const step = Math.min(Math.max(reach / 4, 0.25), 2);
+  const originals: StrokePoint[][] = [];
   const starts = new Set(breaks);
-  const finish = (): void => {
-    const line = piece.length >= 2 ? simplifyPoints(piece, step / 2) : [];
-    if (line.length >= 2) pieces.push(line.flatMap((point) => [point.x, point.y]));
-    piece = [];
-  };
-  let previous: StrokePoint | undefined;
   for (let index = 0; index + 1 < points.length; index += 2) {
-    const point = { x: points[index]!, y: points[index + 1]! };
-    if (starts.has(index / 2)) {
-      finish();
-      previous = undefined;
-    }
-    const walk = previous === undefined ? [point] : along(previous, point, step);
-    for (const stop of walk) {
-      if (distanceToStroke(eraser, stop) <= reach) finish();
-      else piece.push(stop);
-    }
-    previous = point;
+    if (originals.length === 0 || starts.has(index / 2)) originals.push([]);
+    originals[originals.length - 1]!.push({ x: points[index]!, y: points[index + 1]! });
   }
-  finish();
+  const pieces: number[][] = [];
+  let changed = false;
+  for (const original of originals) {
+    const walk: StrokePoint[] = [original[0]!];
+    for (let index = 1; index < original.length; index += 1) walk.push(...along(original[index - 1]!, original[index]!, step));
+    const erased = walk.map((stop) => distanceToStroke(eraser, stop) <= reach);
+    if (!erased.includes(true)) {
+      if (original.length >= 2) pieces.push(original.flatMap((point) => [point.x, point.y]));
+      continue;
+    }
+    changed = true;
+    let piece: StrokePoint[] = [];
+    const finish = (): void => {
+      const line = piece.length >= 2 ? simplifyPoints(piece, step / 2) : [];
+      if (line.length >= 2) pieces.push(line.flatMap((point) => [point.x, point.y]));
+      piece = [];
+    };
+    walk.forEach((stop, index) => {
+      if (erased[index]) finish();
+      else piece.push(stop);
+    });
+    finish();
+  }
   if (pieces.length === 0) return undefined;
   const result: number[] = [];
   const nextBreaks: number[] = [];
@@ -152,7 +161,46 @@ export function eraseFromStroke(
     if (result.length > 0) nextBreaks.push(result.length / 2);
     result.push(...item);
   }
-  return { points: result, breaks: nextBreaks };
+  return { points: result, breaks: nextBreaks, changed };
+}
+
+/**
+ * Whether the eraser, moving from one board point to the next, crossed a
+ * drawing.  A quick sweep reports points far apart, and a thin line between
+ * two of them would otherwise be missed.
+ */
+export function strokeHitsSegment(
+  stroke: { readonly points: readonly number[]; readonly width: number; readonly box: { readonly width: number; readonly height: number } },
+  rect: StrokeBox,
+  from: StrokePoint,
+  to: StrokePoint,
+  tolerance: number,
+): boolean {
+  if (!(rect.width > 0) || !(rect.height > 0)) return false;
+  const scaleX = stroke.box.width / rect.width;
+  const scaleY = stroke.box.height / rect.height;
+  const local = (point: StrokePoint): StrokePoint => ({ x: (point.x - rect.x) * scaleX, y: (point.y - rect.y) * scaleY });
+  const a = local(from), b = local(to);
+  const reach = stroke.width / 2 + tolerance * Math.min(scaleX, scaleY);
+  const points = stroke.points;
+  if (points.length === 2) return distanceToSegment({ x: points[0]!, y: points[1]! }, a, b) <= reach;
+  for (let index = 0; index + 3 < points.length; index += 2) {
+    const p = { x: points[index]!, y: points[index + 1]! };
+    const q = { x: points[index + 2]!, y: points[index + 3]! };
+    if (segmentDistance(a, b, p, q) <= reach) return true;
+  }
+  return false;
+}
+
+/** The shortest distance between two segments: none when they cross. */
+function segmentDistance(a: StrokePoint, b: StrokePoint, p: StrokePoint, q: StrokePoint): number {
+  const cross = (o: StrokePoint, u: StrokePoint, v: StrokePoint): number => (u.x - o.x) * (v.y - o.y) - (u.y - o.y) * (v.x - o.x);
+  const d1 = cross(p, q, a), d2 = cross(p, q, b), d3 = cross(a, b, p), d4 = cross(a, b, q);
+  if (((d1 > 0 && d2 < 0) || (d1 < 0 && d2 > 0)) && ((d3 > 0 && d4 < 0) || (d3 < 0 && d4 > 0))) return 0;
+  return Math.min(
+    distanceToSegment(a, p, q), distanceToSegment(b, p, q),
+    distanceToSegment(p, a, b), distanceToSegment(q, a, b),
+  );
 }
 
 /**
