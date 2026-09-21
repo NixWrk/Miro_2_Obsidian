@@ -163,16 +163,23 @@ const COLOR_SLOTS: readonly {
   readonly slot: ColorSlot;
   readonly label: string;
   readonly valueLabel: string;
-  readonly look: "text" | "fill" | "ring";
+  readonly look: "text" | "fill" | "ring" | "highlight";
   readonly forEdge: boolean;
 }[] = [
   { slot: "text", label: "Text color", valueLabel: "Text color", look: "text", forEdge: false },
+  { slot: "highlight", label: "Highlight", valueLabel: "Highlight color", look: "highlight", forEdge: false },
   { slot: "fill", label: "Fill color", valueLabel: "Fill color", look: "fill", forEdge: false },
   { slot: "border", label: "Border", valueLabel: "Border color", look: "ring", forEdge: false },
   { slot: "edge", label: "Line color", valueLabel: "Line color", look: "fill", forEdge: true },
 ];
-/** Transparent text or a transparent line only hides the element; a fill or a border may go. */
-const TRANSPARENT_SLOTS: ReadonlySet<ColorSlot> = new Set<ColorSlot>(["fill", "border"]);
+/** Transparent text or a transparent line only hides the element; a fill, a border or a highlight may go. */
+const TRANSPARENT_SLOTS: ReadonlySet<ColorSlot> = new Set<ColorSlot>(["fill", "border", "highlight"]);
+/** Marker colours, light enough for text of any colour to read on. */
+const HIGHLIGHT_PALETTE: readonly PaletteColor[] = Object.freeze([
+  ["yellow", "Yellow", "#fff59d"], ["orange", "Orange", "#ffd59a"], ["red", "Red", "#ffb4a2"],
+  ["pink", "Pink", "#f8c4dc"], ["violet", "Violet", "#d9ccf0"], ["blue", "Blue", "#bfe3fb"],
+  ["cyan", "Cyan", "#b8ecf0"], ["green", "Green", "#cde8b0"], ["lime", "Lime", "#e8f0a4"], ["gray", "Gray", "#e3e3e3"],
+].map(([id, label, color]) => Object.freeze({ id: `highlight-${id!}`, label: label!, color: color!, source: "miro" as const })));
 
 function hasDocument(value: unknown): value is Document {
   return value !== null && typeof value === "object"
@@ -609,6 +616,7 @@ export class SelectionToolbar {
       popover.host.setAttribute("data-color-slot", slot);
       popover.button.setAttribute("data-look", look);
       if (look === "text") this.icon(popover.button, "baseline", "A");
+      else if (look === "highlight") this.icon(popover.button, "highlighter", "▰");
       else append(popover.button, make(document, "span", "miro-canvas-toolbar__swatch-mark"));
       // Obsidian's own colour leads the palette, so any colour can be undone.
       const standard = this.block(popover.panel, undefined, "miro-canvas-toolbar__row miro-canvas-toolbar__standard");
@@ -627,7 +635,7 @@ export class SelectionToolbar {
       // Distinct from the popover button's own label so assistive technology
       // and tests can address the value control unambiguously.
       input.setAttribute("aria-label", `Custom ${valueLabel.toLowerCase()}`);
-      const clear = append(standard, makeButton(document, "Transparent", "miro-canvas-toolbar__button--transparent"));
+      const clear = append(standard, makeButton(document, slot === "highlight" ? "No highlight" : "Transparent", "miro-canvas-toolbar__button--transparent"));
       clear.setAttribute("aria-pressed", "false");
       this.icon(clear, "ban", "∅");
       clear.hidden = !TRANSPARENT_SLOTS.has(slot);
@@ -874,7 +882,7 @@ export class SelectionToolbar {
       slotRefs.input.value = color?.slice(0, 7) ?? "#000000";
       slotRefs.popover.button.setAttribute("data-color-unset", color === undefined ? "true" : "false");
       slotRefs.popover.button.style.setProperty?.("--miro-canvas-swatch", color ?? "transparent");
-      const palette = slot === "fill" ? state.fillPalette ?? state.palette : state.palette;
+      const palette = slot === "fill" ? state.fillPalette ?? state.palette : slot === "highlight" ? HIGHLIGHT_PALETTE : state.palette;
       this.renderSwatches(slotRefs.swatches, slot, palette.map((entry) => entry.color), state.editable, color, palette);
       this.renderSwatches(slotRefs.recent, slot, state.recentColors, state.editable, color);
       slotRefs.recent.hidden = state.recentColors.length === 0;

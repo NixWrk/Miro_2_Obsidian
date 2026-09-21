@@ -124,7 +124,8 @@ import {
 } from "./connector-endpoints";
 import { resolveAnchor, type AnchorGeometry, type CanvasAnchor } from "./anchors";
 import { shapeOutline } from "./shape-geometry";
-import { FRAME_COLORS, MIRO_STICKY_COLORS } from "./miro-palette";
+import { FRAME_COLORS, MIRO_STICKY_COLORS, readableInk } from "./miro-palette";
+import { highlightText, isHtmlText, markSelection, unhighlightText } from "./text-highlight";
 
 export interface M1SessionOptions {
 	readonly document?: Document;
@@ -233,6 +234,17 @@ function readRuntime(value: unknown, key: PropertyKey): unknown {
 	}
 }
 
+/** Call a method a host object may or may not have; what it throws is swallowed. */
+function callRuntime(value: unknown, key: PropertyKey, ...args: readonly unknown[]): unknown {
+	const method = readRuntime(value, key);
+	if (typeof method !== "function") return undefined;
+	try {
+		return Reflect.apply(method, value, args);
+	} catch {
+		return undefined;
+	}
+}
+
 function finite(value: unknown): number | undefined {
 	return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
@@ -276,7 +288,7 @@ export function resolveSelectionToolbarPresentation(
 	};
 	const colors: Record<string, string | null> = {};
 	for (const [slot, property] of [
-		["text", "color"], ["fill", "background-color"], ["border", "border-color"], ["edge", "stroke"],
+		["text", "color"], ["fill", "background-color"], ["border", "border-color"], ["edge", "stroke"], ["highlight", "--miro-highlight"],
 	] as const) {
 		const color = css[property];
 		if (color !== undefined) colors[slot] = color === "transparent" ? null : color;
@@ -469,6 +481,8 @@ const APPEARANCE_STYLE_PROPERTIES = [
 	"border-color",
 	"stroke",
 	"--canvas-color",
+	"--miro-highlight",
+	"--miro-highlight-ink",
 ] as const;
 const THEME_STYLE_PROPERTIES = ["color-scheme", "background-color", "color"] as const;
 
@@ -3529,6 +3543,40 @@ export class M1CanvasSession {
 			this.adapter.requestSave();
 			this.refresh();
 		}
+		// Picking a highlight colour marks the text; picking none takes the marks off.
+		if (type === APPEARANCE_ACTIONS.setColor && slot === "highlight") {
+			this.markSelectedText(readRuntime(action, "color") !== null);
+		}
+	}
+
+	/**
+	 * Mark the text being written, when some of it is selected, or the whole
+	 * of each selected card; or take every mark off.  The marks are written in
+	 * the text itself - Markdown's ==, or <mark> in an HTML card - after the
+	 * colour is stored, since the metadata writer refuses a graph that changed
+	 * under it.
+	 */
+	private markSelectedText(on: boolean): void {
+		let changed = false;
+		for (const node of this.adapter.getNodes() ?? []) {
+			const id = readCanvasElementId(node);
+			if (id === undefined || !this.selectedIds.includes(id)) continue;
+			const text = readRuntime(node, "text");
+			if (typeof text !== "string") continue;
+			const child = readRuntime(node, "child");
+			const editor = readRuntime(child, "editor") ?? readRuntime(readRuntime(child, "editMode"), "editor");
+			const selected = readRuntime(node, "isEditing") === true && isObject(editor) ? callRuntime(editor, "getSelection") : undefined;
+			if (on && typeof selected === "string" && selected !== "") {
+				callRuntime(editor, "replaceSelection", markSelection(selected, isHtmlText(text)));
+				continue;
+			}
+			const next = on ? highlightText(text) : unhighlightText(text);
+			if (next === text || typeof readRuntime(node, "setText") !== "function") continue;
+			callRuntime(node, "setText", next);
+			changed = true;
+		}
+		if (changed) this.adapter.requestSave();
+		this.refresh();
 	}
 
 	/** Take native Canvas colour presets off elements, the way its own colour menu does. */
@@ -3783,6 +3831,11 @@ export class M1CanvasSession {
 					this.setAppearanceStyle(element, "background-color", inner && seeThrough(colors.fill) ? "transparent" : colorToCss(colors.fill));
 				}
 				if (colors.border !== undefined) this.setAppearanceStyle(element, "border-color", colorToCss(colors.border));
+				// The card's marks take its highlight colour, with ink that reads on it.
+				if (colors.highlight !== undefined && colors.highlight !== null) {
+					this.setAppearanceStyle(element, "--miro-highlight", colorToCss(colors.highlight));
+					this.setAppearanceStyle(element, "--miro-highlight-ink", readableInk(colorToCss(colors.highlight).slice(0, 7)));
+				}
 			}
 		}
 	}

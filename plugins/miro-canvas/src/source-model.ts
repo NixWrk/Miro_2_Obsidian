@@ -628,7 +628,7 @@ function applyLocalCss(css: Record<string, string>, override: UnknownRecord | un
   if (borderWidth !== undefined && borderWidth >= 0 && borderWidth <= 100) css["border-width"] = `${borderWidth}px`;
   const colors = valueOf(override, "colors");
   if (isRecord(colors)) {
-    for (const [slot, cssKey] of [["text", "color"], ["fill", "background-color"], ["border", "border-color"], ["edge", "stroke"]] as const) {
+    for (const [slot, cssKey] of [["text", "color"], ["fill", "background-color"], ["border", "border-color"], ["edge", "stroke"], ["highlight", "--miro-highlight"]] as const) {
       const read = readOwn(colors, slot);
       if (read.state === "present" && isSafeColor(read.value)) css[cssKey] = normalizeColor(read.value) ?? "transparent";
     }

@@ -286,7 +286,7 @@ const TYPOGRAPHY_FIELDS = new Set([
   "lineHeight",
   "verticalAlign",
 ]);
-const COLOR_FIELDS = new Set(["text", "fill", "border", "edge"]);
+const COLOR_FIELDS = new Set(["text", "fill", "border", "edge", "highlight"]);
 const COMMENT_FIELDS = new Set([
   "id",
   "sourceId",

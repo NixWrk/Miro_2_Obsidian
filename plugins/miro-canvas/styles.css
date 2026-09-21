@@ -2954,6 +2954,13 @@
   overflow-wrap: anywhere;
 }
 
+/* A card's marks take the highlight colour the plugin keeps for it, with ink
+   that reads on it; a card without one keeps Obsidian's own marker. */
+.canvas-node mark {
+  background-color: var(--miro-highlight, var(--text-highlight-bg));
+  color: var(--miro-highlight-ink, inherit);
+}
+
 /* While its window has focus, Obsidian gives every card's text a layer of its
    own (translateZ(0) on the preview).  The compositor turns that layer as a
    finished picture, so a turned card's text went soft until the window lost

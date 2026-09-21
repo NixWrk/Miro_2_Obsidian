@@ -51,7 +51,8 @@ export type TextAlignment = "left" | "center" | "right" | "justify";
 export type VerticalAlign = "top" | "center" | "bottom";
 export type VerticalAlignment = VerticalAlign;
 
-export type ColorSlot = "text" | "fill" | "border" | "edge";
+/** Where a colour goes: text, fill, border, a connector's line, or the marker text is highlighted with. */
+export type ColorSlot = "text" | "fill" | "border" | "edge" | "highlight";
 
 /** A canonical opaque/alpha hex color, or null for a transparent/cleared slot. */
 export type AppearanceColor = string | null;
@@ -170,7 +171,7 @@ export const DEFAULT_TYPOGRAPHY: TypographySettings = Object.freeze({
 export const DEFAULT_COLORS: ColorSettings = Object.freeze({});
 
 const RESERVED_KEYS = new Set(["__proto__", "prototype", "constructor"]);
-const COLOR_SLOTS: readonly ColorSlot[] = ["text", "fill", "border", "edge"];
+const COLOR_SLOTS: readonly ColorSlot[] = ["text", "fill", "border", "edge", "highlight"];
 const TEXT_ALIGNMENTS: readonly TextAlignment[] = ["left", "center", "right", "justify"];
 const TYPOGRAPHY_FIELDS = new Set([
   "fontFamily",
@@ -186,7 +187,7 @@ const TYPOGRAPHY_FIELDS = new Set([
   "textDecoration",
   "textAlign",
 ]);
-const COLOR_FIELDS = new Set(["text", "fill", "border", "edge"]);
+const COLOR_FIELDS = new Set(["text", "fill", "border", "edge", "highlight"]);
 const SETTINGS_FIELDS = new Set([
   "displayTheme",
   "palette",
@@ -1205,7 +1206,7 @@ const APPEARANCE_TYPOGRAPHY_FIELDS = new Set([
   "textAlign",
 ]);
 const APPEARANCE_OVERRIDE_FIELDS = new Set(["typography", "colors"]);
-const COLOR_OVERRIDE_FIELDS = new Set(["text", "fill", "border", "edge"]);
+const COLOR_OVERRIDE_FIELDS = new Set(["text", "fill", "border", "edge", "highlight"]);
 const FORMAT_FIELDS = new Set(["bold", "italic", "underline", "strike", "strikethrough"]);
 
 function cloneMergeRecord(value: unknown): UnknownRecord {
