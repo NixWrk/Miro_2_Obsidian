@@ -5,6 +5,7 @@
  * shown as they were exported.  The host owns persistence and placement.
  */
 import { commentAuthorLabel, type CommentOrigin, type CommentThread } from "./local-comments";
+import { TOOLTIP_DELAY } from "./tooltips";
 
 export interface ThreadMessage {
   readonly id: string;
@@ -236,6 +237,7 @@ export class CommentThreadCard {
     const element = this.make("button", `miro-canvas-thread__button ${className}`);
     element.type = "button";
     element.setAttribute("aria-label", label);
+    element.setAttribute("data-tooltip-delay", TOOLTIP_DELAY);
     if (icon !== undefined) {
       if (this.host.setIcon !== undefined) this.host.setIcon(element, icon);
       else element.textContent = glyph ?? "";

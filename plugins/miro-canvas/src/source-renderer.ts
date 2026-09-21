@@ -12,6 +12,7 @@ import { normalizeAnchor, resolveAnchor, type AnchorEdgeGeometry, type AnchorPoi
 import { readCanvasElementId } from "./canvas-elements";
 import { blockArrowOutline, linePoints, planLine } from "./free-line";
 import { buildSourceScene, type SourceItemDescriptor, type SourceScene } from "./source-model";
+import { TOOLTIP_DELAY } from "./tooltips";
 
 type UnknownRecord = Record<PropertyKey, unknown>;
 
@@ -594,6 +595,7 @@ function decorateDeck(
       addOwnedElementClass(button, "miro-source-deck-button");
       setOwnedElementAttribute(button, "type", "button");
       setOwnedElementAttribute(button, "aria-label", label);
+      setOwnedElementAttribute(button, "data-tooltip-delay", TOOLTIP_DELAY);
       setOwnedElementAttribute(button, "data-deck-action", action);
       if (glyph !== undefined) safeCall(button, "appendChild", [glyph]);
       const stop = (event: unknown): void => { safeCall(event, "stopPropagation"); };

@@ -18,6 +18,7 @@ import {
 	type DisplayTheme,
 } from "./appearance";
 import type { SourceInspection } from "./source-inspector";
+import { BAR_TOOLTIP_DELAY } from "./tooltips";
 
 export type M1NavigationAction =
 	| "zoom-in"
@@ -103,7 +104,6 @@ const THEMES: readonly { readonly value: DisplayTheme; readonly icon: string; re
 	{ value: "light", icon: "sun", glyph: "☀", label: "Light" },
 	{ value: "dark", icon: "moon", glyph: "☾", label: "Dark" },
 ];
-const TOOLTIP_DELAY = "400";
 
 function hasDocument(value: unknown): value is Document {
 	return value !== null && typeof value === "object"
@@ -164,7 +164,7 @@ function makeButton(document: Document, label: string, title: string, className 
 	button.type = "button";
 	// Obsidian renders a tooltip from aria-label; a title would duplicate it.
 	button.setAttribute("aria-label", title);
-	button.setAttribute("data-tooltip-delay", TOOLTIP_DELAY);
+	button.setAttribute("data-tooltip-delay", BAR_TOOLTIP_DELAY);
 	return button;
 }
 

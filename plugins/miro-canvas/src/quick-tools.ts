@@ -9,6 +9,7 @@
 import { SHAPE_CATALOG, shapeCatalogEntry, shapeCatalogLabel } from "./shape-catalog";
 import { shapePicture } from "./selection-toolbar";
 import { LINE_KINDS, lineKind, type LineKindSpec } from "./free-line";
+import { BAR_TOOLTIP_DELAY, PICTURE_TOOLTIP_DELAY } from "./tooltips";
 
 export const QUICK_TOOLS = [
   "select", "text", "sticky", "shape", "pen", "highlighter", "smart", "eraser", "erase-part", "lasso",
@@ -152,6 +153,7 @@ export class QuickTools {
       const option = colors.appendChild(this.make("button", "miro-canvas-toolbar__button miro-canvas-toolbar__button--swatch"));
       option.type = "button";
       option.setAttribute("aria-label", color);
+      option.setAttribute("data-tooltip-delay", PICTURE_TOOLTIP_DELAY);
       option.setAttribute("data-pen-color", color);
       option.style?.setProperty?.("--miro-canvas-swatch", color);
       this.listen(option, "click", () => this.actions.onPen({ color }));
@@ -202,6 +204,7 @@ export class QuickTools {
           const choice = grid.appendChild(this.make("button", "miro-canvas-toolbar__button miro-canvas-toolbar__button--picture"));
           choice.type = "button";
           choice.setAttribute("aria-label", label);
+          choice.setAttribute("data-tooltip-delay", PICTURE_TOOLTIP_DELAY);
           choice.setAttribute("data-shape", kind);
           if (picture !== undefined) choice.appendChild(picture);
           else choice.textContent = glyph;
@@ -344,6 +347,7 @@ export class QuickTools {
     button.type = "button";
     button.setAttribute("aria-label", label);
     button.setAttribute("data-tooltip-position", "top");
+    button.setAttribute("data-tooltip-delay", BAR_TOOLTIP_DELAY);
     let drawn = false;
     if (this.options.setIcon !== undefined) {
       try {

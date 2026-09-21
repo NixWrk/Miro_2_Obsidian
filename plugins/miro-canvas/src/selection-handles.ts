@@ -15,6 +15,7 @@
  */
 
 import { contourPoint, shapeOutline } from "./shape-geometry";
+import { TOOLTIP_DELAY } from "./tooltips";
 
 export type HandleSide = "top" | "right" | "bottom" | "left";
 export const HANDLE_POSITIONS = [0.5] as const;
@@ -286,6 +287,7 @@ function makeGrip(document: Document, className: string, glyph: string, title: s
   button.type = "button";
   // Obsidian renders a tooltip from aria-label; a title would duplicate it.
   button.setAttribute("aria-label", title);
+  button.setAttribute("data-tooltip-delay", TOOLTIP_DELAY);
   return button;
 }
 

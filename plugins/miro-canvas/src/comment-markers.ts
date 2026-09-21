@@ -10,6 +10,7 @@ import {
   type CommentThread,
 } from "./local-comments";
 import { authorColor, authorInitial, threadMessages } from "./comment-thread";
+import { TOOLTIP_DELAY } from "./tooltips";
 
 export interface CommentMarker {
   /** Origin is part of the key: imported and local IDs can coincide. */
@@ -172,7 +173,7 @@ export class CommentMarkers {
       button.setAttribute("data-comment-state", marker.state);
       button.setAttribute("data-comment-has-replies", marker.replyCount > 0 ? "true" : "false");
       button.setAttribute("aria-label", marker.label);
-      button.title = marker.label;
+      button.setAttribute("data-tooltip-delay", TOOLTIP_DELAY);
       // A pin shows who started the thread; a badge counts its messages.
       button.textContent = marker.state === "resolved" ? "✓" : marker.initial;
       button.style.setProperty?.("--miro-avatar", marker.color);

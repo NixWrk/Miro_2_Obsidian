@@ -53,6 +53,7 @@ import {
   CONNECTOR_STROKES,
   type LocalConnectorSettings,
 } from "./source-model";
+import { BAR_TOOLTIP_DELAY, PICTURE_TOOLTIP_DELAY } from "./tooltips";
 
 export type SelectionKind = "shape" | "text" | "sticky" | "edge" | "frame" | "media";
 export type BorderStyle = "solid" | "dashed" | "dotted" | "none";
@@ -153,9 +154,6 @@ const SHAPE_SECTIONS: readonly { readonly section: ShapeSection; readonly title:
   { section: "basic", title: "Basic" },
   { section: "flowchart", title: "Flowchart" },
 ];
-/** Hover text for a picture should not make a person wait a second for it. */
-const PICTURE_TOOLTIP_DELAY = "150";
-const BUTTON_TOOLTIP_DELAY = "400";
 const SVG_NS = "http://www.w3.org/2000/svg";
 
 /** Colour popovers: which appearance slot each one writes and how its button looks. */
@@ -208,7 +206,7 @@ function makeButton(document: Document, title: string, className = ""): HTMLButt
   const button = make(document, "button", `miro-canvas-toolbar__button ${className}`.trim());
   button.type = "button";
   button.setAttribute("aria-label", title);
-  button.setAttribute("data-tooltip-delay", BUTTON_TOOLTIP_DELAY);
+  button.setAttribute("data-tooltip-delay", BAR_TOOLTIP_DELAY);
   return button;
 }
 

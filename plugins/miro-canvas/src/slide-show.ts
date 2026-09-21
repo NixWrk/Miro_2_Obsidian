@@ -6,6 +6,8 @@
  * keyboard listener.
  */
 
+import { TOOLTIP_DELAY } from "./tooltips";
+
 export interface SlideRect {
   readonly x: number;
   readonly y: number;
@@ -94,6 +96,7 @@ export class SlideShow {
       element.type = "button";
       element.className = "miro-canvas-slideshow__button";
       element.setAttribute("aria-label", label);
+      element.setAttribute("data-tooltip-delay", TOOLTIP_DELAY);
       if (this.host.setIcon !== undefined) this.host.setIcon(element, icon);
       else element.textContent = glyph;
       element.addEventListener("click", run);
