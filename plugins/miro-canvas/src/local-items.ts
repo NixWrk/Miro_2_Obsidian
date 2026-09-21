@@ -51,7 +51,8 @@ export const LOCAL_ITEM_SIZES: Readonly<Record<LocalItemType, { readonly width: 
   drawing: { width: 200, height: 200 },
 });
 
-const MAX_STROKE_POINTS = 4_096;
+/** The most points a stored stroke may hold. */
+export const MAX_STROKE_POINTS = 4_096;
 const MAX_STROKE_SIZE = 100_000;
 const HEX_COLOR = /^#[0-9a-f]{6}$/iu;
 

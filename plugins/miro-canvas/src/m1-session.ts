@@ -100,7 +100,7 @@ import { CommentMarkers } from "./comment-markers";
 import { addLocalComment, addReply, listCommentThreads, setCommentResolved, type CommentOrigin, type CommentMutationResult } from "./local-comments";
 import { CommentThreadCard } from "./comment-thread";
 import { QUICK_TOOL_KEYS, QuickTools, isDrawingTool, type QuickTool } from "./quick-tools";
-import { LOCAL_ITEM_SIZES, TABLE_TEMPLATE, type LocalItem } from "./local-items";
+import { LOCAL_ITEM_SIZES, MAX_STROKE_POINTS, TABLE_TEMPLATE, type LocalItem } from "./local-items";
 import {
 	eraseFromStroke, pointInLasso, recogniseStroke, simplifyPoints, strokeBounds, strokeHitsPoint, strokeHitsSegment,
 	type StrokePoint,
@@ -2043,7 +2043,7 @@ export class M1CanvasSession {
 
 	private updateQuickTools(): void {
 		const editable = this.appearance.settings.reviewMode !== true;
-		if (!editable && this.armedTool !== "select") this.armedTool = "select";
+		if (!editable && this.armedTool !== "select" && this.armedTool !== "lasso") this.armedTool = "select";
 		if (!isDrawingTool(this.armedTool)) this.hideBrush();
 		this.quickTools?.update({
 			editable, armed: this.armedTool, shape: this.toolShape,
@@ -2054,8 +2054,10 @@ export class M1CanvasSession {
 
 	private armTool(tool: QuickTool): void {
 		this.toolGesture?.end();
-		this.armedTool = this.appearance.settings.reviewMode === true ? "select" : tool;
-		if (tool !== "select") this.closeCommentThread();
+		// Review mode keeps the tools that only select.
+		this.armedTool = this.appearance.settings.reviewMode === true && tool !== "lasso" ? "select" : tool;
+		// Only a tool that really took over puts an open comment away.
+		if (this.armedTool !== "select") this.closeCommentThread();
 		this.updateQuickTools();
 	}
 
@@ -2406,8 +2408,15 @@ export class M1CanvasSession {
 	private drawStroke(tool: "pen" | "highlighter"): void {
 		const zoom = finite(readRuntime(this.viewport.getViewport(), "zoom")) ?? 1;
 		// The line is kept to the shape a person drew, not to every point the
-		// pointer reported: within half a pixel on screen.
-		const points = simplifyPoints(this.penPoints, 0.5 / zoom);
+		// pointer reported: within half a pixel on screen.  A stroke that still
+		// has more points than a stored one may hold is simplified harder, or
+		// the board would refuse to keep it at all.
+		let tolerance = 0.5 / zoom;
+		let points = simplifyPoints(this.penPoints, tolerance);
+		while (points.length > MAX_STROKE_POINTS) {
+			tolerance *= 2;
+			points = simplifyPoints(this.penPoints, tolerance);
+		}
 		this.penPoints = [];
 		if (points.length === 0) return;
 		const width = Math.round(this.penWidth * (tool === "highlighter" ? HIGHLIGHTER_SCALE : 1) * this.pressureScale() * 100) / 100;
@@ -2447,12 +2456,30 @@ export class M1CanvasSession {
 		if (ring.length < 3) return;
 		const geometry = this.landingGeometry().geometry;
 		const caught: unknown[] = [];
+		const groups = new Set(((readRuntime(this.currentRawDocument, "nodes") ?? []) as readonly unknown[])
+			.filter((item) => readRuntime(item, "type") === "group").map((item) => readRuntime(item, "id")));
 		for (const node of this.adapter.getNodes() ?? []) {
 			const id = readCanvasElementId(node);
 			const rect = id === undefined ? undefined : geometry.nodes?.[id];
 			if (rect === undefined) continue;
-			// An item is caught when the ring goes round its middle.
-			if (pointInLasso(ring, { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 })) caught.push(node);
+			// An item is caught when the ring goes round its middle; a frame or a
+			// group only when the ring goes round all of it, or circling a few
+			// items inside a large frame would take the frame with them.
+			const corners = [
+				{ x: rect.x, y: rect.y }, { x: rect.x + rect.width, y: rect.y },
+				{ x: rect.x + rect.width, y: rect.y + rect.height }, { x: rect.x, y: rect.y + rect.height },
+			];
+			const inside = groups.has(id!)
+				? corners.every((corner) => pointInLasso(ring, corner))
+				: pointInLasso(ring, { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 });
+			if (inside) caught.push(node);
+		}
+		// A connector is caught when the ring goes round both its ends.
+		for (const edge of this.adapter.getEdges() ?? []) {
+			const id = readCanvasElementId(edge);
+			const route = id === undefined ? undefined : geometry.edges?.[id];
+			if (route?.start === undefined || route.end === undefined) continue;
+			if (pointInLasso(ring, route.start) && pointInLasso(ring, route.end)) caught.push(edge);
 		}
 		if (caught.length === 0) {
 			this.callNative("deselectAll");
@@ -2498,25 +2525,39 @@ export class M1CanvasSession {
 			if (!left.changed) continue;
 			changes.push({ id, item: { type: "drawing", stroke: { ...stroke, points: left.points, ...(left.breaks.length === 0 ? {} : { breaks: left.breaks }) } } });
 		}
+		// A locked drawing is left alone rather than refusing the whole sweep,
+		// and what is trimmed and what is removed go in one step, undone as one.
 		this.readInteractionState();
+		const updates = changes.filter((change) => this.drawingEditable(change.id, "edit"));
+		const removals = gone.filter((id) => this.drawingEditable(id, "delete"));
+		if (updates.length + removals.length < changes.length + gone.length) {
+			this.options.onNotice?.("Locked drawings were left as they are.");
+		}
+		if (updates.length === 0 && removals.length === 0) {
+			this.refresh();
+			return;
+		}
 		this.authoring ??= createCanvasAuthoring(this.view);
-		if (changes.length > 0) {
-			const updated = this.authoring.updateItems(changes);
-			if (!updated.ok) this.addDiagnostic(firstProblem(updated.diagnostics) ?? "Canvas rejected the erase.");
-		}
-		if (gone.length > 0) {
-			const removed = this.authoring.deleteItems({ ids: gone });
-			if (!removed.ok) this.addDiagnostic(firstProblem(removed.diagnostics) ?? "Canvas rejected the erase.");
-		}
+		const result = this.authoring.changeItems({ updates, removals });
+		if (!result.ok) this.addDiagnostic(firstProblem(result.diagnostics) ?? "Canvas rejected the erase.");
 		this.refresh();
 	}
 
+	/** Whether the board allows a drawing to be changed that way now. */
+	private drawingEditable(id: string, operation: "edit" | "delete"): boolean {
+		const decision = decideEditOperation(this.policy, operation, [id]);
+		return decision.valid && decision.allowed;
+	}
+
 	private eraseDrawings(): void {
-		const ids = [...this.erasing];
+		const caught = [...this.erasing];
 		this.clearErasing();
 		this.penPoints = [];
-		if (ids.length === 0) return;
+		if (caught.length === 0) return;
 		this.readInteractionState();
+		const ids = caught.filter((id) => this.drawingEditable(id, "delete"));
+		if (ids.length < caught.length) this.options.onNotice?.("Locked drawings were left as they are.");
+		if (ids.length === 0) return;
 		this.authoring ??= createCanvasAuthoring(this.view);
 		const result = this.authoring.deleteItems({ ids });
 		if (!result.ok) this.addDiagnostic(firstProblem(result.diagnostics) ?? "Canvas rejected the erase.");
@@ -2632,7 +2673,10 @@ export class M1CanvasSession {
 			if (target !== null && form.contains(target)) return;
 			close();
 		};
+		let closed = false;
 		const close = (): void => {
+			if (closed) return;
+			closed = true;
 			document.removeEventListener("pointerdown", outside, true);
 			try {
 				form.remove();
@@ -2640,6 +2684,8 @@ export class M1CanvasSession {
 				// Something else already took the field away.
 			}
 		};
+		// A board closed with the field still open takes the field with it.
+		this.disposers.push(close);
 		for (const type of ["pointerdown", "keydown", "keyup", "dblclick"]) {
 			form.addEventListener(type, (event) => {
 				if (type === "keydown" && (event as KeyboardEvent).key === "Escape") close();

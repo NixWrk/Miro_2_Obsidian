@@ -232,7 +232,8 @@ export class QuickTools {
     this.element.setAttribute("data-miro-canvas-editable", state.editable ? "true" : "false");
     for (const [tool, button] of this.buttons) {
       button.setAttribute("aria-pressed", tool === state.armed ? "true" : "false");
-      button.disabled = tool !== "select" && !state.editable;
+      // Selecting changes nothing, so review mode keeps Select and the lasso.
+      button.disabled = tool !== "select" && tool !== "lasso" && !state.editable;
     }
     for (const [kind, button] of this.shapeButtons) {
       button.setAttribute("aria-pressed", kind === state.shape ? "true" : "false");

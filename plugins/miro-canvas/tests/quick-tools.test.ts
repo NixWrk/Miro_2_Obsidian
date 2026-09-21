@@ -196,13 +196,14 @@ describe("quick tools", () => {
     expect(panelOf(more).hidden).toBe(true);
   });
 
-  it("disables every tool but select and closes open panels when the board stops being editable", () => {
+  it("disables every tool but the selecting ones and closes open panels when the board stops being editable", () => {
     const { root, tools } = build();
     toolButton(root, "shape").dispatch("click");
     tools.update({ ...STATE, editable: false });
     expect(panelOf(toolButton(root, "shape")).hidden).toBe(true);
     for (const tool of QUICK_TOOLS) {
-      expect(toolButton(root, tool).disabled).toBe(tool !== "select");
+      // Selecting changes nothing, so Select and the lasso stay live.
+      expect(toolButton(root, tool).disabled).toBe(tool !== "select" && tool !== "lasso");
     }
   });
 

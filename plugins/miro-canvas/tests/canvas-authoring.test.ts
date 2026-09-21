@@ -1278,3 +1278,62 @@ describe("deleteItems", () => {
 		expect(runtime.getData()).not.toHaveProperty(`miroCanvas.localOverrides.${id}`);
 	});
 });
+
+describe("changeItems", () => {
+	const STROKE = { color: "#1a1a1a", width: 4, box: { width: 100, height: 20 }, points: [0, 10, 100, 10] };
+	function drawings(lockSecond = false): CanvasDocument {
+		return {
+			nodes: [
+				{ id: "d1", type: "text", x: 0, y: 0, width: 100, height: 20, text: "" },
+				{ id: "d2", type: "text", x: 0, y: 40, width: 100, height: 20, text: "" },
+			],
+			edges: [],
+			miroCanvas: {
+				schemaVersion: 1,
+				localOverrides: {
+					d1: { item: { type: "drawing", stroke: STROKE } },
+					d2: { item: { type: "drawing", stroke: STROKE }, ...(lockSecond ? { locked: true } : {}) },
+				},
+			},
+		};
+	}
+
+	it("trims one drawing and removes another in one import and one history step", () => {
+		const runtime = new NativeGraph(drawings());
+		const authoring = createCanvasAuthoring(runtime);
+		const trimmed = { ...STROKE, points: [0, 10, 40, 10, 60, 10, 100, 10], breaks: [2] };
+
+		const result = authoring.changeItems({ updates: [{ id: "d1", item: { type: "drawing", stroke: trimmed } }], removals: ["d2"] });
+
+		expect(result.ok).toBe(true);
+		const data = runtime.getData();
+		expect((data.nodes as CanvasDocument[]).map((node) => node.id)).toEqual(["d1"]);
+		const overrides = (data.miroCanvas as CanvasDocument).localOverrides as CanvasDocument;
+		expect(Object.keys(overrides)).toEqual(["d1"]);
+		expect((overrides.d1 as CanvasDocument).item).toEqual({ type: "drawing", stroke: trimmed });
+		expect(runtime.importDataSpy).toHaveBeenCalledTimes(1);
+		expect(runtime.history).toHaveLength(2);
+	});
+
+	it("refuses the whole change when any part of it is not allowed, and changes nothing", () => {
+		const runtime = new NativeGraph(drawings(true));
+		const authoring = createCanvasAuthoring(runtime);
+		const before = JSON.stringify(runtime.getData());
+		const trimmed = { ...STROKE, points: [0, 10, 40, 10] };
+
+		const result = authoring.changeItems({ updates: [{ id: "d1", item: { type: "drawing", stroke: trimmed } }], removals: ["d2"] });
+
+		expect(result.ok).toBe(false);
+		expect(runtime.importDataSpy).not.toHaveBeenCalled();
+		expect(JSON.stringify(runtime.getData())).toBe(before);
+	});
+
+	it("refuses an item named both to rewrite and to remove", () => {
+		const runtime = new NativeGraph(drawings());
+		const authoring = createCanvasAuthoring(runtime);
+		const result = authoring.changeItems({ updates: [{ id: "d1", item: { type: "drawing", stroke: STROKE } }], removals: ["d1"] });
+		expect(result.ok).toBe(false);
+		expect(result.diagnostics.map((item) => item.code)).toContain("item-change-conflict");
+		expect(runtime.importDataSpy).not.toHaveBeenCalled();
+	});
+});
