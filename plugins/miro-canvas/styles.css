@@ -2954,6 +2954,15 @@
   overflow-wrap: anywhere;
 }
 
+/* While its window has focus, Obsidian gives every card's text a layer of its
+   own (translateZ(0) on the preview).  The compositor turns that layer as a
+   finished picture, so a turned card's text went soft until the window lost
+   focus.  A turned card paints its text with the rest of the board instead,
+   where it is drawn at the angle it sits. */
+[data-miro-source-rotated="true"] .canvas-node-content.markdown-embed > .markdown-embed-content > .markdown-preview-view {
+  transform: none !important;
+}
+
 /* A source shape supplies its own vector contour, so only its native rectangular
    paint must step aside while the complete node rotates as one unit. */
 [data-miro-source-kind="shape"][data-miro-source-rotated="true"] {
