@@ -30,7 +30,13 @@ export interface MiroCanvasSettings {
   readonly connectorSnap: number;
   readonly minimapVisible: boolean;
   readonly selectionToolbarEnabled: boolean;
-  readonly showDiagnostics: boolean;
+  /**
+   * The warning badge listing what the plugin could not do as asked.  It is
+   * for whoever develops or debugs the plugin, so it starts hidden; it is
+   * stored under its own name so a badge saved as shown by an older version
+   * does not come back.
+   */
+  readonly developerDiagnostics: boolean;
 }
 
 interface NumberBound {
@@ -67,7 +73,7 @@ export const DEFAULT_SETTINGS: MiroCanvasSettings = Object.freeze({
   connectorSnap: 16,
   minimapVisible: true,
   selectionToolbarEnabled: true,
-  showDiagnostics: true,
+  developerDiagnostics: false,
 });
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -113,7 +119,7 @@ export function normalizeSettings(value: unknown): MiroCanvasSettings {
     connectorSnap: readNumber(value, "connectorSnap", DEFAULT_SETTINGS.connectorSnap),
     minimapVisible: readBoolean(value, "minimapVisible", DEFAULT_SETTINGS.minimapVisible),
     selectionToolbarEnabled: readBoolean(value, "selectionToolbarEnabled", DEFAULT_SETTINGS.selectionToolbarEnabled),
-    showDiagnostics: readBoolean(value, "showDiagnostics", DEFAULT_SETTINGS.showDiagnostics),
+    developerDiagnostics: readBoolean(value, "developerDiagnostics", DEFAULT_SETTINGS.developerDiagnostics),
   });
 }
 

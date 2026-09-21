@@ -117,11 +117,11 @@ export class MiroCanvasSettingTab extends PluginSettingTab {
         .onChange((value) => void this.host.saveSettings({ selectionToolbarEnabled: value })));
 
     new Setting(containerEl)
-      .setName("Show diagnostics")
-      .setDesc("A warning badge in the corner dock lists degraded or host-limited behavior instead of hiding it.")
+      .setName("Developer diagnostics")
+      .setDesc("For developers: a warning badge in the corner dock lists what the plugin could not do as asked.")
       .addToggle((toggle) => toggle
-        .setValue(this.host.settings.showDiagnostics)
-        .onChange((value) => void this.host.saveSettings({ showDiagnostics: value })));
+        .setValue(this.host.settings.developerDiagnostics)
+        .onChange((value) => void this.host.saveSettings({ developerDiagnostics: value })));
   }
 
   private slider(

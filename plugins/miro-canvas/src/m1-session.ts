@@ -1853,7 +1853,7 @@ export class M1CanvasSession {
 			diagnostics: [...new Set(diagnostics)],
 			...(viewport === undefined ? {} : { zoom: Math.round(viewport.zoom * 100) / 100 }),
 			...this.nativeSnapping(),
-			showDiagnostics: this.settings.showDiagnostics,
+			showDiagnostics: this.settings.developerDiagnostics,
 		};
 		this.lastSnapshot = {
 			status: this.adapter.status,

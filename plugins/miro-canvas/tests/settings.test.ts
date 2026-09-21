@@ -16,6 +16,13 @@ describe("plugin settings", () => {
     }
   });
 
+  it("keeps the developer diagnostics hidden unless they were asked for by name", () => {
+    expect(DEFAULT_SETTINGS.developerDiagnostics).toBe(false);
+    // An older version saved its default of showing them; that is not a choice.
+    expect(normalizeSettings({ showDiagnostics: true }).developerDiagnostics).toBe(false);
+    expect(normalizeSettings({ developerDiagnostics: true }).developerDiagnostics).toBe(true);
+  });
+
   it("keeps stored values and drops unknown keys", () => {
     const stored = normalizeSettings({
       zoomStep: 1.5, panStep: 128, wheelZoomModifier: "shift",
