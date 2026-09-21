@@ -101,7 +101,9 @@ import { addLocalComment, addReply, listCommentThreads, setCommentResolved, type
 import { CommentThreadCard } from "./comment-thread";
 import { QUICK_TOOL_KEYS, QuickTools, type QuickTool } from "./quick-tools";
 import { LOCAL_ITEM_SIZES, TABLE_TEMPLATE, type LocalItem } from "./local-items";
-import { eraseFromStroke, pointInLasso, simplifyPoints, strokeBounds, strokeHitsPoint, type StrokePoint } from "./drawing";
+import {
+	eraseFromStroke, pointInLasso, recogniseStroke, simplifyPoints, strokeBounds, strokeHitsPoint, type StrokePoint,
+} from "./drawing";
 import {
 	boundaryAnchorOnRect,
 	buildCanvasAnchorGeometry,
@@ -2032,7 +2034,7 @@ export class M1CanvasSession {
 			this.stylusSeen = true;
 		}
 		if (tool === "select" || root === undefined || event.button !== 0 || this.toolGesture !== undefined) return;
-		const drawingTool = tool === "pen" || tool === "highlighter" || tool === "eraser"
+		const drawingTool = tool === "pen" || tool === "highlighter" || tool === "smart" || tool === "eraser"
 			|| tool === "erase-part" || tool === "lasso";
 		// A stylus rules the board it draws on: while one is in use a touch is a
 		// palm or a hand resting, and with a drawing tool armed a finger pans
@@ -2041,7 +2043,7 @@ export class M1CanvasSession {
 		const target = event.target as Element | null;
 		if (target?.closest?.(PANEL_SELECTOR) != null) return;
 		const start = { x: event.clientX, y: event.clientY };
-		const drawing = tool === "pen" || tool === "highlighter" || tool === "lasso";
+		const drawing = tool === "pen" || tool === "highlighter" || tool === "smart" || tool === "lasso";
 		if (drawingTool) {
 			this.penPoints = [];
 			this.penPressures = [];
@@ -2093,6 +2095,7 @@ export class M1CanvasSession {
 				}
 				const zoom = finite(readRuntime(this.viewport.getViewport(), "zoom")) ?? 1;
 				const shown = tool === "lasso" ? 2 : this.penWidth * zoom * (tool === "highlighter" ? HIGHLIGHTER_SCALE : 1);
+				if (tool === "smart") line?.setAttribute("stroke-dasharray", "4 4");
 				line?.setAttribute("stroke-width", String(shown));
 				line?.setAttribute("points", this.penPoints
 					.map((item) => this.viewportPoint(item))
@@ -2163,6 +2166,10 @@ export class M1CanvasSession {
 		if (a === undefined || b === undefined) return;
 		if (tool === "pen" || tool === "highlighter") {
 			this.drawStroke(tool);
+			return;
+		}
+		if (tool === "smart") {
+			this.drawSmart();
 			return;
 		}
 		if (tool === "eraser") {
@@ -2267,6 +2274,47 @@ export class M1CanvasSession {
 			if (strokeHitsPoint(stroke, rect, board, reach)) found.push(id);
 		}
 		return found;
+	}
+
+	/**
+	 * Turns a rough stroke into the shape it was meant to be, as Miro's smart
+	 * drawing does; a stroke that says nothing in particular is kept as the
+	 * drawing it is, and a straight one between two items becomes a connector.
+	 */
+	private drawSmart(): void {
+		const zoom = finite(readRuntime(this.viewport.getViewport(), "zoom")) ?? 1;
+		const points = simplifyPoints(this.penPoints, 0.5 / zoom);
+		const shape = recogniseStroke(points);
+		if (shape === undefined) {
+			this.drawStroke("pen");
+			return;
+		}
+		if (shape.kind === "line") {
+			const from = this.connectorLanding(this.viewportPoint(shape.from) ?? { x: 0, y: 0 }, undefined, undefined);
+			const to = from?.nodeId === undefined
+				? undefined
+				: this.connectorLanding(this.viewportPoint(shape.to) ?? { x: 0, y: 0 }, from.nodeId, from.board);
+			if (from?.nodeId !== undefined && to?.nodeId !== undefined) {
+				this.penPoints = [];
+				this.connectFromTool({ nodeId: from.nodeId, anchor: from.anchor, board: from.board }, this.viewportPoint(shape.to) ?? { x: 0, y: 0 });
+				return;
+			}
+			// A line going nowhere in particular stays a drawing, drawn straight.
+			this.penPoints = [shape.from, shape.to];
+			this.drawStroke("pen");
+			return;
+		}
+		this.penPoints = [];
+		this.readInteractionState();
+		this.authoring ??= createCanvasAuthoring(this.view);
+		const created = this.authoring.createShape({
+			shape: shape.kind === "ellipse" ? "ellipse" : shape.kind,
+			text: "",
+			x: Math.round(shape.box.x), y: Math.round(shape.box.y),
+			width: Math.round(shape.box.width), height: Math.round(shape.box.height),
+		});
+		if (!created.ok) this.addDiagnostic(firstProblem(created.diagnostics) ?? "Canvas rejected the shape.");
+		this.refresh();
 	}
 
 	/** Keeps the stroke a pen gesture drew, as one item of its own. */

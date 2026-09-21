@@ -4,6 +4,9 @@
  * renderer and the tests all measure a stroke the same way.
  */
 
+/** Below this a stroke is a mark, not a shape anyone meant to draw. */
+const MIN_SHAPE_SIZE = 24;
+
 export interface StrokePoint {
   readonly x: number;
   readonly y: number;
@@ -169,6 +172,59 @@ export function pointInLasso(ring: readonly StrokePoint[], point: StrokePoint): 
     if (point.x < crossing) inside = !inside;
   }
   return inside;
+}
+
+export interface StrokeShape {
+  readonly kind: "rectangle" | "circle" | "ellipse" | "triangle" | "line";
+  readonly box: StrokeBox;
+  readonly from: StrokePoint;
+  readonly to: StrokePoint;
+}
+
+/**
+ * The shape a rough stroke was meant to be, the way Miro's smart drawing
+ * reads one, or nothing when the stroke says nothing in particular.
+ *
+ * A stroke that comes back to where it started is a closed shape, told apart
+ * by how much of its box it fills: a rectangle fills nearly all of it, an
+ * ellipse about four fifths, a triangle about half.  One that does not close
+ * is a line when it hardly bends.
+ */
+export function recogniseStroke(points: readonly StrokePoint[]): StrokeShape | undefined {
+  if (points.length < 2) return undefined;
+  const first = points[0]!;
+  const last = points[points.length - 1]!;
+  const box = strokeBounds(points);
+  const diagonal = Math.hypot(box.width, box.height);
+  if (diagonal < MIN_SHAPE_SIZE) return undefined;
+  const chord = Math.hypot(last.x - first.x, last.y - first.y);
+  let length = 0;
+  let bend = 0;
+  for (let index = 1; index < points.length; index += 1) {
+    length += Math.hypot(points[index]!.x - points[index - 1]!.x, points[index]!.y - points[index - 1]!.y);
+    bend = Math.max(bend, distanceToSegment(points[index]!, first, last));
+  }
+  if (length === 0) return undefined;
+  if (bend <= Math.max(diagonal * 0.08, 2)) {
+    return { kind: "line", box, from: first, to: last };
+  }
+  // Closed when the ends meet, measured against how far the line travelled.
+  if (chord > length * 0.25) return undefined;
+  const area = Math.abs(shoelace(points)) / 2;
+  const filled = area / Math.max(box.width * box.height, 1);
+  const kind = filled > 0.82 ? "rectangle"
+    : filled > 0.62
+      ? (Math.abs(box.width - box.height) <= Math.max(box.width, box.height) * 0.2 ? "circle" : "ellipse")
+      : "triangle";
+  return { kind, box, from: first, to: last };
+}
+
+function shoelace(points: readonly StrokePoint[]): number {
+  let sum = 0;
+  for (let index = 0, previous = points.length - 1; index < points.length; previous = index, index += 1) {
+    sum += (points[previous]!.x + points[index]!.x) * (points[previous]!.y - points[index]!.y);
+  }
+  return sum;
 }
 
 /** The points along a segment, no further apart than one step, its end last. */

@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 
-import { distanceToStroke, eraseFromStroke, pointInLasso, simplifyPoints, strokeBounds, strokeHitsPoint } from "../src/drawing";
+import {
+  distanceToStroke, eraseFromStroke, pointInLasso, recogniseStroke, simplifyPoints, strokeBounds, strokeHitsPoint,
+} from "../src/drawing";
 
 describe("simplifyPoints", () => {
   it("keeps only the two ends when every interior point sits within the tolerance of the line between them", () => {
@@ -158,5 +160,42 @@ describe("eraseFromStroke", () => {
     // Three pieces now: both halves of the first, and the second untouched.
     expect(left.breaks).toHaveLength(2);
     expect(left.points.slice(-2)).toEqual([100, 0]);
+  });
+});
+
+describe("recogniseStroke", () => {
+  const ring = (radiusX: number, radiusY: number, jitter = 0) => Array.from({ length: 33 }, (_, index) => {
+    const angle = (index / 32) * Math.PI * 2;
+    const wobble = jitter * (index % 3 === 0 ? 1 : -1);
+    return { x: 200 + (radiusX + wobble) * Math.cos(angle), y: 200 + (radiusY + wobble) * Math.sin(angle) };
+  });
+  const corners = (points: readonly { x: number; y: number }[]) => points.flatMap((point, index) => {
+    const next = points[(index + 1) % points.length]!;
+    return Array.from({ length: 9 }, (_, step) => ({
+      x: point.x + ((next.x - point.x) * step) / 9,
+      y: point.y + ((next.y - point.y) * step) / 9,
+    }));
+  });
+
+  it("reads a nearly straight stroke as a line between its ends", () => {
+    const shape = recogniseStroke([{ x: 0, y: 0 }, { x: 60, y: 3 }, { x: 120, y: 1 }])!;
+    expect(shape.kind).toBe("line");
+    expect(shape.from).toEqual({ x: 0, y: 0 });
+    expect(shape.to).toEqual({ x: 120, y: 1 });
+  });
+
+  it("reads a rough rectangle, triangle, circle and ellipse by how much of their box they fill", () => {
+    const box = corners([{ x: 0, y: 0 }, { x: 200, y: 4 }, { x: 198, y: 120 }, { x: 2, y: 118 }]);
+    expect(recogniseStroke([...box, box[0]!])?.kind).toBe("rectangle");
+    const triangle = corners([{ x: 0, y: 120 }, { x: 100, y: 0 }, { x: 200, y: 122 }]);
+    expect(recogniseStroke([...triangle, triangle[0]!])?.kind).toBe("triangle");
+    expect(recogniseStroke(ring(100, 96, 4))?.kind).toBe("circle");
+    expect(recogniseStroke(ring(140, 60))?.kind).toBe("ellipse");
+  });
+
+  it("says nothing of a mark too small to mean a shape, or of a stroke left open", () => {
+    expect(recogniseStroke(ring(6, 6))).toBeUndefined();
+    expect(recogniseStroke([{ x: 0, y: 0 }, { x: 80, y: 60 }, { x: 160, y: 0 }, { x: 240, y: 90 }])).toBeUndefined();
+    expect(recogniseStroke([{ x: 5, y: 5 }])).toBeUndefined();
   });
 });
