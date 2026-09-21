@@ -5,6 +5,8 @@ import {
 	buildMinimapModel,
 	computeContentBounds,
 	viewportToBoardRect,
+	MINIMAP_COLORS,
+	minimapCategory,
 } from "../src/minimap-model";
 
 describe("MinimapModel", () => {
@@ -135,5 +137,30 @@ describe("MinimapModel", () => {
 		expect(viewportToBoardRect({ x: 0, y: 0, zoom: 1 })).toBeUndefined();
 		const model = buildMinimapModel([{ x: 0, y: 0, width: 10, height: 10 }], { viewport: { x: 0, y: 0, zoom: 1 } });
 		expect(model.viewportRect).toBeUndefined();
+	});
+});
+
+describe("minimap colours", () => {
+	it("tells each kind of item apart, from what the plugin knows of it and its file", () => {
+		expect(minimapCategory("group", undefined)).toBe("frame");
+		expect(minimapCategory("text", undefined, { kind: "frame" })).toBe("frame");
+		expect(minimapCategory("text", undefined, { kind: "sticky" })).toBe("sticky");
+		expect(minimapCategory("text", undefined, { kind: "shape" })).toBe("shape");
+		expect(minimapCategory("text", undefined, { kind: "code" })).toBe("code");
+		expect(minimapCategory("text", undefined, { kind: "text", localItem: "drawing" })).toBe("drawing");
+		expect(minimapCategory("text", undefined, { kind: "text", localItem: "line" })).toBe("drawing");
+		expect(minimapCategory("text", undefined, { kind: "text", structured: { comment: {} } })).toBe("comment");
+		expect(minimapCategory("link", undefined)).toBe("link");
+		expect(minimapCategory("text", undefined, { kind: "media", structured: { preview: {} } })).toBe("link");
+		expect(minimapCategory("file", "Assets/photo.PNG")).toBe("image");
+		expect(minimapCategory("file", "Notes/plan.md")).toBe("note");
+		expect(minimapCategory("file", "Docs/spec.pdf")).toBe("file");
+		expect(minimapCategory("text", undefined)).toBe("text");
+	});
+
+	it("has a colour for every kind", () => {
+		for (const category of ["frame", "sticky", "shape", "text", "image", "note", "file", "link", "code", "drawing", "comment"] as const) {
+			expect(MINIMAP_COLORS[category]).toMatch(/^(#[0-9a-f]{6}|rgba\()/u);
+		}
 	});
 });

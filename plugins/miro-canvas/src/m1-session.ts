@@ -66,7 +66,9 @@ import {
 	type InteractionPolicy,
 } from "./interaction-policy";
 import {
+	MINIMAP_COLORS,
 	MinimapModel,
+	minimapCategory,
 	type MinimapPoint,
 	type MinimapRect,
 } from "./minimap-model";
@@ -4045,13 +4047,33 @@ export class M1CanvasSession {
 				context.lineTo(item.mapLine[1].x, item.mapLine[1].y);
 				context.stroke();
 			}
-			context.fillStyle = "rgba(80, 120, 230, 0.65)";
-			for (const item of model.nodeItems) {
-				if (item.mapRect === undefined) {
-					continue;
-				}
-				context.fillRect(item.mapRect.x, item.mapRect.y, Math.max(1, item.mapRect.width), Math.max(1, item.mapRect.height));
+			// Each kind of item keeps a colour of its own, and a sticky note its
+			// own fill; frames are outlined first, under what stands on them.
+			const scene = this.landingGeometry().scene;
+			const nodes = new Map(((readRuntime(this.currentRawDocument, "nodes") ?? []) as readonly unknown[])
+				.map((node) => [readRuntime(node, "id"), node] as const));
+			const painted = model.nodeItems.flatMap((item) => {
+				if (item.mapRect === undefined) return [];
+				const node = item.id === undefined ? undefined : nodes.get(item.id);
+				const descriptor = item.id === undefined ? undefined : scene.items.get(item.id);
+				const category = minimapCategory(readRuntime(node, "type"), readRuntime(node, "file"), descriptor);
+				const own = descriptor?.css["background-color"];
+				const color = category === "sticky" && own !== undefined && /^#[0-9a-f]{6}$/iu.test(own) ? own : MINIMAP_COLORS[category];
+				return [{ rect: item.mapRect, category, color }];
+			});
+			context.lineWidth = 1;
+			for (const { rect, color } of painted.filter((entry) => entry.category === "frame")) {
+				context.fillStyle = "rgba(150, 150, 150, 0.08)";
+				context.fillRect(rect.x, rect.y, Math.max(1, rect.width), Math.max(1, rect.height));
+				context.strokeStyle = color;
+				context.strokeRect(rect.x + 0.5, rect.y + 0.5, Math.max(1, rect.width - 1), Math.max(1, rect.height - 1));
 			}
+			context.globalAlpha = 0.85;
+			for (const { rect, color } of painted.filter((entry) => entry.category !== "frame")) {
+				context.fillStyle = color;
+				context.fillRect(rect.x, rect.y, Math.max(1, rect.width), Math.max(1, rect.height));
+			}
+			context.globalAlpha = 1;
 			if (model.viewportRect !== undefined) {
 				// A 2D context cannot resolve a CSS variable; read the theme's colour.
 				const accent = readStyleValue(canvas, "--interactive-accent") ?? "#7c3aed";

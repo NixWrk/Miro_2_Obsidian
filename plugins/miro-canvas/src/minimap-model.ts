@@ -1156,3 +1156,58 @@ export function minimapDragToViewport(
 }
 
 export const viewportForMinimapDrag = minimapDragToViewport;
+
+/** What a node on the map is, for the colour it is drawn in. */
+export type MinimapCategory =
+	| "frame" | "sticky" | "shape" | "text" | "image" | "note" | "file" | "link" | "code" | "drawing" | "comment";
+
+/**
+ * A colour for each kind of item, so the map reads like the board: notes,
+ * pictures, documents and drawings each stand out from the text around
+ * them.  Chosen to hold up on a light board and a dark one; a frame is only
+ * outlined, as it is the ground the rest stands on.
+ */
+export const MINIMAP_COLORS: Readonly<Record<MinimapCategory, string>> = Object.freeze({
+	frame: "rgba(150, 150, 150, 0.7)",
+	sticky: "#f2c94c",
+	shape: "#6f8df0",
+	text: "#9aa0a8",
+	image: "#4fb477",
+	note: "#a47be2",
+	file: "#e0914f",
+	link: "#38b5c4",
+	code: "#5a74b8",
+	drawing: "#d06bb3",
+	comment: "#f0a830",
+});
+
+const IMAGE_EXTENSIONS = new Set(["png", "jpg", "jpeg", "gif", "webp", "svg", "bmp", "avif"]);
+
+/**
+ * The kind of item a node is on the map.  `item` is what the plugin knows of
+ * the node, when it knows anything: its family and the item the tools made.
+ */
+export function minimapCategory(
+	nodeType: unknown,
+	file: unknown,
+	item?: {
+		readonly kind?: string;
+		readonly localItem?: string;
+		readonly structured?: { readonly comment?: unknown; readonly preview?: unknown; readonly embed?: unknown; readonly document?: unknown };
+	},
+): MinimapCategory {
+	if (nodeType === "group" || item?.kind === "frame" || item?.kind === "group") return "frame";
+	if (item?.localItem === "drawing" || item?.localItem === "line") return "drawing";
+	if (item?.structured?.comment !== undefined) return "comment";
+	if (item?.kind === "sticky") return "sticky";
+	if (item?.kind === "code") return "code";
+	if (item?.structured?.preview !== undefined || item?.structured?.embed !== undefined || nodeType === "link") return "link";
+	if (nodeType === "file") {
+		const extension = typeof file === "string" ? file.split(".").pop()?.toLowerCase() ?? "" : "";
+		return IMAGE_EXTENSIONS.has(extension) ? "image" : extension === "md" || extension === "canvas" ? "note" : "file";
+	}
+	if (item?.kind === "media") return "image";
+	if (item?.structured?.document !== undefined) return "file";
+	if (item?.kind === "shape") return "shape";
+	return "text";
+}
