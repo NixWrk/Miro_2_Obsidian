@@ -2,8 +2,24 @@ import { describe, expect, it } from "vitest";
 
 import {
   distanceToStroke, eraseFromStroke, pointInLasso, recogniseStroke, simplifyPoints, strokeBounds, strokeHitsPoint,
-  strokeHitsSegment,
+  snapAngle, strokeHitsSegment,
 } from "../src/drawing";
+
+describe("snapAngle", () => {
+  it("makes a nearly level, upright or diagonal line exactly so, keeping its length", () => {
+    const level = snapAngle({ x: 0, y: 0 }, { x: 100, y: 5 });
+    expect(level.y).toBeCloseTo(0);
+    expect(level.x).toBeCloseTo(Math.hypot(100, 5));
+    const diagonal = snapAngle({ x: 10, y: 10 }, { x: 110, y: 113 });
+    expect(diagonal.x - 10).toBeCloseTo(diagonal.y - 10);
+    expect(snapAngle({ x: 0, y: 0 }, { x: 2, y: -80 }).x).toBeCloseTo(0);
+  });
+
+  it("leaves a line at any other angle, and a point, as they are", () => {
+    expect(snapAngle({ x: 0, y: 0 }, { x: 100, y: 30 })).toEqual({ x: 100, y: 30 });
+    expect(snapAngle({ x: 5, y: 5 }, { x: 5, y: 5 })).toEqual({ x: 5, y: 5 });
+  });
+});
 
 describe("simplifyPoints", () => {
   it("keeps only the two ends when every interior point sits within the tolerance of the line between them", () => {

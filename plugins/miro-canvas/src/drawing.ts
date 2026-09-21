@@ -19,6 +19,24 @@ export interface StrokeBox {
   readonly height: number;
 }
 
+/** How far off level, upright or diagonal a straight line may be and still snap to it. */
+const SNAP_DEGREES = 4;
+
+/**
+ * The end of a straight line drawn from `from` towards `to`: a line nearly
+ * level, upright or at 45 degrees is made exactly so, keeping its length.
+ */
+export function snapAngle(from: StrokePoint, to: StrokePoint): StrokePoint {
+  const dx = to.x - from.x, dy = to.y - from.y;
+  const length = Math.hypot(dx, dy);
+  if (length === 0) return to;
+  const angle = Math.atan2(dy, dx);
+  const step = Math.PI / 4;
+  const snapped = Math.round(angle / step) * step;
+  if (Math.abs(angle - snapped) > (SNAP_DEGREES * Math.PI) / 180) return to;
+  return { x: from.x + Math.cos(snapped) * length, y: from.y + Math.sin(snapped) * length };
+}
+
 /**
  * The same line with the points that say nothing left out.
  *

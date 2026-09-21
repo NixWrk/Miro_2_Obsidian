@@ -103,7 +103,7 @@ import { CommentThreadCard } from "./comment-thread";
 import { QUICK_TOOL_KEYS, QuickTools, isDrawingTool, type QuickTool } from "./quick-tools";
 import { LOCAL_ITEM_SIZES, MAX_STROKE_POINTS, TABLE_TEMPLATE, type LocalItem } from "./local-items";
 import {
-	eraseFromStroke, pointInLasso, recogniseStroke, simplifyPoints, strokeBounds, strokeHitsPoint, strokeHitsSegment,
+	eraseFromStroke, pointInLasso, recogniseStroke, simplifyPoints, snapAngle, strokeBounds, strokeHitsPoint, strokeHitsSegment,
 	type StrokePoint,
 } from "./drawing";
 import {
@@ -2150,8 +2150,26 @@ export class M1CanvasSession {
 		const origin = from === undefined ? start : this.viewportPoint(from.board) ?? start;
 		// The preview grows by the points added, not redrawn from the start.
 		const shown: string[] = [];
-		const draw = (point: { readonly x: number; readonly y: number }): void => {
+		// With Shift held a pen draws straight: from the point the line had
+		// reached when Shift went down to the pointer.  Letting go carries on
+		// freehand from the end of the straight part.
+		let straightFrom: number | undefined;
+		const draw = (point: { readonly x: number; readonly y: number }, straight = false): void => {
 			if (drawingTool) {
+				if (straight && (tool === "pen" || tool === "highlighter") && this.penPoints.length > 0) {
+					straightFrom ??= this.penPoints.length - 1;
+					const anchor = shown[straightFrom]!.split(",").map(Number) as [number, number];
+					const end = snapAngle({ x: anchor[0] + rootRect.left, y: anchor[1] + rootRect.top }, point);
+					const board = this.boardPoint(end);
+					if (board === undefined) return;
+					this.penPoints.length = straightFrom + 1;
+					shown.length = straightFrom + 1;
+					this.penPoints.push(board);
+					shown.push(`${end.x - rootRect.left},${end.y - rootRect.top}`);
+					line?.setAttribute("points", shown.join(" "));
+					return;
+				}
+				straightFrom = undefined;
 				const board = this.boardPoint(point);
 				if (board === undefined) return;
 				const previous = this.penPoints[this.penPoints.length - 1];
@@ -2190,7 +2208,7 @@ export class M1CanvasSession {
 				// A stylus reports how hard it is pressed; a mouse always says 0.5.
 				if (drawing && point.pressure > 0) this.penPressures.push(point.pressure);
 			}
-			draw({ x: point.clientX, y: point.clientY });
+			draw({ x: point.clientX, y: point.clientY }, point.shiftKey === true);
 		};
 		const up = (released: Event): void => {
 			const pointer = released as PointerEvent;
