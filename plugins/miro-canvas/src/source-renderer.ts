@@ -673,7 +673,10 @@ function applyNodeCss(
       patchStyle(content, property, value, patches);
     } else if (BOX_CSS.has(property)) {
       if (layer !== undefined) {
-        if (descriptor.kind !== "shape" || property === "opacity") setOwnedElementStyle(layer, property, value);
+        // A see-through fill is the node's own, painted once under the
+        // layer; painting it here too would double it.
+        const seeThrough = property === "background-color" && /^#[0-9a-f]{6}(?!ff)[0-9a-f]{2}$/iu.test(value);
+        if ((descriptor.kind !== "shape" || property === "opacity") && !seeThrough) setOwnedElementStyle(layer, property, value);
       }
       else patchStyle(shell, property, value, patches);
     }

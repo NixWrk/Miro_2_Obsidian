@@ -122,7 +122,7 @@ import {
 } from "./connector-endpoints";
 import { resolveAnchor, type AnchorGeometry, type CanvasAnchor } from "./anchors";
 import { shapeOutline } from "./shape-geometry";
-import { MIRO_STICKY_COLORS } from "./miro-palette";
+import { FRAME_COLORS, MIRO_STICKY_COLORS } from "./miro-palette";
 
 export interface M1SessionOptions {
 	readonly document?: Document;
@@ -157,6 +157,9 @@ type UnknownRecord = Record<string, unknown>;
 const STICKY_PALETTE: readonly PaletteColor[] = Object.freeze(MIRO_STICKY_COLORS.map((entry) => Object.freeze({
 	id: `miro-sticky-${entry.token}`, label: entry.label, color: entry.color, source: "miro" as const,
 })));
+const FRAME_PALETTE: readonly PaletteColor[] = Object.freeze(FRAME_COLORS.map((entry) => Object.freeze({
+	id: `miro-${entry.token}`, label: entry.label, color: entry.color, source: "miro" as const,
+})));
 const LOCAL_COMMENT_AUTHOR = Object.freeze({ name: "Local user" });
 /** Miro's highlighter is a wider, see-through pen. */
 const HIGHLIGHTER_OPACITY = 0.4;
@@ -165,6 +168,11 @@ const HIGHLIGHTER_SCALE = 3;
 const STYLUS_HOLD_MS = 1_500;
 const MIN_PRESSURE_SCALE = 0.5;
 const MAX_PRESSURE_SCALE = 1.6;
+
+/** Whether a colour lets what lies under it show: a hex colour with less than full alpha. */
+function seeThrough(color: unknown): boolean {
+	return typeof color === "string" && /^#[0-9a-f]{6}[0-9a-f]{2}$/iu.test(color) && !/ff$/iu.test(color);
+}
 
 /** The native side a connector end sits on, from where its anchor lies on the node. */
 function nativeSideOf(anchor: CanvasAnchor | undefined, fallback: ConnectorSide): ConnectorSide {
@@ -3185,6 +3193,8 @@ export class M1CanvasSession {
 			palette: this.appearance.settings.palette,
 			// A note is filled from Miro's own sticky colours, as Miro offers them.
 			...(kinds.length > 0 && kinds.every((kind) => kind === "sticky") ? { fillPalette: STICKY_PALETTE } : {}),
+			// A frame takes quieter, see-through fills, so its items stay the thing seen.
+			...(kinds.length > 0 && kinds.every((kind) => kind === "frame") ? { fillPalette: FRAME_PALETTE } : {}),
 			recentColors: this.appearance.settings.recentColors,
 			...presentation.style,
 			...(placement === undefined ? {} : { placement }),
@@ -3725,6 +3735,7 @@ export class M1CanvasSession {
 		typography: TypographySettings | undefined,
 		colors: ColorSettings | undefined,
 		isEdge: boolean,
+		inner = false,
 	): void {
 		if (typography === undefined && colors === undefined) {
 			return;
@@ -3763,7 +3774,12 @@ export class M1CanvasSession {
 				}
 			} else {
 				if (colors.text !== undefined) this.setAppearanceStyle(element, "color", colorToCss(colors.text));
-				if (colors.fill !== undefined) this.setAppearanceStyle(element, "background-color", colorToCss(colors.fill));
+				// A fill that lets the board show through is painted once, on
+				// the node itself; painted on every surface it would thicken with
+				// each layer, as a frame's quiet fills did.
+				if (colors.fill !== undefined) {
+					this.setAppearanceStyle(element, "background-color", inner && seeThrough(colors.fill) ? "transparent" : colorToCss(colors.fill));
+				}
 				if (colors.border !== undefined) this.setAppearanceStyle(element, "border-color", colorToCss(colors.border));
 			}
 		}
@@ -3826,7 +3842,7 @@ export class M1CanvasSession {
 				// container that covers the outer node, and it carries explicit
 				// font rules there too.  Decorating only the shell is therefore
 				// invisible; every painted surface gets the same values.
-				this.applyElementAppearance(content, override?.typography, override?.colors, false);
+				this.applyElementAppearance(content, override?.typography, override?.colors, false, true);
 			}
 		}
 		for (const edge of this.scene.edges) {

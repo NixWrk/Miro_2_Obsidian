@@ -238,7 +238,8 @@ function makeRange(document: Document, title: string, min: number, max: number):
 function normalizedHex(value: unknown): string | undefined {
   if (typeof value !== "string") return undefined;
   const text = value.trim().toLowerCase();
-  if (/^#[0-9a-f]{6}$/u.test(text)) return text;
+  // A frame's fills see through: their last two digits are how much.
+  if (/^#[0-9a-f]{6}([0-9a-f]{2})?$/u.test(text)) return text;
   if (/^#[0-9a-f]{3}$/u.test(text)) return `#${text[1]!}${text[1]!}${text[2]!}${text[2]!}${text[3]!}${text[3]!}`;
   return undefined;
 }
@@ -869,7 +870,8 @@ export class SelectionToolbar {
       slotRefs.reset.setAttribute("aria-pressed", state.colors[slot] === undefined ? "true" : "false");
       slotRefs.clear.setAttribute("aria-pressed", state.colors[slot] === null ? "true" : "false");
       slotRefs.popover.button.setAttribute("data-color-origin", state.colors[slot] === undefined ? "obsidian" : "board");
-      slotRefs.input.value = color ?? "#000000";
+      // The colour picker knows no transparency: it shows the colour itself.
+      slotRefs.input.value = color?.slice(0, 7) ?? "#000000";
       slotRefs.popover.button.setAttribute("data-color-unset", color === undefined ? "true" : "false");
       slotRefs.popover.button.style.setProperty?.("--miro-canvas-swatch", color ?? "transparent");
       const palette = slot === "fill" ? state.fillPalette ?? state.palette : state.palette;

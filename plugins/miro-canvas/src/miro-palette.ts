@@ -33,6 +33,26 @@ export const MIRO_STICKY_COLORS: readonly MiroColor[] = Object.freeze([
   { token: "white", label: "White", color: "#ffffff" },
 ].map((entry) => Object.freeze(entry)));
 
+/**
+ * Fills for a frame.  A frame is the ground its items stand on, so it takes
+ * a quieter colour than they do: a muted tone, a fifth opaque, which tints
+ * a light board and a dark one alike without drowning what lies on it.
+ */
+export const FRAME_COLORS: readonly MiroColor[] = Object.freeze([
+  { token: "frame_gray", label: "Gray", color: "#8f959e38" },
+  { token: "frame_red", label: "Red", color: "#e5737338" },
+  { token: "frame_orange", label: "Orange", color: "#f0a35e38" },
+  { token: "frame_yellow", label: "Yellow", color: "#e6c84f38" },
+  { token: "frame_lime", label: "Lime", color: "#a3c96238" },
+  { token: "frame_green", label: "Green", color: "#6cbf8f38" },
+  { token: "frame_teal", label: "Teal", color: "#5fb8b038" },
+  { token: "frame_cyan", label: "Cyan", color: "#62b3d938" },
+  { token: "frame_blue", label: "Blue", color: "#7c9ce638" },
+  { token: "frame_violet", label: "Violet", color: "#a58be038" },
+  { token: "frame_pink", label: "Pink", color: "#e08fbd38" },
+  { token: "frame_brown", label: "Brown", color: "#b3947938" },
+].map((entry) => Object.freeze(entry)));
+
 const STICKY_BY_TOKEN = new Map(MIRO_STICKY_COLORS.map((entry) => [entry.token, entry.color] as const));
 
 /** The fill Miro shows for a named sticky colour; "grey" is read as "gray". */
