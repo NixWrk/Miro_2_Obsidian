@@ -74,7 +74,7 @@ import {
 } from "./minimap-model";
 import { MetadataWriter, type MetadataWriteResult } from "./metadata-writer";
 import { PLUGIN_ROOT_KEYS, parseMiroCanvasMetadata, type MiroCanvasMetadata } from "./metadata";
-import { DEFAULT_SETTINGS, panDelta, type MiroCanvasSettings, type PanDirection } from "./settings";
+import { DEFAULT_SETTINGS, commentAuthorName, obsidianAccountName, panDelta, type MiroCanvasSettings, type PanDirection } from "./settings";
 import {
 	DEFAULT_MAX_ZOOM,
 	DEFAULT_MIN_ZOOM,
@@ -101,7 +101,7 @@ import {
 } from "./source-model";
 import { CommentMarkers } from "./comment-markers";
 import { addLocalComment, addReply, listCommentThreads, setCommentResolved, type CommentOrigin, type CommentMutationResult } from "./local-comments";
-import { CommentThreadCard } from "./comment-thread";
+import { CommentThreadCard, threadMessages } from "./comment-thread";
 import { QUICK_TOOL_KEYS, QuickTools, isDrawingTool, type QuickTool } from "./quick-tools";
 import { LOCAL_ITEM_SIZES, MAX_LINE_POINTS, MAX_STROKE_POINTS, TABLE_TEMPLATE, type LocalItem, type LocalLine } from "./local-items";
 import {
@@ -167,7 +167,6 @@ const STICKY_PALETTE: readonly PaletteColor[] = Object.freeze(MIRO_STICKY_COLORS
 const FRAME_PALETTE: readonly PaletteColor[] = Object.freeze(FRAME_COLORS.map((entry) => Object.freeze({
 	id: `miro-${entry.token}`, label: entry.label, color: entry.color, source: "miro" as const,
 })));
-const LOCAL_COMMENT_AUTHOR = Object.freeze({ name: "Local user" });
 /** Miro's highlighter is a wider, see-through pen. */
 const HIGHLIGHTER_OPACITY = 0.4;
 const HIGHLIGHTER_SCALE = 3;
@@ -1935,6 +1934,29 @@ export class M1CanvasSession {
 		this.retargetFollow();
 	}
 
+	/**
+	 * Who comments written here are signed by: the name in the settings, or
+	 * the Obsidian account signed in on this device, or "Local user".
+	 */
+	public commentAuthor(): { readonly name: string } {
+		let storage: Storage | undefined;
+		try {
+			storage = ownerDocument(this.root)?.defaultView?.localStorage;
+		} catch {
+			storage = undefined;
+		}
+		return { name: commentAuthorName(this.settings, obsidianAccountName(storage)) };
+	}
+
+	/** Everyone who has written a comment on this board, and whoever writes here. */
+	public commentAuthors(): readonly string[] {
+		const names = new Set<string>([this.commentAuthor().name]);
+		for (const thread of this.commentThreads()) {
+			for (const message of threadMessages(thread)) if (message.author.trim() !== "") names.add(message.author.trim());
+		}
+		return [...names];
+	}
+
 	private commentThreads(): ReturnType<typeof listCommentThreads> {
 		const document = this.currentRawDocument;
 		let cache = this.commentThreadCache;
@@ -1975,7 +1997,7 @@ export class M1CanvasSession {
 		if (this.root === undefined || document === undefined) return undefined;
 		if (this.commentCard === undefined) {
 			const card = new CommentThreadCard(document, {
-				onReply: (id, text) => this.mutateComment("reply-comment", (draft) => addReply(draft, id, text, { author: LOCAL_COMMENT_AUTHOR })),
+				onReply: (id, text) => this.mutateComment("reply-comment", (draft) => addReply(draft, id, text, { author: this.commentAuthor() })),
 				onResolve: (id, resolved) => this.mutateComment("resolve-comment", (draft) => setCommentResolved(draft, id, resolved)),
 				onOpenPanel: (id, from) => {
 					this.closeCommentThread();
@@ -3003,7 +3025,7 @@ export class M1CanvasSession {
 		const anchor = this.commentDraft;
 		let createdId: string | undefined;
 		this.mutateComment("add-comment", (draft) => {
-			const result = addLocalComment(draft, { text, ...(anchor === undefined ? {} : { anchor }) }, { author: LOCAL_COMMENT_AUTHOR });
+			const result = addLocalComment(draft, { text, ...(anchor === undefined ? {} : { anchor }) }, { author: this.commentAuthor() });
 			createdId = result.comment?.id;
 			return result;
 		});

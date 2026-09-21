@@ -37,6 +37,10 @@ export interface MiroCanvasSettings {
    * does not come back.
    */
   readonly developerDiagnostics: boolean;
+  /** The name comments written here are signed with; empty takes the Obsidian account's name. */
+  readonly commentAuthor: string;
+  /** The colour each comment author's pins and avatars take, by name, where one was chosen. */
+  readonly commentAuthorColors: Readonly<Record<string, string>>;
 }
 
 interface NumberBound {
@@ -74,7 +78,47 @@ export const DEFAULT_SETTINGS: MiroCanvasSettings = Object.freeze({
   minimapVisible: true,
   selectionToolbarEnabled: true,
   developerDiagnostics: false,
+  commentAuthor: "",
+  commentAuthorColors: Object.freeze({}),
 });
+
+/** The longest name a comment is signed with, and the most authors given colours. */
+const MAX_AUTHOR_NAME = 64;
+const MAX_AUTHOR_COLORS = 500;
+const HEX_COLOR = /^#[0-9a-f]{6}$/iu;
+/** The name a comment is signed with when nothing better is known. */
+export const DEFAULT_COMMENT_AUTHOR = "Local user";
+
+/**
+ * The name of the Obsidian account signed in on this device, if any.
+ * Obsidian keeps the account in local storage together with its sign-in
+ * token; only the name is read, and nothing else leaves this function.
+ */
+export function obsidianAccountName(storage: { getItem(key: string): string | null } | undefined): string | undefined {
+  try {
+    const stored = storage?.getItem("obsidian-account");
+    if (typeof stored !== "string") return undefined;
+    const name = (JSON.parse(stored) as { name?: unknown } | null)?.name;
+    return typeof name === "string" && name.trim() !== "" ? name.trim().slice(0, MAX_AUTHOR_NAME) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Who comments written here are signed by: the name chosen, else the account's, else a plain "Local user". */
+export function commentAuthorName(settings: Pick<MiroCanvasSettings, "commentAuthor">, accountName?: string): string {
+  return settings.commentAuthor.trim() || accountName || DEFAULT_COMMENT_AUTHOR;
+}
+
+function readAuthorColors(value: unknown): Readonly<Record<string, string>> {
+  if (!isRecord(value)) return DEFAULT_SETTINGS.commentAuthorColors;
+  const colors: Record<string, string> = {};
+  for (const [name, color] of Object.entries(value).slice(0, MAX_AUTHOR_COLORS)) {
+    if (name.trim() === "" || name.length > MAX_AUTHOR_NAME || typeof color !== "string" || !HEX_COLOR.test(color)) continue;
+    colors[name] = color.toLowerCase();
+  }
+  return Object.freeze(colors);
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
@@ -120,6 +164,8 @@ export function normalizeSettings(value: unknown): MiroCanvasSettings {
     minimapVisible: readBoolean(value, "minimapVisible", DEFAULT_SETTINGS.minimapVisible),
     selectionToolbarEnabled: readBoolean(value, "selectionToolbarEnabled", DEFAULT_SETTINGS.selectionToolbarEnabled),
     developerDiagnostics: readBoolean(value, "developerDiagnostics", DEFAULT_SETTINGS.developerDiagnostics),
+    commentAuthor: typeof value.commentAuthor === "string" ? value.commentAuthor.trim().slice(0, MAX_AUTHOR_NAME) : DEFAULT_SETTINGS.commentAuthor,
+    commentAuthorColors: readAuthorColors(value.commentAuthorColors),
   });
 }
 

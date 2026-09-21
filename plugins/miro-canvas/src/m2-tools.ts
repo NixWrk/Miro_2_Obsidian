@@ -13,7 +13,6 @@ import { DocumentControls } from "./document-controls";
 import type { DocumentHost } from "./document-viewer";
 
 const IMAGE_EXTENSIONS = new Set(["png", "jpg", "jpeg", "gif", "webp", "bmp", "avif"]);
-const LOCAL_COMMENT_AUTHOR = Object.freeze({ name: "Local user" });
 /** Every picture the renderer can draw, once, under the picker's names. */
 const SHAPE_OPTIONS: readonly (readonly [string, string])[] = SHAPE_CATALOG.map((item) => [item.kind, item.name] as const);
 
@@ -303,13 +302,13 @@ export class M2CanvasTools {
       onAddComment: (text, anchor) => {
         const current = anchor ?? this.session.defaultCommentAnchor();
         this.mutate("add-comment", (draft) => addLocalComment(
-          draft, { text, ...(current ? { anchor: current } : {}) }, { author: LOCAL_COMMENT_AUTHOR },
+          draft, { text, ...(current ? { anchor: current } : {}) }, { author: this.session.commentAuthor() },
         ));
       },
       onEditComment: (id, text) => this.mutate("edit-comment", (draft) => editLocalComment(draft, id, text)),
       onDeleteComment: (id) => this.mutate("delete-comment", (draft) => deleteLocalComment(draft, id)),
       onReplyComment: (id, text) => this.mutate(
-        "reply-comment", (draft) => addReply(draft, id, text, { author: LOCAL_COMMENT_AUTHOR }),
+        "reply-comment", (draft) => addReply(draft, id, text, { author: this.session.commentAuthor() }),
       ),
       onResolveComment: (id, resolved) => this.mutate("resolve-comment", (draft) => setCommentResolved(draft, id, resolved)),
       onFilterChange: (scope) => { this.scope = scope; this.refresh(); },

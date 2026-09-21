@@ -49,8 +49,18 @@ export function authorInitial(name: string): string {
   return letter === undefined ? "?" : letter.toLocaleUpperCase();
 }
 
-/** A stable avatar colour per author. */
+/** The colours chosen for authors in the settings, which win over the ones made up for them. */
+let chosenColors: Readonly<Record<string, string>> = {};
+
+/** Colour authors as the settings say; anyone not named keeps a colour made up from the name. */
+export function setAuthorColors(colors: Readonly<Record<string, string>>): void {
+  chosenColors = colors;
+}
+
+/** A stable avatar colour per author: the one chosen for them, or one made up from the name. */
 export function authorColor(name: string): string {
+  const chosen = chosenColors[name];
+  if (chosen !== undefined) return chosen;
   let hash = 0;
   for (const char of name) hash = (hash * 31 + char.codePointAt(0)!) >>> 0;
   return AVATAR_COLORS[hash % AVATAR_COLORS.length]!;

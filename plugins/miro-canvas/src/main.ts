@@ -18,10 +18,12 @@ import {
   DEFAULT_SETTINGS,
   NAVIGATION_COMMANDS,
   normalizeSettings,
+  obsidianAccountName,
   type MiroCanvasSettings,
   type PanDirection,
 } from "./settings";
 import { MiroCanvasSettingTab } from "./settings-tab";
+import { setAuthorColors } from "./comment-thread";
 
 const NATIVE_CANVAS_VIEW_TYPE = "canvas";
 
@@ -64,9 +66,12 @@ export default class MiroCanvasPlugin extends Plugin {
     // A stored settings file is user-editable and may predate this release,
     // so it is normalized rather than trusted.
     this.canvasSettings = normalizeSettings(await this.loadData());
+    setAuthorColors(this.canvasSettings.commentAuthorColors);
     this.addSettingTab(new MiroCanvasSettingTab(this.app, this, {
       get settings(): MiroCanvasSettings { return self.canvasSettings; },
       saveSettings: (patch) => this.saveCanvasSettings(patch),
+      commentAuthors: () => this.m1Session?.commentAuthors() ?? [],
+      accountName: () => obsidianAccountName(window.localStorage),
     }));
     // Advanced Canvas is optional.  Its adapter fails closed, so this probe
     // cannot prevent the native Canvas shell from loading.
@@ -316,6 +321,7 @@ export default class MiroCanvasPlugin extends Plugin {
   /** Persist a settings change and rebuild the session so it takes effect. */
   public async saveCanvasSettings(patch: Partial<MiroCanvasSettings>): Promise<void> {
     this.canvasSettings = normalizeSettings({ ...this.canvasSettings, ...patch });
+    setAuthorColors(this.canvasSettings.commentAuthorColors);
     await this.saveData(this.canvasSettings);
     const leaf = this.app.workspace.activeLeaf;
     if (this.m1Session !== null && leaf !== null && leaf !== undefined) {

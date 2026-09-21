@@ -8,7 +8,9 @@
 
 import { PluginSettingTab, Setting, type App, type Plugin } from "obsidian";
 
+import { authorColor } from "./comment-thread";
 import {
+  DEFAULT_COMMENT_AUTHOR,
   SETTING_BOUNDS,
   WHEEL_ZOOM_MODIFIERS,
   type MiroCanvasSettings,
@@ -18,6 +20,10 @@ import {
 export interface SettingsTabHost {
   readonly settings: MiroCanvasSettings;
   readonly saveSettings: (patch: Partial<MiroCanvasSettings>) => Promise<void>;
+  /** Everyone who has written on the open board, for their colours. */
+  readonly commentAuthors?: () => readonly string[];
+  /** The Obsidian account's name, which signs comments when no name is set. */
+  readonly accountName?: () => string | undefined;
 }
 
 export class MiroCanvasSettingTab extends PluginSettingTab {
@@ -116,12 +122,52 @@ export class MiroCanvasSettingTab extends PluginSettingTab {
         .setValue(this.host.settings.selectionToolbarEnabled)
         .onChange((value) => void this.host.saveSettings({ selectionToolbarEnabled: value })));
 
+    this.comments(containerEl);
+
     new Setting(containerEl)
       .setName("Developer diagnostics")
       .setDesc("For developers: a warning badge in the corner dock lists what the plugin could not do as asked.")
       .addToggle((toggle) => toggle
         .setValue(this.host.settings.developerDiagnostics)
         .onChange((value) => void this.host.saveSettings({ developerDiagnostics: value })));
+  }
+
+  /** Who signs the comments written here, and the colour each author's pins wear. */
+  private comments(containerEl: HTMLElement): void {
+    new Setting(containerEl).setName("Comments").setHeading();
+    const account = this.host.accountName?.();
+    new Setting(containerEl)
+      .setName("Your name")
+      .setDesc(account === undefined
+        ? "Signs the comments you write. Empty signs them \"Local user\"; signed in to an Obsidian account, it takes the account's name."
+        : `Signs the comments you write. Empty uses your Obsidian account's name, ${account}.`)
+      .addText((text) => text
+        .setPlaceholder(account ?? DEFAULT_COMMENT_AUTHOR)
+        .setValue(this.host.settings.commentAuthor)
+        .onChange((value) => void this.host.saveSettings({ commentAuthor: value })));
+    const colors = this.host.settings.commentAuthorColors;
+    const authors = [...new Set([...(this.host.commentAuthors?.() ?? []), ...Object.keys(colors)])]
+      .sort((a, b) => a.localeCompare(b));
+    if (authors.length === 0) {
+      new Setting(containerEl).setName("Author colours").setDesc("Open a board with comments to choose the colour of each author's pins.");
+      return;
+    }
+    for (const author of authors) {
+      new Setting(containerEl)
+        .setName(author)
+        .setDesc(colors[author] === undefined ? "Pin and avatar colour, made up from the name." : "Pin and avatar colour, chosen here.")
+        .addColorPicker((picker) => picker
+          .setValue(colors[author] ?? authorColor(author))
+          .onChange((value) => void this.host.saveSettings({ commentAuthorColors: { ...this.host.settings.commentAuthorColors, [author]: value } })))
+        .addExtraButton((button) => button
+          .setIcon("rotate-ccw")
+          .setTooltip("Back to the colour made up from the name")
+          .setDisabled(colors[author] === undefined)
+          .onClick(() => {
+            const { [author]: _dropped, ...rest } = this.host.settings.commentAuthorColors;
+            void this.host.saveSettings({ commentAuthorColors: rest }).then(() => this.display());
+          }));
+    }
   }
 
   private slider(

@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
 
+import { authorColor, setAuthorColors } from "../src/comment-thread";
 import {
+  DEFAULT_COMMENT_AUTHOR,
   DEFAULT_SETTINGS,
+  commentAuthorName,
+  obsidianAccountName,
   NAVIGATION_COMMANDS,
   SETTING_BOUNDS,
   normalizeSettings,
@@ -14,6 +18,27 @@ describe("plugin settings", () => {
     for (const value of [undefined, null, 0, "settings", [], () => undefined]) {
       expect(normalizeSettings(value)).toEqual(DEFAULT_SETTINGS);
     }
+  });
+
+  it("signs comments with the chosen name, else the Obsidian account's, else Local user", () => {
+    const storage = (value: string | null) => ({ getItem: (key: string) => (key === "obsidian-account" ? value : null) });
+    const account = obsidianAccountName(storage(JSON.stringify({ name: " Anna ", email: "a@b.c", token: "secret" })));
+    expect(account).toBe("Anna");
+    expect(obsidianAccountName(storage(null))).toBeUndefined();
+    expect(obsidianAccountName(storage("not json"))).toBeUndefined();
+    expect(commentAuthorName(normalizeSettings({ commentAuthor: "  Nikolai " }), account)).toBe("Nikolai");
+    expect(commentAuthorName(DEFAULT_SETTINGS, account)).toBe("Anna");
+    expect(commentAuthorName(DEFAULT_SETTINGS)).toBe(DEFAULT_COMMENT_AUTHOR);
+  });
+
+  it("keeps a colour for each author only when it is one", () => {
+    const stored = normalizeSettings({ commentAuthorColors: { Anna: "#AA3300", Bob: "red", "": "#000000" } });
+    expect(stored.commentAuthorColors).toEqual({ Anna: "#aa3300" });
+    const madeUp = authorColor("Anna");
+    setAuthorColors(stored.commentAuthorColors);
+    expect(authorColor("Anna")).toBe("#aa3300");
+    setAuthorColors({});
+    expect(authorColor("Anna")).toBe(madeUp);
   });
 
   it("keeps the developer diagnostics hidden unless they were asked for by name", () => {
