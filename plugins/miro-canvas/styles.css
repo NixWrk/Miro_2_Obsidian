@@ -1005,11 +1005,6 @@
   height: var(--icon-m, 18px);
 }
 
-/* With a tool armed the board is a place to draw it, not to select on. */
-.miro-canvas-root[data-miro-canvas-tool]:not([data-miro-canvas-tool="select"]) .canvas {
-  cursor: crosshair;
-}
-
 /* Room for a finger, and for the smaller screens of a tablet or a phone:
    bigger controls where there is no mouse, and the bars out of each other's
    way where the board is narrow. */
@@ -1084,27 +1079,71 @@
   display: none;
 }
 
-/* The pen's own row of colours and thicknesses. */
-.miro-canvas-tools .miro-canvas-tools__pen {
-  gap: 10px;
+/* The pen's own row, above the tool bar while one of its tools is armed:
+   the tools, the colours and a slider for the size. */
+.miro-canvas-tools .miro-canvas-tools__drawing {
+  gap: 2px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--miro-canvas-toolbar-border);
 }
 
 .miro-canvas-tools__swatches,
-.miro-canvas-tools__widths {
-  gap: 4px;
+.miro-canvas-tools__size {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: 3px;
+  padding-left: 5px;
+  border-left: 1px solid var(--miro-canvas-toolbar-border);
 }
 
-.miro-canvas-tools .miro-canvas-tools__width {
-  display: grid;
-  place-items: center;
-  width: 32px;
+.miro-canvas-tools__size {
+  gap: 8px;
 }
 
-.miro-canvas-tools__dot {
-  width: var(--miro-canvas-pen-width, 4px);
-  height: var(--miro-canvas-pen-width, 4px);
-  background: currentColor;
+.miro-canvas-tools__size .miro-canvas-toolbar__range {
+  width: 120px;
+  min-width: 80px;
+}
+
+.miro-canvas-tools__size .miro-canvas-toolbar__value {
+  min-width: 3ch;
+}
+
+/* Where a pen or an eraser will act, in place of the pointer: a dot the
+   width of the line in its colour, or a ring the reach of the eraser. */
+.miro-canvas-brush {
+  position: absolute;
+  z-index: 100;
+  box-sizing: border-box;
   border-radius: 50%;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+
+.miro-canvas-brush[hidden] {
+  display: none;
+}
+
+.miro-canvas-brush[data-kind="pen"],
+.miro-canvas-brush[data-kind="highlighter"] {
+  background: var(--miro-canvas-brush-color, var(--text-normal));
+  box-shadow: 0 0 0 1px var(--background-primary);
+}
+
+.miro-canvas-brush[data-kind="highlighter"] {
+  opacity: 0.45;
+}
+
+.miro-canvas-brush[data-kind="eraser"] {
+  background: rgb(127 127 127 / 12%);
+  border: 1.5px solid var(--text-normal);
+  box-shadow: 0 0 0 1px var(--background-primary);
+}
+
+/* A drawing the eraser has caught fades until it goes. */
+.miro-canvas-erasing {
+  opacity: 0.25;
 }
 
 /* The pen button wears the colour it will draw with. */
@@ -1141,14 +1180,20 @@
 }
 
 .miro-canvas-tool-ghost--comment,
-.miro-canvas-tool-ghost--link,
-.miro-canvas-tool-ghost--eraser {
+.miro-canvas-tool-ghost--link {
   display: none;
 }
 
-/* The line being drawn, over the board until it becomes an item. */
-.miro-canvas-tool-ghost--pen,
-.miro-canvas-tool-ghost--highlighter {
+/* The line being drawn, the ring a lasso closes and the trail an eraser
+   wipes, over the board until the gesture ends. */
+.miro-canvas-tool-ghost:is(
+  .miro-canvas-tool-ghost--pen,
+  .miro-canvas-tool-ghost--highlighter,
+  .miro-canvas-tool-ghost--smart,
+  .miro-canvas-tool-ghost--lasso,
+  .miro-canvas-tool-ghost--eraser,
+  .miro-canvas-tool-ghost--erase-part
+) {
   inset: 0;
   width: 100%;
   height: 100%;
@@ -1157,11 +1202,43 @@
   border-radius: 0;
 }
 
-/* Drawing is a pen gesture, not a place to press. */
-.miro-canvas-root[data-miro-canvas-tool="pen"] .canvas,
-.miro-canvas-root[data-miro-canvas-tool="highlighter"] .canvas,
-.miro-canvas-root[data-miro-canvas-tool="eraser"] .canvas {
-  cursor: crosshair;
+.miro-canvas-tool-ghost--lasso .miro-canvas-tool-ghost__line {
+  fill: color-mix(in srgb, var(--interactive-accent) 10%, transparent);
+  stroke: var(--interactive-accent);
+  stroke-width: 1.5;
+  stroke-dasharray: 6 4;
+}
+
+.miro-canvas-tool-ghost:is(.miro-canvas-tool-ghost--eraser, .miro-canvas-tool-ghost--erase-part) .miro-canvas-tool-ghost__line {
+  fill: none;
+  stroke: rgb(127 127 127 / 22%);
+}
+
+/* The pointer says what a press will do: a circle for a pen or an eraser,
+   a cross for anything a press places.  Touch drawing needs the browser to
+   leave the gesture alone. */
+.miro-canvas-root:is(
+  [data-miro-canvas-tool="pen"],
+  [data-miro-canvas-tool="highlighter"],
+  [data-miro-canvas-tool="smart"],
+  [data-miro-canvas-tool="eraser"],
+  [data-miro-canvas-tool="erase-part"]
+) :is(.canvas, .canvas *) {
+  cursor: none !important;
+}
+
+.miro-canvas-root[data-miro-canvas-tool]:not(
+  [data-miro-canvas-tool="select"],
+  [data-miro-canvas-tool="pen"],
+  [data-miro-canvas-tool="highlighter"],
+  [data-miro-canvas-tool="smart"],
+  [data-miro-canvas-tool="eraser"],
+  [data-miro-canvas-tool="erase-part"]
+) :is(.canvas, .canvas *) {
+  cursor: crosshair !important;
+}
+
+.miro-canvas-root[data-miro-canvas-tool]:not([data-miro-canvas-tool="select"]) .canvas {
   touch-action: none;
 }
 

@@ -99,7 +99,7 @@ import {
 import { CommentMarkers } from "./comment-markers";
 import { addLocalComment, addReply, listCommentThreads, setCommentResolved, type CommentOrigin, type CommentMutationResult } from "./local-comments";
 import { CommentThreadCard } from "./comment-thread";
-import { QUICK_TOOL_KEYS, QuickTools, type QuickTool } from "./quick-tools";
+import { QUICK_TOOL_KEYS, QuickTools, isDrawingTool, type QuickTool } from "./quick-tools";
 import { LOCAL_ITEM_SIZES, TABLE_TEMPLATE, type LocalItem } from "./local-items";
 import {
 	eraseFromStroke, pointInLasso, recogniseStroke, simplifyPoints, strokeBounds, strokeHitsPoint, type StrokePoint,
@@ -156,8 +156,6 @@ const LOCAL_COMMENT_AUTHOR = Object.freeze({ name: "Local user" });
 /** Miro's highlighter is a wider, see-through pen. */
 const HIGHLIGHTER_OPACITY = 0.4;
 const HIGHLIGHTER_SCALE = 3;
-/** How far from a stroke the eraser still takes it, in screen pixels. */
-const ERASER_REACH = 8;
 /** How long after a stylus a touch is still taken for a palm. */
 const STYLUS_HOLD_MS = 1_500;
 const MIN_PRESSURE_SCALE = 0.5;
@@ -669,6 +667,10 @@ export class M1CanvasSession {
 	/** The pen writes in the board's own ink until a colour is picked. */
 	private penColor: string | undefined;
 	private penWidth = 5;
+	/** How wide the erasers are, in screen pixels. */
+	private eraserSize = 32;
+	/** The circle that shows where a pen or an eraser will act. */
+	private brush: HTMLElement | undefined;
 	/** The board points a pen gesture has passed through, and what it erases. */
 	private penPoints: StrokePoint[] = [];
 	private penPressures: number[] = [];
@@ -777,6 +779,7 @@ export class M1CanvasSession {
 			onPen: (settings) => {
 				if (settings.color !== undefined) this.penColor = settings.color;
 				if (settings.width !== undefined) this.penWidth = settings.width;
+				if (settings.eraserSize !== undefined) this.eraserSize = settings.eraserSize;
 				this.updateQuickTools();
 			},
 		}, {
@@ -1977,23 +1980,73 @@ export class M1CanvasSession {
 		}
 		const down = (event: Event): void => this.startToolGesture(event as PointerEvent);
 		const key = (event: Event): void => this.handleToolKey(event as KeyboardEvent);
+		const hover = (event: Event): void => this.moveBrush(event as PointerEvent);
+		const leave = (): void => this.hideBrush();
 		const document = root.ownerDocument;
 		root.addEventListener("pointerdown", down, true);
+		root.addEventListener("pointermove", hover, { passive: true });
+		root.addEventListener("pointerleave", leave);
 		document.addEventListener("keydown", key);
 		this.disposers.push(() => {
 			root.removeEventListener("pointerdown", down, true);
+			root.removeEventListener("pointermove", hover);
+			root.removeEventListener("pointerleave", leave);
 			document.removeEventListener("keydown", key);
 			this.toolGesture?.end();
+			this.brush?.remove();
+			this.brush = undefined;
 			tools.dispose();
 		});
 		this.updateQuickTools();
 	}
 
+	/**
+	 * The circle a pen or an eraser acts with, drawn where the pointer is, at
+	 * the size it will act: the width of the line, or the eraser's reach.  It
+	 * takes the place of the pointer while one of those tools is armed.
+	 */
+	private moveBrush(event: PointerEvent): void {
+		const root = this.root;
+		const tool = this.armedTool;
+		const target = event.target as Element | null;
+		if (root === undefined || !isDrawingTool(tool) || event.pointerType === "touch" || target?.closest?.(PANEL_SELECTOR) != null) {
+			this.hideBrush();
+			return;
+		}
+		if (this.brush === undefined) {
+			const brush = root.ownerDocument.createElement("div");
+			brush.className = "miro-canvas-brush";
+			brush.setAttribute("aria-hidden", "true");
+			root.appendChild(brush);
+			this.brush = brush;
+		}
+		const brush = this.brush;
+		const erasing = tool === "eraser" || tool === "erase-part";
+		const zoom = finite(readRuntime(this.viewport.getViewport(), "zoom")) ?? 1;
+		const size = erasing
+			? this.eraserSize
+			: Math.max(4, this.penWidth * zoom * (tool === "highlighter" ? HIGHLIGHTER_SCALE : 1));
+		const rect = root.getBoundingClientRect();
+		brush.hidden = false;
+		brush.setAttribute("data-kind", erasing ? "eraser" : tool === "highlighter" ? "highlighter" : "pen");
+		brush.style.width = `${size}px`;
+		brush.style.height = `${size}px`;
+		brush.style.left = `${event.clientX - rect.left}px`;
+		brush.style.top = `${event.clientY - rect.top}px`;
+		brush.style.setProperty("--miro-canvas-brush-color", this.penInk());
+	}
+
+	private hideBrush(): void {
+		if (this.brush !== undefined) this.brush.hidden = true;
+	}
+
 	private updateQuickTools(): void {
 		const editable = this.appearance.settings.reviewMode !== true;
 		if (!editable && this.armedTool !== "select") this.armedTool = "select";
+		if (!isDrawingTool(this.armedTool)) this.hideBrush();
 		this.quickTools?.update({
-			editable, armed: this.armedTool, shape: this.toolShape, penColor: this.penInk(), penWidth: this.penWidth,
+			editable, armed: this.armedTool, shape: this.toolShape,
+			penColor: this.penInk(), penWidth: this.penWidth, eraserSize: this.eraserSize,
 		});
 		if (this.root !== undefined) writeAttribute(this.root, "data-miro-canvas-tool", this.armedTool);
 	}
@@ -2034,8 +2087,8 @@ export class M1CanvasSession {
 			this.stylusSeen = true;
 		}
 		if (tool === "select" || root === undefined || event.button !== 0 || this.toolGesture !== undefined) return;
-		const drawingTool = tool === "pen" || tool === "highlighter" || tool === "smart" || tool === "eraser"
-			|| tool === "erase-part" || tool === "lasso";
+		const drawingTool = isDrawingTool(tool) || tool === "lasso";
+		const erasing = tool === "eraser" || tool === "erase-part";
 		// A stylus rules the board it draws on: while one is in use a touch is a
 		// palm or a hand resting, and with a drawing tool armed a finger pans
 		// instead of drawing, as Miro's tablets behave.
@@ -2059,29 +2112,40 @@ export class M1CanvasSession {
 			from = { nodeId: landing.nodeId, anchor: landing.anchor, board: landing.board };
 		}
 		event.preventDefault();
-		event.stopPropagation();
+		// Native Canvas listens on this same element: stopping the event from
+		// travelling on is not enough, it must not reach the listeners here
+		// either, or the board starts its own selection box under the tool.
+		event.stopImmediatePropagation();
 		const document = root.ownerDocument;
 		const view = document.defaultView;
-		const ghost = drawing
+		const svg = drawing || erasing;
+		const ghost = svg
 			? document.createElementNS("http://www.w3.org/2000/svg", "svg") as unknown as HTMLElement
 			: document.createElement("div");
 		ghost.setAttribute("class", `miro-canvas-tool-ghost miro-canvas-tool-ghost--${tool}`);
-		const line = drawing ? document.createElementNS("http://www.w3.org/2000/svg", "polyline") : undefined;
+		// A lasso shows the ring it closes; an eraser the trail it wipes; a pen
+		// the line it will leave.
+		const line = svg ? document.createElementNS("http://www.w3.org/2000/svg", tool === "lasso" ? "polygon" : "polyline") : undefined;
+		const zoom = finite(readRuntime(this.viewport.getViewport(), "zoom")) ?? 1;
 		if (line !== undefined) {
-			line.setAttribute("fill", "none");
-			line.setAttribute("stroke", this.penInk());
+			line.setAttribute("class", "miro-canvas-tool-ghost__line");
 			line.setAttribute("stroke-linecap", "round");
 			line.setAttribute("stroke-linejoin", "round");
-			if (tool === "highlighter") line.setAttribute("stroke-opacity", String(HIGHLIGHTER_OPACITY));
-			if (tool === "lasso") {
-				line.setAttribute("stroke", "var(--interactive-accent)");
-				line.setAttribute("stroke-dasharray", "6 4");
+			if (drawing && tool !== "lasso") {
+				line.setAttribute("fill", "none");
+				line.setAttribute("stroke", this.penInk());
+				line.setAttribute("stroke-width", String(Math.max(1, this.penWidth * zoom * (tool === "highlighter" ? HIGHLIGHTER_SCALE : 1))));
+				if (tool === "highlighter") line.setAttribute("stroke-opacity", String(HIGHLIGHTER_OPACITY));
+				if (tool === "smart") line.setAttribute("stroke-dasharray", "4 4");
 			}
+			if (erasing) line.setAttribute("stroke-width", String(this.eraserSize));
 			ghost.appendChild(line);
 		}
 		root.appendChild(ghost);
 		const rootRect = root.getBoundingClientRect();
 		const origin = from === undefined ? start : this.viewportPoint(from.board) ?? start;
+		// The preview grows by the points added, not redrawn from the start.
+		const shown: string[] = [];
 		const draw = (point: { readonly x: number; readonly y: number }): void => {
 			if (drawingTool) {
 				const board = this.boardPoint(point);
@@ -2089,19 +2153,15 @@ export class M1CanvasSession {
 				const previous = this.penPoints[this.penPoints.length - 1];
 				if (previous !== undefined && Math.hypot(board.x - previous.x, board.y - previous.y) < 1) return;
 				this.penPoints.push(board);
-				if (tool === "eraser" || tool === "erase-part") {
-					for (const id of this.drawingsUnder(board)) this.erasing.add(id);
-					return;
+				shown.push(`${point.x - rootRect.left},${point.y - rootRect.top}`);
+				line?.setAttribute("points", shown.join(" "));
+				if (erasing) {
+					for (const id of this.drawingsUnder(board)) {
+						if (this.erasing.has(id)) continue;
+						this.erasing.add(id);
+						this.markErasing(id, true);
+					}
 				}
-				const zoom = finite(readRuntime(this.viewport.getViewport(), "zoom")) ?? 1;
-				const shown = tool === "lasso" ? 2 : this.penWidth * zoom * (tool === "highlighter" ? HIGHLIGHTER_SCALE : 1);
-				if (tool === "smart") line?.setAttribute("stroke-dasharray", "4 4");
-				line?.setAttribute("stroke-width", String(shown));
-				line?.setAttribute("points", this.penPoints
-					.map((item) => this.viewportPoint(item))
-					.filter((item): item is { readonly x: number; readonly y: number } => item !== undefined)
-					.map((item) => `${item.x - rootRect.left},${item.y - rootRect.top}`)
-					.join(" "));
 				return;
 			}
 			if (tool === "connector") {
@@ -2134,7 +2194,11 @@ export class M1CanvasSession {
 			end();
 			if (gesture !== undefined) this.finishToolGesture(gesture.tool, start, { x: pointer.clientX, y: pointer.clientY }, gesture.from);
 		};
-		const cancel = (): void => end();
+		const cancel = (): void => {
+			end();
+			this.penPoints = [];
+			this.clearErasing();
+		};
 		const end = (): void => {
 			view?.removeEventListener("pointermove", move, true);
 			view?.removeEventListener("pointerup", up, true);
@@ -2159,7 +2223,7 @@ export class M1CanvasSession {
 		this.swallowClickUntil = Date.now() + 400;
 		// A drawing tool stays armed for the next stroke, as in Miro; every
 		// other tool is used once and hands the board back to the select tool.
-		if (tool !== "pen" && tool !== "highlighter" && tool !== "eraser") this.armedTool = "select";
+		if (!isDrawingTool(tool)) this.armedTool = "select";
 		this.updateQuickTools();
 		const a = this.boardPoint(start);
 		const b = this.boardPoint(end);
@@ -2261,11 +2325,25 @@ export class M1CanvasSession {
 		return Math.min(Math.max(0.5 + median, MIN_PRESSURE_SCALE), MAX_PRESSURE_SCALE);
 	}
 
+	/** Dims a drawing the eraser has caught, so a person sees what will go. */
+	private markErasing(id: string, caught: boolean): void {
+		const node = (this.adapter.getNodes() ?? []).find((item) => readCanvasElementId(item) === id);
+		const element = readCanvasElementDom(node);
+		if (!isElement(element)) return;
+		if (caught) element.classList.add("miro-canvas-erasing");
+		else element.classList.remove("miro-canvas-erasing");
+	}
+
+	private clearErasing(): void {
+		for (const id of this.erasing) this.markErasing(id, false);
+		this.erasing.clear();
+	}
+
 	/** The drawings the eraser is over at a board point. */
 	private drawingsUnder(board: { readonly x: number; readonly y: number }): readonly string[] {
 		const { geometry, scene } = this.landingGeometry();
 		const zoom = finite(readRuntime(this.viewport.getViewport(), "zoom")) ?? 1;
-		const reach = ERASER_REACH / zoom;
+		const reach = this.eraserSize / 2 / zoom;
 		const found: string[] = [];
 		for (const [id, item] of scene.items) {
 			const stroke = item.structured?.stroke;
@@ -2386,7 +2464,7 @@ export class M1CanvasSession {
 	private erasePartOfDrawings(): void {
 		const ids = [...this.erasing];
 		const path = this.penPoints;
-		this.erasing.clear();
+		this.clearErasing();
 		this.penPoints = [];
 		if (ids.length === 0 || path.length === 0) return;
 		const { geometry, scene } = this.landingGeometry();
@@ -2402,7 +2480,7 @@ export class M1CanvasSession {
 			const scaleX = stroke.box.width / rect.width;
 			const scaleY = stroke.box.height / rect.height;
 			const local = path.flatMap((point) => [(point.x - rect.x) * scaleX, (point.y - rect.y) * scaleY]);
-			const reach = stroke.width / 2 + (ERASER_REACH / zoom) * Math.min(scaleX, scaleY);
+			const reach = stroke.width / 2 + (this.eraserSize / 2 / zoom) * Math.min(scaleX, scaleY);
 			const left = eraseFromStroke(stroke.points, stroke.breaks ?? [], local, reach);
 			if (left === undefined) {
 				gone.push(id);
@@ -2426,7 +2504,7 @@ export class M1CanvasSession {
 
 	private eraseDrawings(): void {
 		const ids = [...this.erasing];
-		this.erasing.clear();
+		this.clearErasing();
 		this.penPoints = [];
 		if (ids.length === 0) return;
 		this.readInteractionState();

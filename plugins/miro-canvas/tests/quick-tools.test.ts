@@ -124,7 +124,7 @@ type Call =
   | { readonly kind: "pen"; readonly settings: { readonly color?: string; readonly width?: number } };
 
 /** What the bar is told about the board when nothing in particular is set. */
-const STATE = { editable: true, armed: "select", shape: "rectangle", penColor: "#1a1a1a", penWidth: 5 } as const;
+const STATE = { editable: true, armed: "select", shape: "rectangle", penColor: "#1a1a1a", penWidth: 5, eraserSize: 32 } as const;
 
 function build(): { readonly tools: QuickTools; readonly root: FakeElement; readonly calls: Call[] } {
   const calls: Call[] = [];
