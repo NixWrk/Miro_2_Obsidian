@@ -16,6 +16,7 @@ import {
 } from "./appearance";
 import { normalizeAnchor } from "./anchors";
 import { readLocalItem } from "./local-items";
+import { isExportRecord } from "./export-pages";
 import type {
   AppearanceColor,
   PaletteColor,
@@ -259,6 +260,7 @@ const METADATA_FIELDS = new Set([
   "localOverrides",
   "localComments",
   "freeAnchors",
+  "export",
 ]);
 
 const TRANSFORM_FIELDS = new Set(["scale", "offsetX", "offsetY"]);
@@ -1285,6 +1287,14 @@ function validateMetadataObject(value: unknown): MiroCanvasMetadataValidationRes
     addError(diagnostics, "property-read-failed", "miroCanvas.freeAnchors", "The property could not be read safely.");
   } else if (freeAnchors.state === "present") {
     validateFreeAnchors(freeAnchors.value, "miroCanvas.freeAnchors", diagnostics);
+  }
+
+  // The pages a board exports: the plugin's own record, never nodes.
+  const exported = readOwn(value, "export");
+  if (exported.state === "error") {
+    addError(diagnostics, "property-read-failed", "miroCanvas.export", "The property could not be read safely.");
+  } else if (exported.state === "present" && !isExportRecord(exported.value)) {
+    addError(diagnostics, "export-invalid", "miroCanvas.export", "The export pages must be rectangles with ids.");
   }
 
   const valid = !diagnostics.some((diagnostic) => diagnostic.severity === "error");
