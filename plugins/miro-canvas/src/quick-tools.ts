@@ -76,6 +76,9 @@ const DRAWING_TOOLS: readonly ToolSpec[] = [
   { tool: "erase-part", label: "Precision eraser", icon: "scissors", glyph: "✁" },
 ];
 
+/** The largest sample the pen's row draws; a larger size is shown at this. */
+const MAX_PREVIEW = 28;
+
 /** Whether a tool is one of the pen's, which keep their panel open while armed. */
 export function isDrawingTool(tool: QuickTool): boolean {
   return DRAWING_TOOLS.some((spec) => spec.tool === tool);
@@ -108,7 +111,8 @@ export class QuickTools {
   private drawingBar: HTMLElement | undefined;
   private colorRow: HTMLElement | undefined;
   private sizeInput: HTMLInputElement | undefined;
-  private sizeValue: HTMLElement | undefined;
+  private sizeNumber: HTMLInputElement | undefined;
+  private sizePreview: HTMLElement | undefined;
   private armed: QuickTool = "select";
   /** The drawing tool the pen button goes back to. */
   private drawingTool: QuickTool = "pen";
@@ -138,22 +142,39 @@ export class QuickTools {
       this.listen(option, "click", () => this.actions.onPen({ color }));
       this.penColors.set(color, option);
     }
-    const size = drawingBar.appendChild(this.make("label", "miro-canvas-tools__size"));
+    // The size: a sample of it, a slider that acts as it moves, and the exact
+    // number, which can be typed.
+    const size = drawingBar.appendChild(this.make("span", "miro-canvas-tools__size"));
+    const sizePreview = size.appendChild(this.make("span", "miro-canvas-tools__preview"));
+    sizePreview.setAttribute("aria-hidden", "true");
     const sizeInput = size.appendChild(this.make("input", "miro-canvas-toolbar__range"));
     sizeInput.type = "range";
     sizeInput.step = "1";
     sizeInput.setAttribute("aria-label", "Line width");
-    const sizeValue = size.appendChild(this.make("span", "miro-canvas-toolbar__value"));
-    // The slider changes the size as it moves, not only once it is let go.
-    this.listen(sizeInput, "input", () => {
-      const value = Number(sizeInput.value);
-      if (!Number.isFinite(value)) return;
-      this.actions.onPen(isEraser(this.armed) ? { eraserSize: value } : { width: value });
+    const sizeNumber = size.appendChild(this.make("input", "miro-canvas-toolbar__number miro-canvas-tools__number"));
+    sizeNumber.type = "number";
+    sizeNumber.step = "1";
+    sizeNumber.setAttribute("aria-label", "Line width in points");
+    const apply = (raw: string): void => {
+      const range = isEraser(this.armed) ? ERASER_SIZE_RANGE : PEN_WIDTH_RANGE;
+      const value = Number(raw);
+      if (!Number.isFinite(value) || raw.trim() === "") return;
+      const clamped = Math.min(Math.max(Math.round(value), range.min), range.max);
+      this.actions.onPen(isEraser(this.armed) ? { eraserSize: clamped } : { width: clamped });
+    };
+    this.listen(sizeInput, "input", () => apply(sizeInput.value));
+    // A typed number counts once it is complete: on Enter or on leaving the field.
+    this.listen(sizeNumber, "change", () => apply(sizeNumber.value));
+    this.listen(sizeNumber, "keydown", (event) => {
+      if ((event as KeyboardEvent).key === "Enter") apply(sizeNumber.value);
+      // The board's own letters must not fire while a number is typed.
+      event.stopPropagation();
     });
     this.drawingBar = drawingBar;
     this.colorRow = colors;
     this.sizeInput = sizeInput;
-    this.sizeValue = sizeValue;
+    this.sizeNumber = sizeNumber;
+    this.sizePreview = sizePreview;
     const bar = root.appendChild(this.make("div", "miro-canvas-toolbar__bar"));
     for (const spec of BAR_TOOLS) {
       if (spec.tool === "shape") {
@@ -230,14 +251,25 @@ export class QuickTools {
     // An eraser has a size but no colour; a line has both.
     const erasing = isEraser(state.armed);
     if (this.colorRow !== undefined) this.colorRow.hidden = erasing;
-    if (this.sizeInput !== undefined && this.sizeValue !== undefined) {
+    if (this.sizeInput !== undefined && this.sizeNumber !== undefined) {
       const range = erasing ? ERASER_SIZE_RANGE : PEN_WIDTH_RANGE;
       const value = erasing ? state.eraserSize : state.penWidth;
-      this.sizeInput.min = String(range.min);
-      this.sizeInput.max = String(range.max);
+      for (const input of [this.sizeInput, this.sizeNumber]) {
+        input.min = String(range.min);
+        input.max = String(range.max);
+        if (input.value !== String(value) && this.document.activeElement !== input) input.value = String(value);
+      }
       this.sizeInput.setAttribute("aria-label", erasing ? "Eraser size" : "Line width");
-      if (this.sizeInput.value !== String(value)) this.sizeInput.value = String(value);
-      this.sizeValue.textContent = String(value);
+      this.sizeNumber.setAttribute("aria-label", erasing ? "Eraser size in pixels" : "Line width in points");
+    }
+    if (this.sizePreview !== undefined) {
+      // The sample is drawn at its true size up to the room the row has.
+      const value = erasing ? state.eraserSize : state.penWidth;
+      const shown = Math.min(Math.max(value, 2), MAX_PREVIEW);
+      this.sizePreview.setAttribute("data-kind", erasing ? "eraser" : "pen");
+      this.sizePreview.setAttribute("data-clipped", value > MAX_PREVIEW ? "true" : "false");
+      this.sizePreview.style?.setProperty?.("--miro-canvas-preview-size", `${shown}px`);
+      this.sizePreview.style?.setProperty?.("--miro-canvas-preview-color", state.penColor);
     }
     const entry = shapeCatalogEntry(state.shape);
     const shapeButton = this.buttons.get("shape");

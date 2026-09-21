@@ -1125,8 +1125,36 @@
   min-width: 80px;
 }
 
-.miro-canvas-tools__size .miro-canvas-toolbar__value {
-  min-width: 3ch;
+.miro-canvas-tools .miro-canvas-tools__number {
+  width: 4.5em;
+}
+
+/* A sample of the size: a dot of the line in its colour, or the eraser's ring.
+   Past the room the row has, the sample stops growing and says so. */
+.miro-canvas-tools__preview {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+}
+
+.miro-canvas-tools__preview::before {
+  box-sizing: border-box;
+  width: var(--miro-canvas-preview-size, 4px);
+  height: var(--miro-canvas-preview-size, 4px);
+  content: "";
+  background: var(--miro-canvas-preview-color, var(--text-normal));
+  border-radius: 50%;
+}
+
+.miro-canvas-tools__preview[data-kind="eraser"]::before {
+  background: rgb(127 127 127 / 15%);
+  border: 1.5px solid var(--text-normal);
+}
+
+.miro-canvas-tools__preview[data-clipped="true"]::before {
+  border-style: dashed;
 }
 
 /* Where a pen or an eraser will act, in place of the pointer: a dot the
