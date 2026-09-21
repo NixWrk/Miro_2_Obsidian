@@ -184,6 +184,19 @@ describe("source projection model", () => {
     expect(takes("page", "file")).toBe(false);
   });
 
+  it("shows a pasted copy of a Miro item as the item, keeping the original bound to it", () => {
+    const scene = buildSourceScene({
+      nodes: [{ id: "s1", type: "text" }, { id: "copy", type: "text" }],
+      miroSource: { items: [{ id: "s1", type: "sticky_note", style: { fillColor: "yellow" } }] },
+      miroCanvas: { bindings: { copy: { sourceId: "s1", role: "copy" }, lost: { sourceId: "gone", role: "copy" } } },
+    });
+    expect(scene.items.get("s1")).toMatchObject({ sourceId: "s1", kind: "sticky" });
+    expect(scene.items.get("copy")).toMatchObject({ sourceId: "s1", kind: "sticky" });
+    expect(scene.items.has("lost")).toBe(false);
+    expect(scene.diagnostics.some((item) => item.startsWith("binding-ambiguous"))).toBe(false);
+    expect(scene.diagnostics).toContain("binding-dangling: lost -> gone.");
+  });
+
   it("projects every M3 renderer family without reading active source content", () => {
     const scene = buildSourceScene({ miroSource: { items: [
       { id: "shape", type: "shape", data: { shape: "star", content: "<script>bad()</script>" } },

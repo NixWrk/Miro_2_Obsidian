@@ -114,6 +114,20 @@ export interface UpdateItemInput {
 	readonly rect?: { readonly x: number; readonly y: number; readonly width: number; readonly height: number };
 }
 
+/**
+ * Nodes and connectors to add as they are, with the plugin's record of each:
+ * what a paste brings.  Ids must be new to the board; a connector may end on
+ * a node already there or on one added with it.
+ */
+export interface InsertGraphInput {
+	readonly nodes: readonly Readonly<Record<string, unknown>>[];
+	readonly edges: readonly Readonly<Record<string, unknown>>[];
+	/** The plugin's record of an added node or connector, by its id. */
+	readonly overrides?: Readonly<Record<string, Readonly<Record<string, unknown>>>>;
+	/** Added nodes that show a Miro item another node already shows. */
+	readonly bindings?: Readonly<Record<string, { readonly sourceId: string; readonly role: string }>>;
+}
+
 export interface UpdateElementStyleInput {
 	readonly id: string;
 	readonly shape?: CanvasShapeKind;
@@ -2049,6 +2063,103 @@ export class CanvasAuthoring {
 		const verified = this.commitDocument(before, document, diagnostics, item?.type === "frame");
 		if (verified === undefined) return reject();
 		return { ok: true, status: "applied", nodeId: id, document: verified.document, diagnostics: [...this.diagnosticList, ...diagnostics] };
+	}
+
+	/**
+	 * Add nodes and connectors with the plugin's record of each, in one
+	 * transaction and one history step: a paste is undone as one.
+	 */
+	public insertGraph(input: InsertGraphInput, expected?: CanvasAuthoringExpected): CanvasGraphResult {
+		const diagnostics: CanvasAuthoringDiagnostic[] = [];
+		const reject = (): CanvasGraphResult => ({ ok: false, status: "rejected", diagnostics: [...this.diagnosticList, ...diagnostics] });
+		if (this.disposed || this.host === undefined) return reject();
+		const before = readSnapshotFromHost(this.host, diagnostics);
+		if (before === undefined) return reject();
+		if (expected !== undefined) {
+			const snapshot = makeSnapshot(extractExpectedDocument(expected), diagnostics);
+			if (snapshot === undefined || !structurallyEqual(snapshot.document, before.document)) {
+				addDiagnostic(diagnostics, "stale-document", "warning", "The Canvas document changed since the supplied expected snapshot.");
+				return reject();
+			}
+		}
+		const nodes = Array.isArray(input?.nodes) ? input.nodes : [];
+		const edges = Array.isArray(input?.edges) ? input.edges : [];
+		if (nodes.length === 0) {
+			addDiagnostic(diagnostics, "insert-empty", "error", "Adding to the board needs at least one node.");
+			return reject();
+		}
+		const taken = collectDocumentIds(before);
+		const added = new Set<string>();
+		for (const item of [...nodes, ...edges]) {
+			const id = isPlainObject(item) ? readRequiredString(item, "id") : undefined;
+			if (id === undefined || taken.has(id) || added.has(id)) {
+				addDiagnostic(diagnostics, "insert-id-invalid", "error", "Every added node and connector needs an id the board does not have.");
+				return reject();
+			}
+			added.add(id);
+		}
+		const nodeIds = new Set([...before.nodes.map((node) => node.id), ...nodes.map((node) => node.id as string)]);
+		for (const node of nodes) {
+			if (typeof node.type !== "string" || ![node.x, node.y, node.width, node.height].every(isFiniteNumber)) {
+				addDiagnostic(diagnostics, "insert-node-invalid", "error", "An added node needs a type, a finite position and a size.");
+				return reject();
+			}
+		}
+		for (const edge of edges) {
+			if (typeof edge.fromNode !== "string" || typeof edge.toNode !== "string" || !nodeIds.has(edge.fromNode) || !nodeIds.has(edge.toNode)) {
+				addDiagnostic(diagnostics, "insert-edge-invalid", "error", "An added connector must join nodes the board has or gains.");
+				return reject();
+			}
+		}
+		if (policyAllowsCreate(before.document, diagnostics) === undefined) return reject();
+		let document: UnknownRecord;
+		let copies: { nodes: UnknownRecord[]; edges: UnknownRecord[] };
+		try {
+			document = cloneRecord(before.document);
+			copies = { nodes: nodes.map((node) => cloneRecord(node)), edges: edges.map((edge) => cloneRecord(edge)) };
+		} catch (error) {
+			addDiagnostic(diagnostics, "document-copy-failed", "error", `The Canvas document could not be copied: ${describeError(error)}.`);
+			return reject();
+		}
+		const nodesValue = safeRead(document, "nodes"), edgesValue = safeRead(document, "edges");
+		if (!nodesValue.ok || !Array.isArray(nodesValue.value) || !edgesValue.ok || !Array.isArray(edgesValue.value)) {
+			addDiagnostic(diagnostics, "canvas-document-invalid", "error", "The target Canvas nodes or edges array is unavailable.");
+			return reject();
+		}
+		setOwn(document, "nodes", [...nodesValue.value, ...copies.nodes]);
+		setOwn(document, "edges", [...edgesValue.value, ...copies.edges]);
+		const overrides = Object.entries(input.overrides ?? {}).filter(([id]) => added.has(id));
+		const bindings = Object.entries(input.bindings ?? {}).filter(([id]) => added.has(id));
+		if (overrides.length > 0 || bindings.length > 0) {
+			const metadata = readMetadataForUpdate(document, diagnostics);
+			if (metadata === undefined) return reject();
+			for (const [key, entries] of [["localOverrides", overrides], ["bindings", bindings]] as const) {
+				if (entries.length === 0) continue;
+				const existing = safeRead(metadata, key);
+				if (!existing.ok || (existing.value !== undefined && !isPlainObject(existing.value))) {
+					addDiagnostic(diagnostics, "metadata-overrides-invalid", "error", `Existing ${key} are not a safe object map.`);
+					return reject();
+				}
+				let map: UnknownRecord;
+				try {
+					map = existing.value === undefined ? {} : cloneRecord(existing.value);
+					for (const [id, value] of entries) setOwn(map, id, cloneRecord(value));
+				} catch (error) {
+					addDiagnostic(diagnostics, "metadata-overrides-invalid", "error", `The added ${key} could not be copied: ${describeError(error)}.`);
+					return reject();
+				}
+				setOwn(metadata, key, map);
+			}
+			if (!validateMiroCanvasMetadata(metadata).valid) {
+				addDiagnostic(diagnostics, "metadata-validation-failed", "error", "The added items' metadata failed validation; no graph import was attempted.");
+				return reject();
+			}
+			setOwn(document, "miroCanvas", metadata);
+		}
+		// Native Canvas lays groups under other nodes, whatever order they came in.
+		const verified = this.commitDocument(before, document, diagnostics, copies.nodes.some((node) => node.type === "group"));
+		if (verified === undefined) return reject();
+		return { ok: true, status: "applied", document: verified.document, diagnostics: [...this.diagnosticList, ...diagnostics] };
 	}
 
 	/**

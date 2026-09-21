@@ -758,6 +758,40 @@ describe("CanvasAuthoring", () => {
 		expect(refused.diagnostics.map((item) => item.code)).toContain("element-style-target-invalid");
 	});
 
+	it("adds pasted nodes and connectors with their records in one undoable step", () => {
+		const initial = {
+			nodes: [{ id: "old", type: "text", text: "old", x: 0, y: 0, width: 100, height: 100 }],
+			edges: [],
+			miroCanvas: { schemaVersion: 1 },
+		};
+		const runtime = new NativeGraph(initial);
+		const authoring = createCanvasAuthoring(runtime);
+		const result = authoring.insertGraph({
+			nodes: [
+				{ id: "n1", type: "text", text: "", x: 200, y: 0, width: 200, height: 200 },
+				{ id: "n2", type: "file", file: "Assets/photo.png", x: 500, y: 0, width: 400, height: 300 },
+			],
+			edges: [{ id: "e1", fromNode: "n1", toNode: "old" }],
+			overrides: { n1: { item: { type: "sticky_note", color: "yellow" } }, stray: { rotation: 5 } },
+			bindings: { n2: { sourceId: "miro-image", role: "copy" } },
+		});
+		expect(result.ok).toBe(true);
+		const applied = runtime.getData();
+		expect((applied.nodes as CanvasDocument[]).map((node) => node.id)).toEqual(["old", "n1", "n2"]);
+		const metadata = applied.miroCanvas as CanvasDocument;
+		expect((metadata.localOverrides as CanvasDocument).n1).toEqual({ item: { type: "sticky_note", color: "yellow" } });
+		// A record for something not pasted is not written.
+		expect(metadata.localOverrides as CanvasDocument).not.toHaveProperty("stray");
+		expect(metadata.bindings).toEqual({ n2: { sourceId: "miro-image", role: "copy" } });
+		runtime.undo();
+		expect(runtime.getData()).toEqual(initial);
+		for (const bad of [
+			{ nodes: [], edges: [] },
+			{ nodes: [{ id: "old", type: "text", x: 0, y: 0, width: 1, height: 1 }], edges: [] },
+			{ nodes: [{ id: "n3", type: "text", x: 0, y: 0, width: 1, height: 1 }], edges: [{ id: "e2", fromNode: "n3", toNode: "nowhere" }] },
+		]) expect(authoring.insertGraph(bad as never).ok).toBe(false);
+	});
+
 	it("rejects a multi-selection style atomically when one target is locked", () => {
 		const initial = endpointDocument();
 		((initial.miroCanvas as CanvasDocument).localOverrides as Record<string, CanvasDocument>).b = { locked: true };

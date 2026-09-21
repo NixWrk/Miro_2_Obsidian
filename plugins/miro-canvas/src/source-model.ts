@@ -725,6 +725,8 @@ interface IndexedSource {
   readonly connectorIds: ReadonlySet<string>;
   readonly canvasForSource: Map<string, string>;
   readonly sourceForCanvas: Map<string, string>;
+  /** Nodes pasted from another that show the same Miro item: node id to source id. */
+  readonly copies: ReadonlyMap<string, string>;
   readonly tagDefinitions: ReadonlyMap<string, SourceTagDescriptor>;
 }
 
@@ -809,6 +811,7 @@ function indexSource(document: unknown, diagnostics: string[]): IndexedSource {
 
   const sourceForCanvas = new Map<string, string>();
   const canvasForSource = new Map<string, string>();
+  const copies = new Map<string, string>();
   const metadata = valueOf(document, "miroCanvas");
   const bindings = valueOf(metadata, "bindings");
   if (bindings !== undefined && !isRecord(bindings)) diagnostics.push("bindings-malformed: miroCanvas.bindings must be an object map.");
@@ -824,6 +827,13 @@ function indexSource(document: unknown, diagnostics: string[]): IndexedSource {
         continue;
       }
       sourceForCanvas.set(canvasId, sourceId);
+      // A copy shows the item its original shows, without taking its place:
+      // the item is kept once, however many nodes show it.
+      if (valueOf(binding, "role") === "copy") {
+        copies.set(canvasId, sourceId);
+        if (!byId.has(sourceId)) diagnostics.push(`binding-dangling: ${canvasId} -> ${sourceId}.`);
+        continue;
+      }
       const prior = canvasForSource.get(sourceId);
       if (prior !== undefined && prior !== canvasId) diagnostics.push(`binding-ambiguous: source ${sourceId} is bound to ${prior} and ${canvasId}.`);
       else canvasForSource.set(sourceId, canvasId);
@@ -831,7 +841,7 @@ function indexSource(document: unknown, diagnostics: string[]): IndexedSource {
     }
     if (keys.length > limit) diagnostics.push(`binding-limit-reached: at most ${MAX_BINDINGS} bindings are projected.`);
   }
-  return { byId, insertion: Object.freeze(insertion), connectorIds, canvasForSource, sourceForCanvas, tagDefinitions };
+  return { byId, insertion: Object.freeze(insertion), connectorIds, canvasForSource, sourceForCanvas, copies, tagDefinitions };
 }
 
 function localShapeKind(document: unknown, canvasId: string): string | undefined {
@@ -928,6 +938,12 @@ export function buildSourceScene(document: unknown): SourceScene {
       if (items.has(canvasId)) diagnostics.push(`canvas-id-duplicate: ${canvasId}.`);
       else items.set(canvasId, descriptor);
     }
+  }
+  for (const [canvasId, sourceId] of index.copies) {
+    const source = index.byId.get(sourceId);
+    if (source === undefined || items.has(canvasId)) continue;
+    const descriptor = descriptorFor(document, canvasId, sourceId, source, index.connectorIds.has(sourceId), diagnostics, index.tagDefinitions);
+    if (descriptor !== undefined) items.set(canvasId, descriptor);
   }
   // Ordinary Canvas edges have native style defaults even without source evidence.
   const edges = arrayValue(valueOf(document, "edges")) ?? [];

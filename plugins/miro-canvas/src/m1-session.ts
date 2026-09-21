@@ -126,6 +126,10 @@ import { resolveAnchor, type AnchorGeometry, type CanvasAnchor } from "./anchors
 import { shapeOutline } from "./shape-geometry";
 import { FRAME_COLORS, MIRO_STICKY_COLORS, readableInk } from "./miro-palette";
 import { highlightText, isHtmlText, markSelection, unhighlightText } from "./text-highlight";
+import {
+	CANVAS_CLIPBOARD_TYPE, CLIPBOARD_TYPE, linkedFilePaths, planPaste, readCanvasClipboard, readClipboardRecord,
+	type ClipboardItem,
+} from "./board-clipboard";
 
 export interface M1SessionOptions {
 	readonly document?: Document;
@@ -232,6 +236,13 @@ function readRuntime(value: unknown, key: PropertyKey): unknown {
 	} catch {
 		return undefined;
 	}
+}
+
+/** A node or connector id as native Canvas makes one: sixteen hex digits. */
+function newCanvasId(): string {
+	const bytes = new Uint8Array(8);
+	globalThis.crypto.getRandomValues(bytes);
+	return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
 /** Call a method a host object may or may not have; what it throws is swallowed. */
@@ -693,6 +704,8 @@ export class M1CanvasSession {
 	private readonly quickTools: QuickTools | undefined;
 	private armedTool: QuickTool = "select";
 	private toolShape = "rectangle";
+	/** Where the pointer last was over the board, and when: a paste lands there. */
+	private lastPointer: { readonly x: number; readonly y: number; readonly at: number } | undefined;
 	/** A polyline or spline being placed a click at a time. */
 	private linePlacing: {
 		readonly spec: LineKindSpec;
@@ -1714,6 +1727,7 @@ export class M1CanvasSession {
 		}
 		this.adoptNativeMenu();
 		this.attachQuickTools();
+		this.attachClipboard();
 		this.attachGuards();
 		this.attachMinimapHandlers();
 		this.attachResizeObserver();
@@ -3710,6 +3724,172 @@ export class M1CanvasSession {
 			...(typeof grid === "boolean" ? { snapToGrid: grid } : {}),
 			...(typeof objects === "boolean" ? { snapToObjects: objects } : {}),
 		};
+	}
+
+	/**
+	 * Copy and paste with what the plugin knows of each item.  A copy adds
+	 * the plugin's record to what native Canvas puts on the clipboard; a paste
+	 * of such a copy is laid down here, record and all, in one history step.
+	 * Files copied in the file explorer, or named by a link, are pasted as
+	 * nodes pointing at them.  Anything else is left to native Canvas.
+	 */
+	private attachClipboard(): void {
+		const root = this.root;
+		const document = root?.ownerDocument;
+		if (root === undefined || typeof document?.addEventListener !== "function" || typeof root.addEventListener !== "function") return;
+		const onBoard = (): boolean => {
+			const canvas = this.nativeCanvas();
+			return canvas !== undefined && readRuntime(canvas, "readonly") !== true
+				&& document.activeElement === readRuntime(canvas, "wrapperEl");
+		};
+		const copy = (event: Event): void => {
+			if (!onBoard()) return;
+			const data = readRuntime(event, "clipboardData") as DataTransfer | undefined;
+			const record = this.clipboardRecord();
+			if (data === undefined || record === undefined) return;
+			try {
+				data.setData(CLIPBOARD_TYPE, JSON.stringify(record));
+			} catch {
+				// The native copy still goes through.
+			}
+		};
+		const paste = (event: Event): void => {
+			if (!onBoard() || event.defaultPrevented) return;
+			const data = readRuntime(event, "clipboardData") as DataTransfer | undefined;
+			if (data === undefined || this.appearance.settings.reviewMode === true) return;
+			const read = (type: string): string => {
+				try {
+					return data.getData(type);
+				} catch {
+					return "";
+				}
+			};
+			const handled = this.pasteCopy(read(CANVAS_CLIPBOARD_TYPE), read(CLIPBOARD_TYPE))
+				|| this.pasteLinkedFiles(read("obsidian/files"), read("text/plain"));
+			if (!handled) return;
+			event.preventDefault();
+			event.stopImmediatePropagation();
+		};
+		const track = (event: Event): void => {
+			const x = finite(readRuntime(event, "clientX")), y = finite(readRuntime(event, "clientY"));
+			if (x !== undefined && y !== undefined) this.lastPointer = { x, y, at: Date.now() };
+		};
+		document.addEventListener("copy", copy, true);
+		document.addEventListener("cut", copy, true);
+		document.addEventListener("paste", paste, true);
+		root.addEventListener("pointermove", track, { passive: true });
+		this.disposers.push(() => {
+			document.removeEventListener("copy", copy, true);
+			document.removeEventListener("cut", copy, true);
+			document.removeEventListener("paste", paste, true);
+			root.removeEventListener("pointermove", track);
+		});
+	}
+
+	/** The plugin's record of what is selected, as a copy carries it. */
+	private clipboardRecord(): { readonly version: 1; readonly board: string; readonly items: Record<string, ClipboardItem> } | undefined {
+		this.readInteractionState();
+		if (this.selectedIds.length === 0) return undefined;
+		const scene = this.landingGeometry().scene;
+		const overrides = readRuntime(readRuntime(this.currentRawDocument, "miroCanvas"), "localOverrides");
+		const items: Record<string, ClipboardItem> = {};
+		// The connectors between selected nodes go with them, as native Canvas copies them.
+		const edges = (readRuntime(this.currentRawDocument, "edges") ?? []) as readonly unknown[];
+		const ids = new Set(this.selectedIds);
+		for (const edge of edges) {
+			const id = readRuntime(edge, "id");
+			if (typeof id === "string" && ids.has(readRuntime(edge, "fromNode") as string) && ids.has(readRuntime(edge, "toNode") as string)) ids.add(id);
+		}
+		for (const id of ids) {
+			const override = readRuntime(overrides, id);
+			const sourceId = scene.items.get(id)?.sourceId;
+			if (!isObject(override) && sourceId === undefined) continue;
+			items[id] = {
+				...(isObject(override) ? { override: JSON.parse(JSON.stringify(override)) as Record<string, unknown> } : {}),
+				...(sourceId === undefined ? {} : { sourceId }),
+			};
+		}
+		const board = readRuntime(readRuntime(this.view, "file"), "path");
+		return { version: 1, board: typeof board === "string" ? board : "", items };
+	}
+
+	/** Where a paste lands: under the pointer when it is on the board, else the middle of the view. */
+	private pastePoint(): { readonly x: number; readonly y: number } | undefined {
+		const pointer = this.lastPointer;
+		const rect = this.root === undefined ? undefined : boundingRect(this.root);
+		if (pointer !== undefined && rect !== undefined && Date.now() - pointer.at < 60_000
+			&& pointer.x >= rect.left && pointer.x <= rect.right && pointer.y >= rect.top && pointer.y <= rect.bottom) {
+			return this.boardPoint(pointer);
+		}
+		const centre = readRuntime(this.nativeCanvas(), "posCenter");
+		if (typeof centre !== "function") return undefined;
+		try {
+			const point = Reflect.apply(centre, this.nativeCanvas(), []) as { x?: unknown; y?: unknown };
+			const x = finite(point?.x), y = finite(point?.y);
+			return x === undefined || y === undefined ? undefined : { x, y };
+		} catch {
+			return undefined;
+		}
+	}
+
+	/** Paste a copy made with this plugin, its record included; false leaves the paste to native Canvas. */
+	private pasteCopy(canvasText: string, recordText: string): boolean {
+		const canvas = readCanvasClipboard(canvasText);
+		const record = readClipboardRecord(recordText);
+		if (canvas === undefined || record === undefined || canvas.nodes.length === 0) return false;
+		const target = this.pastePoint();
+		const centre = canvas.center;
+		const offset = target === undefined || centre === undefined ? { x: 40, y: 40 } : { x: target.x - centre.x, y: target.y - centre.y };
+		const board = readRuntime(readRuntime(this.view, "file"), "path");
+		const sources = new Set([...this.landingGeometry().scene.items.values()].map((item) => item.sourceId).filter((id) => id !== undefined));
+		const plan = planPaste(canvas, record, {
+			offset,
+			newId: newCanvasId,
+			// A Miro item is shown again only on the board that has it.
+			sourceExists: (sourceId) => record.board === board && sources.has(sourceId),
+		});
+		this.readInteractionState();
+		this.authoring ??= createCanvasAuthoring(this.view);
+		const result = this.authoring.insertGraph(plan);
+		if (!result.ok) {
+			this.addDiagnostic(firstProblem(result.diagnostics) ?? "Canvas rejected the paste.");
+			this.refresh();
+			return true;
+		}
+		this.refresh();
+		const pasted = new Set(plan.nodes.map((node) => node.id as string));
+		this.callNative("deselectAll");
+		for (const node of this.adapter.getNodes() ?? []) {
+			const id = readCanvasElementId(node);
+			if (id !== undefined && pasted.has(id)) this.callNative("select", [node]);
+		}
+		this.readInteractionState();
+		this.refresh();
+		return true;
+	}
+
+	/** Paste files the clipboard names as nodes pointing at them; false when it names none this vault has. */
+	private pasteLinkedFiles(filesText: string, text: string): boolean {
+		const app = readRuntime(this.view, "app");
+		const vault = readRuntime(app, "vault");
+		const cache = readRuntime(app, "metadataCache");
+		const source = readRuntime(readRuntime(this.view, "file"), "path");
+		const files = linkedFilePaths({ files: filesText, text }).flatMap((path) => {
+			const exact = callRuntime(vault, "getAbstractFileByPath", path);
+			const found = isObject(exact) && typeof readRuntime(exact, "extension") === "string"
+				? exact
+				: callRuntime(cache, "getFirstLinkpathDest", path, typeof source === "string" ? source : "");
+			return isObject(found) && typeof readRuntime(found, "extension") === "string" ? [found] : [];
+		});
+		const point = this.pastePoint();
+		if (files.length === 0 || point === undefined) return false;
+		const created = callRuntime(this.nativeCanvas(), "createFileNodes", files, point);
+		if (!Array.isArray(created)) return false;
+		this.adapter.requestSave();
+		this.callNative("deselectAll");
+		for (const node of created) this.callNative("select", [node]);
+		this.refresh();
+		return true;
 	}
 
 	private callNative(method: string, args: readonly unknown[] = []): boolean {
