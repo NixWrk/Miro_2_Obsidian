@@ -261,6 +261,7 @@ const METADATA_FIELDS = new Set([
   "localComments",
   "freeAnchors",
   "export",
+  "commentPlaces",
 ]);
 
 const TRANSFORM_FIELDS = new Set(["scale", "offsetX", "offsetY"]);
@@ -1287,6 +1288,20 @@ function validateMetadataObject(value: unknown): MiroCanvasMetadataValidationRes
     addError(diagnostics, "property-read-failed", "miroCanvas.freeAnchors", "The property could not be read safely.");
   } else if (freeAnchors.state === "present") {
     validateFreeAnchors(freeAnchors.value, "miroCanvas.freeAnchors", diagnostics);
+  }
+
+  // Where comment pins were moved to, by origin and thread: anchors like any other.
+  const places = readOwn(value, "commentPlaces");
+  if (places.state === "error") {
+    addError(diagnostics, "property-read-failed", "miroCanvas.commentPlaces", "The property could not be read safely.");
+  } else if (places.state === "present") {
+    if (!isRecord(places.value)) {
+      addError(diagnostics, "object-expected", "miroCanvas.commentPlaces", "Comment places must be an object map.");
+    } else {
+      for (const [key, anchor] of Object.entries(places.value)) {
+        if (!normalizeAnchor(anchor).valid) addError(diagnostics, "anchor-invalid", pathFor("miroCanvas.commentPlaces", key), "A comment's place must be a valid anchor.");
+      }
+    }
   }
 
   // The pages a board exports: the plugin's own record, never nodes.

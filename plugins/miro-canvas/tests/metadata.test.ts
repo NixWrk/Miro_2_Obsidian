@@ -19,6 +19,16 @@ describe("miroCanvas metadata boundary", () => {
     expect(result.migrated).toBe(false);
   });
 
+  it("keeps where comment pins were moved to, as anchors, and refuses anything else", () => {
+    const places = {
+      "local:c1": { type: "free", x: 10, y: -20 },
+      "imported:m1": { type: "node", nodeId: "n1", u: 0.5, v: 0.25 },
+    };
+    expect(validateMiroCanvasMetadata({ schemaVersion: 1, commentPlaces: places }).valid).toBe(true);
+    expect(validateMiroCanvasMetadata({ schemaVersion: 1, commentPlaces: { "local:c1": { type: "free", x: "far" } } }).valid).toBe(false);
+    expect(validateMiroCanvasMetadata({ schemaVersion: 1, commentPlaces: [] }).valid).toBe(false);
+  });
+
   it("accepts the minimal v1 metadata document", () => {
     const result = parseMiroCanvasMetadata({
       nodes: [],

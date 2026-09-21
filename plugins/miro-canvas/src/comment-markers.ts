@@ -96,7 +96,12 @@ export function buildCommentMarkers(
 
 export interface CommentMarkersHost {
   readonly onOpenThread: (threadId: string, origin: CommentOrigin) => void;
+  /** A pin was dragged and let go at a point in the window; without it pins stay put. */
+  readonly onMoveThread?: (threadId: string, origin: CommentOrigin, point: { readonly x: number; readonly y: number }) => void;
 }
+
+/** How far a pin must be pulled before a press becomes a drag rather than a click. */
+const DRAG_THRESHOLD = 4;
 
 export interface CommentMarkersOptions extends CommentDisplayOptions {
   readonly document?: Document;
@@ -116,6 +121,10 @@ export class CommentMarkers {
   public readonly element: HTMLElement;
   private readonly document: Document;
   private readonly entries = new Map<string, MarkerElement>();
+  /** The marker each pin shows now, which its listeners read. */
+  private readonly current = new WeakMap<HTMLButtonElement, CommentMarker>();
+  /** Pins being dragged, which stay under the pointer until let go. */
+  private readonly dragging = new WeakSet<HTMLButtonElement>();
   private destroyed = false;
 
   public constructor(private readonly host: CommentMarkersHost, private readonly options: CommentMarkersOptions = {}) {
@@ -151,22 +160,77 @@ export class CommentMarkers {
           minWidth: "32px", minHeight: "32px", borderRadius: "50%",
         });
         const stop = (event: Event) => event.stopPropagation();
+        let dragged = false;
         const open = (event: Event) => {
           event.stopPropagation();
-          this.host.onOpenThread(marker.threadId, marker.origin);
+          // The click that ends a drag does not open the thread as well.
+          if (dragged) {
+            dragged = false;
+            return;
+          }
+          const current = this.markerOf(button);
+          if (current !== undefined) this.host.onOpenThread(current.threadId, current.origin);
+        };
+        // A pin is picked up and put down elsewhere, as in Miro: it follows
+        // the pointer, and the host decides what it lands on.
+        const press = (event: Event) => {
+          const pointer = event as PointerEvent;
+          if (this.host.onMoveThread === undefined || pointer.button !== 0) return;
+          const view = this.document.defaultView;
+          const start = { x: pointer.clientX, y: pointer.clientY };
+          const origin = { left: parseFloat(button.style.left) || 0, top: parseFloat(button.style.top) || 0 };
+          let moving = false;
+          const move = (moved: Event) => {
+            const at = moved as PointerEvent;
+            const dx = at.clientX - start.x, dy = at.clientY - start.y;
+            if (!moving && Math.hypot(dx, dy) < DRAG_THRESHOLD) return;
+            moving = true;
+            this.dragging.add(button);
+            button.setAttribute("data-comment-dragging", "true");
+            button.style.left = `${origin.left + dx}px`;
+            button.style.top = `${origin.top + dy}px`;
+          };
+          const up = (released: Event) => {
+            view?.removeEventListener("pointermove", move, true);
+            view?.removeEventListener("pointerup", up, true);
+            this.dragging.delete(button);
+            button.setAttribute("data-comment-dragging", "false");
+            if (!moving) return;
+            // Only the click the release itself makes is swallowed.
+            dragged = true;
+            view?.setTimeout(() => { dragged = false; }, 0);
+            const at = released as PointerEvent;
+            const current = this.markerOf(button);
+            if (current === undefined) return;
+            // The pin's point moves as far as the pointer did, wherever on the
+            // pin it was taken hold of.
+            const box = this.element.getBoundingClientRect?.();
+            const left = box?.left ?? 0, top = box?.top ?? 0;
+            this.host.onMoveThread?.(current.threadId, current.origin, {
+              x: left + current.point.x + at.clientX - start.x,
+              y: top + current.point.y + at.clientY - start.y,
+            });
+          };
+          view?.addEventListener("pointermove", move, true);
+          view?.addEventListener("pointerup", up, true);
         };
         // Keep Canvas drag/selection and hotkeys out of marker activation.
         const isolatedEvents = ["pointerdown", "mousedown", "dblclick", "keydown", "keyup"];
         for (const name of isolatedEvents) button.addEventListener(name, stop);
+        button.addEventListener("pointerdown", press);
         button.addEventListener("click", open);
         entry = { button, dispose: () => {
           for (const name of isolatedEvents) button.removeEventListener(name, stop);
+          button.removeEventListener("pointerdown", press);
           button.removeEventListener("click", open);
         } };
         this.entries.set(marker.key, entry);
         this.element.appendChild(button);
       }
       const button = entry.button;
+      this.current.set(button, marker);
+      // A pin being dragged stays under the pointer until it is let go.
+      if (this.dragging.has(button)) continue;
       button.setAttribute("data-comment-id", marker.threadId);
       button.setAttribute("data-comment-origin", marker.origin);
       button.setAttribute("data-comment-anchor", marker.anchorType);
@@ -182,6 +246,10 @@ export class CommentMarkers {
       button.style.top = `${marker.point.y}px`;
     }
     return model;
+  }
+
+  private markerOf(button: HTMLButtonElement): CommentMarker | undefined {
+    return this.current.get(button);
   }
 
   public destroy(): void {

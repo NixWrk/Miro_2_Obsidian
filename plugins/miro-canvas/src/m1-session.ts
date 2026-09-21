@@ -122,7 +122,7 @@ import {
 	sideDirection,
 	snapToStandardPoint,
 } from "./connector-endpoints";
-import { resolveAnchor, type AnchorGeometry, type CanvasAnchor } from "./anchors";
+import { normalizeAnchor, resolveAnchor, type AnchorGeometry, type CanvasAnchor } from "./anchors";
 import { shapeOutline } from "./shape-geometry";
 import { FRAME_COLORS, MIRO_STICKY_COLORS, readableInk } from "./miro-palette";
 import { highlightText, isHtmlText, markSelection, unhighlightText } from "./text-highlight";
@@ -235,6 +235,11 @@ function readRuntime(value: unknown, key: PropertyKey): unknown {
 	} catch {
 		return undefined;
 	}
+}
+
+/** The key a moved comment's place is kept under: its origin and id, which alone may repeat. */
+function commentPlaceKey(origin: CommentOrigin, id: string): string {
+	return `${origin}:${id}`;
 }
 
 /** A node or connector id as native Canvas makes one: sixteen hex digits. */
@@ -817,6 +822,7 @@ export class M1CanvasSession {
 		}, { document: controlDocument });
 		this.commentMarkers = controlDocument === undefined ? undefined : new CommentMarkers({
 			onOpenThread: (threadId, origin) => this.openCommentThread(threadId, origin),
+			onMoveThread: (threadId, origin, point) => this.moveCommentThread(threadId, origin, point),
 		}, { document: controlDocument });
 		this.quickTools = controlDocument === undefined ? undefined : new QuickTools({
 			onArm: (tool) => this.armTool(tool),
@@ -1961,7 +1967,14 @@ export class M1CanvasSession {
 		const document = this.currentRawDocument;
 		let cache = this.commentThreadCache;
 		if (cache === undefined || cache.document !== document) {
-			cache = { document, threads: listCommentThreads(document, { includeResolved: true }) };
+			// A pin that was moved shows its thread where it was put.
+			const places = readRuntime(readRuntime(document, "miroCanvas"), "commentPlaces");
+			const threads = listCommentThreads(document, { includeResolved: true }).map((thread) => {
+				const place = readRuntime(places, commentPlaceKey(thread.origin, thread.id));
+				const anchor = place === undefined ? undefined : normalizeAnchor(place);
+				return anchor?.valid === true && anchor.anchor !== undefined ? { ...thread, anchor: anchor.anchor } : thread;
+			});
+			cache = { document, threads: Object.freeze(threads) };
 			this.commentThreadCache = cache;
 		}
 		return cache.threads;
@@ -2999,7 +3012,19 @@ export class M1CanvasSession {
 
 	/** A comment pinned where the board was clicked: on the item there, or on the board. */
 	private composeComment(board: { readonly x: number; readonly y: number }, client: { readonly x: number; readonly y: number }): void {
-		let anchor: CanvasAnchor = { type: "free", x: board.x, y: board.y };
+		const anchor = this.commentAnchorAt(board);
+		const card = this.ensureCommentCard();
+		if (card === undefined || this.root === undefined) return;
+		this.openThread = undefined;
+		this.commentDraft = anchor;
+		card.compose();
+		const rootRect = this.root.getBoundingClientRect();
+		card.place({ x: client.x - rootRect.left, y: client.y - rootRect.top }, clientSize(this.root));
+	}
+
+	/** What a comment put at a board point holds on to: the smallest item there, or the board. */
+	private commentAnchorAt(board: { readonly x: number; readonly y: number }): CanvasAnchor {
+		let anchor: CanvasAnchor = { type: "free", x: Math.round(board.x * 100) / 100, y: Math.round(board.y * 100) / 100 };
 		let smallest = Number.POSITIVE_INFINITY;
 		for (const [nodeId, rect] of Object.entries(this.landingGeometry().geometry.nodes ?? {})) {
 			if (!(rect.width > 0) || !(rect.height > 0) || !insideRect(rect, board)) continue;
@@ -3012,13 +3037,27 @@ export class M1CanvasSession {
 				v: Math.round(((board.y - rect.y) / rect.height) * 1000) / 1000,
 			};
 		}
-		const card = this.ensureCommentCard();
-		if (card === undefined || this.root === undefined) return;
-		this.openThread = undefined;
-		this.commentDraft = anchor;
-		card.compose();
-		const rootRect = this.root.getBoundingClientRect();
-		card.place({ x: client.x - rootRect.left, y: client.y - rootRect.top }, clientSize(this.root));
+		return anchor;
+	}
+
+	/**
+	 * A pin put down somewhere else: its thread now holds on to what it was
+	 * dropped on.  The place is the plugin's own record, so a Miro comment,
+	 * whose export is never rewritten, moves the same way a local one does.
+	 */
+	private moveCommentThread(threadId: string, origin: CommentOrigin, point: { readonly x: number; readonly y: number }): void {
+		const board = this.boardPoint(point);
+		if (board === undefined) {
+			this.refresh();
+			return;
+		}
+		const anchor = this.commentAnchorAt(board);
+		this.writeMetadata("move-comment", (draft) => {
+			const places = readRuntime(draft, "commentPlaces");
+			draft.commentPlaces = { ...(isObject(places) ? places : {}), [commentPlaceKey(origin, threadId)]: anchor };
+			return draft;
+		});
+		this.refresh();
 	}
 
 	private createComment(text: string): void {
