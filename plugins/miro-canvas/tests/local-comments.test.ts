@@ -6,9 +6,11 @@ import {
   commentAuthorLabel,
   commentTimeLabel,
   deleteLocalComment,
+  deleteLocalReply,
   editLocalComment,
   listCommentThreads,
   reopenComment,
+  renameLocalCommentAuthor,
   resolveComment,
 } from "../src/local-comments";
 
@@ -19,6 +21,68 @@ const options = {
 };
 
 describe("offline local comments", () => {
+  it("deletes one local reply without changing the thread or imported evidence", () => {
+    const source = {comments: [{id: "source", text: "Evidence", messages: [{id: "imported", text: "Keep"}]}]};
+    const base = {miroSource: source, localComments: []};
+    const thread = addLocalComment(base, "Local", options);
+    const first = addReply(thread.metadata, "local-1", "First", options);
+    const second = addReply(first.metadata, "local-1", "Second", {...options, idFactory: () => "reply-2"});
+    const before = JSON.stringify(second.metadata);
+    const removed = deleteLocalReply(second.metadata, "local-1", "reply-1");
+    expect(removed.ok).toBe(true);
+    expect(removed.comment?.text).toBe("Local");
+    expect(removed.comment?.replies.map(reply => reply.text)).toEqual(["Second"]);
+    expect(removed.metadata?.miroSource).toEqual(source);
+    expect(JSON.stringify(second.metadata)).toBe(before);
+    expect(deleteLocalReply(second.metadata,"source","imported").ok).toBe(false);
+  });
+  it("renames only the selected local author and preserves all other evidence and timestamps", () => {
+    const author = { id: "user", name: "Alice", displayName: "Original", future: { keep: [1] } };
+    const reply = { id: "r1", origin: "local", text: "Reply", author,
+      createdAt: "old", updatedAt: "later", source: { author: "Original" }, future: [2] };
+    const thread = { id: "l1", origin: "local", text: "Opening", author,
+      createdAt: "old", updatedAt: "later", resolved: false, replies: [reply], source: { keep: true } };
+    const metadata = { schemaVersion: 1, localComments: [thread],
+      miroSource: { comments: [{ id: "imported", createdBy: author }] }, future: [3] };
+    const before = JSON.stringify(metadata);
+    const opening = renameLocalCommentAuthor(metadata, "l1", "l1", "  Bob  ");
+    expect(opening.ok).toBe(true);
+    expect(opening.changed).toBe(true);
+    expect(opening.metadata).toEqual({ ...metadata,
+      localComments: [{ ...thread, author: { ...author, name: "Bob" } }] });
+    const renamed = renameLocalCommentAuthor(metadata, "l1", "r1", "Carol");
+    expect(renamed.metadata).toEqual({ ...metadata,
+      localComments: [{ ...thread, replies: [{ ...reply, author: { ...author, name: "Carol" } }] }] });
+    expect(renameLocalCommentAuthor(renamed.metadata, "l1", "r1", " Carol ").changed).toBe(false);
+    expect(JSON.stringify(metadata)).toBe(before);
+    const nameless = { localComments: [{ id: "l1", text: "Opening", replies: [] }] };
+    expect(renameLocalCommentAuthor(nameless, "l1", "l1", "Alice").comment?.author).toEqual({ name: "Alice" });
+  });
+
+  it("rejects invalid renames and immutable opening/reply authors without changing metadata", () => {
+    const metadata = { localComments: [{ id: "l1", text: "Local", replies: [
+      { id: "r1", text: "Imported", origin: "imported" },
+      { id: "r2", text: "Immutable", immutable: true },
+    ] }], miroSource: { comments: [{ id: "source", content: "Original" }] } };
+    for (const [thread, message, name, code] of [
+      ["source", "source", "Bob", "comment-immutable"],
+      ["l1", "r1", "Bob", "comment-immutable"],
+      ["l1", "r2", "Bob", "comment-immutable"],
+      ["missing", "missing", "Bob", "comment-not-found"],
+      ["l1", "missing", "Bob", "comment-not-found"],
+      ["l1", "__proto__", "Bob", "id-invalid"],
+      ["l1", "l1", " ", "author-invalid"],
+      ["l1", "l1", null, "author-invalid"],
+    ]) {
+      const result = renameLocalCommentAuthor(metadata, thread, message, name);
+      expect(result).toMatchObject({ ok: false, changed: false, metadata });
+      expect(result.diagnostics[0]?.code).toBe(code);
+    }
+    expect(renameLocalCommentAuthor(null, "l1", "l1", "Bob").ok).toBe(false);
+    expect(renameLocalCommentAuthor({ localComments: {} }, "l1", "l1", "Bob").ok).toBe(false);
+    expect(renameLocalCommentAuthor({ localComments: [{ id: "l1", immutable: true }] }, "l1", "l1", "Bob")
+      .diagnostics[0]?.code).toBe("comment-immutable");
+  });
   it("hides imported threads locally in both metadata input forms without changing evidence", () => {
     const metadata = { schemaVersion: 1, miroSource: { comments: [{ id: "source", content: "Original" }] },
       hiddenImportedComments: ["source"], localComments: [] };

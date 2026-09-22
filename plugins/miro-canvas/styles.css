@@ -1674,10 +1674,13 @@
   box-shadow: inset 0 0 0 1px var(--background-modifier-border-hover, rgb(128 128 128 / 40%)), 0 0 0 2px var(--miro-canvas-toolbar-bg), 0 0 0 3px var(--interactive-accent);
 }
 
-/* The custom colour picker is one more, wider swatch at the end. */
-.miro-canvas-tools__connectors input.miro-canvas-toolbar__swatch {
+/* Creation palettes use the same circular swatch for presets and custom ink. */
+.miro-canvas-tools .miro-canvas-tools__swatches input.miro-canvas-toolbar__swatch {
   width: 22px;
   min-width: 22px;
+  max-width: 22px;
+  flex: 0 0 22px;
+  height: 22px;
   border-radius: 50%;
 }
 
@@ -2787,9 +2790,48 @@
   box-shadow: var(--shadow-l);
 }
 
-.miro-canvas-thread[hidden] {
-  display: none;
+.miro-canvas-thread[hidden],
+.miro-canvas-thread [hidden] {
+  display: none !important;
 }
+
+/* Native Canvas knows only its own selected nodes/edges. A mixed selection uses
+   the frame covering those elements and plugin connectors together. */
+.miro-canvas-mixed-selection .canvas-selection {
+  visibility: hidden;
+}
+
+.miro-canvas-mixed-selection-frame {
+  position: absolute;
+  z-index: 9;
+  box-sizing: border-box;
+  border: 1px solid var(--interactive-accent);
+  pointer-events: none;
+}
+
+.miro-canvas-mixed-selection-frame > div {
+  position: absolute;
+  pointer-events: auto;
+  cursor: move;
+}
+
+.miro-canvas-mixed-selection-frame__top,
+.miro-canvas-mixed-selection-frame__bottom {
+  left: 0;
+  width: 100%;
+  height: 10px;
+}
+
+.miro-canvas-mixed-selection-frame__top { top: -5px; }
+.miro-canvas-mixed-selection-frame__bottom { bottom: -5px; }
+.miro-canvas-mixed-selection-frame__left,
+.miro-canvas-mixed-selection-frame__right {
+  top: 0;
+  height: 100%;
+  width: 10px;
+}
+.miro-canvas-mixed-selection-frame__left { left: -5px; }
+.miro-canvas-mixed-selection-frame__right { right: -5px; }
 
 .miro-canvas-thread__header {
   display: flex;
@@ -2801,6 +2843,18 @@
 
 .miro-canvas-thread__spacer {
   flex: 1;
+}
+
+.miro-canvas-thread__color {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  cursor: pointer;
+}
+.miro-canvas-thread {
+  border-left: 3px solid var(--miro-thread-color, var(--background-modifier-border));
 }
 
 .miro-canvas-thread .miro-canvas-thread__button {
@@ -2922,11 +2976,31 @@
 }
 
 .miro-canvas-thread__composer {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   gap: 4px;
   padding: 8px 8px 8px 14px;
   border-top: 1px solid var(--background-modifier-border);
+}
+
+.miro-canvas-thread__author-input {
+  grid-column: 1 / -1;
+  min-width: 0;
+  width: 100%;
+}
+
+.miro-canvas-thread input.miro-canvas-thread__author {
+  width: 100%;
+  height: 26px;
+  padding: 2px 4px;
+  background: transparent;
+  border: 1px solid transparent;
+}
+
+.miro-canvas-thread input.miro-canvas-thread__author:hover,
+.miro-canvas-thread input.miro-canvas-thread__author:focus {
+  border-color: var(--background-modifier-border);
 }
 
 .miro-canvas-thread .miro-canvas-thread__input {

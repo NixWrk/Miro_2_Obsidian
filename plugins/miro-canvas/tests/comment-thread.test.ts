@@ -24,6 +24,8 @@ class FakeElement {
   public appendChild(child: FakeElement): FakeElement { child.parentNode = this; this.children.push(child); return child; }
   public removeChild(child: FakeElement): FakeElement { this.children.splice(this.children.indexOf(child), 1); child.parentNode = undefined; return child; }
   public remove(): void { this.parentNode?.removeChild(this); }
+  public focus(): void { this.fire("focus"); }
+  public blur(): void { this.fire("blur"); }
   public setAttribute(name: string, value: string): void { this.attributes.set(name, value); }
   public getAttribute(name: string): string | null { return this.attributes.get(name) ?? null; }
   public addEventListener(name: string, listener: (event: unknown) => void): void {
@@ -79,7 +81,7 @@ describe("comment thread messages", () => {
 });
 
 describe("comment thread card", () => {
-  function setup() {
+  function setup(rename = false) {
     const calls: unknown[][] = [];
     const card = new CommentThreadCard(fakeDocument, {
       onReply: (...args) => calls.push(["reply", ...args]),
@@ -87,9 +89,87 @@ describe("comment thread card", () => {
       onDelete: (...args) => calls.push(["delete", ...args]),
       onOpenPanel: (...args) => calls.push(["panel", ...args]),
       onClose: () => calls.push(["close"]),
+      onCreate: (...args) => calls.push(["create", ...args]),
+      ...(rename ? { onRenameAuthor: (...args: [string, string, string]) => calls.push(["rename", ...args]) } : {}),
     });
     return { card, root: card.element as unknown as FakeElement, calls };
   }
+
+  it("passes edited author names for new comments and replies, preserving reply drafts on refresh", () => {
+    const { card, root, calls } = setup();
+    const form = root.byClass("miro-canvas-thread__composer")[0]!;
+    card.compose("Alice");
+    expect(root.byLabel("Author name").value).toBe("Alice");
+    root.byLabel("Author name").value = "  Bob  ";
+    root.byLabel("Reply").value = " Hello ";
+    form.fire("submit");
+    expect(calls).toEqual([["create", "Hello", "Bob", {color: authorColor("Alice"), locked: false}]]);
+    card.show(LOCAL, { editable: true, authorName: "Alice" });
+    root.byLabel("Author name").value = " Carol ";
+    root.byLabel("Reply").value = "Reply draft";
+    card.show(LOCAL, { editable: true, authorName: "Alice" });
+    expect(root.byLabel("Author name").value).toBe(" Carol ");
+    form.fire("submit");
+    expect(calls.at(-1)).toEqual(["reply", "l1", "Reply draft", "Carol"]);
+    card.show(LOCAL, { editable: false });
+    root.byLabel("Reply").value = "Blocked";
+    form.fire("submit");
+    expect(calls).toHaveLength(2);
+    card.compose();
+    expect(root.byLabel("Author name").value).toBe("");
+  });
+
+  it("renames opening and reply authors without interrupting a focused edit on refresh", () => {
+    const { card, root, calls } = setup(true);
+    card.show(LOCAL, { editable: true });
+    const author = root.byLabel("Edit author name");
+    author.focus();
+    author.value = "  Alice  ";
+    card.show({ ...LOCAL, resolved: true }, { editable: true });
+    expect(root.byLabel("Edit author name")).toBe(author);
+    expect(author.value).toBe("  Alice  ");
+    author.fire("keydown", { key: "Enter" });
+    author.blur();
+    expect(calls).toEqual([["rename", "l1", "l1", "Alice", "local"]]);
+    expect(root.byClass("miro-canvas-thread__avatar")[0]!.textContent).toBe("A");
+    const reply = root.byClass("miro-canvas-thread__author")[1]!;
+    reply.focus();
+    reply.value = "Bob";
+    reply.blur();
+    expect(calls.at(-1)).toEqual(["rename", "l1", "r1", "Bob", "local"]);
+    reply.focus();
+    reply.value = "Cancelled";
+    expect(reply.fire("keydown", { key: "Escape" }).stopped).toBe(true);
+    expect(reply.value).toBe("Bob");
+    reply.value = "  ";
+    reply.blur();
+    expect(reply.value).toBe("Bob");
+    expect(calls).toHaveLength(2);
+  });
+
+  it("gates renaming on the callback and local editability, invalidating stale editors", () => {
+    const without = setup();
+    without.card.show(LOCAL, { editable: true });
+    expect(without.root.byLabel("Edit author name")).toBeUndefined();
+    const { card, root, calls } = setup(true);
+    card.show(LOCAL, { editable: true });
+    const author = root.byLabel("Edit author name");
+    author.focus();
+    author.value = "Stale";
+    card.show(LOCAL, { editable: false });
+    author.blur();
+    expect(root.byLabel("Edit author name")).toBeUndefined();
+    card.show(IMPORTED, { editable: true });
+    expect(root.byLabel("Edit author name")).toBeDefined();
+    card.show({ ...LOCAL, replies: [{ ...LOCAL.replies[0]!, immutable: true }] }, { editable: true });
+    expect(root.byClass("miro-canvas-thread__author").map((item) => item.tagName)).toEqual(["input", "span"]);
+    const stale = root.byLabel("Edit author name");
+    stale.focus();
+    stale.value = "Wrong thread";
+    card.show({ ...LOCAL, id: "other" }, { editable: true });
+    stale.blur();
+    expect(calls).toEqual([]);
+  });
 
   it("shows an imported thread read-only and keeps the board's gestures out", () => {
     const { card, root, calls } = setup();

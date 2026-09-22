@@ -47,6 +47,32 @@ function baseDocument(): Record<string, unknown> {
 }
 
 describe("connector endpoints", () => {
+  it("resolves comment endpoints, moved pins and their node rotation without touching source", () => {
+    const document = baseDocument();
+    const meta = document.miroCanvas as Record<string, unknown>;
+    meta.localComments = [{id: "pin", text: "Comment", origin: "local", resolved: false,
+      anchor: {type: "node", nodeId: "a", u: 1, v: 0.5}, replies: []}];
+    meta.connectors = {line: {id: "line", from: {type: "comment", origin: "local", commentId: "pin"},
+      to: {type: "node", nodeId: "b", u: 0, v: 0.5}, route: "straight", width: 2, color: "#123456", startCap: "none", endCap: "arrow"}};
+    const before = JSON.stringify(document);
+    expect(buildCanvasAnchorGeometry(document).edges?.line?.start).toMatchObject({x: 100, y: 40});
+    expect(buildCanvasAnchorGeometry(document, {a: {rotation: 90}}).edges?.line?.start).toMatchObject({x: 50, y: 90});
+    expect(JSON.stringify(document)).toBe(before);
+    meta.commentPlaces = {"local:pin": {type: "free", x: 321, y: 456}};
+    expect(buildCanvasAnchorGeometry(document).edges?.line?.start).toMatchObject({x: 321, y: 456});
+    const updated = updateConnectorEndpoint(document, {edgeId: "e1", end: "from", anchor: {type: "comment", origin: "local", commentId: "pin"}});
+    expect(updated.ok).toBe(true);
+    expect(buildCanvasAnchorGeometry(updated.document).edges?.e1?.start).toMatchObject({x: 321, y: 456});
+  });
+
+  it("rejects missing comment targets and comment-connector cycles", () => {
+    const document = baseDocument(), meta = document.miroCanvas as Record<string, unknown>;
+    const anchor = {type: "comment", origin: "local", commentId: "pin"} as const;
+    expect(updateConnectorEndpoint(document, {edgeId: "e1", end: "from", anchor}).ok).toBe(false);
+    meta.localComments = [{id: "pin", text: "Cycle", origin: "local", resolved: false,
+      anchor: {type: "edge", edgeId: "e1", t: 0.5}, replies: []}];
+    expect(updateConnectorEndpoint(document, {edgeId: "e1", end: "from", anchor}).ok).toBe(false);
+  });
   it("projects arbitrary pointer positions onto a node silhouette", () => {
     const document = baseDocument();
     expect(nodeBoundaryAnchor(document, "a", { x: 150, y: 20 })).toEqual({

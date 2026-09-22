@@ -3,7 +3,7 @@ import {
   type NativeEdgeEnd, type NodeMeasurements,
 } from "./connector-endpoints";
 import { SHAPE_CLIP_PATHS, inscribedInsets, shapeOutline, shapePath, type ShapePoint } from "./shape-geometry";
-import { CAP_PATHS, capFilled, strokeDash } from "./connector-style";
+import { CAP_PATHS, capFilled, strokeDash, headMarkerAttributes } from "./connector-style";
 import { readableInk } from "./miro-palette";
 import { codeLineCount, fitFontSize, lineNumbersCss, plainText } from "./text-fit";
 import { authorColor, authorInitial, shortTime } from "./comment-thread";
@@ -479,7 +479,7 @@ function decorateLine(document: Document | undefined, layer: DomElementLike, des
   const route = (connector?.shape === "elbowed" || connector?.shape === "curved" || connector?.shape === "straight")
     ? connector.shape : line.route;
   if (block) {
-    const outline = blockArrowOutline(points[0]!, points[points.length - 1]!, width)
+    const outline = blockArrowOutline(points[0]!, points[points.length - 1]!, width, connector?.headSize ?? line.headSize)
       .map((point) => `${Math.round(point.x * 100) / 100},${Math.round(point.y * 100) / 100}`).join(" ");
     for (const [name, value] of Object.entries({ points: outline, fill: color, stroke: color, "stroke-width": "1", "stroke-linejoin": "round" })) {
       setOwnedElementAttribute(path, name, value);
@@ -490,8 +490,8 @@ function decorateLine(document: Document | undefined, layer: DomElementLike, des
     const dash = strokeDash(connector?.strokeStyle);
     const scale = Math.max(1, width / 2);
     const owned: RestorePatch[] = [];
-    const start = marker(document, connector?.startCap ?? "none", color, owned, svg, LOCAL_CAP_SCALE);
-    const end = marker(document, connector?.endCap ?? "none", color, owned, svg, LOCAL_CAP_SCALE);
+    const start = marker(document, connector?.startCap ?? "none", color, owned, svg, LOCAL_CAP_SCALE, connector?.headSize ?? line.headSize);
+    const end = marker(document, connector?.endCap ?? "none", color, owned, svg, LOCAL_CAP_SCALE, connector?.headSize ?? line.headSize);
     for (const [name, value] of Object.entries({
       d, fill: "none", stroke: color, "stroke-width": String(width), "stroke-linecap": "round", "stroke-linejoin": "round",
       ...(dash === "none" ? {} : { "stroke-dasharray": dash.split(" ").map((part) => String(Number(part) * scale)).join(" ") }),
@@ -998,7 +998,7 @@ function queryAll(element: DomElementLike, selector: string): DomElementLike[] {
 const LOCAL_CAP_SCALE = 0.6;
 
 function marker(
-  document: Document | undefined, cap: string, color: string, patches: RestorePatch[], parent: DomElementLike, scale = 1,
+  document: Document | undefined, cap: string, color: string, patches: RestorePatch[], parent: DomElementLike, scale = 1, headSize?: number,
 ): string | undefined {
   if (cap === "none") return "none";
   const d = CAP_PATHS[cap];
@@ -1006,7 +1006,7 @@ function marker(
   const defs = createSvg(document, "defs"), mark = createSvg(document, "marker"), path = createSvg(document, "path");
   if (defs === undefined || mark === undefined || path === undefined) return undefined;
   const id = `miro-cap-${++markerSequence}`;
-  for (const [key, value] of Object.entries({ id, viewBox: "-16 -8 18 16", refX: "0", refY: "0", markerWidth: String(18 * scale), markerHeight: String(16 * scale), markerUnits: "strokeWidth", orient: "auto-start-reverse" })) {
+  for (const [key, value] of Object.entries({ id, viewBox: "-16 -8 18 16", refX: "0", refY: "0", markerWidth: String(18 * scale), markerHeight: String(16 * scale), markerUnits: "strokeWidth", orient: "auto-start-reverse", ...headMarkerAttributes(headSize) })) {
     setOwnedElementAttribute(mark, key, value);
   }
   const filled = capFilled(cap);
@@ -1063,8 +1063,8 @@ function renderConnectorGeometry(document: Document | undefined, runtime: unknow
   }
   const color = descriptor.css.stroke ?? "var(--canvas-color, currentColor)";
   const scale = local ? LOCAL_CAP_SCALE : 1;
-  const startMarker = marker(document, caps[0]!, color, patches, group, scale);
-  const endMarker = marker(document, caps[1]!, color, patches, group, scale);
+  const startMarker = marker(document, caps[0]!, color, patches, group, scale, descriptor.connector?.headSize);
+  const endMarker = marker(document, caps[1]!, color, patches, group, scale, descriptor.connector?.headSize);
   if (startMarker === undefined || endMarker === undefined) {
     diagnostics.push(`connector-marker-fallback: ${id}.`);
     return undefined;

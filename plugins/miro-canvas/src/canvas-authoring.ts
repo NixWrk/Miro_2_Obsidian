@@ -1007,7 +1007,7 @@ function readStylePatch(action: unknown, diagnostics: CanvasAuthoringDiagnostic[
 		if (patch.borderStyle !== undefined && !["solid", "dashed", "dotted", "none"].includes(patch.borderStyle as string)) throw new SnapshotError("invalid border style");
 		if (patch.borderWidth !== undefined && (!isFiniteNumber(patch.borderWidth) || patch.borderWidth < 0 || patch.borderWidth > 100)) throw new SnapshotError("invalid border width");
 		if (patch.connector !== undefined) {
-			const connector = only(patch.connector, ["route", "strokeStyle", "startCap", "endCap", "width", "color", "waypoints"]);
+			const connector = only(patch.connector, ["route", "strokeStyle", "startCap", "endCap", "width", "headSize", "color", "waypoints"]);
 			if (hasOwn(connector, "waypoints")) {
 				const waypoints = readWaypoints(connector.waypoints);
 				if (waypoints === undefined) throw new SnapshotError("invalid connector waypoints");
@@ -1017,6 +1017,7 @@ function readStylePatch(action: unknown, diagnostics: CanvasAuthoringDiagnostic[
 				if (connector[key] !== undefined && !(values as readonly unknown[]).includes(connector[key])) throw new SnapshotError("invalid connector enum");
 			}
 			if (connector.width !== undefined && (!isFiniteNumber(connector.width) || connector.width <= 0 || connector.width > 100)) throw new SnapshotError("invalid connector width");
+			if (connector.headSize !== undefined && (!isFiniteNumber(connector.headSize) || connector.headSize < 1 || connector.headSize > 1000)) throw new SnapshotError("invalid connector head size");
 			if (hasOwn(connector, "color")) {
 				if (!isSafeColor(connector.color)) throw new SnapshotError("unsafe connector color");
 				connector.color = normalizeColor(connector.color);

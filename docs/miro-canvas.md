@@ -706,6 +706,27 @@ The settings descriptions explicitly explain Escape and the all-targets-off case
 
 Remaining review findings, not release claims:
 
+The next development patch restores bend handles on independent straight,
+curved and elbowed connectors. Dragging an attached connector's body adjusts its
+route without detaching its ends; free connectors still move as a whole.
+Clipboard copies now include their selection center, so paste centers the group
+at the last canvas pointer location (or the viewport center if none is known).
+Clicking with a drag-based line/arrow tool no longer creates a default-length
+connector. Explicit multipoint line tools retain their point-placement gesture.
+Drawing now has a custom color picker as well as the preset palette, matching
+connectors. Hidden comment-card controls stay hidden, preventing the local-delete
+and imported-hide buttons from appearing together.
+
+The comment card now edits an author's displayed name before posting and after
+posting, deletes individual local replies, and sets a thread's color and lock.
+The default name still comes from the plugin setting; imported author changes
+are local display aliases, not edits to Miro metadata. Connectors can anchor to
+comment markers and resolve their endpoints as comments move. A connector's
+arrowhead size is adjustable independently of stroke width. The mixed lasso
+frame encloses selected native items and independent connectors; dragging its
+border moves the whole selection in one transaction. These behaviors have
+focused unit and synthetic-browser coverage, not live Obsidian acceptance.
+
 - Native-edge-only clipboard payloads without their endpoint nodes are not yet
   supported by the unified paste path. Independent connectors are supported.
 - Formatting a mixed native/independent selection still uses separate style

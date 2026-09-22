@@ -1,8 +1,9 @@
 /** Independent board connectors. Arrowheads are style, never an element type. */
 import { normalizeAnchor, resolveAnchor, type CanvasAnchor, type AnchorGeometry, type AnchorPoint } from "./anchors";
-import { planRoute, type PlannedRoute } from "./connector-route";
+import { planRoute, routeBends, moveElbowSegment, placeWaypoint, type RouteHandle, type PlannedRoute } from "./connector-route";
 import { readLocalLine, type LineRoute } from "./local-items";
 import { lineBoardPoints } from "./free-line";
+import { validHeadSize } from "./connector-style";
 import { CONNECTOR_CAPS, effectiveRotation, rotatePoint } from "./source-model";
 
 export interface BoardConnector {
@@ -12,6 +13,7 @@ export interface BoardConnector {
   readonly route: LineRoute;
   readonly color: string;
   readonly width: number;
+  readonly headSize?: number;
   readonly startCap: string;
   readonly endCap: string;
   readonly strokeStyle?: "solid" | "dashed" | "dotted";
@@ -27,6 +29,7 @@ export function readBoardConnector(v: unknown): BoardConnector | undefined {
     || !["straight", "elbowed", "curved"].includes(v.route as string)
     || typeof v.color !== "string" || !/^#[0-9a-f]{6}$/i.test(v.color)
     || typeof v.width !== "number" || !Number.isFinite(v.width) || v.width <= 0 || v.width > 1000
+    || (v.headSize !== undefined && !validHeadSize(v.headSize))
     || ![...CONNECTOR_CAPS, "circle", "filled_circle", "er_one", "er_many", "er_one_or_many"].includes(v.startCap as never)
     || ![...CONNECTOR_CAPS, "circle", "filled_circle", "er_one", "er_many", "er_one_or_many"].includes(v.endCap as never)
     || (v.strokeStyle !== undefined && !["solid", "dashed", "dotted"].includes(v.strokeStyle as string))
@@ -68,6 +71,14 @@ export function connectorRoutes(connectors: readonly BoardConnector[], base: Anc
 export function translateConnector(c: BoardConnector, dx: number, dy: number, id = c.id): BoardConnector {
   const end = (a: CanvasAnchor): CanvasAnchor => a.type === "free" ? { ...a, x: a.x + dx, y: a.y + dy } : a;
   return { ...c, id, from: end(c.from), to: end(c.to), ...(c.waypoints ? { waypoints: c.waypoints.map(p => ({ x:p.x+dx, y:p.y+dy })) } : {}) };
+}
+/** Reshape only the route: both endpoint attachments remain unchanged. */
+export function reshapeBoardConnector(c: BoardConnector, route: PlannedRoute, grip: RouteHandle, at: AnchorPoint): BoardConnector {
+  const bends = routeBends(route);
+  const waypoints = grip.kind === "segment"
+    ? moveElbowSegment({ point: route.start }, { point: route.end }, bends, grip.index, grip.axis === "x" ? at.x : at.y)
+    : placeWaypoint(route.start, route.end, bends, grip.index, at, { insert: grip.kind === "insert" });
+  return { ...c, waypoints };
 }
 /** Older block arrows stored their implicit end head as "none". */
 export function connectorEndCap(c: BoardConnector): string {

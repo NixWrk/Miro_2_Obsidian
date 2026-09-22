@@ -63,6 +63,16 @@ describe("storing a line", () => {
 });
 
 describe("block arrows", () => {
+  it("sizes the head independently while retaining the shaft and short-arrow limit", () => {
+    const from = {x: 0, y: 0}, to = {x: 100, y: 0};
+    const thin = blockArrowOutline(from, to, 2, 20);
+    const thick = blockArrowOutline(from, to, 16, 20);
+    expect(thin[2]).toEqual({x: 80, y: -12});
+    expect(thick[2]).toEqual(thin[2]);
+    expect(thin[0]).not.toEqual(thick[0]);
+    expect(blockArrowOutline(from, {x: 10, y: 0}, 2, 20)[2]!.x).toBe(5);
+    expect(blockArrowOutline(from, from, 2, 20)).toEqual([from, from, from]);
+  });
   it("widens from a slim tail to a head three times as wide, its tip at the end", () => {
     const outline = blockArrowOutline({ x: 0, y: 0 }, { x: 100, y: 0 }, 12);
     expect(outline).toHaveLength(7);

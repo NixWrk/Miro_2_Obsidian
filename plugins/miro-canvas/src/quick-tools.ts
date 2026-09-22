@@ -9,6 +9,7 @@
 import { SHAPE_CATALOG, shapeCatalogEntry, shapeCatalogLabel } from "./shape-catalog";
 import { shapePicture } from "./selection-toolbar";
 import { LINE_KINDS, lineKind, type LineKindSpec } from "./free-line";
+import { validHeadSize } from "./connector-style";
 import { BAR_TOOLTIP_DELAY, PICTURE_TOOLTIP_DELAY } from "./tooltips";
 
 export const QUICK_TOOLS = [
@@ -48,6 +49,7 @@ const MORE_TOOLS: readonly ToolSpec[] = [
 export interface QuickToolsState {
   readonly connectorColor?: string;
   readonly connectorWidth?: number;
+  readonly connectorHeadSize?: number;
   readonly showLassoTool?: boolean;
   readonly showConnectorTool?: boolean;
   /** False in review mode: nothing can be made. */
@@ -63,7 +65,7 @@ export interface QuickToolsState {
 }
 
 export interface QuickToolsActions {
-  readonly onConnector?: (settings: {color?:string;width?:number}) => void;
+  readonly onConnector?: (settings: {color?:string;width?:number;headSize?:number}) => void;
   readonly onArm: (tool: QuickTool) => void;
   readonly onShape: (shape: string) => void;
   readonly onPen: (settings: { readonly color?: string; readonly width?: number; readonly eraserSize?: number }) => void;
@@ -127,6 +129,7 @@ export class QuickTools {
   private readonly buttons = new Map<QuickTool, HTMLButtonElement>();
   private readonly shapeButtons = new Map<string, HTMLButtonElement>();
   private readonly penColors = new Map<string, HTMLButtonElement>();
+  private readonly penColor: HTMLInputElement;
   private penButton: HTMLButtonElement | undefined;
   /** The pen's own row, open for as long as one of its tools is armed. */
   private drawingBar: HTMLElement | undefined;
@@ -143,6 +146,7 @@ export class QuickTools {
   private connectorBar: HTMLElement;
   private connectorColor: HTMLInputElement;
   private connectorWidth: HTMLInputElement;
+  private connectorHeadSize: HTMLInputElement;
   private connectorRange: HTMLInputElement;
   private connectorPreview: HTMLElement;
   private readonly connectorColors=new Map<string,HTMLButtonElement>();
@@ -180,6 +184,14 @@ export class QuickTools {
     this.connectorWidth=connectorSize.appendChild(this.make("input","miro-canvas-toolbar__number miro-canvas-tools__number"));
     this.connectorWidth.type="number";this.connectorWidth.min="1";this.connectorWidth.max="1000";this.connectorWidth.setAttribute("aria-label","New connector width");
     this.listen(this.connectorWidth,"change",()=>{const width=Number(this.connectorWidth.value);if(Number.isFinite(width)&&width>=1&&width<=1000)this.actions.onConnector?.({width});});
+    this.connectorHeadSize=connectorSize.appendChild(this.make("input","miro-canvas-toolbar__number miro-canvas-tools__number"));
+    this.connectorHeadSize.type="number";this.connectorHeadSize.min="1";this.connectorHeadSize.max="1000";this.connectorHeadSize.step="any";
+    this.connectorHeadSize.placeholder="Auto";this.connectorHeadSize.setAttribute("aria-label","New connector arrowhead size");
+    this.connectorHeadSize.title="Arrowhead size in board units";
+    this.listen(this.connectorHeadSize,"change",()=>{
+      const headSize=Number(this.connectorHeadSize.value);
+      if(!this.connectorHeadSize.disabled && validHeadSize(headSize))this.actions.onConnector?.({headSize});
+    });
     root.setAttribute("role", "toolbar");
     root.setAttribute("aria-label", "Board tools");
     // Miro keeps the pen, the highlighter, smart drawing, the erasers and the
@@ -199,6 +211,10 @@ export class QuickTools {
       this.listen(option, "click", () => this.actions.onPen({ color }));
       this.penColors.set(color, option);
     }
+    this.penColor = colors.appendChild(this.make("input", "miro-canvas-toolbar__swatch"));
+    this.penColor.type = "color";
+    this.penColor.setAttribute("aria-label", "New drawing color");
+    this.listen(this.penColor, "input", () => this.actions.onPen({color: this.penColor.value}));
     // The size: a sample of it, a slider that acts as it moves, and the exact
     // number, which can be typed.
     const size = drawingBar.appendChild(this.make("span", "miro-canvas-tools__size"));
@@ -302,6 +318,10 @@ export class QuickTools {
     if (state.armed !== this.armed) this.closePanels();
     this.connectorBar.hidden = state.armed !== "connector" || !state.editable;
     this.connectorColor.value = state.connectorColor ?? "#1a1a1a";
+    this.connectorHeadSize.disabled = !state.editable;
+    if(this.document.activeElement!==this.connectorHeadSize)this.connectorHeadSize.value=state.connectorHeadSize===undefined?"":String(state.connectorHeadSize);
+    this.penColor.value = state.penColor;
+    this.penColor.disabled = !state.editable;
     for(const [color,button] of this.connectorColors)button.setAttribute("aria-pressed",color===this.connectorColor.value?"true":"false");
     if(this.document.activeElement!==this.connectorRange)this.connectorRange.value=String(state.connectorWidth??2);
     this.connectorPreview.style?.setProperty?.("--miro-canvas-preview-size",`${Math.min(state.connectorWidth??2,MAX_PREVIEW)}px`);

@@ -14,6 +14,16 @@ import {
 export type CommentOrigin = "local" | "imported";
 export type CommentScope = "board" | "selection";
 
+export const MAX_COMMENT_AUTHOR_NAME_LENGTH = 256;
+export const MAX_COMMENT_AUTHOR_ALIASES = 1000;
+
+function displayAuthorName(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const name = value.trim();
+  return name.length > 0 && name.length <= MAX_COMMENT_AUTHOR_NAME_LENGTH
+    && !/[\u0000-\u001f\u007f]/u.test(name) ? name : undefined;
+}
+
 export interface CommentAuthor {
   readonly id?: string;
   readonly name?: string;
@@ -101,6 +111,7 @@ export interface CommentMutationDiagnostic {
     | "comment-not-found"
     | "comment-immutable"
     | "text-invalid"
+    | "author-invalid"
     | "id-invalid"
     | "anchor-invalid"
     | "reply-invalid";
@@ -494,6 +505,7 @@ export function listCommentThreads(input: unknown, options: CommentListOptions =
   const threads = [...importedThreads(input), ...localThreads(input)];
   const wrapper = isRecord(input) ? readOwn(input, "miroCanvas") : undefined;
   const metadata = isRecord(wrapper) ? wrapper : input;
+  const aliases = isRecord(metadata) ? readOwn(metadata, "commentAuthorNames") : undefined;
   const hiddenValue = isRecord(metadata) ? readOwn(metadata, "hiddenImportedComments") : undefined;
   const hidden = new Set(Array.isArray(hiddenValue) ? hiddenValue : []);
   const selected = new Set((options.selectedElementIds ?? []).filter((id): id is string => safeKey(id)).map((id) => id.trim()));
@@ -510,7 +522,20 @@ export function listCommentThreads(input: unknown, options: CommentListOptions =
       return false;
     }
     return [...targetIds(thread)].some((id) => selected.has(id));
-  }));
+  }).map((thread) => applyAuthorAliases(thread, aliases)));
+}
+
+/** Only detached presentation authors change; source/createdBy remain original evidence. */
+function applyAuthorAliases(thread: CommentThread, aliases: unknown): CommentThread {
+  if (thread.origin !== "imported" || !isRecord(aliases)) return thread;
+  const names = readOwn(aliases, `${thread.origin}:${thread.id}`);
+  if (!isRecord(names)) return thread;
+  const authorFor = (message: { readonly id: string; readonly author?: CommentAuthor }) => {
+    const name = displayAuthorName(readOwn(names, message.id));
+    return name === undefined ? {} : { author: { ...message.author, name } };
+  };
+  return { ...thread, ...authorFor(thread),
+    replies: thread.replies.map((reply) => ({ ...reply, ...authorFor(reply) })) };
 }
 
 export const listComments = listCommentThreads;
@@ -726,6 +751,102 @@ export function editLocalComment(
 export const updateLocalComment = editLocalComment;
 export const editComment = editLocalComment;
 
+/** Rename one local author without changing message IDs, timestamps or source evidence. */
+export function renameLocalCommentAuthor(
+  metadataInput: unknown,
+  threadId: unknown,
+  messageId: unknown,
+  nameInput: unknown,
+): CommentMutationResult {
+  const prepared = metadataForMutation(metadataInput);
+  if (prepared.metadata === undefined) {
+    return failure(metadataInput, diagnostic("metadata-invalid", "Metadata must be a JSON object."));
+  }
+  if (prepared.comments === undefined) {
+    return failure(prepared.metadata, diagnostic("comments-invalid", "localComments must be an array of objects."));
+  }
+  const located = mutableLocalComment(prepared.comments, threadId, prepared.metadata);
+  if (located.diagnostic !== undefined || located.comment === undefined || located.id === undefined) {
+    return failure(prepared.metadata, located.diagnostic ?? diagnostic("comment-not-found", "Comment was not found."));
+  }
+  if (!safeKey(messageId)) {
+    return failure(prepared.metadata, diagnostic("id-invalid", "Message ID is unsafe."));
+  }
+  const name = textOf(nameInput);
+  if (name === undefined) {
+    return failure(prepared.metadata, diagnostic("author-invalid", "Author name must be non-empty text."));
+  }
+  const replies = readOwn(located.comment, "replies");
+  const message = messageId.trim() === located.id ? located.comment
+    : Array.isArray(replies) ? replies.find((reply): reply is UnknownRecord =>
+      isRecord(reply) && readOwn(reply, "id") === messageId.trim()) : undefined;
+  if (message === undefined) {
+    return failure(prepared.metadata, diagnostic("comment-not-found", "Message was not found."));
+  }
+  if (originOf(message) === "imported") {
+    return failure(prepared.metadata, diagnostic("comment-immutable", "Imported Miro messages are immutable."));
+  }
+  const author = readOwn(message, "author");
+  if (author !== ABSENT && !isRecord(author)) {
+    return failure(prepared.metadata, diagnostic("author-invalid", "Author must be an object."));
+  }
+  const changed = !isRecord(author) || readOwn(author, "name") !== name;
+  if (changed) message.author = { ...(isRecord(author) ? author : {}), name };
+  setComments(prepared.metadata, prepared.comments);
+  return { ok: true, changed, metadata: prepared.metadata,
+    comment: normalizeLocalThread(located.comment), diagnostics: [] };
+}
+
+/** Store imported display aliases separately from evidence; local names use the local mutation. */
+export function renameCommentDisplayAuthor(
+  metadataInput: unknown,
+  origin: CommentOrigin,
+  threadId: unknown,
+  messageId: unknown,
+  nameInput: unknown,
+): CommentMutationResult {
+  if (origin === "local") return renameLocalCommentAuthor(metadataInput, threadId, messageId, nameInput);
+  const metadata = cloneMetadata(metadataInput);
+  if (metadata === undefined) {
+    return failure(metadataInput, diagnostic("metadata-invalid", "Metadata must be a JSON object."));
+  }
+  if (origin !== "imported" || !safeKey(threadId) || !safeKey(messageId)
+    || !safeKey(`imported:${threadId.trim()}`)) {
+    return failure(metadata, diagnostic("id-invalid", "Comment origin or message ID is unsafe."));
+  }
+  const name = displayAuthorName(nameInput);
+  if (name === undefined) {
+    return failure(metadata, diagnostic("author-invalid", "Display author name must be 1–256 characters without control characters."));
+  }
+  const thread = importedThreads(metadata).find((item) => item.id === threadId.trim());
+  const id = messageId.trim();
+  if (thread === undefined || (id !== thread.id && !thread.replies.some((reply) => reply.id === id))) {
+    return failure(metadata, diagnostic("comment-not-found", "Imported message was not found."));
+  }
+  const rawAliases = readOwn(metadata, "commentAuthorNames");
+  if (rawAliases !== ABSENT && !isRecord(rawAliases)) {
+    return failure(metadata, diagnostic("author-invalid", "Comment author aliases must be an object."));
+  }
+  const aliases = isRecord(rawAliases) ? rawAliases : {};
+  const key = `imported:${thread.id}`;
+  const rawNames = readOwn(aliases, key);
+  if (rawNames !== ABSENT && !isRecord(rawNames)) {
+    return failure(metadata, diagnostic("author-invalid", "Message author aliases must be an object."));
+  }
+  const names = isRecord(rawNames) ? rawNames : {};
+  const count = ownKeys(aliases).reduce((total, aliasKey) => {
+    const group = readOwn(aliases, aliasKey);
+    return total + (isRecord(group) ? ownKeys(group).length : 1);
+  }, 0);
+  if (count + (hasOwn(names, id) ? 0 : 1) > MAX_COMMENT_AUTHOR_ALIASES) {
+    return failure(metadata, diagnostic("author-invalid", "Comment author alias limit reached."));
+  }
+  const changed = readOwn(names, id) !== name;
+  metadata.commentAuthorNames = { ...aliases, [key]: { ...names, [id]: name } };
+  return { ok: true, changed, metadata,
+    comment: applyAuthorAliases(thread, metadata.commentAuthorNames), diagnostics: [] };
+}
+
 /** Delete a local thread.  Imported source comments can never be deleted here. */
 export function deleteLocalComment(metadataInput: unknown, idInput: unknown): CommentMutationResult {
   const prepared = metadataForMutation(metadataInput);
@@ -746,6 +867,24 @@ export function deleteLocalComment(metadataInput: unknown, idInput: unknown): Co
 
 export const removeLocalComment = deleteLocalComment;
 export const deleteComment = deleteLocalComment;
+
+/** Remove one local reply while retaining the thread, other replies and source. */
+export function deleteLocalReply(metadataInput: unknown, threadId: unknown, replyId: unknown): CommentMutationResult {
+  const prepared = metadataForMutation(metadataInput);
+  if (prepared.metadata === undefined) return failure(metadataInput, diagnostic("metadata-invalid", "Metadata must be a JSON object."));
+  if (prepared.comments === undefined) return failure(prepared.metadata, diagnostic("comments-invalid", "localComments must be an array of objects."));
+  const located = mutableLocalComment(prepared.comments, threadId, prepared.metadata);
+  if (located.diagnostic || !located.comment || !located.id) return failure(prepared.metadata, located.diagnostic ?? diagnostic("comment-not-found", "Comment was not found."));
+  if (!safeKey(replyId)) return failure(prepared.metadata, diagnostic("id-invalid", "Reply ID is unsafe."));
+  const replies = readOwn(located.comment, "replies");
+  if (!Array.isArray(replies)) return failure(prepared.metadata, diagnostic("reply-invalid", "Comment replies must be an array."));
+  const reply = replies.find(item => isRecord(item) && readOwn(item, "id") === replyId.trim());
+  if (!isRecord(reply)) return failure(prepared.metadata, diagnostic("comment-not-found", "Reply was not found."));
+  if (originOf(reply) === "imported") return failure(prepared.metadata, diagnostic("comment-immutable", "Imported replies cannot be deleted."));
+  located.comment.replies = replies.filter(item => item !== reply);
+  setComments(prepared.metadata, prepared.comments);
+  return {ok: true, changed: true, metadata: prepared.metadata, comment: normalizeLocalThread(located.comment), diagnostics: []};
+}
 
 /** Add a local reply to a local thread; imported threads remain read-only. */
 export function addReply(

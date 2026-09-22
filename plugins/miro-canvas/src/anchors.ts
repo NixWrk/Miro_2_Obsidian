@@ -4,7 +4,13 @@
  * the Miro source snapshot about local edits.
  */
 
-export type AnchorType = "free" | "node" | "image" | "edge";
+export type AnchorType = "free" | "node" | "image" | "edge" | "comment";
+export interface CommentAnchor {
+  readonly type: "comment";
+  readonly commentId: string;
+  readonly origin: "local" | "imported";
+  readonly [key: string]: unknown;
+}
 
 export interface FreePointAnchor {
   readonly type: "free";
@@ -36,7 +42,7 @@ export interface EdgeAnchor {
   readonly [key: string]: unknown;
 }
 
-export type CanvasAnchor = FreePointAnchor | NodeAnchor | ImageAnchor | EdgeAnchor;
+export type CanvasAnchor = FreePointAnchor | NodeAnchor | ImageAnchor | EdgeAnchor | CommentAnchor;
 export type Anchor = CanvasAnchor;
 
 export interface AnchorDiagnostic {
@@ -73,6 +79,7 @@ export interface AnchorEdgeGeometry {
 }
 
 export interface AnchorGeometry {
+  readonly comments?: Readonly<Record<string, AnchorPoint>>;
   readonly nodes?: Readonly<Record<string, AnchorRect>>;
   readonly images?: Readonly<Record<string, AnchorRect>>;
   readonly edges?: Readonly<Record<string, AnchorEdgeGeometry>>;
@@ -286,6 +293,13 @@ export function normalizeAnchor(value: unknown): AnchorNormalizationResult {
     }
     return { valid: true, anchor: { ...common, type: "free", x: x as number, y: y as number }, diagnostics };
   }
+  if (type === "comment") {
+    const id = readOwn(value, "commentId"), origin = readOwn(value, "origin");
+    if (!safeId(id) || (origin !== "local" && origin !== "imported")) {
+      return {valid: false, diagnostics: [diagnostic("anchor-invalid", "Comment anchor needs an ID and origin.")]};
+    }
+    return {valid: true, anchor: {...common, type: "comment", commentId: id.trim(), origin}, diagnostics};
+  }
   if (type === "node" || type === "image") {
     const id = targetId(value, "nodeId");
     const u = readOwn(value, "u");
@@ -452,6 +466,12 @@ export function resolveAnchor(anchorValue: unknown, geometry: AnchorGeometry | u
     return finite(point.x) && finite(point.y)
       ? { valid: true, point: { ...point, anchor }, diagnostics: [] }
       : { valid: false, diagnostics: [diagnostic("geometry-invalid", "Resolved node/image point is not finite.", anchor.type, anchor.nodeId)] };
+  }
+  if (anchor.type === "comment") {
+    const map = readOwn(geometry, "comments");
+    const point = map === ABSENT ? undefined : geometryPoint(mapValue(map, `${anchor.origin}:${anchor.commentId}`), "comments");
+    return point ? {valid: true, point: {...point, anchor}, diagnostics: []}
+      : {valid: false, diagnostics: [diagnostic("missing-target", "Comment anchor target is missing.", "comment", anchor.commentId)]};
   }
   const edges = readOwn(geometry, "edges");
   const item = edges === ABSENT ? ABSENT : mapValue(edges, anchor.edgeId);

@@ -1,10 +1,34 @@
 import { describe, expect, it } from "vitest";
-import { boardConnectors, connectorEndCap, connectorRoutes, migrateLineNodes, readBoardConnector, restyleBoardConnector, translateConnector, type BoardConnector } from "../src/board-connectors";
+import { boardConnectors, connectorEndCap, connectorRoutes, migrateLineNodes, readBoardConnector, reshapeBoardConnector, restyleBoardConnector, translateConnector, type BoardConnector } from "../src/board-connectors";
+import { routeHandles } from "../src/connector-route";
 import { buildCanvasAnchorGeometry, updateConnectorEndpoint } from "../src/connector-endpoints";
 import { validateMiroCanvasMetadata } from "../src/metadata";
 const line: BoardConnector = {id:"a",from:{type:"free",x:10,y:20},to:{type:"free",x:110,y:20},route:"straight",color:"#123456",width:2,startCap:"none",endCap:"arrow"};
 const legacy = () => ({nodes:[{id:"old",type:"text",text:"",x:10,y:20,width:100,height:50}],edges:[],miroSource:{future:[1]},miroCanvas:{schemaVersion:1,localOverrides:{old:{future:"kept",localItem:{type:"line",line:{route:"straight",color:"#123456",width:2,box:{width:100,height:50},points:[0,0,100,50]}}}}}});
 describe("independent board connectors",()=>{
+  it("validates optional head sizes and preserves them through movement and restyling",()=>{
+    for (const headSize of [1, 12.5, 1000]) {
+      const c = {...line, headSize};
+      expect(readBoardConnector(c)).toEqual(c);
+      expect(translateConnector(c, 10, 20).headSize).toBe(headSize);
+      expect(restyleBoardConnector(c, {width: 50}).headSize).toBe(headSize);
+    }
+    for (const headSize of [0, -1, 1001, NaN, Infinity, "20", null]) {
+      expect(readBoardConnector({...line, headSize})).toBeUndefined();
+    }
+    expect(readBoardConnector(line)?.headSize).toBeUndefined();
+  });
+  for (const kind of ["straight", "curved", "elbowed"] as const) it(`reshapes a ${kind} body while preserving endpoint anchors`,()=>{
+    const c:BoardConnector={...line,route:kind,from:{type:"node",nodeId:"n",u:1,v:0.5},to:{type:"free",x:300,y:150}};
+    const geometry={nodes:{n:{x:0,y:0,width:100,height:100}}};
+    const route=connectorRoutes([c],geometry).get(c.id)!;
+    const grip=routeHandles(route)[0]!;
+    const next=reshapeBoardConnector(c,route,grip,{x:grip.point.x+40,y:grip.point.y+50});
+    expect(next.from).toEqual(c.from);expect(next.to).toEqual(c.to);
+    expect(connectorRoutes([next],geometry).get(c.id)!.path).not.toBe(route.path);
+    expect(next.color).toBe(c.color);expect(next.width).toBe(c.width);
+    expect(readBoardConnector(next)).toBeDefined();
+  });
   it("allows legacy block arrows to reverse or become ordinary lines without losing anchors",()=>{
     const block:BoardConnector={...line,block:true,endCap:"none"};
     expect(connectorEndCap(block)).toBe("stealth");

@@ -33,6 +33,7 @@ import {
   STROKE_LABELS,
   capFilled,
   capReach,
+  validHeadSize,
   strokeDash,
   type ConnectorCap,
   type ConnectorRoute,
@@ -71,7 +72,7 @@ export interface SelectionToolbarStyle {
   readonly shape?: ShapeKind;
   readonly borderStyle?: BorderStyle;
   readonly borderWidth?: number;
-  readonly connector?: LocalConnectorSettings;
+  readonly connector?: LocalConnectorSettings & { readonly headSize?: number };
 }
 
 export interface SelectionToolbarState extends SelectionToolbarStyle {
@@ -402,6 +403,7 @@ interface ToolbarRefs {
   readonly strokes: readonly HTMLButtonElement[];
   readonly lineWidth: HTMLInputElement;
   readonly lineWidthValue: HTMLElement;
+  readonly headSize: HTMLInputElement;
   readonly colors: Readonly<Record<string, ColorRefs>>;
   readonly borderStyles: readonly HTMLButtonElement[];
   readonly borderWidth: HTMLInputElement;
@@ -609,6 +611,10 @@ export class SelectionToolbar {
     const lineWidthRow = this.block(line.panel, "Thickness", "miro-canvas-toolbar__row miro-canvas-toolbar__slider");
     const lineWidth = append(lineWidthRow, makeRange(document, "Line thickness", 1, LINE_SLIDER_MAX));
     const lineWidthValue = append(lineWidthRow, make(document, "span", "miro-canvas-toolbar__value"));
+    const headSizeRow = this.block(line.panel, "Head size", "miro-canvas-toolbar__row");
+    const headSize = append(headSizeRow, makeNumber(document, "Arrowhead size", 1, 1000));
+    headSize.step = "any";
+    headSize.placeholder = "Auto";
 
     // Colours: text, fill and border for a node, the line colour for a connector.
     const colorGroup = append(bar, make(document, "span", "miro-canvas-toolbar__group"));
@@ -673,7 +679,7 @@ export class SelectionToolbar {
       bar, shape, shapeOptions,
       textGroup, font, fontOptions, fontSize, fontSizeDown, fontSizeUp,
       format, formats, align, alignments, verticalAlignments, lineHeight,
-      edgeGroup, startCap, endCap, startCaps, endCaps, swapEnds, line, routes, strokes, lineWidth, lineWidthValue,
+      edgeGroup, startCap, endCap, startCaps, endCaps, swapEnds, line, routes, strokes, lineWidth, lineWidthValue, headSize,
       colors, borderStyles, borderWidth, borderWidthValue,
       lock, deleteSelection, openLink, nativeSlot, status,
     };
@@ -741,6 +747,10 @@ export class SelectionToolbar {
     this.listen(refs.lineWidth, "change", () => {
       const width = finiteNumber(refs.lineWidth.value);
       if (width !== undefined && width > 0 && width <= MAX_BORDER_WIDTH) this.style({ connector: { width } });
+    });
+    this.listen(refs.headSize, "change", () => {
+      const headSize = Number(refs.headSize.value);
+      if (validHeadSize(headSize)) this.style({ connector: { headSize } });
     });
     for (const { slot } of COLOR_SLOTS) {
       const color = refs.colors[slot]!;
@@ -879,6 +889,7 @@ export class SelectionToolbar {
     const lineWidth = state.connector?.width;
     refs.lineWidth.value = String(Math.min(LINE_SLIDER_MAX, lineWidth ?? 2));
     refs.lineWidthValue.textContent = String(lineWidth ?? 2);
+    if (this.document?.activeElement !== refs.headSize) refs.headSize.value = state.connector?.headSize === undefined ? "" : String(state.connector.headSize);
 
     for (const { slot } of COLOR_SLOTS) {
       const color = normalizedHex(state.colors[slot]);
@@ -943,7 +954,7 @@ export class SelectionToolbar {
       ...Object.values(refs.shapeOptions),
       ...refs.fontOptions, refs.fontSize, refs.fontSizeDown, refs.fontSizeUp,
       ...Object.values(refs.formats), ...refs.alignments, ...refs.verticalAlignments, refs.lineHeight,
-      ...refs.startCaps, ...refs.endCaps, refs.swapEnds, ...refs.routes, ...refs.strokes, refs.lineWidth,
+      ...refs.startCaps, ...refs.endCaps, refs.swapEnds, ...refs.routes, ...refs.strokes, refs.lineWidth, refs.headSize,
       ...Object.values(refs.colors).flatMap((color) => [color.input, color.clear, color.reset]),
       ...refs.borderStyles, refs.borderWidth,
     ];

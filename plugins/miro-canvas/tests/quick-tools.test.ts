@@ -140,6 +140,40 @@ function build(): { readonly tools: QuickTools; readonly root: FakeElement; read
 }
 
 describe("quick tools", () => {
+  it("reports valid head sizes separately from width and supports optional hosts", () => {
+    const patches: unknown[] = [];
+    const tools = new QuickTools({onArm:()=>{}, onShape:()=>{}, onPen:()=>{}, onConnector:p=>patches.push(p)}, {document:new FakeDocument() as unknown as Document});
+    const root = tools.element as unknown as FakeElement;
+    const input = byLabel(root, "New connector arrowhead size") as unknown as HTMLInputElement;
+    tools.update({...STATE, armed:"connector"});
+    expect(input.value).toBe("");
+    for (const value of ["0", "1001", "", "NaN"]) {
+      input.value=value;(input as unknown as FakeElement).dispatch("change");
+    }
+    expect(patches).toEqual([]);
+    input.value="24.5";(input as unknown as FakeElement).dispatch("change");
+    expect(patches).toEqual([{headSize:24.5}]);
+    tools.update({...STATE, connectorHeadSize:24.5, connectorWidth:50, editable:false});
+    expect(input.value).toBe("24.5");expect(input.disabled).toBe(true);
+    (input as unknown as FakeElement).dispatch("change");
+    expect(patches).toHaveLength(1);
+    const optional=build();
+    const optionalInput=byLabel(optional.root,"New connector arrowhead size") as unknown as HTMLInputElement;
+    optionalInput.value="20";
+    expect(()=>(optionalInput as unknown as FakeElement).dispatch("change")).not.toThrow();
+  });
+  it("offers a custom drawing color alongside the connector color picker", () => {
+    const {tools, root, calls} = build();
+    tools.update({...STATE, armed: "pen", penColor: "#abcdef"});
+    const picker = byLabel(root, "New drawing color") as unknown as HTMLInputElement;
+    expect(picker.value).toBe("#abcdef");
+    picker.value = "#123456";
+    (picker as unknown as FakeElement).dispatch("input");
+    expect(calls).toEqual([{kind: "pen", settings: {color: "#123456"}}]);
+    expect(byLabel(root, "New connector color").type).toBe("color");
+    tools.update({...STATE, editable: false});
+    expect(picker.disabled).toBe(true);
+  });
   it("offers one button per tool, with code and link inside the more panel", () => {
     const { root } = build();
     for (const tool of QUICK_TOOLS) toolButton(root, tool);

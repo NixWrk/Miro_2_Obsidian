@@ -35,6 +35,7 @@ export interface LocalStroke {
  * follows the node when the node is moved or resized.
  */
 export interface LocalLine {
+  readonly headSize?: number;
   readonly route: LineRoute;
   readonly color: string;
   readonly width: number;
@@ -121,6 +122,8 @@ const CAP_NAME = /^[a-z_]{1,32}$/u;
 export function readLocalLine(value: unknown): LocalLine | undefined {
   if (value === null || typeof value !== "object" || Array.isArray(value)) return undefined;
   const route = own(value, "route"), color = own(value, "color"), width = own(value, "width");
+  const headSize = own(value, "headSize");
+  if (headSize !== undefined && (typeof headSize !== "number" || !Number.isFinite(headSize) || headSize < 1 || headSize > 1000)) return undefined;
   const strokeStyle = own(value, "strokeStyle"), startCap = own(value, "startCap"), endCap = own(value, "endCap");
   const box = own(value, "box"), points = own(value, "points"), block = own(value, "block");
   if (typeof route !== "string" || !LINE_ROUTES.has(route)) return undefined;
@@ -139,6 +142,7 @@ export function readLocalLine(value: unknown): LocalLine | undefined {
     route: route as LineRoute,
     color: color.toLowerCase(),
     width,
+    ...(headSize === undefined ? {} : {headSize: headSize as number}),
     ...(strokeStyle === undefined ? {} : { strokeStyle: strokeStyle as "dashed" | "dotted" }),
     ...(startCap === undefined || startCap === "none" ? {} : { startCap: startCap as string }),
     ...(endCap === undefined || endCap === "none" ? {} : { endCap: endCap as string }),

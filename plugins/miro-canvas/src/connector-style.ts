@@ -12,6 +12,24 @@ export type ConnectorCap = (typeof CONNECTOR_CAPS)[number];
 export type ConnectorRoute = (typeof CONNECTOR_ROUTES)[number];
 export type ConnectorStroke = (typeof CONNECTOR_STROKES)[number];
 
+/** Nominal ten-unit cap size in board units, independent of the shaft width. */
+export function validHeadSize(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value) && value >= 1 && value <= 1000;
+}
+
+/** Shared marker sizing for board and native edges. Scale is screen units per board unit.
+ * Omitted sizes retain the caller's legacy marker attributes unchanged.
+ */
+export function headMarkerAttributes(headSize: number | undefined, scale = 1): Readonly<Record<string, string>> {
+  if (!validHeadSize(headSize)) return {};
+  return {
+    markerUnits: "userSpaceOnUse",
+    viewBox: "-16 -8 18 16",
+    markerWidth: String(headSize * scale * 1.8),
+    markerHeight: String(headSize * scale * 1.6),
+  };
+}
+
 export const CAP_PATHS: Readonly<Record<string, string>> = Object.freeze({
   rounded_stealth: "M-10 -5Q-2 -2 0 0Q-2 2 -10 5L-7 0Z",
   filled_oval: "M-5 -5A5 5 0 1 1 -5 5A5 5 0 1 1 -5 -5Z",

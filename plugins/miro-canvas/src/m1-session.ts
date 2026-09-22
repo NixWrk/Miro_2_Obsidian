@@ -105,7 +105,7 @@ import {
 import { CommentMarkers } from "./comment-markers";
 import { matchesPointer } from "./pointer-bindings";
 import { edgeLanding } from "./edge-landing";
-import { addLocalComment, addReply, deleteLocalComment, listCommentThreads, setCommentResolved, type CommentOrigin, type CommentMutationResult } from "./local-comments";
+import { addLocalComment, addReply, deleteLocalComment, deleteLocalReply, listCommentThreads, renameCommentDisplayAuthor, setCommentResolved, type CommentOrigin, type CommentMutationResult } from "./local-comments";
 import { CommentThreadCard, threadMessages } from "./comment-thread";
 import { QUICK_TOOL_KEYS, QuickTools, isDrawingTool, type QuickTool } from "./quick-tools";
 import { LOCAL_ITEM_SIZES, MAX_LINE_POINTS, MAX_STROKE_POINTS, TABLE_TEMPLATE, type LocalItem, type LocalLine } from "./local-items";
@@ -333,6 +333,7 @@ export function resolveSelectionToolbarPresentation(
 		? connector.endCap as NonNullable<SelectionToolbarStyle["connector"]>["endCap"] : undefined;
 	const width = cssNumber(css["stroke-width"]);
 	const connectorStyle: NonNullable<SelectionToolbarStyle["connector"]> = {
+		...(connector?.headSize === undefined ? {} : {headSize: connector.headSize}),
 		...(route === undefined ? {} : { route }),
 		...(strokeStyle === undefined ? {} : { strokeStyle }),
 		...(startCap === undefined ? {} : { startCap }),
@@ -641,6 +642,7 @@ function keyIsPrintable(key: string): boolean {
 export class M1CanvasSession {
 	private connectorLayer?: ConnectorLayer;
 	private connectorColor?: string;
+	private connectorHeadSize?: number;
 	private connectorWidth = 2;
 	private ordinaryConnectorWidth = 2;
 	private blockConnectorWidth = 16;
@@ -664,7 +666,7 @@ export class M1CanvasSession {
 		if (!this.root || typeof this.root.ownerDocument?.createElementNS !== "function" || typeof this.root.append !== "function") return;
 		this.connectorLayer ??= new ConnectorLayer(this.root, {
 			document: () => this.currentRawDocument,
-			geometry: () => buildCanvasAnchorGeometry(this.currentRawDocument),
+			geometry: () => this.landingGeometry().geometry,
 			screen: p => { const at = this.viewportPoint(p) ?? p; const box = boundingRect(this.root); return {x:at.x-(box?.left??0),y:at.y-(box?.top??0)}; },
 			board: p => this.boardPoint(p),
 			landing: (p,id) => this.connectorLanding(p,undefined,undefined,id)?.anchor,
@@ -926,7 +928,7 @@ export class M1CanvasSession {
 				this.toolShape = shape;
 				this.updateQuickTools();
 			},
-			onConnector: settings => {this.connectorColor=settings.color??this.connectorColor;this.connectorWidth=settings.width??this.connectorWidth;this.updateQuickTools();},
+			onConnector: settings => {this.connectorColor=settings.color??this.connectorColor;this.connectorWidth=settings.width??this.connectorWidth;this.connectorHeadSize=settings.headSize??this.connectorHeadSize;this.updateQuickTools();},
 			onPen: (settings) => {
 				if (settings.color !== undefined) this.penColor = settings.color;
 				if (settings.width !== undefined) this.penWidth = settings.width;
@@ -993,6 +995,8 @@ export class M1CanvasSession {
 	private previewRotation(id: string, degrees: number): void {
 		this.rotationPreview = { id, rotation: degrees };
 		this.sourceRenderer?.refresh();
+		this.connectorLayer?.render();
+		this.updateCommentMarkers();
 		this.handles.update(this.handlesState(true));
 	}
 
@@ -1318,6 +1322,8 @@ export class M1CanvasSession {
 	/** Node boxes, silhouettes and routes of the current document, measured once per document. */
 	private landingGeometry(): { readonly geometry: AnchorGeometry; readonly scene: SourceScene } {
 		const document = this.currentRawDocument;
+		const preview = this.rotationPreview;
+		if (preview) return {geometry: buildCanvasAnchorGeometry(document, {[preview.id]: {rotation: preview.rotation}}), scene: buildSourceScene(document)};
 		let cache = this.landingCache;
 		if (cache === undefined || cache.document !== document) {
 			cache = { document, geometry: buildCanvasAnchorGeometry(document), scene: buildSourceScene(document) };
@@ -1358,6 +1364,18 @@ export class M1CanvasSession {
 		const zoom = finite(readRuntime(this.viewport.getViewport(), "zoom")) ?? 1;
 		const magnet = this.settings.connectorMagnet / zoom;
 		const snap = this.settings.connectorSnap / zoom;
+		// Comment pins are screen-sized targets, independent of their text card.
+		if (this.settings.connectorAttachNodes) {
+			let closest: {key: string; point: {x: number;y: number}; distance: number} | undefined;
+			for (const [key, at] of Object.entries(geometry.comments ?? {})) {
+				const distance = Math.hypot(at.x-board.x, at.y-board.y);
+				if (distance <= (14 / zoom + magnet) && (!closest || distance < closest.distance)) closest = {key, point: at, distance};
+			}
+			if (closest) {
+				const colon = closest.key.indexOf(":");
+				return {board: closest.point, anchor: {type: "comment", origin: closest.key.slice(0, colon) as CommentOrigin, commentId: closest.key.slice(colon+1)}};
+			}
+		}
 		let best: {
 			readonly nodeId: string; readonly anchor: CanvasAnchor;
 			readonly distance: number; readonly inside: boolean; readonly area: number;
@@ -1660,6 +1678,7 @@ export class M1CanvasSession {
 				...(connector.startCap === undefined ? {} : { startCap: connector.startCap }),
 				...(connector.endCap === undefined ? {} : { endCap: connector.endCap }),
 				...(connector.width === undefined ? {} : { width: connector.width }),
+				...(connector.headSize === undefined ? {} : {headSize: connector.headSize}),
 			});
 		}
 	}
@@ -2009,6 +2028,7 @@ export class M1CanvasSession {
 			diagnostics.push(diagnostic);
 		}
 		this.refreshBoardConnectors();
+		this.updateMixedSelectionFrame();
 		const markerModel = this.updateCommentMarkers();
 		for (const diagnostic of markerModel?.diagnostics ?? []) {
 			diagnostics.push(`Comment ${diagnostic.threadId}: ${diagnostic.message}`);
@@ -2106,10 +2126,13 @@ export class M1CanvasSession {
 		if (cache === undefined || cache.document !== document) {
 			// A pin that was moved shows its thread where it was put.
 			const places = readRuntime(readRuntime(document, "miroCanvas"), "commentPlaces");
+			const decorations = readRuntime(readRuntime(document, "miroCanvas"), "commentDecorations");
 			const threads = listCommentThreads(document, { includeResolved: true }).map((thread) => {
 				const place = readRuntime(places, commentPlaceKey(thread.origin, thread.id));
 				const anchor = place === undefined ? undefined : normalizeAnchor(place);
-				return anchor?.valid === true && anchor.anchor !== undefined ? { ...thread, anchor: anchor.anchor } : thread;
+				const decoration = readRuntime(decorations, commentPlaceKey(thread.origin, thread.id));
+				return {...thread, ...(anchor?.valid === true && anchor.anchor !== undefined ? {anchor: anchor.anchor} : {}),
+					...(isRecord(decoration) ? {color: decoration.color, locked: decoration.locked} : {})};
 			});
 			cache = { document, threads: Object.freeze(threads) };
 			this.commentThreadCache = cache;
@@ -2147,13 +2170,18 @@ export class M1CanvasSession {
 		if (this.root === undefined || document === undefined) return undefined;
 		if (this.commentCard === undefined) {
 			const card = new CommentThreadCard(document, {
-				onReply: (id, text) => this.mutateComment("reply-comment", (draft) => addReply(draft, id, text, { author: this.commentAuthor() })),
+				onReply: (id, text, name) => this.mutateComment("reply-comment", (draft) => addReply(draft, id, text, { author: {name: name?.trim() || this.commentAuthor().name} })),
+				onRenameAuthor: (id, messageId, name, origin) => this.mutateComment("rename-comment-author", draft => renameCommentDisplayAuthor(draft, origin ?? "local", id, messageId, name)),
 				onResolve: (id, resolved) => this.mutateComment("resolve-comment", (draft) => setCommentResolved(draft, id, resolved)),
-				onDelete: (id) => this.mutateComment("delete-comment", (draft) => deleteLocalComment(draft, id)),
+				onDelete: (id) => {if(!this.commentLocked(id,"local"))this.mutateComment("delete-comment", draft => deleteLocalComment(draft,id));},
+				onDeleteReply: (id, replyId) => {if(!this.commentLocked(id,"local"))this.mutateComment("delete-comment-reply",draft => deleteLocalReply(draft,id,replyId));},
+				onAppearance: (id, origin, patch) => this.setCommentAppearance(id, origin, patch),
 				onHideImported: (id) => {
+					if(this.commentLocked(id,"imported"))return;
 					this.writeMetadata("hide-imported-comment", draft => {
 						const previous = Array.isArray(draft.hiddenImportedComments) ? draft.hiddenImportedComments : [];
 						draft.hiddenImportedComments = [...new Set([...previous, id])];
+						this.detachMissingCommentAnchors(draft);
 						return draft;
 					});
 					this.refresh();
@@ -2163,7 +2191,7 @@ export class M1CanvasSession {
 					this.options.onOpenCommentThread?.(id, from);
 				},
 				onClose: () => this.closeCommentThread(),
-				onCreate: (text) => this.createComment(text),
+				onCreate: (text, name, appearance) => this.createComment(text, name, appearance),
 				...(this.options.setIcon === undefined ? {} : { setIcon: this.options.setIcon }),
 			});
 			this.root.appendChild(card.element);
@@ -2197,7 +2225,7 @@ export class M1CanvasSession {
 			this.closeCommentThread();
 			return;
 		}
-		card.show(thread, { editable: this.appearance.settings.reviewMode !== true });
+		card.show(thread, { editable: this.appearance.settings.reviewMode !== true, authorName: this.commentAuthor().name });
 		if (marker !== undefined) card.place(marker.point, clientSize(this.root));
 	}
 
@@ -2209,6 +2237,7 @@ export class M1CanvasSession {
 				problem = mutation.diagnostics[0]?.message ?? "The comment could not be changed.";
 				throw new Error(problem);
 			}
+			this.detachMissingCommentAnchors(mutation.metadata);
 			return mutation.metadata as Record<string, unknown>;
 		});
 		if (result?.status !== "applied" && result?.status !== "noop") {
@@ -2229,6 +2258,7 @@ export class M1CanvasSession {
 	 */
 	private followViewport(): void {
 		this.connectorLayer?.render();
+		this.updateMixedSelectionFrame();
 		if (this.disposed) {
 			return;
 		}
@@ -2253,10 +2283,29 @@ export class M1CanvasSession {
 			this.lastMinimapSignature=signature;this.drawMinimap();
 		}
 	}
+
+	private commentLocked(id: string, origin: CommentOrigin): boolean {
+		return this.commentThreads().some(thread => thread.id === id && thread.origin === origin && thread.locked === true);
+	}
+
+	private setCommentAppearance(id: string, origin: CommentOrigin, patch: {color?: string; locked?: boolean}): void {
+		if (this.appearance.settings.reviewMode || !this.commentThreads().some(thread => thread.id === id && thread.origin === origin)) return;
+		if (patch.color !== undefined && !/^#[0-9a-f]{6}$/i.test(patch.color)) return;
+		this.writeMetadata("comment-appearance", draft => {
+			const map: Record<string, unknown> = isRecord(draft.commentDecorations) ? {...draft.commentDecorations} : {};
+			const key = commentPlaceKey(origin,id), previous = isRecord(map[key]) ? map[key] : {};
+			map[key] = {...previous,...patch};draft.commentDecorations=map;
+			return draft;
+		});
+		this.refresh();
+	}
 	private rectangleSelectionEnd?:()=>void;
 	private attachRectangleSelection(): void {
 		const root=this.root,view=root?.ownerDocument?.defaultView;if(!root||!view)return;
 		const down=(event:PointerEvent)=>{
+			if(this.connectorLayer?.selection().length && this.closestTarget(event,".canvas-selection") && !this.closestTarget(event,".canvas-node-resizer")) {
+				if(this.startSelectionMove(event))return;
+			}
 			if(event.button!==0||this.armedTool!=="select"||this.isSpacePanHeld()||this.inControls(event)
 				||matchesPointer(this.settings.panBinding,event)||matchesPointer(this.settings.lassoBinding,event)
 				||this.closestTarget(event,".canvas-node,.canvas-edge,.canvas-selection,.miro-board-connector-hit,.miro-board-connector-grip,input,textarea,[contenteditable=true]"))return;
@@ -2478,7 +2527,7 @@ export class M1CanvasSession {
 		if (!editable && this.armedTool !== "select" && this.armedTool !== "lasso") this.armedTool = "select";
 		if (!isDrawingTool(this.armedTool)) this.hideBrush();
 		this.quickTools?.update({
-			connectorColor:this.connectorColor??this.boardInk(), connectorWidth:this.connectorWidth,
+			connectorColor:this.connectorColor??this.boardInk(), connectorWidth:this.connectorWidth, ...(this.connectorHeadSize === undefined ? {} : {connectorHeadSize: this.connectorHeadSize}),
 			showLassoTool: this.settings.showLassoTool, showConnectorTool: this.settings.showConnectorTool,
 			editable, armed: this.armedTool, shape: this.toolShape,
 			penColor: this.penInk(), penWidth: this.penWidth, eraserSize: this.eraserSize,
@@ -2516,6 +2565,10 @@ export class M1CanvasSession {
 
 	/** A press on the board with a tool armed: drag out the item, or click to drop it. */
 	private startToolGesture(event: PointerEvent): void {
+		if (this.armedTool === "connector" && this.closestTarget(event, ".miro-canvas-comment-marker") && event.button === 0) {
+			this.startLine(lineKind(this.toolShape) ?? lineKind("arrow")!, event);
+			return;
+		}
 		if (this.closestTarget(event, ".miro-board-connector-grip,.miro-board-connector-hit")) return;
 		const lasso = this.armedTool === "select" && matchesPointer(this.settings.lassoBinding, event) && !this.isSpacePanHeld();
 		const tool = lasso ? "lasso" : this.armedTool;
@@ -2836,7 +2889,7 @@ export class M1CanvasSession {
 		const show = (tip: StrokePoint, placed: readonly StrokePoint[]): void => {
 			const through = course(tip, placed);
 			if (spec.block === true) {
-				shape.setAttribute("points", blockArrowOutline(local(through[0]!), local(tip), width * this.zoom())
+				shape.setAttribute("points", blockArrowOutline(local(through[0]!), local(tip), width * this.zoom(), this.connectorHeadSize === undefined ? undefined : this.connectorHeadSize * this.zoom())
 					.map((point) => `${point.x},${point.y}`).join(" "));
 				return;
 			}
@@ -2872,6 +2925,7 @@ export class M1CanvasSession {
 		root.addEventListener("dblclick", swallow, true);
 		const move = (moved: Event): void => {
 			const pointer = moved as PointerEvent;
+			if (pointer.pointerId !== event.pointerId) return;
 			const from = spec.input === "points" ? points[points.length - 1]! : first;
 			const next = aim({ x: pointer.clientX, y: pointer.clientY }, from, pointer.shiftKey === true);
 			if (next === undefined) return;
@@ -2884,12 +2938,13 @@ export class M1CanvasSession {
 		};
 		const up = (released: Event): void => {
 			const pointer = released as PointerEvent;
+			if (pointer.pointerId !== event.pointerId) return;
 			const at = aim({ x: pointer.clientX, y: pointer.clientY }, first, pointer.shiftKey === true) ?? tip;
 			end();
 			if (event.button === 2) this.suppressContextUntil = Date.now() + 400;
-			// A click without a drag leaves a line of Miro's length to the right.
+			// A click selects the tool; only an intentional drag creates a line.
 			const reach = Math.hypot(at.x - first.x, at.y - first.y) * this.zoom();
-			this.createLine(spec, course(reach < 6 ? { x: first.x + 160, y: first.y } : at, [first]));
+			if (reach >= 6) this.createLine(spec, course(at, [first]));
 		};
 		view?.addEventListener("pointermove", move, true);
 		view?.addEventListener("pointercancel", cancel, true);
@@ -2944,6 +2999,7 @@ export class M1CanvasSession {
 		}
 		this.writeBoardConnectors([{id:newCanvasId(), from:from.anchor,
 			to:to.anchor, route:spec.route, color:this.connectorColor??this.boardInk(), width:this.connectorWidth,
+			...(this.connectorHeadSize === undefined ? {} : {headSize: this.connectorHeadSize}),
 			startCap:"none",endCap:spec.endCap??(spec.block?"stealth":"none"),waypoints:points.slice(1,-1),...(spec.block?{block:true as const}:{})}]);
 		return;
 	}
@@ -3257,7 +3313,7 @@ export class M1CanvasSession {
 		if (card === undefined || this.root === undefined) return;
 		this.openThread = undefined;
 		this.commentDraft = anchor;
-		card.compose();
+		card.compose(this.commentAuthor().name);
 		const rootRect = this.root.getBoundingClientRect();
 		card.place({ x: client.x - rootRect.left, y: client.y - rootRect.top }, clientSize(this.root));
 	}
@@ -3286,6 +3342,7 @@ export class M1CanvasSession {
 	 * whose export is never rewritten, moves the same way a local one does.
 	 */
 	private moveCommentThread(threadId: string, origin: CommentOrigin, point: { readonly x: number; readonly y: number }): void {
+		if (this.commentLocked(threadId, origin)) return;
 		const board = this.boardPoint(point);
 		if (board === undefined) {
 			this.refresh();
@@ -3300,11 +3357,13 @@ export class M1CanvasSession {
 		this.refresh();
 	}
 
-	private createComment(text: string): void {
+	private createComment(text: string, name?: string, appearance?: {color: string; locked: boolean}): void {
 		const anchor = this.commentDraft;
 		let createdId: string | undefined;
 		this.mutateComment("add-comment", (draft) => {
-			const result = addLocalComment(draft, { text, ...(anchor === undefined ? {} : { anchor }) }, { author: this.commentAuthor() });
+			const result = addLocalComment(draft, { text, ...(anchor === undefined ? {} : { anchor }),
+				...(appearance && /^#[0-9a-f]{6}$/i.test(appearance.color) ? {color: appearance.color, locked: appearance.locked} : {}) },
+				{ author: {name: name?.trim() || this.commentAuthor().name} });
 			createdId = result.comment?.id;
 			return result;
 		});
@@ -3574,7 +3633,7 @@ export class M1CanvasSession {
 			...(kinds.length > 0 && kinds.every((kind) => kind === "frame") ? { fillPalette: FRAME_PALETTE } : {}),
 			recentColors: this.appearance.settings.recentColors,
 			...presentation.style,
-			...(independent?{connector:{route:independent.route,startCap:independent.startCap as never,endCap:connectorEndCap(independent) as never,width:independent.width,strokeStyle:independent.strokeStyle??"solid",waypoints:independent.waypoints??[]},colors:{...presentation.colors,edge:independent.color}}:{}),
+			...(independent?{connector:{route:independent.route,startCap:independent.startCap as never,endCap:connectorEndCap(independent) as never,width:independent.width,...(independent.headSize === undefined ? {} : {headSize: independent.headSize}),strokeStyle:independent.strokeStyle??"solid",waypoints:independent.waypoints??[]},colors:{...presentation.colors,edge:independent.color}}:{}),
 			independentSelection: !!this.connectorLayer?.selection().length,
 			independentOnly: this.selectedIds.length>0 && this.selectedIds.every(id=>this.connectorLayer?.selection().includes(id)),
 			...(placement === undefined ? {} : { placement }),
@@ -4145,7 +4204,19 @@ export class M1CanvasSession {
 				};
 				return {...c,from:end(c.from,geometry.edges?.[c.id]?.start),to:end(c.to,geometry.edges?.[c.id]?.end)};
 			});
-			const graph = { nodes, edges, ...(connectors.length?{connectors}:{}) };
+			const points: {x:number;y:number}[] = [];
+			for (const node of nodes) {
+				if ([node.x,node.y,node.width,node.height].every(v=>typeof v==="number"&&Number.isFinite(v))) {
+					points.push({x:node.x as number,y:node.y as number},{x:(node.x as number)+(node.width as number),y:(node.y as number)+(node.height as number)});
+				}
+			}
+			for (const c of connectors) points.push(...(geometry.edges?.[c.id]?.points ?? []));
+			const bounds = points.reduce((box, p) => ({
+				left: Math.min(box.left, p.x), right: Math.max(box.right, p.x),
+				top: Math.min(box.top, p.y), bottom: Math.max(box.bottom, p.y),
+			}), {left: Infinity, right: -Infinity, top: Infinity, bottom: -Infinity});
+			const center = points.length ? {x:(bounds.left+bounds.right)/2,y:(bounds.top+bounds.bottom)/2} : undefined;
+			const graph = { nodes, edges, ...(connectors.length?{connectors}:{}), ...(center?{center}:{}) };
 			try {
 				data.setData(CLIPBOARD_TYPE, JSON.stringify(record));
 				data.setData(CANVAS_CLIPBOARD_TYPE, JSON.stringify(graph));
@@ -4182,6 +4253,7 @@ export class M1CanvasSession {
 			event.stopImmediatePropagation();
 		};
 		const track = (event: Event): void => {
+			if (this.inControls(event)) return;
 			const x = finite(readRuntime(event, "clientX")), y = finite(readRuntime(event, "clientY"));
 			if (x !== undefined && y !== undefined) this.lastPointer = { x, y, at: Date.now() };
 		};
@@ -4214,6 +4286,7 @@ export class M1CanvasSession {
 		document.addEventListener("cut", copy, true);
 		document.addEventListener("paste", paste, true);
 		root.addEventListener("pointermove", track, { passive: true });
+		root.addEventListener("pointerdown", track, { capture: true, passive: true });
 		this.disposers.push(() => {
 			keyTarget.removeEventListener("keydown", key as EventListener, true);
 			root.removeEventListener("contextmenu", context, true);
@@ -4221,6 +4294,7 @@ export class M1CanvasSession {
 			document.removeEventListener("cut", copy, true);
 			document.removeEventListener("paste", paste, true);
 			root.removeEventListener("pointermove", track);
+			root.removeEventListener("pointerdown", track, true);
 		});
 	}
 
@@ -4255,7 +4329,7 @@ export class M1CanvasSession {
 	private pastePoint(): { readonly x: number; readonly y: number } | undefined {
 		const pointer = this.lastPointer;
 		const rect = this.root === undefined ? undefined : boundingRect(this.root);
-		if (pointer !== undefined && rect !== undefined && Date.now() - pointer.at < 60_000
+		if (pointer !== undefined && rect !== undefined
 			&& pointer.x >= rect.left && pointer.x <= rect.right && pointer.y >= rect.top && pointer.y <= rect.bottom) {
 			return this.boardPoint(pointer);
 		}
@@ -4308,6 +4382,48 @@ export class M1CanvasSession {
 	}
 	private selectionMovePreview?: Record<string,unknown>;
 	private selectionMoveEnd?: ()=>void;
+	private mixedSelectionFrame?: HTMLElement;
+	/** One visible frame for the native selection and independent connectors. */
+	private updateMixedSelectionFrame(): void {
+		const root = this.root;
+		if (!root) return;
+		const connectorIds = this.connectorLayer?.selection() ?? [];
+		const nativeIds = new Set((this.adapter.getSelection() ?? []).flatMap(item => allIds([item])));
+		const mixed = connectorIds.length > 0 && nativeIds.size > 0;
+		if (mixed) root.classList.add("miro-canvas-mixed-selection");
+		else root.classList.remove("miro-canvas-mixed-selection");
+		if (!mixed) {this.mixedSelectionFrame?.remove();this.mixedSelectionFrame=undefined;return;}
+		const box = boundingRect(root);
+		if (!box) return;
+		let left=Infinity,top=Infinity,right=-Infinity,bottom=-Infinity;
+		const add = (x:number,y:number):void => {left=Math.min(left,x);right=Math.max(right,x);top=Math.min(top,y);bottom=Math.max(bottom,y);};
+		for (const element of this.adapter.getNodes() ?? []) {
+			if (!nativeIds.has(readCanvasElementId(element) ?? "")) continue;
+			const rect = boundingRect(readCanvasElementDom(element));
+			if(rect){add(rect.left-box.left,rect.top-box.top);add(rect.right-box.left,rect.bottom-box.top);}
+		}
+		const geometry=this.landingGeometry().geometry;
+		for(const id of [...nativeIds,...connectorIds]){
+			const route=geometry.edges?.[id];
+			for(const p of route?.points ?? (route?.start&&route.end?[route.start,route.end]:[])){
+				const at=this.viewportPoint(p);if(at)add(at.x-box.left,at.y-box.top);
+			}
+		}
+		if(!Number.isFinite(left)||!Number.isFinite(right)||!Number.isFinite(bottom))return;
+		if(!this.mixedSelectionFrame){
+			const frame=root.ownerDocument.createElement("div");frame.className="miro-canvas-mixed-selection-frame";
+			for(const side of ["top","right","bottom","left"]){
+				const grab=root.ownerDocument.createElement("div");grab.className=`miro-canvas-mixed-selection-frame__${side}`;
+				grab.setAttribute("aria-label","Move selected elements");
+				grab.addEventListener("pointerdown",event=>this.startSelectionMove(event));
+				frame.appendChild(grab);
+			}
+			root.appendChild(frame);this.mixedSelectionFrame=frame;
+		}
+		const pad=8,frame=this.mixedSelectionFrame;
+		frame.style.left=`${left-pad}px`;frame.style.top=`${top-pad}px`;
+		frame.style.width=`${right-left+pad*2}px`;frame.style.height=`${bottom-top+pad*2}px`;
+	}
 	private startSelectionMove(event: PointerEvent): boolean {
 		this.readInteractionState();
 		if(event.button!==0 || event.shiftKey || this.selectedIds.length<2 || this.closestTarget(event,"input,textarea,[contenteditable=true],.cm-editor"))return false;
@@ -4359,6 +4475,29 @@ export class M1CanvasSession {
 		if(result.ok){this.connectorLayer?.reset();this.callNative("deselectAll");}
 		else this.options.onNotice?.(firstProblem(result.diagnostics)??"Delete was refused.");
 		this.refresh();
+	}
+
+	/** Deleting a pin preserves its connections as free endpoints in the same undo step. */
+	private detachMissingCommentAnchors(draft: Record<string, unknown>): void {
+		const before = this.landingGeometry().geometry;
+		const document = isRecord(this.currentRawDocument) ? this.currentRawDocument : {};
+		const after = buildCanvasAnchorGeometry({...document, miroCanvas: draft});
+		const detach = (raw: unknown, id: string, end: "from" | "to"): unknown => {
+			const a = normalizeAnchor(raw).anchor;
+			if (a?.type !== "comment" || after.comments?.[`${a.origin}:${a.commentId}`]) return raw;
+			const p = end === "from" ? before.edges?.[id]?.start : before.edges?.[id]?.end;
+			if (!p || !this.editAllowed("edit", [id])) throw new Error("A connected line is locked or its comment position is unavailable.");
+			return {type: "free", x: p.x, y: p.y};
+		};
+		if (isRecord(draft.connectors)) for (const [id, c] of Object.entries(draft.connectors)) {
+			if (isRecord(c)) draft.connectors[id] = {...c, from: detach(c.from, id, "from"), to: detach(c.to, id, "to")};
+		}
+		if (isRecord(draft.localOverrides)) for (const [id, o] of Object.entries(draft.localOverrides)) {
+			if (!isRecord(o) || !isRecord(o.connectorAnchors)) continue;
+			const anchors = {...o.connectorAnchors};
+			for (const end of ["from", "to"] as const) if (anchors[end]) anchors[end] = detach(anchors[end], id, end);
+			draft.localOverrides[id] = {...o, connectorAnchors: anchors};
+		}
 	}
 
 	/** Paste files the clipboard names as nodes pointing at them; false when it names none this vault has. */
@@ -5495,6 +5634,8 @@ export class M1CanvasSession {
 		this.toolbar.dispose();
 		this.handles.dispose();
 		this.commentMarkers?.destroy();
+		this.mixedSelectionFrame?.remove();this.mixedSelectionFrame=undefined;
+		this.root?.classList.remove("miro-canvas-mixed-selection");
 		this.commentCard?.destroy();
 		this.authoring?.dispose();
 		this.authoring = undefined;

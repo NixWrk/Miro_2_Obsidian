@@ -109,7 +109,7 @@ def main() -> int:
                 assert abs(after_end['x'] - before_end['x'] - 30) < 1, (before_end, after_end)
                 assert abs(after_end['y'] - before_end['y'] - 40) < 1, (before_end, after_end)
                 assert page.locator('.miro-board-connector-hit').count() == 1, 'Grip created a new connector'
-                assert page.locator('.miro-board-connector-grip').count() == 2
+                assert page.locator('.miro-board-connector-grip[data-end]').count() == 2
                 # Non-unit zoom and an offset camera must use the same endpoint origin.
                 page.evaluate("miroBrowser.runtime.setViewport(60,30,1);miroBrowser.session.followViewport()")
                 box = page.evaluate("document.querySelector('.miro-board-connector-grip[data-end=from]').getBoundingClientRect().toJSON()")
@@ -187,6 +187,11 @@ def main() -> int:
                 assert abs(after['x'] - before['x'] - 90) < 2, (before, after)
                 assert abs(after['y'] - before['y'] - 35) < 2, (before, after)
                 assert page.evaluate("miroBrowser.session.openThread===undefined"), 'Drag opened the comment card'
+                marker.click()
+                card = page.locator('.miro-canvas-thread')
+                assert card.get_by_role('button', name='Delete comment', exact=True).is_visible()
+                assert not card.get_by_role('button', name='Remove imported comment from board', exact=True).is_visible()
+                card.get_by_role('button', name='Close', exact=True).click()
                 page.evaluate("""() => {
                   const b=miroBrowser,s=b.session;s.resetTools();s.connectorLayer.select(['menu-line']);
                   const first=b.runtime.getData().miroCanvas.connectors['menu-line'];
@@ -251,6 +256,152 @@ def main() -> int:
                   b.runtime.redo();b.session.refresh();
                   if(b.runtime.getData().miroCanvas.connectors['group-b'].from.x!==-280)throw Error('Group redo failed');
                 }""")
+                page.evaluate("""() => {
+                  const b=miroBrowser,s=b.session;s.resetTools();
+                  for(const route of ['straight','curved','elbowed']) {
+                    const c={id:'reshape-'+route,from:{type:'node',nodeId:'n1',u:1,v:0.5},to:{type:'node',nodeId:'file',u:0,v:0.5},route,color:'#223344',width:2,startCap:'none',endCap:'arrow'};
+                    s.writeBoardConnectors([c]);s.connectorLayer.select([c.id]);s.armTool('connector');
+                    const grip=b.root.querySelector('[data-route-grip]');
+                    if(!grip)throw Error('Missing body grips: '+route);
+                    const r=grip.getBoundingClientRect(),x=r.x+r.width/2,y=r.y+r.height/2;
+                    const hit=b.root.querySelector('[data-connector-id="'+c.id+'"]'),before=hit.getAttribute('d'),saves=b.getSaves();
+                    // Press the path itself, not the grip: attached bodies must bend too.
+                    hit.dispatchEvent(new PointerEvent('pointerdown',{button:0,pointerId:98,clientX:x,clientY:y,bubbles:true}));
+                    window.dispatchEvent(new PointerEvent('pointermove',{pointerId:98,clientX:x+40,clientY:y+50}));
+                    if(b.root.querySelector('[data-connector-id="'+c.id+'"]').getAttribute('d')===before)throw Error('Body preview did not change: '+route);
+                    s.refresh();
+                    if(b.getSaves()!==saves)throw Error('Body preview saved early');
+                    window.dispatchEvent(new PointerEvent('pointerup',{pointerId:98,clientX:x+40,clientY:y+50}));
+                    const next=b.runtime.getData().miroCanvas.connectors[c.id];
+                    if(!next.waypoints.length||JSON.stringify(next.from)!==JSON.stringify(c.from)||JSON.stringify(next.to)!==JSON.stringify(c.to))throw Error('Reshape lost endpoint anchors');
+                    if(b.getSaves()!==saves+1)throw Error('Reshape was not one history step');
+                    b.runtime.undo();s.refresh();
+                    if(b.runtime.getData().miroCanvas.connectors[c.id].waypoints)throw Error('Reshape undo failed');
+                    b.runtime.redo();s.refresh();
+                    if(!b.runtime.getData().miroCanvas.connectors[c.id].waypoints.length)throw Error('Reshape redo failed');
+                  }
+                }""")
+                # Latest user regressions: author controls, comment anchors, circular ink,
+                # independent cap sizing and rotation previews must work together.
+                page.evaluate("""() => {
+                  const b=miroBrowser,s=b.session;s.resetTools();s.armTool('pen');
+                  const picker=b.root.querySelector('[aria-label="New drawing color"]');
+                  const r=picker.getBoundingClientRect();
+                  if(Math.abs(r.width-r.height)>1||r.width>24)throw Error('Custom color is not circular');
+                  s.resetTools();
+                  const at={x:-200,y:-180};s.composeComment(at,s.viewportPoint(at));
+                }""")
+                card = page.locator('.miro-canvas-thread')
+                card.get_by_label('Author name', exact=True).fill('Before posting')
+                card.get_by_label('Reply', exact=True).fill('Author and connector regression')
+                card.get_by_role('button', name='Send reply', exact=True).click()
+                card.get_by_label('Edit author name', exact=True).fill('After posting')
+                page.evaluate('miroBrowser.session.refresh()')
+                assert card.get_by_label('Edit author name', exact=True).input_value() == 'After posting'
+                card.get_by_label('Edit author name', exact=True).press('Enter')
+                card.get_by_label('Comment color', exact=True).fill('#3f66aa')
+                card.get_by_role('button', name='Lock comment', exact=True).click()
+                assert card.get_by_role('button', name='Delete comment', exact=True).is_disabled()
+                page.evaluate("""() => {
+                  const b=miroBrowser,s=b.session;
+                  const thread=s.commentThreads().find(t=>t.text==='Author and connector regression');
+                  if(thread.author.name!=='After posting')throw Error('Author rename was not saved');
+                  if(thread.color!=='#3f66aa'||thread.locked!==true)throw Error('Comment color or lock was not saved');
+                  const original=JSON.stringify(b.runtime.getData().miroCanvas.commentPlaces??{});
+                  s.moveCommentThread(thread.id,'local',s.viewportPoint({x:400,y:500}));
+                  if(JSON.stringify(b.runtime.getData().miroCanvas.commentPlaces??{})!==original)throw Error('Locked comment moved');
+                  s.setCommentAppearance(thread.id,'local',{locked:false});
+                  b.pinId=thread.id;
+                  s.connectorHeadSize=30;s.connectorWidth=2;s.updateQuickTools();
+                }""")
+                card.get_by_label('Reply', exact=True).fill('Temporary reply')
+                card.get_by_role('button', name='Send reply', exact=True).click()
+                assert card.get_by_role('button', name='Delete reply', exact=True).is_visible()
+                page.evaluate("""() => {const b=miroBrowser,card=b.session.commentCard,h=card.host,original=h.onDeleteReply;b.replyCardBefore={thread:card.thread?.id,immutable:card.thread?.immutable,origin:card.thread?.origin,open:b.session.openThread};h.onDeleteReply=(...args)=>{b.replyDeleteCalled=args;original(...args);};}""")
+                card.get_by_role('button', name='Delete reply', exact=True).click()
+                page.evaluate("""() => {
+                  const b=miroBrowser,s=b.session;
+                  if(s.commentThreads().find(t=>t.id===b.pinId).replies.length!==0)throw Error('Deleting one reply failed: '+JSON.stringify({called:b.replyDeleteCalled,cardBefore:b.replyCardBefore,cardAfter:{thread:s.commentCard.thread?.id,open:s.openThread},replies:s.commentThreads().find(t=>t.id===b.pinId).replies,locked:s.commentLocked(b.pinId,'local'),status:s.transientDiagnostics}));
+                  s.closeCommentThread();s.armTool('connector');s.toolShape='arrow';
+                }""")
+                pin = page.locator('.miro-canvas-comment-marker[data-comment-id="' + page.evaluate('miroBrowser.pinId') + '"]')
+                box = pin.bounding_box()
+                assert box is not None
+                page.mouse.move(box['x'] + box['width'] / 2, box['y'] + box['height'] / 2)
+                page.mouse.down()
+                target = page.evaluate('miroBrowser.session.viewportPoint({x:40,y:180})')
+                page.mouse.move(target['x'], target['y'], steps=6)
+                page.mouse.up()
+                page.evaluate("""() => {
+                  const b=miroBrowser,s=b.session;
+                  const c=Object.values(b.runtime.getData().miroCanvas.connectors).find(c=>c.from.type==='comment'&&c.from.commentId===b.pinId);
+                  if(!c||c.to.type!=='node'||c.to.nodeId!=='n1')throw Error('Cannot drag arrow from comment to node');
+                  if(c.headSize!==30)throw Error('Creation lost head size');
+                  s.resetTools();s.connectorLayer.select([c.id]);s.readInteractionState();s.applyElementStyle({connector:{width:8}});
+                  if(b.runtime.getData().miroCanvas.connectors[c.id].headSize!==30)throw Error('Width overwrote head size');
+                  const visible=()=>b.root.querySelector('[data-connector-id="'+c.id+'"]').previousElementSibling;
+                  const markerId=visible().getAttribute('marker-end').slice(5,-1);
+                  const marker=document.getElementById(markerId);
+                  if(marker.getAttribute('markerUnits')!=='userSpaceOnUse')throw Error('Head still scales with width');
+                  const before=visible().getAttribute('d'),saves=b.getSaves();
+                  s.previewRotation('n1',90);
+                  if(visible().getAttribute('d')===before)throw Error('Connector did not follow rotation preview');
+                  if(b.getSaves()!==saves)throw Error('Rotation preview saved early');
+                  s.cancelHandleRotation();
+                  if(visible().getAttribute('d')!==before)throw Error('Cancelled rotation left connector rotated');
+                  s.setElementRotation('n1',90);s.refresh();
+                  if(visible().getAttribute('d')===before)throw Error('Committed rotation missed connector');
+                  b.runtime.undo();s.refresh();
+                  if(visible().getAttribute('d')!==before)throw Error('Rotation undo missed connector');
+                  const pinPoint=s.landingGeometry().geometry.comments['local:'+b.pinId];
+                  s.moveCommentThread(b.pinId,'local',s.viewportPoint({x:pinPoint.x+30,y:pinPoint.y+20}));
+                  const after=s.landingGeometry().geometry.edges[c.id];
+                  if(Math.abs(after.start.x-pinPoint.x-30)>1)throw Error('Connector did not follow moved comment');
+                  s.openCommentThread(b.pinId,'local');
+                  b.pinConnector=c.id;
+                }""")
+                card.get_by_role('button', name='Delete comment', exact=True).click()
+                page.evaluate("""() => {
+                  const b=miroBrowser,s=b.session,c=b.runtime.getData().miroCanvas.connectors[b.pinConnector];
+                  if(c.from.type!=='free')throw Error('Deleting comment left dangling arrow');
+                  b.runtime.undo();s.refresh();
+                  if(b.runtime.getData().miroCanvas.connectors[c.id].from.type!=='comment')throw Error('Undo did not restore comment attachment');
+                }""")
+                page.evaluate("""() => {
+                  const b=miroBrowser,s=b.session;b.runtime.importData(b.initial);s.refresh();
+                  s.writeBoardConnectors([{id:'mixed-line',route:'straight',color:'#abcdef',width:2,startCap:'none',endCap:'arrow',
+                    from:{type:'free',x:-300,y:-150},to:{type:'free',x:-150,y:-90}}]);
+                  b.select('n1');s.connectorLayer.select(['mixed-line']);s.refresh();
+                  const frame=b.root.querySelector('.miro-canvas-mixed-selection-frame');
+                  if(!frame)throw Error('Mixed selection has no shared frame');
+                  const f=frame.getBoundingClientRect(),n=b.node.nodeEl.getBoundingClientRect();
+                  const a=s.viewportPoint({x:-300,y:-150}),z=s.viewportPoint({x:-150,y:-90});
+                  if(f.left>Math.min(a.x,z.x)-5||f.right<n.right+5||f.top>Math.min(a.y,z.y)-5||f.bottom<n.bottom+5)
+                    throw Error('Mixed frame excludes a selected element');
+                  b.mixedBefore=b.runtime.getData();b.mixedSaves=b.getSaves();
+                  b.root.addEventListener('pointerdown',e=>{b.mixedDown={target:e.target.className,ids:[...s.selectedIds],layer:s.connectorLayer.selection()};},true);
+                }""")
+                frame = page.locator('.miro-canvas-mixed-selection-frame')
+                bounds = frame.bounding_box()
+                assert bounds is not None
+                page.mouse.move(bounds['x'] + 1, bounds['y'] + bounds['height'] / 2)
+                page.mouse.down()
+                page.mouse.move(bounds['x'] + 61, bounds['y'] + bounds['height'] / 2 + 30, steps=5)
+                page.mouse.up()
+                page.evaluate("""() => {
+                  const b=miroBrowser,s=b.session,d=b.runtime.getData(),old=b.mixedBefore;
+                  const node=d.nodes.find(n=>n.id==='n1'),before=old.nodes.find(n=>n.id==='n1');
+                  const line=d.miroCanvas.connectors['mixed-line'],prior=old.miroCanvas.connectors['mixed-line'];
+                  if(node.x!==before.x+60||node.y!==before.y+30||line.from.x!==prior.from.x+60||line.from.y!==prior.from.y+30)
+                    throw Error('Dragging shared frame did not move all selected elements: '+JSON.stringify({node:[node.x,node.y],before:[before.x,before.y],line:line.from,prior:prior.from,selected:s.selectedIds,down:b.mixedDown,saves:[b.getSaves(),b.mixedSaves]}));
+                  if(b.getSaves()!==b.mixedSaves+1)throw Error('Mixed frame drag wrote more than one history step');
+                  b.runtime.undo();s.refresh();
+                  if(JSON.stringify(b.runtime.getData())!==JSON.stringify(old))throw Error('Mixed frame undo failed');
+                  b.runtime.redo();s.refresh();
+                  if(b.runtime.getData().miroCanvas.connectors['mixed-line'].from.x!==prior.from.x+60)throw Error('Mixed frame redo failed');
+                  s.connectorLayer.reset();s.refresh();
+                  if(b.root.querySelector('.miro-canvas-mixed-selection-frame'))throw Error('Mixed frame remained after connector deselection');
+                }""")
                 assert errors == [], errors
                 page.evaluate("miroBrowser.dispose()")
                 browser.close()
@@ -280,8 +431,15 @@ def main() -> int:
                   check(payload.graph.edges.length === 1, 'Internal connector not copied');
                   const before = b.runtime.nodes.size;
                   b.root.focus();
+                  const pasteAt={x:235,y:140}, screen=b.session.viewportPoint(pasteAt);
+                  b.root.dispatchEvent(new PointerEvent('pointermove',{clientX:screen.x,clientY:screen.y,bubbles:true}));
+                  const oldIds=new Set(b.runtime.nodes.keys());
                   b.root.dispatchEvent(new ClipboardEvent('paste', {clipboardData:clipboard, bubbles:true, cancelable:true}));
                   check(b.runtime.nodes.size === before + 2, 'Paste did not add nodes');
+                  const pasted=b.runtime.getData().nodes.filter(n=>!oldIds.has(n.id));
+                  const cx=(Math.min(...pasted.map(n=>n.x))+Math.max(...pasted.map(n=>n.x+n.width)))/2;
+                  const cy=(Math.min(...pasted.map(n=>n.y))+Math.max(...pasted.map(n=>n.y+n.height)))/2;
+                  check(Math.abs(cx-pasteAt.x)<1&&Math.abs(cy-pasteAt.y)<1,'Paste missed pointer position');
                   const files = b.runtime.getData().nodes.filter(n => n.type === 'file' && n.file === 'attachments/Spec.pdf');
                   check(files.length === 2, 'Attachment did not reuse its file path');
                   check(b.sourceUnchanged(), 'Copy duplicated or changed Miro source');
@@ -310,6 +468,19 @@ def main() -> int:
                   check(b.runtime.data.miroCanvas.localOverrides.e1.connectorAnchors.to.type === 'edge', 'Endpoint did not attach to another edge');
                   check(b.runtime.data.miroCanvas.localOverrides.e1.connectorAnchors.to.edgeId === 'edge-target', 'Wrong edge attached');
                   const nodeCount = b.runtime.nodes.size;
+                  const dragSpec={kind:'arrow',route:'straight',endCap:'arrow',input:'drag'};
+                  const at=b.session.viewportPoint({x:-280,y:-200});
+                  const countBefore=Object.keys(b.runtime.getData().miroCanvas.connectors??{}).length;
+                  const savesBeforeClick=b.getSaves();
+                  b.session.startLine(dragSpec,new PointerEvent('pointerdown',{pointerId:120,button:0,clientX:at.x,clientY:at.y}));
+                  window.dispatchEvent(new PointerEvent('pointerup',{pointerId:120,clientX:at.x+2,clientY:at.y+1}));
+                  check(Object.keys(b.runtime.getData().miroCanvas.connectors??{}).length===countBefore,'Click created a connector');
+                  check(b.getSaves()===savesBeforeClick,'Click wrote connector history');
+                  b.session.startLine(dragSpec,new PointerEvent('pointerdown',{pointerId:121,button:0,clientX:at.x,clientY:at.y}));
+                  window.dispatchEvent(new PointerEvent('pointermove',{pointerId:121,clientX:at.x+100,clientY:at.y+30}));
+                  window.dispatchEvent(new PointerEvent('pointerup',{pointerId:121,clientX:at.x+100,clientY:at.y+30}));
+                  check(Object.keys(b.runtime.getData().miroCanvas.connectors??{}).length===countBefore+1,'Drag failed to create connector');
+                  b.runtime.undo();b.session.refresh();
                   b.session.createLine({kind:'arrow',route:'straight',endCap:'arrow',input:'drag'}, [{x:1500,y:1400},{x:1700,y:1400}]);
                   check(b.runtime.nodes.size === nodeCount, 'Free connector created a node');
                   const connectors = b.runtime.getData().miroCanvas.connectors;

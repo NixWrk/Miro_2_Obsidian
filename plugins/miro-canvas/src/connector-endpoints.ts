@@ -13,6 +13,7 @@ import type {
 } from "./anchors";
 import { buildSourceScene } from "./source-model";
 import { boardConnectors } from "./board-connectors";
+import { listCommentThreads } from "./local-comments";
 import { planRoute, type RouteEnd } from "./connector-route";
 import { closestContourPoint, contourPoint, shapeOutline, type ShapePoint } from "./shape-geometry";
 import { decideInteraction } from "./interaction-policy";
@@ -32,7 +33,7 @@ const MAX_JSON_DEPTH = 64;
 const RESERVED_IDS = new Set(["__proto__", "prototype", "constructor"]);
 const IMAGE_EXTENSIONS = new Set(["png", "jpg", "jpeg", "gif", "webp", "bmp", "avif"]);
 const SIDES = new Set<NativeSide>(["top", "right", "bottom", "left"]);
-const KNOWN_ANCHOR_FIELDS = ["type", "nodeId", "edgeId", "u", "v", "x", "y", "t"] as const;
+const KNOWN_ANCHOR_FIELDS = ["type", "nodeId", "edgeId", "commentId", "origin", "u", "v", "x", "y", "t"] as const;
 
 export interface ConnectorEndpointDiagnostic {
   readonly code: string;
@@ -421,6 +422,26 @@ export function buildCanvasAnchorGeometry(document: unknown, measurements?: Node
   }
 
   const edges = Object.create(null) as Record<string, AnchorEdgeGeometry>;
+  const comments = Object.create(null) as Record<string, AnchorPoint>;
+  const threads = new Map(listCommentThreads(document).map(t => [`${t.origin}:${t.id}`, t]));
+  const resolvingComments = new Set<string>();
+  const resolveComment = (key: string): void => {
+    if (comments[key] || resolvingComments.has(key)) return;
+    const thread = threads.get(key); if (!thread) return;
+    resolvingComments.add(key);
+    const metadata = isRecord(document.miroCanvas) ? document.miroCanvas : {};
+    const place = isRecord(metadata.commentPlaces) ? metadata.commentPlaces[key] : undefined;
+    const anchor = normalizeAnchor(place ?? thread.anchor).anchor;
+    if (anchor?.type === "edge") resolveEdge(anchor.edgeId);
+    if (anchor?.type === "comment") resolveComment(`${anchor.origin}:${anchor.commentId}`);
+    const point = resolveAnchor(anchor, {nodes, images, edges, comments}).point;
+    if (point) comments[key] = {x: point.x, y: point.y};
+    resolvingComments.delete(key);
+  };
+  const resolveDependency = (anchor: CanvasAnchor): void => {
+    if (anchor.type === "edge") resolveEdge(anchor.edgeId);
+    if (anchor.type === "comment") resolveComment(`${anchor.origin}:${anchor.commentId}`);
+  };
   const independent = new Map(boardConnectors(document).map(c => [c.id,c]));
   const resolving = new Set<string>();
   const resolveEdge = (edgeId: string): AnchorEdgeGeometry | undefined => {
@@ -435,8 +456,8 @@ export function buildCanvasAnchorGeometry(document: unknown, measurements?: Node
       const c = independent.get(edgeId);
       if (!c) return undefined;
       resolving.add(edgeId);
-      for (const anchor of [c.from,c.to]) if (anchor.type === "edge") resolveEdge(anchor.edgeId);
-      const from=resolveAnchor(c.from,{nodes,images,edges}).point, to=resolveAnchor(c.to,{nodes,images,edges}).point;
+      for (const anchor of [c.from,c.to]) resolveDependency(anchor);
+      const from=resolveAnchor(c.from,{nodes,images,edges,comments}).point, to=resolveAnchor(c.to,{nodes,images,edges,comments}).point;
       resolving.delete(edgeId);
       if (!from || !to) return undefined;
       return edges[edgeId] = {...planRoute({point:from},{point:to},c.route,c.waypoints)};
@@ -464,7 +485,8 @@ export function buildCanvasAnchorGeometry(document: unknown, measurements?: Node
           const point = resolveAnchor(anchor, { edges: targetEdges }).point;
           return point === undefined ? undefined : { point: { x: point.x, y: point.y } };
         }
-        const point = resolveAnchor(anchor, { nodes, images }).point;
+        resolveDependency(anchor);
+        const point = resolveAnchor(anchor, { nodes, images, comments }).point;
         if (point === undefined) return undefined;
         const rect = anchor.type === "node" ? nodes[anchor.nodeId] : undefined;
         const facing = local && rect !== undefined && anchor.type === "node"
@@ -505,7 +527,8 @@ export function buildCanvasAnchorGeometry(document: unknown, measurements?: Node
     resolveEdge(edgeId);
   }
   for (const edgeId of independent.keys()) resolveEdge(edgeId);
-  return { nodes, images, edges };
+  for (const key of threads.keys()) resolveComment(key);
+  return { nodes, images, edges, comments };
 }
 
 /**
@@ -1035,7 +1058,7 @@ export function updateConnectorEndpoint(
     return { ok: false, diagnostics: [diagnostic(code, `Reconnect is blocked by interaction policy (${decision.reason}).`)] };
   }
 
-  if (anchor.type === "free" || anchor.type === "edge") {
+  if (anchor.type === "free" || anchor.type === "edge" || anchor.type === "comment") {
     const fallbackError = validateNativeFallback(graph, edge, input.end);
     if (fallbackError !== undefined) {
       return { ok: false, diagnostics: [fallbackError] };
@@ -1093,5 +1116,8 @@ export function updateConnectorEndpoint(
     return { ok: false, diagnostics: [diagnostic("metadata-invalid", `Stored connector anchor ${edgeId}.${input.end} could not be updated safely.`)] };
   }
   setOwn(connectorAnchors, input.end, mergedAnchor);
+  if (anchor.type === "comment" && buildCanvasAnchorGeometry(nextDocument).edges?.[edgeId] === undefined) {
+    return {ok: false, diagnostics: [diagnostic("missing-reference", "Comment target is missing or forms a dependency cycle.")]};
+  }
   return { ok: true, document: nextDocument, diagnostics };
 }

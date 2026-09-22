@@ -83,7 +83,7 @@ export class MiroCanvasSettingTab extends PluginSettingTab {
 
     new Setting(containerEl).setName("Connectors").setHeading();
     for (const [key, title] of [
-      ["connectorAttachNodes", "Attach to nodes"],
+      ["connectorAttachNodes", "Attach to nodes and comments"],
       ["connectorAllowFree", "Allow unattached ends on the canvas"],
       ["connectorAttachConnectors", "Attach to other lines and arrows"],
     ] as const) {

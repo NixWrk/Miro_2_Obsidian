@@ -11,6 +11,7 @@
 
 import { planRoute, type PlannedRoute } from "./connector-route";
 import type { LineRoute, LocalLine } from "./local-items";
+import { validHeadSize } from "./connector-style";
 
 export interface LinePoint {
   readonly x: number;
@@ -69,18 +70,21 @@ export function lineKind(kind: string | undefined): LineKindSpec | undefined {
  * head three times as wide, as Miro draws it.  A short arrow keeps a head no
  * longer than half of it.
  */
-export function blockArrowOutline(from: LinePoint, to: LinePoint, width: number): LinePoint[] {
+export function blockArrowOutline(from: LinePoint, to: LinePoint, width: number, headSize?: number): LinePoint[] {
   const dx = to.x - from.x, dy = to.y - from.y;
   const length = Math.hypot(dx, dy);
   if (length === 0) return [from, from, from];
   const ux = dx / length, uy = dy / length;
   const nx = -uy, ny = ux;
-  const head = Math.min(width * 2.5, length / 2);
+  // Explicit size is the head's length; preserve the legacy 3:2.5 aspect ratio.
+  const size = validHeadSize(headSize) ? headSize : width * 2.5;
+  const head = Math.min(size, length / 2);
+  const halfHead = size * 0.6;
   const neck = { x: to.x - ux * head, y: to.y - uy * head };
   const at = (base: LinePoint, side: number): LinePoint => ({ x: base.x + nx * side, y: base.y + ny * side });
   return [
-    at(from, -width / 6), at(neck, -width / 2), at(neck, -width * 1.5), to,
-    at(neck, width * 1.5), at(neck, width / 2), at(from, width / 6),
+    at(from, -width / 6), at(neck, -width / 2), at(neck, -halfHead), to,
+    at(neck, halfHead), at(neck, width / 2), at(from, width / 6),
   ];
 }
 

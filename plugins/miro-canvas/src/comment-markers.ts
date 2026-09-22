@@ -17,7 +17,7 @@ export interface CommentMarker {
   readonly key: string;
   readonly threadId: string;
   readonly origin: CommentOrigin;
-  readonly anchorType: "board" | "node" | "image" | "edge";
+  readonly anchorType: "board" | "node" | "image" | "edge" | "comment";
   readonly state: "open" | "resolved";
   readonly point: AnchorPoint;
   readonly label: string;
@@ -25,6 +25,7 @@ export interface CommentMarker {
   /** The opening author's initial and colour, which the pin shows as Miro's does. */
   readonly initial: string;
   readonly color: string;
+  readonly locked?: boolean;
 }
 
 export interface CommentMarkersState extends CommentListOptions {
@@ -88,7 +89,8 @@ export function buildCommentMarkers(
       label: `${status} comment by ${author}, ${commentTimeLabel(thread.createdAt, display)}: ${messages[0]?.text ?? thread.text}. ${replyCount} replies. Open thread`,
       replyCount,
       initial: authorInitial(author),
-      color: authorColor(author),
+      color: typeof thread.color === "string" && /^#[0-9a-f]{6}$/i.test(thread.color) ? thread.color : authorColor(author),
+      locked: thread.locked === true,
     }));
   }
   return { markers: Object.freeze(markers), diagnostics: Object.freeze(diagnostics) };
@@ -176,7 +178,7 @@ export class CommentMarkers {
         // the pointer, and the host decides what it lands on.
         const press = (event: Event) => {
           const pointer = event as PointerEvent;
-          if (this.host.onMoveThread === undefined || pointer.button !== 0) return;
+          if (this.host.onMoveThread === undefined || pointer.button !== 0 || this.markerOf(button)?.locked) return;
           const view = this.document.defaultView;
           if (view === null) return;
           // A second press or disposal cannot leave listeners from the first

@@ -263,6 +263,8 @@ const METADATA_FIELDS = new Set([
   "freeAnchors",
   "export",
   "commentPlaces",
+  "commentAuthorNames",
+  "commentDecorations",
   "hiddenImportedComments",
   "connectors",
   "connectorMigrationArchive",
@@ -1296,6 +1298,21 @@ function validateMetadataObject(value: unknown): MiroCanvasMetadataValidationRes
 
   // Where comment pins were moved to, by origin and thread: anchors like any other.
   const places = readOwn(value, "commentPlaces");
+  const authorNames = readOwn(value, "commentAuthorNames");
+  if (authorNames.state === "error") addError(diagnostics, "property-read-failed", "miroCanvas.commentAuthorNames", "Comment author names could not be read.");
+  else if (authorNames.state === "present" && (!isRecord(authorNames.value) || Object.keys(authorNames.value).length > 10000
+    || Object.values(authorNames.value).some(group => !isRecord(group) || Object.keys(group).length > 1000
+      || Object.values(group).some(name => typeof name !== "string" || name.length < 1 || name.length > 256 || /[\u0000-\u001f\u007f]/u.test(name))))) {
+    addError(diagnostics, "object-expected", "miroCanvas.commentAuthorNames", "Author aliases must be bounded message-to-name maps.");
+  }
+  const decorations = readOwn(value, "commentDecorations");
+  if (decorations.state === "error") addError(diagnostics, "property-read-failed", "miroCanvas.commentDecorations", "Comment appearance could not be read.");
+  else if (decorations.state === "present" && (!isRecord(decorations.value) || Object.keys(decorations.value).length > 10000
+    || Object.values(decorations.value).some(item => !isRecord(item)
+      || (item.color !== undefined && (typeof item.color !== "string" || !/^#[0-9a-f]{6}$/i.test(item.color)))
+      || (item.locked !== undefined && typeof item.locked !== "boolean")))) {
+    addError(diagnostics, "object-expected", "miroCanvas.commentDecorations", "Comment colors and locks must be valid bounded records.");
+  }
   const connectors = readOwn(value, "connectors");
   if (connectors.state === "error") {
     addError(diagnostics, "property-read-failed", "miroCanvas.connectors", "The property could not be read safely.");

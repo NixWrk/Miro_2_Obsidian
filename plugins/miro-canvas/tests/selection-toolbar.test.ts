@@ -195,6 +195,21 @@ function build(overrides: Partial<SelectionToolbarState> = {}, options: Selectio
 }
 
 describe("selection toolbar", () => {
+  it("edits head size independently and rejects invalid or read-only changes", () => {
+    const {root, styles, update} = build({...EDGE});
+    const input = byLabel(root, "Arrowhead size");
+    expect(input.value).toBe("");
+    for (const value of ["", "0", "1001", "NaN"]) {input.value=value;input.dispatch("change");}
+    expect(styles).toEqual([]);
+    input.value="18.5";input.dispatch("change");
+    expect(styles).toEqual([{connector:{headSize:18.5}}]);
+    update({connector:{width:50,headSize:18.5}});
+    expect(input.value).toBe("18.5");
+    update({editable:false, connector:{headSize:18.5}});
+    expect(input.disabled).toBe(true);
+    input.value="30";input.dispatch("change");
+    expect(styles).toHaveLength(1);
+  });
   it("keeps one compact row and hides every popover until it is opened", () => {
     const { root } = build();
     const bar = root.children.find((child) => child.className.includes("__bar"))!;

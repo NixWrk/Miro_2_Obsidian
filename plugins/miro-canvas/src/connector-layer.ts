@@ -1,7 +1,7 @@
 import { type CanvasAnchor, type AnchorGeometry, type AnchorPoint } from "./anchors";
-import { boardConnectors, connectorRoutes, readBoardConnector, translateConnector, type BoardConnector } from "./board-connectors";
-import { CAP_PATHS, capFilled, strokeDash } from "./connector-style";
-import { routePath } from "./connector-route";
+import { boardConnectors, connectorRoutes, readBoardConnector, reshapeBoardConnector, translateConnector, type BoardConnector } from "./board-connectors";
+import { CAP_PATHS, capFilled, headMarkerAttributes, strokeDash } from "./connector-style";
+import { gripNear, routeHandles, routePath, routeBends, removeWaypoint, type RouteHandle } from "./connector-route";
 import { blockArrowOutline } from "./free-line";
 
 interface Host {
@@ -40,6 +40,10 @@ export class ConnectorLayer {
       root.addEventListener(type, handler, true); this.cleanups.push(() => root.removeEventListener(type, handler, true));
     };
     listen("pointerdown", event => {
+      // The shared selection frame belongs to the current selection. Its press
+      // must not clear independent connectors before the group drag starts.
+      if ((event.target as Element)?.closest?.(".miro-canvas-mixed-selection-frame")) return;
+      if (this.selected.size && (event.target as Element)?.closest?.(".canvas-selection") && this.host.moveSelection(event as PointerEvent)) return;
       if(!(event as PointerEvent).shiftKey && (event.target as Element)?.closest?.(".canvas-node") && this.selected.size && this.host.moveSelection(event as PointerEvent))return;
       if ((event as PointerEvent).button===0 && !(event as PointerEvent).shiftKey && !this.svg.contains(event.target as Node) && !(event.target as Element)?.closest?.(".miro-canvas-toolbar,.miro-canvas-tools,.miro-canvas-comment-markers")) { this.selected.clear(); this.render();this.host.selectionChanged(); }
     });
@@ -106,7 +110,7 @@ export class ConnectorLayer {
       path.setAttribute("stroke-dasharray",strokeDash(c.strokeStyle));
       if (c.block) {
         const reverse = c.startCap !== "none" && c.endCap === "none";
-        const outline=blockArrowOutline(reverse ? route.end : route.start,reverse ? route.start : route.end,c.width).map(p=>this.host.screen(p));
+        const outline=blockArrowOutline(reverse ? route.end : route.start,reverse ? route.start : route.end,c.width,c.headSize).map(p=>this.host.screen(p));
         path.setAttribute("d",outline.map((p,i)=>`${i?"L":"M"}${p.x} ${p.y}`).join(" ")+" Z");
         path.setAttribute("fill",c.color); path.setAttribute("stroke-width","1");
       }
@@ -118,6 +122,7 @@ export class ConnectorLayer {
         const id = `miro-cap-${this.host.id()}`;
         marker.setAttribute("id",id); marker.setAttribute("viewBox","-16 -8 18 16");
         marker.setAttribute("refX","0"); marker.setAttribute("refY","0"); marker.setAttribute("markerWidth","14"); marker.setAttribute("markerHeight","14"); marker.setAttribute("orient","auto-start-reverse");
+        for (const [key, value] of Object.entries(headMarkerAttributes(c.headSize, scale))) marker.setAttribute(key, value);
         glyph.setAttribute("d",CAP_PATHS[cap]!); glyph.setAttribute("stroke",c.color); glyph.setAttribute("fill",capFilled(cap)?c.color:"none"); marker.append(glyph); defs.append(marker);
         path.setAttribute(`marker-${end}`,`url(#${id})`);
       }
@@ -140,19 +145,43 @@ export class ConnectorLayer {
         const grip = doc.createElementNS(NS,"circle"); grip.setAttribute("cx",String(at.x)); grip.setAttribute("cy",String(at.y)); grip.setAttribute("r","6"); grip.classList.add("miro-board-connector-grip"); grip.setAttribute("data-end",end);
         grip.addEventListener("pointerdown", e => { if(e.button!==0)return; e.preventDefault(); e.stopImmediatePropagation(); this.drag(e,c,end); }); this.svg.append(grip);
       }
+      if (this.selected.size === 1 && this.selected.has(c.id) && !c.block && this.host.editable([c.id])) {
+        for (const handle of routeHandles(route)) {
+          const at = this.host.screen(handle.point);
+          const grip = doc.createElementNS(NS, "circle");
+          grip.setAttribute("cx", String(at.x)); grip.setAttribute("cy", String(at.y)); grip.setAttribute("r", "4");
+          grip.classList.add("miro-board-connector-grip"); grip.setAttribute("data-route-grip", handle.kind);
+          grip.setAttribute("aria-label", "Move connector bend");
+          grip.addEventListener("pointerdown", e => {
+            if (e.button !== 0) return;
+            e.preventDefault(); e.stopImmediatePropagation(); this.drag(e, c, undefined, handle);
+          });
+          grip.addEventListener("dblclick", e => {
+            e.preventDefault(); e.stopPropagation();
+            if (handle.kind === "insert" || !this.host.editable([c.id])) return;
+            this.host.write([{ ...c, waypoints: handle.kind === "waypoint" ? removeWaypoint(routeBends(route), handle.index) : [] }], [], c);
+          });
+          this.svg.append(grip);
+        }
+      }
     }
   }
-  private drag(event:PointerEvent, c:BoardConnector, end?:"from"|"to"):void {
-    if(!end && this.host.moveSelection(event))return;
+  private drag(event:PointerEvent, c:BoardConnector, end?:"from"|"to", handle?: RouteHandle):void {
+    if(!end && !handle && this.host.moveSelection(event))return;
     if (!this.host.editable([c.id])) return;
     const first=this.host.board({x:event.clientX,y:event.clientY}), view=this.root.ownerDocument.defaultView;
     if(!first || !view) return;
+    const route = connectorRoutes(boardConnectors(this.host.document()), this.host.geometry()).get(c.id);
+    // A node-bound line cannot translate its endpoints. Dragging its body
+    // changes its route instead, just like a native Canvas connector.
+    const bend = handle ?? (!end && !c.block && (c.from.type !== "free" || c.to.type !== "free") && route ? gripNear(route, first) : undefined);
     let next=c, changed=false;
     const move=(e:PointerEvent)=>{
       if(e.pointerId!==event.pointerId) return;
       const at=this.host.board({x:e.clientX,y:e.clientY}); if(!at)return;
       changed ||= Math.hypot(e.clientX-event.clientX,e.clientY-event.clientY)>3;
       if(end) {const anchor=this.host.landing({x:e.clientX,y:e.clientY},c.id); next=anchor?{...c,[end]:anchor}:c;}
+      else if (bend && route) next=reshapeBoardConnector(c,route,bend,at);
       else next=translateConnector(c,at.x-first.x,at.y-first.y);
       this.preview=next;this.render(true);
     };
