@@ -77,8 +77,11 @@ export function shortTime(value: string | undefined, locale?: string): string {
 }
 
 export interface CommentThreadCardHost {
+  readonly onHideImported?: (threadId: string) => void;
   readonly onReply: (threadId: string, text: string) => void;
   readonly onResolve: (threadId: string, resolved: boolean) => void;
+  /** Deletes an editable local thread. Imported Miro evidence is never deleted. */
+  readonly onDelete: (threadId: string) => void;
   /** Opens the thread in the full comments panel. */
   readonly onOpenPanel: (threadId: string, origin: CommentOrigin) => void;
   readonly onClose: () => void;
@@ -103,6 +106,8 @@ export class CommentThreadCard {
   private readonly send: HTMLButtonElement;
   private readonly note: HTMLElement;
   private readonly panelButton: HTMLButtonElement;
+  private readonly deleteButton: HTMLButtonElement;
+  private readonly hideImportedButton: HTMLButtonElement;
   private composing = false;
 
   public constructor(private readonly document: Document, private readonly host: CommentThreadCardHost) {
@@ -124,6 +129,14 @@ export class CommentThreadCard {
     this.panelButton = panel;
     panel.addEventListener("click", () => {
       if (this.thread !== undefined) this.host.onOpenPanel(this.thread.id, this.thread.origin);
+    });
+    this.deleteButton = header.appendChild(this.button("Delete comment", "miro-canvas-thread__icon", "trash-2", "×"));
+    this.deleteButton.addEventListener("click", () => {
+      if (this.thread?.origin === "local") this.host.onDelete(this.thread.id);
+    });
+    this.hideImportedButton = header.appendChild(this.button("Remove imported comment from board", "miro-canvas-thread__icon", "trash-2", "×"));
+    this.hideImportedButton.addEventListener("click", () => {
+      if (!this.hideImportedButton.disabled && this.thread?.origin === "imported") this.host.onHideImported?.(this.thread.id);
     });
     const close = header.appendChild(this.button("Close", "miro-canvas-thread__icon", "x", "×"));
     close.addEventListener("click", () => this.host.onClose());
@@ -168,6 +181,8 @@ export class CommentThreadCard {
     this.element.setAttribute("data-comment-state", "new");
     this.toggle.hidden = true;
     this.panelButton.hidden = true;
+    this.deleteButton.hidden = true;
+    this.hideImportedButton.hidden = true;
     this.note.hidden = true;
     this.composer.hidden = false;
     this.input.placeholder = "Add a comment";
@@ -195,6 +210,10 @@ export class CommentThreadCard {
     const editable = local && options.editable;
     this.toggle.setAttribute("aria-checked", thread.resolved ? "true" : "false");
     this.toggle.disabled = !editable;
+    this.deleteButton.hidden = !local;
+    this.deleteButton.disabled = !editable;
+    this.hideImportedButton.hidden = local || this.host.onHideImported === undefined;
+    this.hideImportedButton.disabled = !options.editable;
     this.composer.hidden = !editable;
     this.note.hidden = local && options.editable;
     this.note.textContent = local ? "Review mode is on; comments are read-only." : "Imported from Miro; read-only.";

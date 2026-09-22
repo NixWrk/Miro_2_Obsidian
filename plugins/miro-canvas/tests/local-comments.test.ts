@@ -19,6 +19,15 @@ const options = {
 };
 
 describe("offline local comments", () => {
+  it("hides imported threads locally in both metadata input forms without changing evidence", () => {
+    const metadata = { schemaVersion: 1, miroSource: { comments: [{ id: "source", content: "Original" }] },
+      hiddenImportedComments: ["source"], localComments: [] };
+    const before = JSON.stringify(metadata);
+    expect(listCommentThreads(metadata)).toEqual([]);
+    expect(listCommentThreads({ miroCanvas: metadata })).toEqual([]);
+    expect(JSON.stringify(metadata)).toBe(before);
+    expect(listCommentThreads({ ...metadata, hiddenImportedComments: [] })).toHaveLength(1);
+  });
   it("formats presentation without modifying raw author or timestamp evidence", () => {
     const author = { name: "  Alice  ", displayName: "Other", future: { keep: true } };
     expect(commentAuthorLabel({ author })).toBe("Alice");

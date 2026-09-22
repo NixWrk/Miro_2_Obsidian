@@ -28,8 +28,8 @@ class Element {
   public removeEventListener(name: string, listener: (event: Event) => void): void {
     this.listeners.get(name)?.delete(listener);
   }
-  public dispatch(name: string): Event {
-    const event = { stopPropagation: vi.fn(), preventDefault: vi.fn() } as unknown as Event;
+  public dispatch(name: string, props: Record<string, unknown> = {}): Event {
+    const event = { ...props, stopPropagation: vi.fn(), preventDefault: vi.fn() } as unknown as Event;
     for (const listener of this.listeners.get(name) ?? []) listener(event);
     return event;
   }
@@ -38,7 +38,28 @@ class Element {
     this.parent = undefined;
   }
 }
-const dom = { createElement: (tag: string) => new Element(tag) } as unknown as Document;
+
+class WindowTarget {
+  public readonly listeners = new Map<string, Set<(event: Event) => void>>();
+  public addEventListener(name: string, listener: (event: Event) => void): void {
+    if (!this.listeners.has(name)) this.listeners.set(name, new Set());
+    this.listeners.get(name)!.add(listener);
+  }
+  public removeEventListener(name: string, listener: (event: Event) => void): void {
+    this.listeners.get(name)?.delete(listener);
+  }
+  public dispatch(name: string, props: Record<string, unknown> = {}): void {
+    const event = { ...props, stopPropagation: vi.fn(), preventDefault: vi.fn() } as unknown as Event;
+    for (const listener of this.listeners.get(name) ?? []) listener(event);
+  }
+  public setTimeout(callback: () => void): number { callback(); return 0; }
+}
+
+const windowTarget = new WindowTarget();
+const dom = {
+  createElement: (tag: string) => new Element(tag),
+  defaultView: windowTarget,
+} as unknown as Document;
 
 describe("comment marker model", () => {
   it("resolves board, rotated node, image and polyline edge anchors through viewport projection", () => {
@@ -170,5 +191,27 @@ describe("comment marker DOM renderer", () => {
     renderer.update(state);
     expect(onOpenThread).not.toHaveBeenCalled();
     expect(root.children).toHaveLength(1);
+  });
+
+  it("moves a pin on release and restores it when the pointer is cancelled", () => {
+    const onMoveThread = vi.fn();
+    const renderer = new CommentMarkers({ onOpenThread: vi.fn(), onMoveThread }, { document: dom, ...display });
+    renderer.update({ threads: [thread], geometry: {}, boardPoint: { x: 10, y: 20 } });
+    const button = (renderer.element as unknown as Element).children[0]!;
+
+    button.dispatch("pointerdown", { button: 0, clientX: 10, clientY: 20 });
+    windowTarget.dispatch("pointermove", { clientX: 30, clientY: 50 });
+    expect([button.style.left, button.style.top]).toEqual(["30px", "50px"]);
+    windowTarget.dispatch("pointercancel");
+    expect([button.style.left, button.style.top]).toEqual(["10px", "20px"]);
+    expect(onMoveThread).not.toHaveBeenCalled();
+
+    button.dispatch("pointerdown", { button: 0, clientX: 10, clientY: 20 });
+    windowTarget.dispatch("pointermove", { clientX: 30, clientY: 50 });
+    windowTarget.dispatch("pointerup", { clientX: 30, clientY: 50 });
+    expect(onMoveThread).toHaveBeenCalledWith("t", "local", { x: 30, y: 50 });
+    for (const name of ["pointermove", "pointerup", "pointercancel", "blur"]) {
+      expect(windowTarget.listeners.get(name)?.size ?? 0).toBe(0);
+    }
   });
 });

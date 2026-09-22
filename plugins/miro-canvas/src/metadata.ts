@@ -15,6 +15,7 @@ import {
   isValidLineHeight,
 } from "./appearance";
 import { normalizeAnchor } from "./anchors";
+import { readBoardConnector } from "./board-connectors";
 import { readLocalItem } from "./local-items";
 import { isExportRecord } from "./export-pages";
 import type {
@@ -262,6 +263,9 @@ const METADATA_FIELDS = new Set([
   "freeAnchors",
   "export",
   "commentPlaces",
+  "hiddenImportedComments",
+  "connectors",
+  "connectorMigrationArchive",
 ]);
 
 const TRANSFORM_FIELDS = new Set(["scale", "offsetX", "offsetY"]);
@@ -1292,6 +1296,20 @@ function validateMetadataObject(value: unknown): MiroCanvasMetadataValidationRes
 
   // Where comment pins were moved to, by origin and thread: anchors like any other.
   const places = readOwn(value, "commentPlaces");
+  const connectors = readOwn(value, "connectors");
+  if (connectors.state === "error") {
+    addError(diagnostics, "property-read-failed", "miroCanvas.connectors", "The property could not be read safely.");
+  } else if (connectors.state === "present" && (!isRecord(connectors.value)
+    || Object.entries(connectors.value).some(([id, c]) => readBoardConnector(c)?.id !== id))) {
+    addError(diagnostics, "connector-invalid", "miroCanvas.connectors", "Connectors must be a map of valid independent connectors keyed by ID.");
+  }
+  const hiddenComments = readOwn(value, "hiddenImportedComments");
+  if (hiddenComments.state === "error") {
+    addError(diagnostics, "property-read-failed", "miroCanvas.hiddenImportedComments", "The property could not be read safely.");
+  } else if (hiddenComments.state === "present" && (!Array.isArray(hiddenComments.value)
+    || hiddenComments.value.some(id => typeof id !== "string" || id.length === 0 || id.length > 512))) {
+    addError(diagnostics, "array-expected", "miroCanvas.hiddenImportedComments", "Hidden imported comments must be an array of bounded non-empty IDs.");
+  }
   if (places.state === "error") {
     addError(diagnostics, "property-read-failed", "miroCanvas.commentPlaces", "The property could not be read safely.");
   } else if (places.state === "present") {

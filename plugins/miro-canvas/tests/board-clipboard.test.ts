@@ -15,6 +15,12 @@ const CANVAS = {
 };
 
 describe("pasting a copy", () => {
+  it("copies independent connectors together with their nodes using new anchor IDs",()=>{
+    const connector={id:"c",from:{type:"node" as const,nodeId:"a",u:1,v:0.5},to:{type:"node" as const,nodeId:"b",u:0,v:0.5},route:"straight" as const,color:"#123456",width:2,startCap:"none",endCap:"arrow"};
+    let n=0;const plan=planPaste({...CANVAS,connectors:[connector]},undefined,{offset:{x:40,y:40},newId:()=>`new${n++}`,sourceExists:()=>false});
+    expect(plan.connectors?.[0]).toMatchObject({id:plan.ids.get("c"),from:{nodeId:plan.ids.get("a")},to:{nodeId:plan.ids.get("b")}});
+    expect(connector.from.nodeId).toBe("a");
+  });
   it("gives every piece a new id, moves it and keeps connectors joined", () => {
     let next = 0;
     const plan = planPaste(CANVAS, undefined, { offset: { x: 100, y: -50 }, newId: () => `n${next++}`, sourceExists: () => false });

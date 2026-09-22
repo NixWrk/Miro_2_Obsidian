@@ -14,6 +14,12 @@ import {
 } from "../src/settings";
 
 describe("plugin settings", () => {
+  it("defaults to node-only attachments and persists independent opt-ins", () => {
+    expect(normalizeSettings({})).toMatchObject({ connectorAttachNodes: true, connectorAllowFree: false, connectorAttachConnectors: false });
+    expect(normalizeSettings({ connectorAttachNodes: false, connectorAllowFree: true, connectorAttachConnectors: true }))
+      .toMatchObject({ connectorAttachNodes: false, connectorAllowFree: true, connectorAttachConnectors: true });
+    expect(normalizeSettings({ connectorAllowFree: "true", connectorAttachConnectors: 1 }).connectorAllowFree).toBe(false);
+  });
   it("falls back to the defaults for anything that is not a settings object", () => {
     for (const value of [undefined, null, 0, "settings", [], () => undefined]) {
       expect(normalizeSettings(value)).toEqual(DEFAULT_SETTINGS);

@@ -175,7 +175,7 @@ describe("quick tools", () => {
     shapeButton.dispatch("click");
     expect(panelOf(shapeButton).hidden).toBe(false);
     shapeOption(root, "rectangle").dispatch("click");
-    expect(calls).toEqual([{ kind: "shape", shape: "rectangle" }, { kind: "arm", tool: "shape" }]);
+    expect(calls).toEqual([{ kind: "arm", tool: "shape" }, { kind: "shape", shape: "rectangle" }, { kind: "arm", tool: "shape" }]);
     expect(panelOf(shapeButton).hidden).toBe(true);
   });
 
@@ -194,6 +194,17 @@ describe("quick tools", () => {
     // A second click on the open panel's own button closes it again.
     more.dispatch("click");
     expect(panelOf(more).hidden).toBe(true);
+  });
+
+  it("closes shape popovers when a different tool is armed", () => {
+    const { root, tools } = build();
+    tools.update({ ...STATE, armed: "shape" });
+    const button = toolButton(root, "shape");
+    button.dispatch("click");
+    expect(panelOf(button).hidden).toBe(false);
+    tools.update({ ...STATE, armed: "connector" });
+    expect(panelOf(button).hidden).toBe(true);
+    expect(button.getAttribute("aria-expanded")).toBe("false");
   });
 
   it("disables every tool but the selecting ones and closes open panels when the board stops being editable", () => {

@@ -1,4 +1,5 @@
 import { M1CanvasSession } from "../../../plugins/miro-canvas/src/m1-session";
+import { normalizeSettings } from "../../../plugins/miro-canvas/src/settings";
 import { M2CanvasTools } from "../../../plugins/miro-canvas/src/m2-tools";
 import { MetadataWriter } from "../../../plugins/miro-canvas/src/metadata-writer";
 import { createObsidianMetadataStore } from "../../../plugins/miro-canvas/src/obsidian-metadata-store";
@@ -8,8 +9,23 @@ import type { LocalDocument } from "../../../plugins/miro-canvas/src/document-vi
 const clone = <T>(value: T): T => JSON.parse(JSON.stringify(value));
 const root = document.createElement("div");
 root.className = "canvas-wrapper";
+root.tabIndex = 0;
 root.style.cssText = "position:relative;width:1500px;height:800px;background:#fafafa";
 document.body.append(root);
+
+// Native Canvas owns this menu and empties it while middle-button panning.
+// The plugin adopts the actual element into its selection toolbar.
+const nativeMenuContainer = document.createElement("div");
+nativeMenuContainer.className = "canvas-menu-container";
+const nativeMenu = nativeMenuContainer.appendChild(document.createElement("div"));
+nativeMenu.className = "canvas-menu";
+for (const label of ["Delete", "Zoom to selection", "Edit"]) {
+  const button = nativeMenu.appendChild(document.createElement("button"));
+  button.className = "clickable-icon";
+  button.setAttribute("aria-label", label);
+  button.textContent = label.slice(0, 1);
+}
+root.append(nativeMenuContainer);
 
 type RuntimeElement = Record<string, unknown> & {
   getData: () => Record<string, unknown>;
@@ -153,6 +169,7 @@ let historyIndex = 0;
 let saves = 0;
 const runtime = {
   wrapperEl: root, nodes, edges, selection,
+  menu: { menuEl: nativeMenu, containerEl: nativeMenuContainer },
   data: clone(initial) as unknown as Record<string, unknown>, readonly: false,
   x: 0, y: 0, zoom: 0, tx: 0, ty: 0, tZoom: 0, scale: 1,
   setViewport(x: number, y: number, zoom: number) {
@@ -173,6 +190,7 @@ const runtime = {
   },
   requestSave(addHistory: boolean) {
     saves += 1;
+    this.data = this.getData();
     if (addHistory) {
       history.splice(historyIndex + 1);
       history.push(clone(this.data));
@@ -180,12 +198,26 @@ const runtime = {
     }
   },
   setReadonly(value: boolean) { this.readonly = value; },
+  select(node: RuntimeElement) { selection.add(node); },
+  deselectAll() { selection.clear(); },
+  deleteSelection() {
+    const ids = new Set(selectedIds());
+    const next = this.getData();
+    next.nodes = next.nodes.filter(node => !ids.has(String(node.id)));
+    next.edges = next.edges.filter(edge => !ids.has(String(edge.id)) && !ids.has(String(edge.fromNode)) && !ids.has(String(edge.toNode)));
+    this.importData(next);
+    this.requestSave(true);
+  },
   undo() { if (historyIndex > 0) this.importData(history[--historyIndex]); },
   redo() { if (historyIndex + 1 < history.length) this.importData(history[++historyIndex]); },
 };
 const view = { canvas: runtime, getViewType: () => "canvas" };
 const writer = new MetadataWriter(createObsidianMetadataStore(view).store!);
-const session = new M1CanvasSession(view, writer);
+let systemClipboard = "";
+const session = new M1CanvasSession(view, writer, { settings: normalizeSettings({ connectorAllowFree: true, connectorAttachConnectors: true }), desktopClipboard: {
+  readText: () => systemClipboard,
+  writeText: text => { systemClipboard = text; },
+} });
 const mounted = session.mount();
 
 const openCalls: LocalDocument[] = [];
@@ -207,7 +239,8 @@ const mountM2 = () => {
   if (m2) return true;
   select("file");
   m2 = new M2CanvasTools(session, documentHost, document);
-  m2.element.style.cssText = "position:absolute;right:0;top:0;z-index:100;width:720px;max-height:780px;overflow:auto;background:#fff;color:#24272f;--text-normal:#24272f;--text-muted:#505461;--background-primary:#fff;--background-secondary:#f2f4f8;--background-modifier-border:#bec4cf";
+  // Reserve the bottom dock's space; this development-only panel scrolls above it.
+  m2.element.style.cssText = "position:absolute;right:0;top:0;z-index:100;width:720px;max-height:680px;overflow:auto;background:#fff;color:#24272f;--text-normal:#24272f;--text-muted:#505461;--background-primary:#fff;--background-secondary:#f2f4f8;--background-modifier-border:#bec4cf";
   root.append(m2.element);
   select("n1");
   return true;

@@ -1,4 +1,4 @@
-import { Modal, Notice, Plugin, TFile, setIcon, type WorkspaceLeaf } from "obsidian";
+import { Menu, Modal, Notice, Plugin, TFile, setIcon, type WorkspaceLeaf } from "obsidian";
 
 import {
   inspectAdvancedCanvas,
@@ -199,6 +199,17 @@ export default class MiroCanvasPlugin extends Plugin {
         console.info(`[miro-canvas] ${description}`);
       }),
     });
+    this.addCommand({
+      id: "migrate-line-nodes",
+      name: "Miro Canvas: Convert legacy line nodes to connectors",
+      checkCallback: checking => this.runM1Command(checking, session => session.migrateLines()),
+    });
+    this.addCommand({
+      id: "reset-tools",
+      name: "Miro Canvas: Reset tools and selection",
+      hotkeys: [{modifiers:[],key:"Escape"}],
+      checkCallback: checking => this.runM1Command(checking,session=>session.resetTools()),
+    });
 
     this.addCommand({
       id: "m1-toggle-attachment-names",
@@ -289,6 +300,21 @@ export default class MiroCanvasPlugin extends Plugin {
       onStateChange: () => this.updateStatus(true),
       setIcon: (element, icon) => setIcon(element, icon),
       onOpenSettings: () => this.openOwnSettings(),
+      desktopClipboard: (() => {
+        try {
+          const clipboard = typeof require === "function" ? require("electron").clipboard : undefined;
+          return clipboard ? { readText: () => clipboard.readText() as string, writeText: (text:string) => clipboard.writeText(text) as void } : undefined;
+        } catch { return undefined; }
+      })(),
+      onClipboardMenu: (event, run, nativeMenu) => {
+        const menu = new Menu();
+        for (const [action, title, icon] of [["copy", "Copy", "copy"], ["cut", "Cut", "scissors"], ["paste", "Paste", "clipboard-paste"]] as const) {
+          menu.addItem(item => item.setTitle(title).setIcon(icon).onClick(() => run(action)));
+        }
+        menu.addSeparator();
+        menu.addItem(item => item.setTitle("More Canvas actions").setIcon("ellipsis").onClick(nativeMenu));
+        menu.showAtMouseEvent(event);
+      },
       onOpenCommentThread: (threadId, origin) => {
         const session = this.activeM1Session();
         if (session !== null) this.openLocalTools(session, { threadId, origin });

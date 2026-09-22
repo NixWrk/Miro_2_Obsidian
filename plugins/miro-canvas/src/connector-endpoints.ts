@@ -12,6 +12,7 @@ import type {
   CanvasAnchor,
 } from "./anchors";
 import { buildSourceScene } from "./source-model";
+import { boardConnectors } from "./board-connectors";
 import { planRoute, type RouteEnd } from "./connector-route";
 import { closestContourPoint, contourPoint, shapeOutline, type ShapePoint } from "./shape-geometry";
 import { decideInteraction } from "./interaction-policy";
@@ -420,6 +421,7 @@ export function buildCanvasAnchorGeometry(document: unknown, measurements?: Node
   }
 
   const edges = Object.create(null) as Record<string, AnchorEdgeGeometry>;
+  const independent = new Map(boardConnectors(document).map(c => [c.id,c]));
   const resolving = new Set<string>();
   const resolveEdge = (edgeId: string): AnchorEdgeGeometry | undefined => {
     if (edges[edgeId] !== undefined) {
@@ -430,7 +432,14 @@ export function buildCanvasAnchorGeometry(document: unknown, measurements?: Node
     }
     const edge = graph.edges.get(edgeId);
     if (edge === undefined) {
-      return undefined;
+      const c = independent.get(edgeId);
+      if (!c) return undefined;
+      resolving.add(edgeId);
+      for (const anchor of [c.from,c.to]) if (anchor.type === "edge") resolveEdge(anchor.edgeId);
+      const from=resolveAnchor(c.from,{nodes,images,edges}).point, to=resolveAnchor(c.to,{nodes,images,edges}).point;
+      resolving.delete(edgeId);
+      if (!from || !to) return undefined;
+      return edges[edgeId] = {...planRoute({point:from},{point:to},c.route,c.waypoints)};
     }
     resolving.add(edgeId);
     const descriptor = sourceScene.items.get(edgeId);
@@ -495,6 +504,7 @@ export function buildCanvasAnchorGeometry(document: unknown, measurements?: Node
   for (const edgeId of graph.edges.keys()) {
     resolveEdge(edgeId);
   }
+  for (const edgeId of independent.keys()) resolveEdge(edgeId);
   return { nodes, images, edges };
 }
 
@@ -837,7 +847,7 @@ function validateStoredConnectorAnchors(graph: GraphIndex): ConnectorEndpointDia
       if (anchor.type === "image" && !isImageNode(graph.nodes.get(anchor.nodeId)!)) {
         return diagnostic("missing-reference", `Stored image anchor ${edgeId}.${end} does not reference an image node.`);
       }
-      if (anchor.type === "edge" && !graph.edges.has(anchor.edgeId)) {
+      if (anchor.type === "edge" && !graph.edges.has(anchor.edgeId) && !boardConnectors(graph.document).some(c=>c.id===anchor.edgeId)) {
         return diagnostic("missing-reference", `Stored connector anchor ${edgeId}.${end} references missing edge ${anchor.edgeId}.`);
       }
     }
@@ -874,7 +884,9 @@ function hasEdgeAnchorCycle(graph: GraphIndex, candidate: { readonly edgeId: str
     }
     visited.add(edgeId);
     active.add(edgeId);
-    for (const target of edgeReferences(graph, edgeId, candidate)) {
+    const local = boardConnectors(graph.document).find(c=>c.id===edgeId);
+    const references = local ? [local.from,local.to].flatMap(a=>a.type==="edge"?[a.edgeId]:[]) : edgeReferences(graph, edgeId, candidate);
+    for (const target of references) {
       if (visit(target)) {
         return true;
       }
@@ -993,7 +1005,7 @@ export function updateConnectorEndpoint(
       return { ok: false, diagnostics: [diagnostic("missing-reference", `Anchor target ${anchor.nodeId} is missing or has the wrong node kind.`)] };
     }
   } else if (anchor.type === "edge") {
-    if (!graph.edges.has(anchor.edgeId)) {
+    if (!graph.edges.has(anchor.edgeId) && !boardConnectors(graph.document).some(c=>c.id===anchor.edgeId)) {
       return { ok: false, diagnostics: [diagnostic("missing-reference", `Anchor target edge ${anchor.edgeId} does not exist.`)] };
     }
     if (anchor.edgeId === edgeId) {

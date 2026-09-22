@@ -8,6 +8,7 @@
  * rejected, because a bad preference must never stop a board from opening.
  */
 
+import { POINTER_BINDINGS, type PointerBinding } from "./pointer-bindings";
 export type WheelZoomModifier = "none" | "ctrl" | "shift" | "alt";
 
 export interface MiroCanvasSettings {
@@ -28,8 +29,16 @@ export interface MiroCanvasSettings {
   readonly connectorMagnet: number;
   /** Screen pixels within which a connector end snaps onto a standard point. */
   readonly connectorSnap: number;
+  readonly connectorAttachNodes: boolean;
+  readonly connectorAllowFree: boolean;
+  readonly connectorAttachConnectors: boolean;
   readonly minimapVisible: boolean;
   readonly selectionToolbarEnabled: boolean;
+  readonly lassoBinding: PointerBinding;
+  readonly panBinding: PointerBinding;
+  readonly lineBinding: PointerBinding;
+  readonly showLassoTool: boolean;
+  readonly showConnectorTool: boolean;
   /**
    * The warning badge listing what the plugin could not do as asked.  It is
    * for whoever develops or debugs the plugin, so it starts hidden; it is
@@ -75,8 +84,16 @@ export const DEFAULT_SETTINGS: MiroCanvasSettings = Object.freeze({
   fastPanMultiplier: 4,
   connectorMagnet: 24,
   connectorSnap: 16,
+  connectorAttachNodes: true,
+  connectorAllowFree: false,
+  connectorAttachConnectors: false,
   minimapVisible: true,
   selectionToolbarEnabled: true,
+  lassoBinding: "alt+left",
+  panBinding: "none",
+  lineBinding: "right",
+  showLassoTool: true,
+  showConnectorTool: true,
   developerDiagnostics: false,
   commentAuthor: "",
   commentAuthorColors: Object.freeze({}),
@@ -161,8 +178,16 @@ export function normalizeSettings(value: unknown): MiroCanvasSettings {
     fastPanMultiplier: readNumber(value, "fastPanMultiplier", DEFAULT_SETTINGS.fastPanMultiplier),
     connectorMagnet: readNumber(value, "connectorMagnet", DEFAULT_SETTINGS.connectorMagnet),
     connectorSnap: readNumber(value, "connectorSnap", DEFAULT_SETTINGS.connectorSnap),
+    connectorAttachNodes: readBoolean(value, "connectorAttachNodes", DEFAULT_SETTINGS.connectorAttachNodes),
+    connectorAllowFree: readBoolean(value, "connectorAllowFree", DEFAULT_SETTINGS.connectorAllowFree),
+    connectorAttachConnectors: readBoolean(value, "connectorAttachConnectors", DEFAULT_SETTINGS.connectorAttachConnectors),
     minimapVisible: readBoolean(value, "minimapVisible", DEFAULT_SETTINGS.minimapVisible),
     selectionToolbarEnabled: readBoolean(value, "selectionToolbarEnabled", DEFAULT_SETTINGS.selectionToolbarEnabled),
+    lassoBinding: POINTER_BINDINGS.includes(value.lassoBinding as PointerBinding) ? value.lassoBinding as PointerBinding : DEFAULT_SETTINGS.lassoBinding,
+    panBinding: POINTER_BINDINGS.includes(value.panBinding as PointerBinding) ? value.panBinding as PointerBinding : DEFAULT_SETTINGS.panBinding,
+    lineBinding: POINTER_BINDINGS.includes(value.lineBinding as PointerBinding) ? value.lineBinding as PointerBinding : DEFAULT_SETTINGS.lineBinding,
+    showLassoTool: readBoolean(value, "showLassoTool", DEFAULT_SETTINGS.showLassoTool),
+    showConnectorTool: readBoolean(value, "showConnectorTool", DEFAULT_SETTINGS.showConnectorTool),
     developerDiagnostics: readBoolean(value, "developerDiagnostics", DEFAULT_SETTINGS.developerDiagnostics),
     commentAuthor: typeof value.commentAuthor === "string" ? value.commentAuthor.trim().slice(0, MAX_AUTHOR_NAME) : DEFAULT_SETTINGS.commentAuthor,
     commentAuthorColors: readAuthorColors(value.commentAuthorColors),

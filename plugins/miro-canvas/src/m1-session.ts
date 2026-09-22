@@ -30,6 +30,9 @@ import {
 	type CanvasScene,
 } from "./canvas-adapter";
 import { CANVAS_SHAPE_KINDS, createCanvasAuthoring, type CanvasAuthoring, type ConnectorSide } from "./canvas-authoring";
+import { boardConnectors, connectorEndCap, connectorRoutes, restyleBoardConnector, type BoardConnector } from "./board-connectors";
+import { translateBoardSelection, routeIntersectsBox } from "./board-selection";
+import { ConnectorLayer } from "./connector-layer";
 import {
 	MAX_WAYPOINTS, gripNear, moveElbowSegment, placeWaypoint, planRoute, removeWaypoint, routeBends, routeHandles, routePath, simplifyCorners,
 	type PlannedRoute, type RouteEnd,
@@ -100,7 +103,9 @@ import {
 	type SourceScene,
 } from "./source-model";
 import { CommentMarkers } from "./comment-markers";
-import { addLocalComment, addReply, listCommentThreads, setCommentResolved, type CommentOrigin, type CommentMutationResult } from "./local-comments";
+import { matchesPointer } from "./pointer-bindings";
+import { edgeLanding } from "./edge-landing";
+import { addLocalComment, addReply, deleteLocalComment, listCommentThreads, setCommentResolved, type CommentOrigin, type CommentMutationResult } from "./local-comments";
 import { CommentThreadCard, threadMessages } from "./comment-thread";
 import { QUICK_TOOL_KEYS, QuickTools, isDrawingTool, type QuickTool } from "./quick-tools";
 import { LOCAL_ITEM_SIZES, MAX_LINE_POINTS, MAX_STROKE_POINTS, TABLE_TEMPLATE, type LocalItem, type LocalLine } from "./local-items";
@@ -132,6 +137,7 @@ import {
 } from "./board-clipboard";
 
 export interface M1SessionOptions {
+	readonly desktopClipboard?: { readText():string; writeText(text:string):void };
 	readonly document?: Document;
 	readonly panelHost?: HTMLElement;
 	readonly onNotice?: (message: string) => void;
@@ -145,6 +151,7 @@ export interface M1SessionOptions {
 	/** Opens this plugin's page in Obsidian's settings, from the board menu. */
 	readonly onOpenSettings?: () => void;
 	readonly onOpenCommentThread?: (threadId: string, origin: CommentOrigin) => void;
+	readonly onClipboardMenu?: (event: MouseEvent, run: (action: "copy" | "cut" | "paste") => void, nativeMenu: () => void) => void;
 }
 
 export type M1SessionStatus = "ready" | "unavailable" | "incompatible";
@@ -632,6 +639,85 @@ function keyIsPrintable(key: string): boolean {
 
 /** A single active Canvas runtime and its user-facing M1 controls. */
 export class M1CanvasSession {
+	private connectorLayer?: ConnectorLayer;
+	private connectorColor?: string;
+	private connectorWidth = 2;
+	private ordinaryConnectorWidth = 2;
+	private blockConnectorWidth = 16;
+	private clipboardCommand?: (action:"copy"|"cut"|"paste")=>boolean;
+	private liveGeometryDirty = false;
+	public resetTools(): void {
+		this.rectangleSelectionEnd?.();
+		this.selectionMoveEnd?.();
+		this.toolGesture?.end();this.panGestureEnd?.();this.linePlacing=undefined;
+		this.cancelHandleRotation();this.connectorLayer?.reset();this.callNative("deselectAll");
+		this.closeCommentThread();this.quickTools?.closePanels();this.armTool("select");this.refresh();
+	}
+	public migrateLines(): void {
+		this.authoring ??= createCanvasAuthoring(this.view);
+		const result = this.authoring.migrateLines();
+		this.options.onNotice?.(result.ok ? "Line migration finished. Unsupported legacy lines are retained; Undo restores the previous graph." : firstProblem(result.diagnostics) ?? "Line migration was refused.");
+		for (const diagnostic of result.diagnostics) this.addDiagnostic(diagnostic.message);
+		this.refresh();
+	}
+	private refreshBoardConnectors(): void {
+		if (!this.root || typeof this.root.ownerDocument?.createElementNS !== "function" || typeof this.root.append !== "function") return;
+		this.connectorLayer ??= new ConnectorLayer(this.root, {
+			document: () => this.currentRawDocument,
+			geometry: () => buildCanvasAnchorGeometry(this.currentRawDocument),
+			screen: p => { const at = this.viewportPoint(p) ?? p; const box = boundingRect(this.root); return {x:at.x-(box?.left??0),y:at.y-(box?.top??0)}; },
+			board: p => this.boardPoint(p),
+			landing: (p,id) => this.connectorLanding(p,undefined,undefined,id)?.anchor,
+			editable: ids => this.editAllowed(ids.length ? "edit" : "paste",ids),
+			write: (items,remove,expected) => this.writeBoardConnectors(items,remove,expected),
+			deselectNative: () => {this.callNative("deselectAll");}, id: newCanvasId,
+			clipboard: action => {this.clipboardCommand?.(action);},
+			removeSelection: () => this.deleteBoardSelection(),
+			moveSelection: event => this.startSelectionMove(event),
+			selectionChanged: () => this.refresh(),
+		});
+		this.connectorLayer.render();
+	}
+	private writeBoardConnectors(items: BoardConnector[], remove: string[] = [], expected?: BoardConnector): boolean {
+		this.currentRawDocument = this.adapter.getDocument();
+		this.readInteractionState();
+		if (expected && JSON.stringify(boardConnectors(this.currentRawDocument).find(c => c.id === expected.id)) !== JSON.stringify(expected)) {
+			this.options.onNotice?.("Connector move was cancelled because the connector changed during the drag.");
+			this.refresh();
+			return false;
+		}
+		if (!this.editAllowed("edit",[...items.map(c=>c.id),...remove])) return false;
+		const old = boardConnectors(this.currentRawDocument);
+		const next = old.filter(c=>!remove.includes(c.id) && !items.some(item=>item.id===c.id)).concat(items);
+		const geometry = buildCanvasAnchorGeometry(this.currentRawDocument);
+		const routes = connectorRoutes(old,geometry);
+		const detached = next.map(c => {
+			const route=routes.get(c.id);
+			const end=(a:CanvasAnchor,p:{x:number;y:number}|undefined):CanvasAnchor=>a.type==="edge"&&remove.includes(a.edgeId)&&p?{type:"free",x:p.x,y:p.y}:a;
+			return {...c,from:end(c.from,route?.start),to:end(c.to,route?.end)};
+		});
+		const changed = detached.filter(c=>JSON.stringify(c)!==JSON.stringify(old.find(o=>o.id===c.id)));
+		if (changed.length && !this.editAllowed("edit",changed.map(c=>c.id))) return false;
+		const metadata=readRuntime(this.currentRawDocument,"miroCanvas");
+		const overrides={...(isRecord(metadata)&&isRecord(metadata.localOverrides)?metadata.localOverrides:{})};
+		for (const [id,value] of Object.entries(overrides)) {
+			if (!isRecord(value) || !isRecord(value.connectorAnchors)) continue;
+			const anchors={...value.connectorAnchors};let edited=false;
+			for (const end of ["from","to"] as const) {
+				const a=anchors[end]; const route=geometry.edges?.[id]; const p=end==="from"?route?.start:route?.end;
+				if(isRecord(a)&&a.type==="edge"&&remove.includes(a.edgeId as string)) {
+					if(!p || !this.editAllowed("edit",[id])) return false;
+					anchors[end]={type:"free",x:p.x,y:p.y};edited=true;
+				}
+			}
+			if(edited)overrides[id]={...value,connectorAnchors:anchors};
+		}
+		const connectors=Object.fromEntries(detached.map(c=>[c.id,c]));
+		const proposed={...(isRecord(this.currentRawDocument)?this.currentRawDocument:{}),miroCanvas:{...(isRecord(metadata)?metadata:{}),connectors,localOverrides:overrides}};
+		const nextGeometry=buildCanvasAnchorGeometry(proposed);
+		if (detached.some(c=>nextGeometry.edges?.[c.id]===undefined)) {this.options.onNotice?.("Connector target is missing or would create a cycle.");return false;}
+		return this.writeMetadata("board-connectors",draft=>{draft.connectors=connectors;draft.localOverrides=overrides;})?.ok === true;
+	}
 	public readonly kind = "miro-canvas-m1-session" as const;
 	public readonly view: unknown;
 	public readonly adapter: CanvasAdapter;
@@ -710,6 +796,8 @@ export class M1CanvasSession {
 	private toolShape = "rectangle";
 	/** Where the pointer last was over the board, and when: a paste lands there. */
 	private lastPointer: { readonly x: number; readonly y: number; readonly at: number } | undefined;
+	private panGestureEnd: (() => void) | undefined;
+	private suppressContextUntil = 0;
 	/** A polyline or spline being placed a click at a time. */
 	private linePlacing: {
 		readonly spec: LineKindSpec;
@@ -769,7 +857,7 @@ export class M1CanvasSession {
 				: undefined;
 		const renderDocument = options.document ?? ownerDocument(this.root);
 		this.sourceRenderer = renderDocument === undefined ? undefined : new SourceRenderer({
-			getDocument: () => this.adapter.getDocument(),
+			getDocument: () => this.selectionMovePreview ?? this.adapter.getDocument(),
 			getNodes: () => this.adapter.getNodes(),
 			getEdges: () => this.adapter.getEdges(),
 			getRotationPreview: () => this.rotationPreview,
@@ -801,6 +889,7 @@ export class M1CanvasSession {
 		this.toolbar = new SelectionToolbar({
 			onAppearance: (action) => this.applyAppearance(action),
 			onStyle: (patch) => this.applyElementStyle(patch),
+			onDelete: () => this.deleteBoardSelection(),
 			onLock: (locked) => (locked ? this.lockSelection() : this.unlockSelection()),
 			onOpenLink: () => this.openSelectedLink(),
 		}, {
@@ -827,9 +916,17 @@ export class M1CanvasSession {
 		this.quickTools = controlDocument === undefined ? undefined : new QuickTools({
 			onArm: (tool) => this.armTool(tool),
 			onShape: (shape) => {
+				const wasBlock = lineKind(this.toolShape)?.block === true;
+				const isBlock = lineKind(shape)?.block === true;
+				if (wasBlock !== isBlock) {
+					if (wasBlock) this.blockConnectorWidth = this.connectorWidth;
+					else this.ordinaryConnectorWidth = this.connectorWidth;
+					this.connectorWidth = isBlock ? this.blockConnectorWidth : this.ordinaryConnectorWidth;
+				}
 				this.toolShape = shape;
 				this.updateQuickTools();
 			},
+			onConnector: settings => {this.connectorColor=settings.color??this.connectorColor;this.connectorWidth=settings.width??this.connectorWidth;this.updateQuickTools();},
 			onPen: (settings) => {
 				if (settings.color !== undefined) this.penColor = settings.color;
 				if (settings.width !== undefined) this.penWidth = settings.width;
@@ -1196,12 +1293,24 @@ export class M1CanvasSession {
 	/** The board point under a viewport point. */
 	private boardPoint(point: { readonly x: number; readonly y: number }): { readonly x: number; readonly y: number } | undefined {
 		const rootRect = boundingRect(this.root);
+		const displayed=this.displayViewport(), size=clientSize(this.root);
+		if(displayed && this.viewport.coordinateMode==="center") return {x:(point.x-(rootRect?.left??0)-size.width/2)/displayed.zoom+displayed.x,y:(point.y-(rootRect?.top??0)-size.height/2)/displayed.zoom+displayed.y};
 		return this.viewport.screenToBoard({ x: point.x - (rootRect?.left ?? 0), y: point.y - (rootRect?.top ?? 0) });
+	}
+	/** Native target camera animates toward x/y/zoom. Overlays follow the displayed camera. */
+	private displayViewport(): ViewportTransform | undefined {
+		const viewport=this.viewport.getViewport();
+		if(this.viewport.coordinateMode!=="center")return viewport;
+		const canvas=this.nativeCanvas(), x=finite(readRuntime(canvas,"x")),y=finite(readRuntime(canvas,"y")),logZoom=finite(readRuntime(canvas,"zoom"));
+		const zoom=logZoom===undefined?undefined:2**logZoom;
+		return viewport && x!==undefined && y!==undefined && zoom!==undefined && Number.isFinite(zoom) && zoom>0 ? {...viewport,x,y,zoom} : viewport;
 	}
 
 	/** The viewport point over a board point. */
 	private viewportPoint(point: { readonly x: number; readonly y: number }): { readonly x: number; readonly y: number } | undefined {
 		const rootRect = boundingRect(this.root);
+		const displayed=this.displayViewport(), size=clientSize(this.root);
+		if(displayed && this.viewport.coordinateMode==="center") return {x:(point.x-displayed.x)*displayed.zoom+size.width/2+(rootRect?.left??0),y:(point.y-displayed.y)*displayed.zoom+size.height/2+(rootRect?.top??0)};
 		const screen = this.viewport.boardToScreen(point);
 		return screen === undefined ? undefined : { x: screen.x + (rootRect?.left ?? 0), y: screen.y + (rootRect?.top ?? 0) };
 	}
@@ -1212,6 +1321,8 @@ export class M1CanvasSession {
 		let cache = this.landingCache;
 		if (cache === undefined || cache.document !== document) {
 			cache = { document, geometry: buildCanvasAnchorGeometry(document), scene: buildSourceScene(document) };
+			const independent = connectorRoutes(boardConnectors(document),cache.geometry);
+			cache = {...cache,geometry:{...cache.geometry,edges:{...cache.geometry.edges,...Object.fromEntries([...independent].map(([id,r])=>[id,{start:r.start,end:r.end,points:r.points}]))}}};
 			this.landingCache = cache;
 		}
 		return cache;
@@ -1239,6 +1350,7 @@ export class M1CanvasSession {
 		point: { readonly x: number; readonly y: number },
 		exclude: string | undefined,
 		toward: { readonly x: number; readonly y: number } | undefined,
+		excludeEdge?: string,
 	): { readonly board: { readonly x: number; readonly y: number }; readonly anchor: CanvasAnchor; readonly nodeId?: string } | undefined {
 		const board = this.boardPoint(point);
 		if (board === undefined) return undefined;
@@ -1250,7 +1362,7 @@ export class M1CanvasSession {
 			readonly nodeId: string; readonly anchor: CanvasAnchor;
 			readonly distance: number; readonly inside: boolean; readonly area: number;
 		} | undefined;
-		for (const [nodeId, rect] of Object.entries(geometry.nodes ?? {})) {
+		for (const [nodeId, rect] of Object.entries(this.settings.connectorAttachNodes ? geometry.nodes ?? {} : {})) {
 			if (nodeId === exclude || !(rect.width > 0) || !(rect.height > 0)) continue;
 			const reach = Math.hypot(rect.width, rect.height) / 2 + magnet;
 			if (Math.hypot(board.x - (rect.x + rect.width / 2), board.y - (rect.y + rect.height / 2)) > reach) continue;
@@ -1273,7 +1385,18 @@ export class M1CanvasSession {
 				best = { nodeId, anchor, distance, inside, area };
 			}
 		}
-		if (best === undefined) return { board, anchor: { type: "free", x: board.x, y: board.y } };
+		// A dragged native endpoint may attach anywhere along another edge's
+		// route. Store its parameter, not a fixed point or the target's style.
+		if (this.settings.connectorAttachConnectors && excludeEdge !== undefined && !best?.inside) {
+			let nearest: { distance: number; anchor: CanvasAnchor; board: { x: number; y: number } } | undefined;
+			for (const edgeId of Object.keys(geometry.edges ?? {})) {
+				if (edgeId === excludeEdge) continue;
+				const candidate = edgeLanding(edgeId, geometry.edges![edgeId]!, board);
+				if (candidate !== undefined && candidate.distance <= magnet && (nearest === undefined || candidate.distance < nearest.distance)) nearest = candidate;
+			}
+			if (nearest !== undefined && (best === undefined || nearest.distance < best.distance)) return nearest;
+		}
+		if (best === undefined) return this.settings.connectorAllowFree ? { board, anchor: { type: "free", x: board.x, y: board.y } } : undefined;
 		const rect = geometry.nodes![best.nodeId]!;
 		const at = resolveAnchor(best.anchor, { nodes: { [best.nodeId]: rect } }).point;
 		return { board: at === undefined ? board : { x: at.x, y: at.y }, anchor: best.anchor, nodeId: best.nodeId };
@@ -1307,7 +1430,7 @@ export class M1CanvasSession {
 		} else {
 			if (this.lineOf(gesture.edgeId) !== undefined) return point;
 			const other = this.oppositeEnd(gesture.edgeId, gesture.end);
-			landing = this.connectorLanding(point, other.nodeId, other.point);
+			landing = this.connectorLanding(point, other.nodeId, other.point, gesture.edgeId);
 		}
 		return landing === undefined ? undefined : this.viewportPoint(landing.board);
 	}
@@ -1374,7 +1497,7 @@ export class M1CanvasSession {
 		}
 		this.readInteractionState();
 		const other = this.oppositeEnd(edgeId, end);
-		const landing = this.connectorLanding(point, other.nodeId, other.point);
+		const landing = this.connectorLanding(point, other.nodeId, other.point, edgeId);
 		if (landing === undefined) {
 			this.addDiagnostic("The connector end could not be placed at that point.");
 			this.refresh();
@@ -1384,6 +1507,7 @@ export class M1CanvasSession {
 		const result = this.authoring.updateConnectorEndpoint({ edgeId, end, anchor: landing.anchor });
 		if (!result.ok) {
 			this.addDiagnostic(firstProblem(result.diagnostics) ?? "Canvas rejected the connector end.");
+			this.options.onNotice?.(firstProblem(result.diagnostics) ?? "Canvas rejected the connector end.");
 		}
 		this.refresh();
 	}
@@ -1463,8 +1587,13 @@ export class M1CanvasSession {
 		}
 		this.authoring ??= createCanvasAuthoring(this.view);
 		const lines = this.selectedIds.filter((id) => this.lineOf(id) !== undefined);
+		const independent=boardConnectors(this.currentRawDocument).filter(c=>this.selectedIds.includes(c.id));
+		if(independent.length && patch.connector){
+			const {route,color,...style}=patch.connector;
+			this.writeBoardConnectors(independent.map(c=>restyleBoardConnector(c,{...style,...(route?{route,...(route!==c.route?{waypoints:[]}: {})}:{}),...(typeof color==="string"?{color}: {})})));
+		}
 		if (lines.length > 0) this.restyleLines(lines, patch);
-		const others = this.selectedIds.filter((id) => !lines.includes(id));
+		const others = this.selectedIds.filter((id) => !lines.includes(id) && !independent.some(c=>c.id===id));
 		if (others.length === 0) {
 			this.refresh();
 			return;
@@ -1738,6 +1867,8 @@ export class M1CanvasSession {
 		this.attachResizeObserver();
 		this.attachSystemThemeListener();
 		this.attachRefreshPolling();
+		this.attachViewportFrames();
+		this.attachRectangleSelection();
 		this.refresh();
 		return true;
 	}
@@ -1790,7 +1921,7 @@ export class M1CanvasSession {
 		for (const diagnostic of this.viewport.diagnostics) {
 			diagnostics.push(diagnostic.message);
 		}
-		this.currentRawDocument = this.adapter.getDocument();
+		this.currentRawDocument = this.selectionMovePreview ?? this.adapter.getDocument();
 		const parsed = parseMiroCanvasMetadata(this.currentRawDocument);
 		if (parsed.status === "valid" && parsed.metadata !== undefined) {
 			this.currentMetadata = parsed.metadata;
@@ -1813,8 +1944,13 @@ export class M1CanvasSession {
 				: `Metadata persistence is unavailable, so appearance, locking and every other write is disabled: ${this.options.persistenceProblem}`);
 		}
 		const selection = this.adapter.getSelection();
-		this.selectedIds = selection === undefined ? [] : allIds(selection);
+		this.selectedIds = [...new Set([...(selection === undefined ? [] : allIds(selection)),...(this.connectorLayer?.selection() ?? [])])];
 		this.scene = this.adapter.getScene() ?? sceneFromDocument(this.currentRawDocument) ?? { nodes: [], edges: [] };
+		const independentGeometry=buildCanvasAnchorGeometry(this.currentRawDocument);
+		const independentEdges=boardConnectors(this.currentRawDocument).flatMap(c=>{
+			const route=independentGeometry.edges?.[c.id];return route?[{id:c.id,...route}]:[];
+		});
+		if(independentEdges.length)this.scene={...this.scene,edges:[...this.scene.edges,...independentEdges]};
 		this.policy = this.policyFromDocument(this.currentRawDocument);
 		this.attachNativeGuards();
 		const sceneSignature = this.sceneSignature(this.scene);
@@ -1830,7 +1966,7 @@ export class M1CanvasSession {
 		this.lastAppearanceSignature = appearanceSignature;
 		this.lastPolicySignature = policySignature;
 		const size = clientSize(this.root);
-		const viewport = this.viewport.getViewport();
+		const viewport = this.displayViewport();
 		const minimapSignature = `${sceneSignature}|${this.viewportSignature(viewport, size)}`;
 		const minimapChanged = minimapSignature !== this.lastMinimapSignature;
 		if (this.minimap === undefined || minimapChanged) {
@@ -1872,6 +2008,7 @@ export class M1CanvasSession {
 		for (const diagnostic of this.sourceRenderer?.refresh() ?? []) {
 			diagnostics.push(diagnostic);
 		}
+		this.refreshBoardConnectors();
 		const markerModel = this.updateCommentMarkers();
 		for (const diagnostic of markerModel?.diagnostics ?? []) {
 			diagnostics.push(`Comment ${diagnostic.threadId}: ${diagnostic.message}`);
@@ -2012,6 +2149,15 @@ export class M1CanvasSession {
 			const card = new CommentThreadCard(document, {
 				onReply: (id, text) => this.mutateComment("reply-comment", (draft) => addReply(draft, id, text, { author: this.commentAuthor() })),
 				onResolve: (id, resolved) => this.mutateComment("resolve-comment", (draft) => setCommentResolved(draft, id, resolved)),
+				onDelete: (id) => this.mutateComment("delete-comment", (draft) => deleteLocalComment(draft, id)),
+				onHideImported: (id) => {
+					this.writeMetadata("hide-imported-comment", draft => {
+						const previous = Array.isArray(draft.hiddenImportedComments) ? draft.hiddenImportedComments : [];
+						draft.hiddenImportedComments = [...new Set([...previous, id])];
+						return draft;
+					});
+					this.refresh();
+				},
 				onOpenPanel: (id, from) => {
 					this.closeCommentThread();
 					this.options.onOpenCommentThread?.(id, from);
@@ -2082,6 +2228,7 @@ export class M1CanvasSession {
 	 * positions are recomputed, from measurements cached per document.
 	 */
 	private followViewport(): void {
+		this.connectorLayer?.render();
 		if (this.disposed) {
 			return;
 		}
@@ -2099,6 +2246,79 @@ export class M1CanvasSession {
 		}
 		this.handles.update(this.handlesState(previous?.editable ?? false));
 		this.updateCommentMarkers();
+		const size=clientSize(this.root), viewport=this.displayViewport();
+		const signature=`${this.lastSceneSignature}|${this.viewportSignature(viewport,size)}`;
+		if(signature!==this.lastMinimapSignature) {
+			this.minimap=new MinimapModel(this.scene,{width:240,height:160,padding:8,viewport,viewportSize:size,coordinateMode:this.viewport.coordinateMode});
+			this.lastMinimapSignature=signature;this.drawMinimap();
+		}
+	}
+	private rectangleSelectionEnd?:()=>void;
+	private attachRectangleSelection(): void {
+		const root=this.root,view=root?.ownerDocument?.defaultView;if(!root||!view)return;
+		const down=(event:PointerEvent)=>{
+			if(event.button!==0||this.armedTool!=="select"||this.isSpacePanHeld()||this.inControls(event)
+				||matchesPointer(this.settings.panBinding,event)||matchesPointer(this.settings.lassoBinding,event)
+				||this.closestTarget(event,".canvas-node,.canvas-edge,.canvas-selection,.miro-board-connector-hit,.miro-board-connector-grip,input,textarea,[contenteditable=true]"))return;
+			const first=this.boardPoint({x:event.clientX,y:event.clientY});if(!first)return;
+			this.rectangleSelectionEnd?.();
+			const original=[...(this.connectorLayer?.selection()??[])],base=event.shiftKey?original:[];
+			let dragged=false,active=true;
+			const update=(e:PointerEvent)=>{
+				if(e.pointerId!==event.pointerId)return;
+				dragged ||= Math.hypot(e.clientX-event.clientX,e.clientY-event.clientY)>3;
+				if(!dragged)return;
+				const last=this.boardPoint({x:e.clientX,y:e.clientY});if(!last)return;
+				const geometry=buildCanvasAnchorGeometry(this.adapter.getDocument());
+				const ids=boardConnectors(this.currentRawDocument).filter(c=>{
+					const route=geometry.edges?.[c.id];return route && routeIntersectsBox(route.points??(route.start&&route.end?[route.start,route.end]:[]),first,last);
+				}).map(c=>c.id);
+				this.connectorLayer?.select([...new Set([...base,...ids])]);
+			};
+			const move=(e:PointerEvent)=>{queueMicrotask(()=>{if(active)update(e);});};
+			const cleanup=()=>{active=false;view.removeEventListener("pointermove",move);view.removeEventListener("pointerup",up);view.removeEventListener("pointercancel",cancel);view.removeEventListener("blur",cancel);this.rectangleSelectionEnd=undefined;};
+			const up=(e:PointerEvent)=>{if(e.pointerId!==event.pointerId)return;cleanup();queueMicrotask(()=>{if(!this.disposed)update(e);});};
+			const cancel=()=>{cleanup();this.connectorLayer?.select(original);};
+			view.addEventListener("pointermove",move);view.addEventListener("pointerup",up);view.addEventListener("pointercancel",cancel);view.addEventListener("blur",cancel);
+			this.rectangleSelectionEnd=cancel;
+		};
+		root.addEventListener("pointerdown",down,true);
+		this.disposers.push(()=>{this.rectangleSelectionEnd?.();root.removeEventListener("pointerdown",down,true);});
+	}
+	private attachViewportFrames(): void {
+		const view=this.root?.ownerDocument?.defaultView;
+		if(typeof view?.requestAnimationFrame!=="function")return;
+		let frame=0, stopped=false, previous="", dragging=false, geometrySignature="";
+		const down=()=>{dragging=true;this.liveGeometryDirty=true;};
+		const up=()=>{dragging=false;this.liveGeometryDirty=true;};
+		this.root?.addEventListener("pointerdown",down,true);
+		view.addEventListener("pointerup",up,true);view.addEventListener("pointercancel",up,true);view.addEventListener("blur",up);
+		const tick=()=>{
+			if(stopped || this.disposed)return;
+			let geometryChanged=false;
+			if(dragging || this.liveGeometryDirty){
+				this.liveGeometryDirty=false;
+				// Native dragging updates runtime geometry before the saved document.
+				// Read its current graph, but do not write or add history during preview.
+				const document=this.selectionMovePreview ?? this.adapter.getDocument();
+				if(isRecord(document)&&Array.isArray(document.nodes)&&Array.isArray(document.edges)){
+					const signature=safeSignature({nodes:document.nodes.map(n=>isRecord(n)?[n.id,n.x,n.y,n.width,n.height]:n),edges:document.edges});
+					if(signature!==geometrySignature){
+						geometrySignature=signature;geometryChanged=true;
+						this.currentRawDocument=document;this.landingCache=undefined;
+						this.sourceRenderer?.refresh();
+						const geometry=this.landingGeometry().geometry;
+						this.scene={nodes:document.nodes,edges:[...document.edges,...boardConnectors(document).flatMap(c=>geometry.edges?.[c.id]?[{id:c.id,...geometry.edges[c.id]}]:[])]};
+						this.lastSceneSignature=this.sceneSignature(this.scene);
+					}
+				}
+			}
+			const signature=this.viewportSignature(this.displayViewport(),clientSize(this.root));
+			if(signature!==previous||geometryChanged){previous=signature;this.followViewport();}
+			frame=view.requestAnimationFrame(tick);
+		};
+		frame=view.requestAnimationFrame(tick);
+		this.disposers.push(()=>{stopped=true;view.cancelAnimationFrame(frame);this.root?.removeEventListener("pointerdown",down,true);view.removeEventListener("pointerup",up,true);view.removeEventListener("pointercancel",up,true);view.removeEventListener("blur",up);});
 	}
 
 	/** Watch the canvas transform and the selected elements, and nothing else. */
@@ -2121,7 +2341,7 @@ export class M1CanvasSession {
 				return;
 			}
 			try {
-				this.followObserver = Reflect.construct(Observer, [() => this.followViewport()]) as NonNullable<M1CanvasSession["followObserver"]>;
+				this.followObserver = Reflect.construct(Observer, [() => {this.liveGeometryDirty=true;this.followViewport();}]) as NonNullable<M1CanvasSession["followObserver"]>;
 			} catch {
 				return;
 			}
@@ -2177,21 +2397,35 @@ export class M1CanvasSession {
 				}
 			});
 		}
-		const down = (event: Event): void => this.startToolGesture(event as PointerEvent);
+		const down = (event: Event): void => {
+			if (event.target instanceof Node && root.contains(event.target)) this.startToolGesture(event as PointerEvent);
+		};
+		// Claim compatibility mouse events too: native Canvas pans on mousedown.
+		const mouseDown = (event: MouseEvent): void => {
+			if (!(event.target instanceof Node) || !root.contains(event.target) || this.inControls(event)
+				|| this.isSpacePanHeld() || this.closestTarget(event, "input,textarea,[contenteditable=true],.cm-editor")) return;
+			if ((this.armedTool === "select" && matchesPointer(this.settings.lassoBinding, event))
+				|| (this.armedTool === "lasso" && event.button === 0)) {
+				event.preventDefault(); event.stopImmediatePropagation();
+			}
+		};
 		const key = (event: Event): void => this.handleToolKey(event as KeyboardEvent);
 		const hover = (event: Event): void => this.moveBrush(event as PointerEvent);
 		const leave = (): void => this.hideBrush();
 		const document = root.ownerDocument;
-		root.addEventListener("pointerdown", down, true);
+		document.addEventListener("pointerdown", down, true);
+		document.addEventListener("mousedown", mouseDown, true);
 		root.addEventListener("pointermove", hover, { passive: true });
 		root.addEventListener("pointerleave", leave);
 		document.addEventListener("keydown", key);
 		this.disposers.push(() => {
-			root.removeEventListener("pointerdown", down, true);
+			document.removeEventListener("pointerdown", down, true);
+			document.removeEventListener("mousedown", mouseDown, true);
 			root.removeEventListener("pointermove", hover);
 			root.removeEventListener("pointerleave", leave);
 			document.removeEventListener("keydown", key);
 			this.toolGesture?.end();
+			this.panGestureEnd?.();
 			this.brush?.remove();
 			this.brush = undefined;
 			tools.dispose();
@@ -2244,6 +2478,8 @@ export class M1CanvasSession {
 		if (!editable && this.armedTool !== "select" && this.armedTool !== "lasso") this.armedTool = "select";
 		if (!isDrawingTool(this.armedTool)) this.hideBrush();
 		this.quickTools?.update({
+			connectorColor:this.connectorColor??this.boardInk(), connectorWidth:this.connectorWidth,
+			showLassoTool: this.settings.showLassoTool, showConnectorTool: this.settings.showConnectorTool,
 			editable, armed: this.armedTool, shape: this.toolShape,
 			penColor: this.penInk(), penWidth: this.penWidth, eraserSize: this.eraserSize,
 		});
@@ -2272,11 +2508,6 @@ export class M1CanvasSession {
 			event.preventDefault();
 			return;
 		}
-		if (event.key === "Escape" && this.armedTool !== "select") {
-			this.armTool("select");
-			event.preventDefault();
-			return;
-		}
 		const tool = event.shiftKey ? undefined : QUICK_TOOL_KEYS.get(event.key.toUpperCase());
 		if (tool === undefined) return;
 		this.armTool(tool);
@@ -2285,8 +2516,42 @@ export class M1CanvasSession {
 
 	/** A press on the board with a tool armed: drag out the item, or click to drop it. */
 	private startToolGesture(event: PointerEvent): void {
-		const tool = this.armedTool;
+		if (this.closestTarget(event, ".miro-board-connector-grip,.miro-board-connector-hit")) return;
+		const lasso = this.armedTool === "select" && matchesPointer(this.settings.lassoBinding, event) && !this.isSpacePanHeld();
+		const tool = lasso ? "lasso" : this.armedTool;
 		const root = this.root;
+		if (root === undefined || this.inControls(event) || this.closestTarget(event, "input, textarea, [contenteditable=true], .cm-editor")) return;
+		if (!lasso && tool === "select" && matchesPointer(this.settings.panBinding, event)) {
+			event.preventDefault(); event.stopImmediatePropagation();
+			this.panGestureEnd?.();
+			const view = root.ownerDocument.defaultView;
+			let last = { x: event.clientX, y: event.clientY };
+			const move = (moved: PointerEvent): void => {
+				if (moved.pointerId !== event.pointerId) return;
+				const direction = this.viewport.coordinateMode === "center" ? -1 : 1;
+				this.viewport.panBy((moved.clientX-last.x)*direction, (moved.clientY-last.y)*direction);
+				last = { x: moved.clientX, y: moved.clientY };
+				this.followViewport();
+			};
+			const end = (): void => {
+				view?.removeEventListener("pointermove", move, true);
+				view?.removeEventListener("pointerup", end, true);
+				view?.removeEventListener("pointercancel", end, true);
+				view?.removeEventListener("blur", end);
+				this.panGestureEnd = undefined;
+				this.suppressContextUntil = Date.now()+400;
+			};
+			view?.addEventListener("pointermove", move, true);
+			view?.addEventListener("pointerup", end, true);
+			view?.addEventListener("pointercancel", end, true);
+			view?.addEventListener("blur", end);
+			this.panGestureEnd = end;
+			return;
+		}
+		if ((tool === "connector" || (tool === "shape" && lineKind(this.toolShape) !== undefined)) && matchesPointer(this.settings.lineBinding, event)) {
+			this.startLine(lineKind("line")!, event);
+			return;
+		}
 		const pointer = typeof event.pointerType === "string" ? event.pointerType : "mouse";
 		if (pointer === "pen") {
 			this.lastPenAt = Date.now();
@@ -2299,8 +2564,8 @@ export class M1CanvasSession {
 			this.linePlacing.place({ x: event.clientX, y: event.clientY }, event.shiftKey === true);
 			return;
 		}
-		if (tool === "select" || root === undefined || event.button !== 0 || this.toolGesture !== undefined) return;
-		const shapeLine = tool === "shape" ? lineKind(this.toolShape) : undefined;
+		if (tool === "select" || root === undefined || (!lasso && event.button !== 0) || this.toolGesture !== undefined) return;
+		const shapeLine = tool === "connector" ? lineKind(this.toolShape) ?? lineKind("arrow") : tool === "shape" ? lineKind(this.toolShape) : undefined;
 		if (shapeLine !== undefined) {
 			if (pointer === "touch" && Date.now() - this.lastPenAt < STYLUS_HOLD_MS) return;
 			if ((event.target as Element | null)?.closest?.(PANEL_SELECTOR) != null) return;
@@ -2567,7 +2832,7 @@ export class M1CanvasSession {
 		const course = (tip: StrokePoint, placed: readonly StrokePoint[]): StrokePoint[] =>
 			spec.input === "points" ? [...placed, tip]
 				: spec.route === "curved" ? [placed[0]!, bowPoint(placed[0]!, tip), tip] : [placed[0]!, tip];
-		const width = spec.width ?? 2;
+		const width = this.connectorWidth;
 		const show = (tip: StrokePoint, placed: readonly StrokePoint[]): void => {
 			const through = course(tip, placed);
 			if (spec.block === true) {
@@ -2621,6 +2886,7 @@ export class M1CanvasSession {
 			const pointer = released as PointerEvent;
 			const at = aim({ x: pointer.clientX, y: pointer.clientY }, first, pointer.shiftKey === true) ?? tip;
 			end();
+			if (event.button === 2) this.suppressContextUntil = Date.now() + 400;
 			// A click without a drag leaves a line of Miro's length to the right.
 			const reach = Math.hypot(at.x - first.x, at.y - first.y) * this.zoom();
 			this.createLine(spec, course(reach < 6 ? { x: first.x + 160, y: first.y } : at, [first]));
@@ -2662,36 +2928,25 @@ export class M1CanvasSession {
 	/** Put a finished line on the board, selected, with the select tool back. */
 	private createLine(spec: LineKindSpec, points: readonly StrokePoint[]): void {
 		this.swallowClickUntil = Date.now() + 400;
-		this.armedTool = "select";
+		this.armedTool = "connector";
 		this.updateQuickTools();
 		if (points.length < 2) {
 			this.refresh();
 			return;
 		}
-		const { rect, line } = lineFromBoard(points, {
-			route: spec.route,
-			color: this.boardInk(),
-			width: spec.width ?? 2,
-			...(spec.endCap === undefined ? {} : { endCap: spec.endCap }),
-			...(spec.block === true ? { block: true as const } : {}),
-		});
-		this.readInteractionState();
-		this.authoring ??= createCanvasAuthoring(this.view);
-		const created = this.authoring.createItem({ item: { type: "line", line }, ...rect });
-		if (!created.ok || created.nodeId === undefined) {
-			this.addDiagnostic(firstProblem(created.diagnostics) ?? "Canvas rejected the line.");
-			this.refresh();
-			return;
+		// Every drawing mode creates the same independent connector record.
+		// Arrowheads are style; removing one never removes its anchors.
+		const from = this.connectorLanding(this.viewportPoint(points[0]!) ?? points[0]!, undefined, points[points.length - 1], "");
+		const to = this.connectorLanding(this.viewportPoint(points[points.length - 1]!) ?? points[points.length - 1]!, from?.nodeId, points[0], "");
+		if (from === undefined || to === undefined) {
+			this.options.onNotice?.("Connection not placed: both ends must use enabled attachment targets. Enable free ends in plugin settings to draw on empty canvas.");
+			this.refresh(); return;
 		}
-		this.refresh();
-		const node = [...(this.adapter.getNodes() ?? [])].find((item) => readCanvasElementId(item) === created.nodeId);
-		if (node !== undefined) {
-			this.adapter.invoke("selectOnly", node);
-			this.readInteractionState();
-			this.refresh();
-		}
+		this.writeBoardConnectors([{id:newCanvasId(), from:from.anchor,
+			to:to.anchor, route:spec.route, color:this.connectorColor??this.boardInk(), width:this.connectorWidth,
+			startCap:"none",endCap:spec.endCap??(spec.block?"stealth":"none"),waypoints:points.slice(1,-1),...(spec.block?{block:true as const}:{})}]);
+		return;
 	}
-
 	/** Ink that shows on the board whatever its theme: near-black on light, near-white on dark. */
 	private boardInk(): string {
 		const theme = this.root === undefined ? undefined : this.root.getAttribute("data-miro-canvas-resolved-theme");
@@ -2876,12 +3131,12 @@ export class M1CanvasSession {
 			if (route?.start === undefined || route.end === undefined) continue;
 			if (pointInLasso(ring, route.start) && pointInLasso(ring, route.end)) caught.push(edge);
 		}
-		if (caught.length === 0) {
-			this.callNative("deselectAll");
-			return;
-		}
-		this.callNative("selectOnly", [caught[0]]);
-		for (const node of caught.slice(1)) this.callNative("select", [node]);
+		const connectors=boardConnectors(this.currentRawDocument).filter(c=>{
+			const route=geometry.edges?.[c.id];return route?.start && route.end && pointInLasso(ring,route.start)&&pointInLasso(ring,route.end);
+		});
+		this.callNative("deselectAll");
+		for (const node of caught) this.callNative("select", [node]);
+		this.connectorLayer?.select(connectors.map(c=>c.id));
 		this.refresh();
 	}
 
@@ -2990,24 +3245,9 @@ export class M1CanvasSession {
 		from: { readonly nodeId: string; readonly anchor: CanvasAnchor; readonly board: { readonly x: number; readonly y: number } },
 		end: { readonly x: number; readonly y: number },
 	): void {
-		const landing = this.connectorLanding(end, from.nodeId, from.board);
+		const landing = this.connectorLanding(end, from.nodeId, from.board, "");
 		if (landing === undefined) return;
-		const side = nativeSideOf(from.anchor, "right");
-		if (landing.nodeId === undefined) {
-			const rect = this.landingGeometry().geometry.nodes?.[from.nodeId];
-			const facing = rect === undefined ? undefined : facingSideOfRect(rect, landing.board);
-			this.createConnectedNode(from.nodeId, facing ?? side, 0.5, landing.board);
-			return;
-		}
-		this.readInteractionState();
-		this.authoring ??= createCanvasAuthoring(this.view);
-		const result = this.authoring.createConnector({
-			fromNode: from.nodeId, toNode: landing.nodeId,
-			fromSide: side, toSide: nativeSideOf(landing.anchor, "left"),
-			fromAnchor: from.anchor, toAnchor: landing.anchor,
-		});
-		if (!result.ok) this.addDiagnostic(firstProblem(result.diagnostics) ?? "Canvas rejected the new connector.");
-		this.refresh();
+		this.writeBoardConnectors([{id:newCanvasId(),from:from.anchor,to:landing.anchor,route:"straight",color:this.boardInk(),width:2,startCap:"none",endCap:"arrow"}]);
 	}
 
 	/** A comment pinned where the board was clicked: on the item there, or on the board. */
@@ -3140,12 +3380,54 @@ export class M1CanvasSession {
 		const menuEl = readRuntime(menu, "menuEl");
 		const container = readRuntime(menu, "containerEl");
 		if (!isElement(slot) || !isElement(menuEl) || !isElement(container) || menuEl.parentElement === slot) return;
+		const root = this.root;
+		const document = ownerDocument(root);
+		if (root === undefined || document === undefined) return;
+		// Native Canvas deliberately empties its menu while the board is being
+		// panned.  Since that menu now lives inside our toolbar, its disappearance
+		// used to make the whole row jump narrower under a held middle button.  A
+		// non-interactive snapshot keeps the row visually stable for that gesture;
+		// the real native buttons remain the only controls before and afterwards.
+		const snapshot = menuEl.cloneNode(false) as HTMLElement;
+		snapshot.classList.add("miro-canvas-toolbar__native-snapshot");
+		snapshot.setAttribute("aria-hidden", "true");
+		snapshot.setAttribute("inert", "");
+		snapshot.hidden = true;
 		try {
 			slot.appendChild(menuEl);
+			slot.appendChild(snapshot);
 		} catch {
 			return;
 		}
+		let middlePointer: number | undefined;
+		const hideSnapshot = (): void => {
+			middlePointer = undefined;
+			snapshot.hidden = true;
+		};
+		const down = (event: Event): void => {
+			const pointer = event as PointerEvent;
+			if (pointer.button !== 1 || menuEl.children.length === 0) return;
+			middlePointer = pointer.pointerId;
+			snapshot.replaceChildren(...Array.from(menuEl.children, (child) => child.cloneNode(true)));
+			snapshot.hidden = false;
+			// Keep the fallback armed: native menu clearing may happen on a later frame.
+			// CSS hides it whenever the real menu is populated.
+		};
+		const up = (event: Event): void => {
+			const pointer = event as PointerEvent;
+			if (middlePointer === undefined || (pointer.pointerId !== undefined && pointer.pointerId !== middlePointer)) return;
+			hideSnapshot();
+		};
+		root.addEventListener("pointerdown", down, true);
+		document.addEventListener("pointerup", up, true);
+		document.addEventListener("pointercancel", up, true);
+		document.defaultView?.addEventListener("blur", hideSnapshot);
 		this.disposers.push(() => {
+			root.removeEventListener("pointerdown", down, true);
+			document.removeEventListener("pointerup", up, true);
+			document.removeEventListener("pointercancel", up, true);
+			document.defaultView?.removeEventListener("blur", hideSnapshot);
+			snapshot.remove();
 			try {
 				if (menuEl.parentElement === slot) container.prepend(menuEl);
 			} catch {
@@ -3164,6 +3446,9 @@ export class M1CanvasSession {
 	}
 
 	private handlesState(editable: boolean): SelectionHandlesState {
+		// Independent connectors own their SVG handles. Never render the native
+		// endpoint editor over them (it also uses a different coordinate origin).
+		if (this.connectorLayer?.selection().length) return { selectedIds: [], rotation: 0, editable, isEdge: false };
 		const id = this.selectedIds[0];
 		const { geometry, scene } = this.landingGeometry();
 		return {
@@ -3265,6 +3550,7 @@ export class M1CanvasSession {
 	private toolbarState(state: M1ControlsState, lockedSelection: boolean): SelectionToolbarState {
 		const id = this.selectedIds[0];
 		const presentation = resolveSelectionToolbarPresentation(this.currentRawDocument, id);
+		const independent=boardConnectors(this.currentRawDocument).find(c=>c.id===id);
 		const placement = this.selectionPlacement();
 		const kinds = this.selectionKinds();
 		const link = this.selectedLink();
@@ -3288,6 +3574,9 @@ export class M1CanvasSession {
 			...(kinds.length > 0 && kinds.every((kind) => kind === "frame") ? { fillPalette: FRAME_PALETTE } : {}),
 			recentColors: this.appearance.settings.recentColors,
 			...presentation.style,
+			...(independent?{connector:{route:independent.route,startCap:independent.startCap as never,endCap:connectorEndCap(independent) as never,width:independent.width,strokeStyle:independent.strokeStyle??"solid",waypoints:independent.waypoints??[]},colors:{...presentation.colors,edge:independent.color}}:{}),
+			independentSelection: !!this.connectorLayer?.selection().length,
+			independentOnly: this.selectedIds.length>0 && this.selectedIds.every(id=>this.connectorLayer?.selection().includes(id)),
 			...(placement === undefined ? {} : { placement }),
 			...(link === undefined ? {} : { link }),
 		};
@@ -3360,6 +3649,7 @@ export class M1CanvasSession {
 
 	private selectionKinds(): readonly SelectionKind[] {
 		const edgeIds = new Set(collectCanvasElementIds(this.adapter.getEdges() ?? []));
+		for(const c of boardConnectors(this.currentRawDocument))edgeIds.add(c.id);
 		const source = buildSourceScene(this.currentRawDocument);
 		const nodes = readRuntime(this.currentRawDocument, "nodes");
 		const kinds = new Set<SelectionKind>();
@@ -3422,6 +3712,14 @@ export class M1CanvasSession {
 			top = Math.min(top, rect.top);
 			right = Math.max(right, rect.right);
 			bottom = Math.max(bottom, rect.bottom);
+		}
+		const geometry=buildCanvasAnchorGeometry(this.currentRawDocument);
+		for(const id of this.connectorLayer?.selection()??[]){
+			const route=geometry.edges?.[id];
+			for(const p of route?.points ?? (route?.start&&route.end?[route.start,route.end]:[])){
+				const at=this.viewportPoint(p);if(!at)continue;
+				left=Math.min(left,at.x);right=Math.max(right,at.x);top=Math.min(top,at.y);bottom=Math.max(bottom,at.y);
+			}
 		}
 		if (!Number.isFinite(left) || !Number.isFinite(top) || !Number.isFinite(right)) {
 			return undefined;
@@ -3607,7 +3905,13 @@ export class M1CanvasSession {
 					next = appearanceReducer(next, { ...action, nodeId });
 				}
 			}
-			return mergeAppearanceMetadata(draft, next, previous);
+			const merged=mergeAppearanceMetadata(draft, next, previous);
+			if(slot==="edge"){
+				const connectors=boardConnectors(merged);
+				const color=readRuntime(action,"color");
+				merged.connectors=Object.fromEntries(connectors.map(c=>[c.id,this.selectedIds.includes(c.id)?{...c,color:typeof color==="string"&&/^#[0-9a-f]{6}$/i.test(color)?color:"#1a1a1a"}:c]));
+			}
+			return merged;
 		});
 		// Obsidian's own colour also lives on the element as a Canvas preset,
 		// tinting a node's fill and border and a connector's line.  It is taken
@@ -3799,25 +4103,66 @@ export class M1CanvasSession {
 		const document = root?.ownerDocument;
 		if (root === undefined || typeof document?.addEventListener !== "function" || typeof root.addEventListener !== "function") return;
 		const onBoard = (): boolean => {
-			const canvas = this.nativeCanvas();
-			return canvas !== undefined && readRuntime(canvas, "readonly") !== true
-				&& document.activeElement === readRuntime(canvas, "wrapperEl");
+			const active = document.activeElement;
+			return active !== null && (active === root || root.contains?.(active) === true || active === document.body && root.closest?.(".workspace-leaf.mod-active") !== null)
+				&& active.closest?.("input, textarea, [contenteditable=true], .cm-editor") == null;
 		};
+		const execute = (action:"copy"|"cut"|"paste"): boolean => {
+			const bridge=this.options.desktopClipboard;
+			if(!bridge) return document.execCommand?.(action) ?? false;
+			try {
+				const data=new DataTransfer();
+				if(action==="paste") data.setData("text/plain",bridge.readText());
+				const event=new ClipboardEvent(action==="cut"?"copy":action,{clipboardData:data,bubbles:true,cancelable:true});
+				root.dispatchEvent(event);
+				if(!event.defaultPrevented) return false;
+				if(action!=="paste") bridge.writeText(data.getData("text/plain"));
+				// Cut only after the OS clipboard has accepted the complete payload.
+				if(action==="cut") root.dispatchEvent(new ClipboardEvent("cut",{clipboardData:data,bubbles:true,cancelable:true}));
+				return true;
+			} catch {this.options.onNotice?.("System clipboard was unavailable; the selection was not cut.");return false;}
+		};
+		this.clipboardCommand=execute;
 		const copy = (event: Event): void => {
 			if (!onBoard()) return;
 			const data = readRuntime(event, "clipboardData") as DataTransfer | undefined;
 			const record = this.clipboardRecord();
 			if (data === undefined || record === undefined) return;
+			if (event.type === "cut" && !this.editAllowed("delete", this.selectedIds)) {
+				event.preventDefault();
+				event.stopImmediatePropagation();
+				return;
+			}
+			const ids = new Set(this.selectedIds);
+			const nodes = (readRuntime(this.currentRawDocument, "nodes") as Record<string, unknown>[] ?? []).filter(node => ids.has(node.id as string));
+			const edges = (readRuntime(this.currentRawDocument, "edges") as Record<string, unknown>[] ?? []).filter(edge => ids.has(edge.id as string) || (ids.has(edge.fromNode as string) && ids.has(edge.toNode as string)));
+			const all=boardConnectors(this.currentRawDocument), geometry=buildCanvasAnchorGeometry(this.currentRawDocument);
+			const included=new Set(all.filter(c=>ids.has(c.id)||[c.from,c.to].every(a=>(a.type==="node"||a.type==="image")&&ids.has(a.nodeId))).map(c=>c.id));
+			const connectors=all.filter(c=>included.has(c.id)).map(c=>{
+				const end=(a:CanvasAnchor,p:{x:number;y:number}|undefined):CanvasAnchor=>{
+					if((a.type==="node"||a.type==="image")&&ids.has(a.nodeId)||a.type==="edge"&&(included.has(a.edgeId)||edges.some(e=>e.id===a.edgeId)))return a;
+					return p?{type:"free",x:p.x,y:p.y}:a;
+				};
+				return {...c,from:end(c.from,geometry.edges?.[c.id]?.start),to:end(c.to,geometry.edges?.[c.id]?.end)};
+			});
+			const graph = { nodes, edges, ...(connectors.length?{connectors}:{}) };
 			try {
 				data.setData(CLIPBOARD_TYPE, JSON.stringify(record));
+				data.setData(CANVAS_CLIPBOARD_TYPE, JSON.stringify(graph));
+				data.setData("text/plain", JSON.stringify({ miroCanvasClipboard: 1, graph, record }));
 			} catch {
-				// The native copy still goes through.
+				return; // A failed copy must never delete the selection.
+			}
+			event.preventDefault();
+			event.stopImmediatePropagation();
+			if (event.type === "cut") {
+				this.deleteBoardSelection();
 			}
 		};
 		const paste = (event: Event): void => {
 			if (!onBoard() || event.defaultPrevented) return;
 			const data = readRuntime(event, "clipboardData") as DataTransfer | undefined;
-			if (data === undefined || this.appearance.settings.reviewMode === true) return;
+			if (data === undefined || !this.editAllowed("paste", [])) return;
 			const read = (type: string): string => {
 				try {
 					return data.getData(type);
@@ -3825,7 +4170,12 @@ export class M1CanvasSession {
 					return "";
 				}
 			};
-			const handled = this.pasteCopy(read(CANVAS_CLIPBOARD_TYPE), read(CLIPBOARD_TYPE))
+			let graphText = read(CANVAS_CLIPBOARD_TYPE), recordText = read(CLIPBOARD_TYPE);
+			try {
+				const text = JSON.parse(read("text/plain"));
+				if (text?.miroCanvasClipboard === 1) { graphText ||= JSON.stringify(text.graph); recordText ||= JSON.stringify(text.record); }
+			} catch { /* Ordinary text belongs to native Canvas. */ }
+			const handled = this.pasteCopy(graphText, recordText)
 				|| this.pasteLinkedFiles(read("obsidian/files"), read("text/plain"));
 			if (!handled) return;
 			event.preventDefault();
@@ -3835,11 +4185,38 @@ export class M1CanvasSession {
 			const x = finite(readRuntime(event, "clientX")), y = finite(readRuntime(event, "clientY"));
 			if (x !== undefined && y !== undefined) this.lastPointer = { x, y, at: Date.now() };
 		};
+		const key = (event: KeyboardEvent): void => {
+			if (!onBoard() || !(event.ctrlKey || event.metaKey) || event.altKey || event.shiftKey) return;
+			const command = ({ KeyC: "copy", KeyX: "cut", KeyV: "paste" } as Record<string, "copy"|"cut"|"paste">)[event.code];
+			if (command === undefined) return;
+			// Capture before Obsidian's hotkey scope; physical codes also work in Russian layouts.
+			if (execute(command)) { event.preventDefault(); event.stopImmediatePropagation(); }
+		};
+		const context = (event: MouseEvent): void => {
+			if (!this.inControls(event) && ((this.armedTool === "select" && !this.isSpacePanHeld() && (matchesPointer(this.settings.lassoBinding, event) || matchesPointer(this.settings.panBinding, event)))
+				|| this.panGestureEnd !== undefined || this.toolGesture !== undefined || Date.now() < this.suppressContextUntil
+				|| ((this.armedTool === "connector" || (this.armedTool === "shape" && lineKind(this.toolShape) !== undefined)) && matchesPointer(this.settings.lineBinding, event)))) {
+				event.preventDefault(); event.stopImmediatePropagation(); return;
+			}
+			if (this.options.onClipboardMenu === undefined || this.inControls(event) || this.closestTarget(event, "input, textarea, [contenteditable=true], .cm-editor")) return;
+			this.readInteractionState();
+			if (this.selectedIds.length === 0) return;
+			event.preventDefault(); event.stopImmediatePropagation();
+			this.options.onClipboardMenu(event, action => {
+				root.focus();
+				if (!execute(action)) this.options.onNotice?.("Clipboard action was unavailable. Focus the canvas and use Ctrl+C, Ctrl+X or Ctrl+V.");
+			}, () => { this.callNative("onSelectionContextMenu", [event]); });
+		};
+		const keyTarget = document.defaultView ?? document;
+		keyTarget.addEventListener("keydown", key as EventListener, true);
+		root.addEventListener("contextmenu", context, true);
 		document.addEventListener("copy", copy, true);
 		document.addEventListener("cut", copy, true);
 		document.addEventListener("paste", paste, true);
 		root.addEventListener("pointermove", track, { passive: true });
 		this.disposers.push(() => {
+			keyTarget.removeEventListener("keydown", key as EventListener, true);
+			root.removeEventListener("contextmenu", context, true);
 			document.removeEventListener("copy", copy, true);
 			document.removeEventListener("cut", copy, true);
 			document.removeEventListener("paste", paste, true);
@@ -3897,7 +4274,7 @@ export class M1CanvasSession {
 	private pasteCopy(canvasText: string, recordText: string): boolean {
 		const canvas = readCanvasClipboard(canvasText);
 		const record = readClipboardRecord(recordText);
-		if (canvas === undefined || record === undefined || canvas.nodes.length === 0) return false;
+		if (canvas === undefined || record === undefined || canvas.nodes.length === 0 && !canvas.connectors?.length) return false;
 		const target = this.pastePoint();
 		const centre = canvas.center;
 		const offset = target === undefined || centre === undefined ? { x: 40, y: 40 } : { x: target.x - centre.x, y: target.y - centre.y };
@@ -3920,6 +4297,7 @@ export class M1CanvasSession {
 		this.refresh();
 		const pasted = new Set(plan.nodes.map((node) => node.id as string));
 		this.callNative("deselectAll");
+		this.connectorLayer?.select(plan.connectors?.map(c=>c.id) ?? []);
 		for (const node of this.adapter.getNodes() ?? []) {
 			const id = readCanvasElementId(node);
 			if (id !== undefined && pasted.has(id)) this.callNative("select", [node]);
@@ -3927,6 +4305,60 @@ export class M1CanvasSession {
 		this.readInteractionState();
 		this.refresh();
 		return true;
+	}
+	private selectionMovePreview?: Record<string,unknown>;
+	private selectionMoveEnd?: ()=>void;
+	private startSelectionMove(event: PointerEvent): boolean {
+		this.readInteractionState();
+		if(event.button!==0 || event.shiftKey || this.selectedIds.length<2 || this.closestTarget(event,"input,textarea,[contenteditable=true],.cm-editor"))return false;
+		const target=this.eventElementId(event.target);
+		if(target && !this.selectedIds.includes(target))return false;
+		const ids=[...this.selectedIds], original=this.adapter.getDocument();
+		const first=this.boardPoint({x:event.clientX,y:event.clientY}), view=this.root?.ownerDocument.defaultView;
+		if(!first || !view || !isRecord(original))return false;
+		event.preventDefault();event.stopImmediatePropagation();
+		if(!this.editAllowed("move",ids))return true;
+		this.selectionMoveEnd?.();
+		const dom=(this.adapter.getNodes()??[]).filter(n=>ids.includes(readCanvasElementId(n)??"")).map(n=>readCanvasElementDom(n)).filter(isElement);
+		const styles=dom.map(el=>({el,value:el.style.getPropertyValue("translate"),priority:el.style.getPropertyPriority("translate")}));
+		let dx=0,dy=0,changed=false;
+		const move=(e:PointerEvent)=>{
+			if(e.pointerId!==event.pointerId)return;
+			const at=this.boardPoint({x:e.clientX,y:e.clientY});if(!at)return;
+			dx=at.x-first.x;dy=at.y-first.y;changed ||= Math.hypot(e.clientX-event.clientX,e.clientY-event.clientY)>3;
+			if(!changed)return;
+			this.selectionMovePreview=translateBoardSelection(original,ids,dx,dy);
+			this.currentRawDocument=this.selectionMovePreview;this.landingCache=undefined;
+			for(const {el} of styles)el.style.setProperty("translate",`${dx}px ${dy}px`);
+			this.liveGeometryDirty=true;this.sourceRenderer?.refresh();this.connectorLayer?.render();this.followViewport();
+		};
+		const cleanup=()=>{
+			view.removeEventListener("pointermove",move,true);view.removeEventListener("pointerup",up,true);view.removeEventListener("pointercancel",cancel,true);view.removeEventListener("blur",cancel);
+			for(const {el,value,priority} of styles){if(value)el.style.setProperty("translate",value,priority);else el.style.removeProperty("translate");}
+			this.selectionMovePreview=undefined;this.selectionMoveEnd=undefined;this.landingCache=undefined;
+		};
+		const cancel=()=>{cleanup();this.refresh();};
+		const up=(e:PointerEvent)=>{
+			if(e.pointerId!==event.pointerId)return;move(e);cleanup();
+			if(changed){
+				this.authoring??=createCanvasAuthoring(this.view);
+				const result=this.authoring.moveSelection(ids,dx,dy,original);
+				if(!result.ok)this.options.onNotice?.("Selection move was refused because the board changed or an item is locked.");
+				else for(const node of this.adapter.getNodes()??[])if(ids.includes(readCanvasElementId(node)??""))this.callNative("select",[node]);
+			}
+			this.refresh();
+		};
+		view.addEventListener("pointermove",move,true);view.addEventListener("pointerup",up,true);view.addEventListener("pointercancel",cancel,true);view.addEventListener("blur",cancel);
+		this.selectionMoveEnd=cancel;return true;
+	}
+	private deleteBoardSelection(): void {
+		this.readInteractionState();
+		if(!this.selectedIds.length || !this.editAllowed("delete",this.selectedIds))return;
+		this.authoring ??= createCanvasAuthoring(this.view);
+		const result=this.authoring.deleteItems({ids:this.selectedIds});
+		if(result.ok){this.connectorLayer?.reset();this.callNative("deselectAll");}
+		else this.options.onNotice?.(firstProblem(result.diagnostics)??"Delete was refused.");
+		this.refresh();
 	}
 
 	/** Paste files the clipboard names as nodes pointing at them; false when it names none this vault has. */
@@ -4673,7 +5105,7 @@ export class M1CanvasSession {
 		const document = this.adapter.getDocument();
 		this.policy = this.policyFromDocument(document);
 		const selection = this.adapter.getSelection();
-		this.selectedIds = selection === undefined ? [] : allIds(selection);
+		this.selectedIds = [...new Set([...(selection === undefined ? [] : allIds(selection)),...(this.connectorLayer?.selection() ?? [])])];
 		if (selection === undefined) {
 			this.interactionBlock = "this Canvas runtime does not report its selection";
 			this.policy = createInteractionPolicy(undefined);
@@ -4803,6 +5235,7 @@ export class M1CanvasSession {
 			this.guardNativeMethod(canvas, key, (original, receiver, args) => {
 				this.readInteractionState();
 				const ids = key.endsWith("Selection") ? this.selectedIds : allIds([args[0]]);
+				if(key.endsWith("Selection") && ids.length){this.deleteBoardSelection();return undefined;}
 				return this.nativeEditAllowed("delete", ids) ? Reflect.apply(original, receiver, args) : undefined;
 			});
 		}
@@ -5055,8 +5488,10 @@ export class M1CanvasSession {
 			return;
 		}
 		this.disposed = true;
+		this.selectionMoveEnd?.();
 		this.slideShow?.stop();
 		this.controls.dispose();
+		this.connectorLayer?.dispose();
 		this.toolbar.dispose();
 		this.handles.dispose();
 		this.commentMarkers?.destroy();

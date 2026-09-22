@@ -13,6 +13,7 @@
  */
 
 export const CLIPBOARD_TYPE = "obsidian/miro-canvas";
+import { readBoardConnector, type BoardConnector } from "./board-connectors";
 export const CANVAS_CLIPBOARD_TYPE = "obsidian/canvas";
 
 type Record_ = Readonly<Record<string, unknown>>;
@@ -32,12 +33,14 @@ export interface ClipboardRecord {
 }
 
 export interface CanvasClipboard {
+  readonly connectors?: readonly BoardConnector[];
   readonly nodes: readonly Record_[];
   readonly edges: readonly Record_[];
   readonly center?: { readonly x: number; readonly y: number };
 }
 
 export interface PastePlan {
+  readonly connectors?: readonly BoardConnector[];
   readonly nodes: Record<string, unknown>[];
   readonly edges: Record<string, unknown>[];
   readonly overrides: Record<string, Record<string, unknown>>;
@@ -67,6 +70,7 @@ export function readCanvasClipboard(text: string | undefined): CanvasClipboard |
     const value: unknown = JSON.parse(text);
     if (!isRecord(value) || !Array.isArray(value.nodes) || !Array.isArray(value.edges)) return undefined;
     if (!value.nodes.every(isRecord) || !value.edges.every(isRecord)) return undefined;
+    if(value.connectors!==undefined && (!Array.isArray(value.connectors) || !value.connectors.every(c=>readBoardConnector(c))))return undefined;
     return value as unknown as CanvasClipboard;
   } catch {
     return undefined;
@@ -89,7 +93,7 @@ export function planPaste(
   },
 ): PastePlan {
   const ids = new Map<string, string>();
-  for (const item of [...canvas.nodes, ...canvas.edges]) {
+  for (const item of [...canvas.nodes, ...canvas.edges, ...(canvas.connectors??[])]) {
     if (typeof item.id === "string") ids.set(item.id, options.newId());
   }
   const { x: dx, y: dy } = options.offset;
@@ -115,7 +119,8 @@ export function planPaste(
     if (isRecord(item.override)) overrides[newId] = follow(item.override, ids, dx, dy) as Record<string, unknown>;
     if (typeof item.sourceId === "string" && options.sourceExists(item.sourceId)) bindings[newId] = { sourceId: item.sourceId, role: "copy" };
   }
-  return { nodes, edges, overrides, bindings, ids };
+  const connectors=canvas.connectors?.map(c=>({...follow(c,ids,dx,dy) as BoardConnector,id:ids.get(c.id)!}));
+  return { nodes, edges, overrides, bindings, ids, ...(connectors?.length?{connectors}:{}) };
 }
 
 /**

@@ -97,7 +97,11 @@ M2 tools are available through **Local shapes, comments, anchors and documents**
 in the command palette. Create the supported Miro shape set with editable native
 text fallbacks. Every local comment receives a stable Canvas anchor and marker;
 opening the marker focuses its thread, whose messages show author and creation
-time. Edit/reply to and resolve local threads; imported comments remain read-only.
+time. Edit, reply to, resolve, reopen, and delete local threads; imported
+comments remain read-only. A pin can be dragged onto another item or a free
+board point without rewriting imported Miro evidence. Local comments use the
+name selected in settings, falling back to the signed-in Obsidian account name,
+and author pin/avatar colors can be overridden per name.
 Choose a target and relative coordinates for node/image anchors, T for edges,
 or board X/Y for free anchors, then save an anchor or set a connector endpoint.
 Node/image connections update native endpoints; free/edge connections retain
@@ -460,6 +464,20 @@ Rules:
   crop/resize transforms.
 - Prevent self-links and dangling references, and include connector edits in
   undo/redo.
+- Treat a free line and a node-bound connector as two states of one editable
+  line model: attaching or detaching an endpoint must convert between them
+  without changing the route, caps, color, width, or labels.
+- Let one line endpoint join another line endpoint without forcing either
+  segment to adopt the other's style; joining records topology, not a style
+  merge.
+
+### Selection and creation tools
+
+- Make lasso a configurable selection gesture as well as an optional toolbar
+  button. Mouse buttons and modifiers used for select, pan, lasso, line, and
+  connector gestures must be configurable without taking global hotkeys.
+- Let users show or hide the lasso, line, and connector buttons independently
+  while keeping every action available through commands and assignable hotkeys.
 
 ### Files and documents
 
@@ -568,16 +586,142 @@ and covered by automated tests.
 - [x] Add bounded provenance and source-limitation inspection without default
   board clutter or raw source values in DOM.
 
+### Future: ecosystem migration
+
+- Add explicit, non-destructive import adapters for common local plugin formats,
+  beginning with Excalidraw drawings and mind-map plugins. Convert recoverable
+  structure into native Canvas plus versioned `miroCanvas` metadata while
+  preserving the original file and recording provenance and unsupported fields.
+- Keep adapters format-specific and optional; never make another plugin a
+  runtime dependency or silently rewrite its files.
+
 ### M5: release hardening
 
 - Test network-denied operation.
 - Test large boards and migrations.
 - Test native Canvas, Advanced Canvas, and both plugins together.
 - Add real-Obsidian visual baselines and accessibility checks.
+- Run a documented platform/display matrix on Windows, macOS, and Linux (or
+  representative virtual machines), multiple viewport sizes and device-pixel
+  ratios, and Obsidian desktop and mobile/touch where available.
+- Exercise mouse, trackpad, pen tablet/stylus, touch-screen, and phone/tablet
+  drawing and selection gestures, including palm rejection and window-focus
+  changes for rotated text rendering.
 - Extract the plugin to its own repository only if the stable release boundary
   justifies it.
 
 ## Definition of done
+
+### Connector development checkpoint
+
+New lines and arrows use independent `miroCanvas.connectors` records, not hidden
+Canvas nodes. A connector has two anchors (free point, node/image, or a position
+along another connector), a route and independent style; arrowheads do not change
+its identity. Native/imported edges remain supported through the shared anchor
+geometry. Attaching connectors does not merge their styles.
+
+The Lines and arrows tool now stays active until another tool is selected. Its
+bottom row keeps route, color and thickness controls open. Select a connector to
+drag it or its endpoint handles, change its line/arrow style, copy, cut or delete.
+Desktop keyboard clipboard commands use the system clipboard, including physical
+C/X/V keys on non-Latin layouts. File nodes continue to share the original file.
+`Miro Canvas: Reset tools and selection` defaults to Escape and can be reassigned
+in Obsidian Settings → Hotkeys.
+
+Run `Miro Canvas: Convert legacy line nodes to connectors` explicitly to migrate
+old line cards. The transaction is undoable, idempotent, preserves source data,
+and archives the exact former node/override in `connectorMigrationArchive`.
+Straight legacy lines now bake their rotation into board coordinates. Rotated
+curves/elbows and line cards targeted by native or independent connectors are
+retained and reported rather than destructively approximated. Opening a board
+does not migrate it.
+
+Limitations: independent connectors need this plugin to display; native Obsidian
+does not support free endpoints without node containers. The Canvas file stays
+valid and its other nodes/native edges remain usable without the plugin.
+Shift-click and lasso support mixed node/connector selections. Copy, paste, cut,
+selection deletion and group dragging use one native history step; external
+connector anchors are detached on copy while internal anchors are remapped.
+Native Canvas rectangle selection also includes independent connectors when
+their route intersects the box, including crossings with both ends outside.
+Selection deletion checks locks across the dependent-connector closure before
+removing anything. A refused save or stale group-drag preview leaves the graph
+unchanged. Real-Obsidian mouse
+QA is still open because Windows screenshot capture fails with
+`SetIsBorderRequired / 0x80004002`; accessibility clicks also lack geometry.
+The connector tool uses one persistent bottom panel, without a second floating
+route picker. Attached routes and selection frames follow live drag geometry on
+animation frames; the focused test disables periodic refresh to verify this.
+The focused browser gate covers keyboard clipboard, connector persistence,
+undo/redo, copying, displayed-camera following and reset. Both focused and full
+browser UI smoke tests pass against the synthetic host; neither replaces real
+Obsidian interaction QA.
+
+### Follow-up audit (2026-09-22)
+
+The installed test-vault build reports `ready/valid/ready/ready`. Automated gates
+pass: 646 plugin tests, all three browser smoke suites, TypeScript, Ruff, 501 Python
+tests with 157 subtests, and structural/visual regression (seven fixtures have
+no visual baseline). Real mouse QA remains blocked by the capture/input errors
+above; no real-app smoothness claim is made.
+
+Connector selections now use the same icon toolbar as native edges (caps, route,
+width, color, lock and delete), not a separate text menu. The bottom connector
+row matches drawing controls with swatches, width preview, slider and numeric
+entry; arrows are grouped before plain lines. Comment pins capture the first
+press and retain their drag through refresh/focus changes.
+Run `python -m tools.obsidian_oracle.smoke_plugin_ui --controls` for the focused
+menu/marquee/first-press drag gate; `--screenshots <directory>` saves its preview.
+
+Connector attachment settings now default to **nodes only**. Enable unattached
+ends and attachment to other lines/arrows separately under Connectors. Disabling
+a target type does not rewrite existing connections; it restricts newly placed
+or moved endpoints. Invalid new connections are not saved.
+The creation panel shows all seven types in one row (arrows left, lines right),
+with palette and width controls. Drawing and connectors share a 600px control-row
+width, constrained on narrow screens. Changing tools closes the previous popover;
+opening shapes leaves the connector tool. Independent endpoints use only their own SVG handles;
+dragging one with the connector tool armed must not create a new connector.
+The focused browser gate also checks right-button lasso against a competing native
+mousedown pan handler, node-only defaults, compact panel width and deletion
+button visibility when the native menu is empty. Real Obsidian mouse QA remains
+unverified: renewed capture attempts still fail with `0x80004002`.
+
+#### Critical review follow-up
+
+Block arrows now honor the width control and reverse their head correctly.
+Block creation starts at width 16, independently of ordinary lines (width 2);
+each width is remembered while switching types within the session. The preview
+uses the same width as the saved connector. Group drag snapshots use the same
+JSON normalization as native transactions, so optional `undefined` Canvas fields
+do not cause a false stale-document rejection. A real pointer browser scenario
+checks two selected connectors, refresh during dragging, one save, undo and redo.
+Removing the head or choosing a non-block-compatible route/cap converts the
+appearance to a regular connector while preserving anchors. Legacy implicit
+block heads are interpreted without an automatic document migration.
+Single-connector drags reject a newer edit to the same connector; dropping on a
+disabled attachment target cancels the move instead of retaining the last hover
+target. Text-field clipboard events are not consumed by the connector layer.
+The settings descriptions explicitly explain Escape and the all-targets-off case.
+
+Remaining review findings, not release claims:
+
+- Native-edge-only clipboard payloads without their endpoint nodes are not yet
+  supported by the unified paste path. Independent connectors are supported.
+- Formatting a mixed native/independent selection still uses separate style
+  transactions; it is not yet guaranteed to be one undo step like group movement.
+- Connector SVG rebuilding and native/independent route resolution should be
+  profiled on large boards before any performance guarantee.
+- Live Obsidian mouse/clipboard, other OSes, touch/stylus and high-DPI rotated
+  text remain separate acceptance gates, not covered by the synthetic browser.
+
+| Requested feature | Evidence / remaining boundary |
+| --- | --- |
+| Comments: drag/delete, author name and color | Marker, thread, local-comment and settings tests pass. Imported comments are hidden locally, not erased from source. |
+| Rotation magnets and 90-degree buttons | Selection-handles tests cover 45-degree snapping; toolbar keeps quarter turns. |
+| Configurable lasso/pan/line gestures and button visibility | Settings and pointer-binding tests pass; mixed lasso is covered by browser interactions. Bindings use the supported presets. |
+| Text marker, quiet frame colors, minimap type colors | Text-highlight, selection-toolbar and minimap-model tests pass; full browser gate passes. |
+| Native app validation | Load status observed after reload. Drag smoothness and real OS clipboard still need user verification. |
 
 The first production release is ready when:
 

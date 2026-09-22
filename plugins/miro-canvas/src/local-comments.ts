@@ -492,9 +492,14 @@ function targetIds(thread: CommentThread): ReadonlySet<string> {
 /** Combine immutable imported threads with local threads without retaining source references. */
 export function listCommentThreads(input: unknown, options: CommentListOptions = {}): readonly CommentThread[] {
   const threads = [...importedThreads(input), ...localThreads(input)];
+  const wrapper = isRecord(input) ? readOwn(input, "miroCanvas") : undefined;
+  const metadata = isRecord(wrapper) ? wrapper : input;
+  const hiddenValue = isRecord(metadata) ? readOwn(metadata, "hiddenImportedComments") : undefined;
+  const hidden = new Set(Array.isArray(hiddenValue) ? hiddenValue : []);
   const selected = new Set((options.selectedElementIds ?? []).filter((id): id is string => safeKey(id)).map((id) => id.trim()));
   const includeResolved = options.includeResolved !== false;
   return Object.freeze(threads.filter((thread) => {
+    if (thread.origin === "imported" && hidden.has(thread.id)) return false;
     if (!includeResolved && thread.resolved) {
       return false;
     }

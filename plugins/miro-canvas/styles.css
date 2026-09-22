@@ -958,6 +958,7 @@
 }
 
 .miro-canvas-toolbar.miro-canvas-tools {
+  width: max-content;
   --miro-canvas-toolbar-size: 32px;
   top: auto;
   bottom: 16px;
@@ -1122,10 +1123,30 @@
 
 /* The pen's own row, above the tool bar while one of its tools is armed:
    the tools, the colours and a slider for the size. */
-.miro-canvas-tools .miro-canvas-tools__drawing {
+.miro-canvas-tools .miro-canvas-tools__drawing,
+.miro-canvas-tools .miro-canvas-tools__connectors {
+  box-sizing: border-box;
+  width: min(600px, calc(100vw - 48px));
   gap: 2px;
   padding-bottom: 4px;
   border-bottom: 1px solid var(--miro-canvas-toolbar-border);
+}
+
+/* Seven directly available connector types fit in the same row as drawing.
+   Keep the palette size; give the width slider the remaining space. */
+.miro-canvas-tools__connectors > .miro-canvas-toolbar__button {
+  width: 24px;
+  min-width: 24px;
+  padding: 2px;
+}
+.miro-canvas-tools__connectors .miro-canvas-tools__size,
+.miro-canvas-tools__drawing .miro-canvas-tools__size {
+  flex: 1;
+}
+.miro-canvas-tools .miro-canvas-tools__size .miro-canvas-toolbar__range {
+  flex: 1;
+  width: 0;
+  min-width: 48px;
 }
 
 .miro-canvas-tools__swatches,
@@ -1654,6 +1675,12 @@
 }
 
 /* The custom colour picker is one more, wider swatch at the end. */
+.miro-canvas-tools__connectors input.miro-canvas-toolbar__swatch {
+  width: 22px;
+  min-width: 22px;
+  border-radius: 50%;
+}
+
 .miro-canvas-toolbar .miro-canvas-toolbar__swatch {
   box-sizing: border-box;
   width: 48px;
@@ -1816,7 +1843,7 @@
   align-items: center;
 }
 
-.miro-canvas-toolbar__native:has(> .canvas-menu:empty) {
+.miro-canvas-toolbar__native:not(:has(> .canvas-menu:not(.miro-canvas-toolbar__native-snapshot):not(:empty))):not(:has(> .miro-canvas-toolbar__native-snapshot:not([hidden]))):not(:has(> .miro-canvas-toolbar__button--delete:not([hidden]))) {
   display: none;
 }
 
@@ -1825,6 +1852,25 @@
   background: transparent;
   border: 0;
   box-shadow: none;
+}
+
+/* Obsidian empties the native menu while middle-button panning.  This inert
+   snapshot occupies the same space until the real menu returns. */
+.miro-canvas-toolbar__native-snapshot {
+  pointer-events: none;
+  user-select: none;
+}
+
+.miro-board-connectors { position:absolute; inset:0; width:100%; height:100%; overflow:visible; pointer-events:none; z-index:5; }
+.miro-board-connector-hit { pointer-events:stroke; cursor:move; }
+.miro-board-connector-grip { fill:var(--background-primary); stroke:var(--interactive-accent); stroke-width:2px; pointer-events:all; cursor:crosshair; }
+.miro-board-connector-tools { position:absolute; top:12px; left:50%; transform:translateX(-50%); z-index:30; display:flex; gap:4px; padding:6px; background:var(--background-primary); border:1px solid var(--background-modifier-border); border-radius:8px; }
+.miro-board-connector-tools[hidden] { display:none; }
+.miro-canvas-toolbar[data-miro-independent-only="true"] .canvas-menu,
+.miro-canvas-toolbar[data-miro-independent-only="true"] .miro-canvas-toolbar__native-snapshot { display:none !important; }
+
+.miro-canvas-toolbar__native:has(> .canvas-menu:not(.miro-canvas-toolbar__native-snapshot):not(:empty)) > .miro-canvas-toolbar__native-snapshot {
+  display: none;
 }
 
 .miro-canvas-toolbar__native > .canvas-menu > button:has(> .lucide-palette),
@@ -2307,11 +2353,8 @@
   border-radius: 10px;
 }
 
-.miro-source-preview > .canvas-node-label,
-.miro-source-document > .canvas-node-label,
-.miro-source-embed > .canvas-node-label {
-  display: none;
-}
+/* Attachment titles are controlled by the board/selection setting in the
+   session. Do not hide them permanently by source kind. */
 
 .miro-source-preview > .canvas-node-container,
 .miro-source-document > .canvas-node-container,
@@ -2961,12 +3004,18 @@
   color: var(--miro-highlight-ink, inherit);
 }
 
-/* While its window has focus, Obsidian gives every card's text a layer of its
-   own (translateZ(0) on the preview).  The compositor turns that layer as a
-   finished picture, so a turned card's text went soft until the window lost
-   focus.  A turned card paints its text with the rest of the board instead,
-   where it is drawn at the angle it sits. */
-[data-miro-source-rotated="true"] .canvas-node-content.markdown-embed > .markdown-embed-content > .markdown-preview-view {
+/* While its window has focus, Obsidian gives card previews a composited layer
+   (normally translateZ(0)).  Different Obsidian releases wrap the preview at
+   different depths, so do not depend on one exact child chain: any preview in
+   a turned node must paint with the board instead of being rasterised first
+   and then enlarged/turned as a finished bitmap. */
+[data-miro-source-rotated="true"] .canvas-node-content,
+[data-miro-source-rotated="true"] .markdown-preview-view {
+  backface-visibility: visible !important;
+  will-change: auto !important;
+}
+
+[data-miro-source-rotated="true"] .markdown-preview-view {
   transform: none !important;
 }
 

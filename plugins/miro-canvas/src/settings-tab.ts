@@ -9,6 +9,7 @@
 import { PluginSettingTab, Setting, type App, type Plugin } from "obsidian";
 
 import { authorColor } from "./comment-thread";
+import { POINTER_BINDINGS, type PointerBinding } from "./pointer-bindings";
 import {
   DEFAULT_COMMENT_AUTHOR,
   SETTING_BOUNDS,
@@ -81,9 +82,38 @@ export class MiroCanvasSettingTab extends PluginSettingTab {
       "fastPanMultiplier", (value) => `${value}×`);
 
     new Setting(containerEl).setName("Connectors").setHeading();
+    for (const [key, title] of [
+      ["connectorAttachNodes", "Attach to nodes"],
+      ["connectorAllowFree", "Allow unattached ends on the canvas"],
+      ["connectorAttachConnectors", "Attach to other lines and arrows"],
+    ] as const) {
+      new Setting(containerEl).setName(title)
+        .setDesc("Applies when creating or moving an endpoint; existing connections are preserved. With all three options off, no new connection can be placed.")
+        .addToggle(toggle => toggle.setValue(this.host.settings[key])
+          .onChange(value => void this.host.saveSettings({ [key]: value })));
+    }
+    new Setting(containerEl).setName("Lasso gesture")
+      .setDesc("Use lasso while Select is active. Middle-button and Space panning remain available; a right-button binding replaces the context menu for that gesture.")
+      .addDropdown(dropdown => {
+        for (const chord of POINTER_BINDINGS) dropdown.addOption(chord, chord);
+        dropdown.setValue(this.host.settings.lassoBinding).onChange(value => void this.host.saveSettings({ lassoBinding: value as PointerBinding }));
+      });
+    for (const [key, title] of [["showLassoTool", "Show lasso button"], ["showConnectorTool", "Show lines and arrows button"]] as const) {
+      new Setting(containerEl).setName(title).addToggle(toggle => toggle.setValue(this.host.settings[key])
+        .onChange(value => void this.host.saveSettings({ [key]: value })));
+    }
+    for (const [key, title, description] of [
+      ["panBinding", "Additional pan gesture", "While Select is active. Lasso wins if both bindings match; middle-button and Space panning remain available."],
+      ["lineBinding", "Line gesture", "While Lines and arrows is active: draw a line without an arrowhead using this gesture."],
+    ] as const) {
+      new Setting(containerEl).setName(title).setDesc(description).addDropdown(dropdown => {
+        for (const chord of POINTER_BINDINGS) dropdown.addOption(chord, chord);
+        dropdown.setValue(this.host.settings[key]).onChange(value => void this.host.saveSettings({ [key]: value as PointerBinding }));
+      });
+    }
 
     this.slider(containerEl, "Magnet distance",
-      "How close a connector end has to come to a node, in screen pixels, to attach to its outline. Farther away the end stays where it is dropped.",
+      "Screen-pixel distance for attachment to an enabled target. Away from targets, a free end is allowed only when enabled; otherwise placement is cancelled.",
       "connectorMagnet", (value) => `${value} px`);
     this.slider(containerEl, "Key point snap distance",
       "How close a connector end has to come to a node's standard connection point, in screen pixels, to snap onto it.",
@@ -93,7 +123,7 @@ export class MiroCanvasSettingTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName("Keyboard shortcuts")
-      .setDesc("Pan, zoom, minimap, review mode and lock are commands. Assign keys to them in Settings → Hotkeys, filtered by \"Miro Canvas\". No keys are bound by default, so nothing is taken from another plugin.")
+      .setDesc("Assign commands in Settings → Hotkeys, filtered by \"Miro Canvas\". Reset tools and selection uses Escape by default and can be rebound there. Canvas tools also use letter shortcuts while the canvas has focus; text editors keep their keys.")
       .addButton((button) => button
         .setButtonText("Open hotkeys")
         .onClick(() => {

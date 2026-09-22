@@ -11,6 +11,91 @@ import {
 
 type CanvasDocument = Record<string, unknown>;
 
+describe("mixed selection transactions",()=>{
+  const document=()=>({nodes:[{id:"n",type:"text",text:"",x:0,y:0,width:100,height:100},{id:"m",type:"text",text:"",x:200,y:0,width:100,height:100}],
+    edges:[{id:"e",fromNode:"n",toNode:"m"}],miroSource:{evidence:[1]},miroCanvas:{schemaVersion:1,localOverrides:{},connectors:{
+      a:{id:"a",from:{type:"node",nodeId:"n",u:1,v:0.5},to:{type:"free",x:300,y:100},route:"straight",color:"#123456",width:2,startCap:"none",endCap:"arrow"},
+      b:{id:"b",from:{type:"edge",edgeId:"a",t:0.5},to:{type:"free",x:400,y:200},route:"straight",color:"#ff0000",width:4,startCap:"none",endCap:"none"}
+    }}});
+  it("normalizes native optional undefined fields in the group drag snapshot",()=>{
+    const before=document(),runtime=new NativeGraph(before);
+    const expected=runtime.getData() as any;
+    expected.nodes[0].subpath=undefined;
+    expected.edges[0].label=undefined;
+    expect(createCanvasAuthoring(runtime).moveSelection(["a","b"],40,30,expected).ok).toBe(true);
+    const after=runtime.getData() as any;
+    expect(after.miroCanvas.connectors.a.to).toMatchObject({x:340,y:130});
+    expect(after.miroCanvas.connectors.b.to).toMatchObject({x:440,y:230});
+    runtime.undo();expect(runtime.getData()).toEqual(before);
+  });
+  it("moves nodes and connectors in one history step, preserving anchors and styles",()=>{
+    const before=document(),runtime=new NativeGraph(before),authoring=createCanvasAuthoring(runtime);
+    expect(authoring.moveSelection(["n","a","b"],40,30,before).ok).toBe(true);
+    const after=runtime.getData() as any;
+    expect(after.nodes[0]).toMatchObject({x:40,y:30});
+    expect(after.miroCanvas.connectors.a.from).toEqual(before.miroCanvas.connectors.a.from);
+    expect(after.miroCanvas.connectors.a.to).toMatchObject({x:340,y:130});
+    expect(after.miroCanvas.connectors.b).toMatchObject({color:"#ff0000",width:4,from:{type:"edge",edgeId:"a"}});
+    expect(runtime.history).toHaveLength(2);runtime.undo();expect(runtime.getData()).toEqual(before);
+    runtime.redo();expect(runtime.getData()).toEqual(after);
+  });
+  it("deletes node, native edge and connector dependency chain atomically",()=>{
+    const before=document(),runtime=new NativeGraph(before);
+    expect(createCanvasAuthoring(runtime).deleteItems({ids:["n"]}).ok).toBe(true);
+    expect(runtime.nodes.size).toBe(1);expect(runtime.edges.size).toBe(0);
+    expect((runtime.getData().miroCanvas as any).connectors).toEqual({});
+    runtime.undo();expect(runtime.getData()).toEqual(before);
+    runtime.redo();expect((runtime.getData().miroCanvas as any).connectors).toEqual({});
+  });
+  it.each(["e","a","b"])("refuses the whole deletion if dependent %s is locked",id=>{
+    const before=document() as any;before.miroCanvas.localOverrides[id]={locked:true};
+    const runtime=new NativeGraph(before);
+    expect(createCanvasAuthoring(runtime).deleteItems({ids:["n"]}).ok).toBe(false);
+    expect(runtime.getData()).toEqual(before);expect(runtime.history).toHaveLength(1);
+  });
+  it("deletes a native edge attached to a removed independent connector",()=>{
+    const before=document() as any;before.miroCanvas.localOverrides.e={connectorAnchors:{from:{type:"edge",edgeId:"a",t:0.5}}};
+    const runtime=new NativeGraph(before);
+    expect(createCanvasAuthoring(runtime).deleteItems({ids:["a"]}).ok).toBe(true);
+    expect(runtime.nodes.size).toBe(2);expect(runtime.edges.size).toBe(0);
+    runtime.undo();expect(runtime.getData()).toEqual(before);
+  });
+  it("rolls back failed mixed moves and rejects stale previews",()=>{
+    const before=document(),runtime=new NativeGraph(before),authoring=createCanvasAuthoring(runtime);
+    runtime.throwOnSave=true;
+    expect(authoring.moveSelection(["n","a"],40,30,before).ok).toBe(false);expect(runtime.getData()).toEqual(before);
+    runtime.throwOnSave=false;
+    expect(authoring.moveSelection(["n","a"],40,30,{...before,unknown:1}).ok).toBe(false);
+    expect(runtime.getData()).toEqual(before);
+  });
+  it("pastes standalone connectors without inventing nodes",()=>{
+    const runtime=new NativeGraph({nodes:[],edges:[]});
+    const c={...document().miroCanvas.connectors.a,from:{type:"free" as const,x:0,y:0}} as any;
+    expect(createCanvasAuthoring(runtime).insertGraph({nodes:[],edges:[],connectors:[c]}).ok).toBe(true);
+    expect(runtime.nodes.size).toBe(0);expect((runtime.getData().miroCanvas as any).connectors.a).toEqual(c);
+    runtime.undo();expect(runtime.getData()).toEqual({nodes:[],edges:[]});
+  });
+});
+
+describe("legacy connector migration transaction", () => {
+  const document = () => ({nodes:[{id:"line",type:"text",text:"",x:0,y:0,width:100,height:20}],edges:[],miroSource:{evidence:[1]},
+    miroCanvas:{schemaVersion:1,localOverrides:{line:{item:{type:"line",line:{route:"straight",color:"#123456",width:2,box:{width:100,height:20},points:[0,0,100,20]}}}}}});
+  it("migrates in one undoable step and survives JSON reopening",()=>{
+    const before=document(), runtime=new NativeGraph(before), authoring=createCanvasAuthoring(runtime);
+    expect(authoring.migrateLines().ok).toBe(true);
+    const after=runtime.getData();expect(runtime.nodes.size).toBe(0);expect(runtime.history.length).toBe(2);
+    expect(new NativeGraph(clone(after)).getData()).toEqual(after);
+    runtime.undo();expect(runtime.getData()).toEqual(before);
+    runtime.redo();expect(runtime.getData()).toEqual(after);
+    expect(authoring.migrateLines().ok).toBe(true);expect(runtime.history.length).toBe(2);
+  });
+  it("rolls back a failed save",()=>{
+    const before=document(), runtime=new NativeGraph(before);runtime.throwOnSave=true;
+    expect(createCanvasAuthoring(runtime).migrateLines().ok).toBe(false);
+    expect(runtime.getData()).toEqual(before);
+  });
+});
+
 function clone<T>(value: T): T {
 	return JSON.parse(JSON.stringify(value)) as T;
 }

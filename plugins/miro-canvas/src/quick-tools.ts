@@ -34,7 +34,7 @@ const BAR_TOOLS: readonly ToolSpec[] = [
   { tool: "sticky", label: "Sticky note", icon: "sticky-note", glyph: "▢", key: "N" },
   { tool: "shape", label: "Shape", icon: "shapes", glyph: "◇", key: "S" },
   { tool: "pen", label: "Pen", icon: "pen", glyph: "✎", key: "P" },
-  { tool: "connector", label: "Connection line", icon: "move-up-right", glyph: "↗", key: "L" },
+  { tool: "connector", label: "Lines and arrows", icon: "move-up-right", glyph: "↗", key: "L" },
   { tool: "comment", label: "Comment", icon: "message-circle", glyph: "💬", key: "C" },
   { tool: "frame", label: "Frame", icon: "frame", glyph: "#", key: "F" },
 ];
@@ -46,6 +46,10 @@ const MORE_TOOLS: readonly ToolSpec[] = [
 ];
 
 export interface QuickToolsState {
+  readonly connectorColor?: string;
+  readonly connectorWidth?: number;
+  readonly showLassoTool?: boolean;
+  readonly showConnectorTool?: boolean;
   /** False in review mode: nothing can be made. */
   readonly editable: boolean;
   readonly armed: QuickTool;
@@ -59,6 +63,7 @@ export interface QuickToolsState {
 }
 
 export interface QuickToolsActions {
+  readonly onConnector?: (settings: {color?:string;width?:number}) => void;
   readonly onArm: (tool: QuickTool) => void;
   readonly onShape: (shape: string) => void;
   readonly onPen: (settings: { readonly color?: string; readonly width?: number; readonly eraserSize?: number }) => void;
@@ -135,11 +140,46 @@ export class QuickTools {
   private readonly panels: { readonly button: HTMLButtonElement; readonly panel: HTMLElement }[] = [];
   private readonly listeners: (() => void)[] = [];
   private shownShape = "";
+  private connectorBar: HTMLElement;
+  private connectorColor: HTMLInputElement;
+  private connectorWidth: HTMLInputElement;
+  private connectorRange: HTMLInputElement;
+  private connectorPreview: HTMLElement;
+  private readonly connectorColors=new Map<string,HTMLButtonElement>();
 
   public constructor(private readonly actions: QuickToolsActions, private readonly options: QuickToolsOptions = {}) {
     const document = options.document ?? globalThis.document;
     this.document = document;
     const root = this.make("div", "miro-canvas-toolbar miro-canvas-tools");
+    this.connectorBar = root.appendChild(this.make("div", "miro-canvas-toolbar__bar miro-canvas-tools__connectors"));
+    this.connectorBar.hidden = true;
+    for(const line of [...LINE_KINDS].sort((a,b)=>Number(!!b.endCap||!!b.block)-Number(!!a.endCap||!!a.block))) {
+      const button=this.connectorBar.appendChild(this.make("button","miro-canvas-toolbar__button"));
+      button.type="button";button.setAttribute("aria-label",line.label);button.setAttribute("data-shape",line.kind);
+      const picture=linePicture(document,line);if(picture)button.appendChild(picture);else button.textContent=line.kind;
+      this.shapeButtons.set(line.kind,button);
+      this.listen(button,"click",()=>{this.actions.onShape(line.kind);this.actions.onArm("connector");this.closePanels();});
+    }
+    const connectorColors=this.connectorBar.appendChild(this.make("span","miro-canvas-tools__swatches"));
+    for(const color of PEN_COLORS){
+      const option=connectorColors.appendChild(this.make("button","miro-canvas-toolbar__button miro-canvas-toolbar__button--swatch"));
+      option.type="button";option.setAttribute("aria-label",color);option.setAttribute("data-connector-color",color);
+      option.setAttribute("data-tooltip-delay",PICTURE_TOOLTIP_DELAY);option.style?.setProperty?.("--miro-canvas-swatch",color);
+      this.listen(option,"click",()=>this.actions.onConnector?.({color}));this.connectorColors.set(color,option);
+    }
+    this.connectorColor=connectorColors.appendChild(this.make("input","miro-canvas-toolbar__swatch"));
+    this.connectorColor.type="color";this.connectorColor.setAttribute("aria-label","New connector color");
+    this.listen(this.connectorColor,"input",()=>this.actions.onConnector?.({color:this.connectorColor.value}));
+    const connectorSize=this.connectorBar.appendChild(this.make("span","miro-canvas-tools__size"));
+    this.connectorPreview=connectorSize.appendChild(this.make("span","miro-canvas-tools__preview"));
+    this.connectorPreview.setAttribute("aria-hidden","true");this.connectorPreview.setAttribute("data-kind","pen");
+    this.connectorRange=connectorSize.appendChild(this.make("input","miro-canvas-toolbar__range"));
+    this.connectorRange.type="range";this.connectorRange.min="1";this.connectorRange.max=String(PEN_WIDTH_RANGE.max);this.connectorRange.step="1";
+    this.connectorRange.setAttribute("aria-label","New connector width slider");
+    this.listen(this.connectorRange,"input",()=>this.actions.onConnector?.({width:Number(this.connectorRange.value)}));
+    this.connectorWidth=connectorSize.appendChild(this.make("input","miro-canvas-toolbar__number miro-canvas-tools__number"));
+    this.connectorWidth.type="number";this.connectorWidth.min="1";this.connectorWidth.max="1000";this.connectorWidth.setAttribute("aria-label","New connector width");
+    this.listen(this.connectorWidth,"change",()=>{const width=Number(this.connectorWidth.value);if(Number.isFinite(width)&&width>=1&&width<=1000)this.actions.onConnector?.({width});});
     root.setAttribute("role", "toolbar");
     root.setAttribute("aria-label", "Board tools");
     // Miro keeps the pen, the highlighter, smart drawing, the erasers and the
@@ -197,7 +237,10 @@ export class QuickTools {
       if (spec.tool === "shape") {
         const host = bar.appendChild(this.make("span", "miro-canvas-toolbar__popover"));
         const button = host.appendChild(this.toolButton(spec));
-        const panel = host.appendChild(this.panel(button, "miro-canvas-toolbar__panel--shapes"));
+        const panel = host.appendChild(this.panel(button, "miro-canvas-toolbar__panel--shapes", () => {
+          if (lineKind(this.shownShape)) this.actions.onShape("rectangle");
+          this.actions.onArm("shape");
+        }));
         // Lines first, as Miro lists them, then the basic shapes and the
         // flowchart's own symbols.
         const option = (grid: HTMLElement, kind: string, label: string, picture: Element | undefined, glyph: string): void => {
@@ -211,7 +254,7 @@ export class QuickTools {
           this.listen(choice, "click", () => {
             this.closePanels();
             this.actions.onShape(kind);
-            this.actions.onArm("shape");
+            this.actions.onArm(lineKind(kind) ? "connector" : "shape");
           });
           this.shapeButtons.set(kind, choice);
         };
@@ -219,8 +262,6 @@ export class QuickTools {
           panel.appendChild(this.make("div", "miro-canvas-toolbar__heading", title));
           return panel.appendChild(this.make("div", "miro-canvas-toolbar__pictures miro-canvas-toolbar__pictures--shapes"));
         };
-        const lines = section("Lines");
-        for (const spec of LINE_KINDS) option(lines, spec.kind, spec.label, linePicture(document, spec), spec.label.split("\n")[0]!);
         for (const [part, title] of [["basic", "Basic"], ["flowchart", "Flowchart"]] as const) {
           const grid = section(title);
           for (const entry of SHAPE_CATALOG.filter((item) => item.section === part)) {
@@ -258,6 +299,17 @@ export class QuickTools {
   }
 
   public update(state: QuickToolsState): void {
+    if (state.armed !== this.armed) this.closePanels();
+    this.connectorBar.hidden = state.armed !== "connector" || !state.editable;
+    this.connectorColor.value = state.connectorColor ?? "#1a1a1a";
+    for(const [color,button] of this.connectorColors)button.setAttribute("aria-pressed",color===this.connectorColor.value?"true":"false");
+    if(this.document.activeElement!==this.connectorRange)this.connectorRange.value=String(state.connectorWidth??2);
+    this.connectorPreview.style?.setProperty?.("--miro-canvas-preview-size",`${Math.min(state.connectorWidth??2,MAX_PREVIEW)}px`);
+    this.connectorPreview.style?.setProperty?.("--miro-canvas-preview-color",this.connectorColor.value);
+    if(this.document.activeElement!==this.connectorWidth)this.connectorWidth.value=String(state.connectorWidth??2);
+    const lasso = this.buttons.get("lasso"), connector = this.buttons.get("connector");
+    if (lasso !== undefined) lasso.hidden = state.showLassoTool === false;
+    if (connector !== undefined) connector.hidden = state.showConnectorTool === false;
     this.element.setAttribute("data-miro-canvas-editable", state.editable ? "true" : "false");
     for (const [tool, button] of this.buttons) {
       button.setAttribute("aria-pressed", tool === state.armed ? "true" : "false");
@@ -303,7 +355,7 @@ export class QuickTools {
     }
     const entry = shapeCatalogEntry(state.shape);
     const line = lineKind(state.shape);
-    const shapeButton = this.buttons.get("shape");
+    const shapeButton = this.buttons.get(line === undefined ? "shape" : "connector");
     if ((entry !== undefined || line !== undefined) && shapeButton !== undefined && this.shownShape !== state.shape) {
       // The button shows the shape or the line it will make.
       const picture = line !== undefined ? linePicture(this.document, line) : shapePicture(this.document, entry!);
@@ -362,13 +414,14 @@ export class QuickTools {
   }
 
   /** A menu that opens above its button; one at a time. */
-  private panel(button: HTMLButtonElement, className: string): HTMLElement {
+  private panel(button: HTMLButtonElement, className: string, onOpen?: () => void): HTMLElement {
     const panel = this.make("div", `miro-canvas-toolbar__panel ${className}`);
     panel.hidden = true;
     button.setAttribute("aria-haspopup", "true");
     button.setAttribute("aria-expanded", "false");
     this.listen(button, "click", () => {
       const open = panel.hidden;
+      if (open) onOpen?.();
       this.closePanels();
       if (!open) return;
       panel.hidden = false;

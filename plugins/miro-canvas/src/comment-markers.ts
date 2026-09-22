@@ -161,6 +161,7 @@ export class CommentMarkers {
         });
         const stop = (event: Event) => event.stopPropagation();
         let dragged = false;
+        let cancelDrag: (() => void) | undefined;
         const open = (event: Event) => {
           event.stopPropagation();
           // The click that ends a drag does not open the thread as well.
@@ -177,11 +178,24 @@ export class CommentMarkers {
           const pointer = event as PointerEvent;
           if (this.host.onMoveThread === undefined || pointer.button !== 0) return;
           const view = this.document.defaultView;
+          if (view === null) return;
+          // A second press or disposal cannot leave listeners from the first
+          // gesture behind on the window.
+          cancelDrag?.();
+          const picked=this.markerOf(button);
+          if(picked===undefined)return;
+          pointer.preventDefault();
+          pointer.stopPropagation();
+          // Own the first press before focus changes or periodic rendering can
+          // hand the gesture back to Canvas. A click still opens on release.
+          this.dragging.add(button);
+          try { button.setPointerCapture?.(pointer.pointerId); } catch { /* Synthetic events have no active pointer. */ }
           const start = { x: pointer.clientX, y: pointer.clientY };
           const origin = { left: parseFloat(button.style.left) || 0, top: parseFloat(button.style.top) || 0 };
           let moving = false;
           const move = (moved: Event) => {
             const at = moved as PointerEvent;
+            if(at.pointerId!==pointer.pointerId)return;
             const dx = at.clientX - start.x, dy = at.clientY - start.y;
             if (!moving && Math.hypot(dx, dy) < DRAG_THRESHOLD) return;
             moving = true;
@@ -190,29 +204,49 @@ export class CommentMarkers {
             button.style.left = `${origin.left + dx}px`;
             button.style.top = `${origin.top + dy}px`;
           };
+          const stopListening = () => {
+            view.removeEventListener("pointermove", move, true);
+            view.removeEventListener("pointerup", up, true);
+            view.removeEventListener("pointercancel", cancel, true);
+            view.removeEventListener("blur", cancel, true);
+            cancelDrag = undefined;
+            try { if(button.hasPointerCapture?.(pointer.pointerId))button.releasePointerCapture(pointer.pointerId); } catch { /* The host may already have released it. */ }
+          };
+          const reset = () => {
+            stopListening();
+            this.dragging.delete(button);
+            button.setAttribute("data-comment-dragging", "false");
+            const current = this.markerOf(button);
+            if (current !== undefined) {
+              button.style.left = `${current.point.x}px`;
+              button.style.top = `${current.point.y}px`;
+            }
+          };
+          const cancel = () => reset();
           const up = (released: Event) => {
-            view?.removeEventListener("pointermove", move, true);
-            view?.removeEventListener("pointerup", up, true);
+            if((released as PointerEvent).pointerId!==pointer.pointerId)return;
+            stopListening();
             this.dragging.delete(button);
             button.setAttribute("data-comment-dragging", "false");
             if (!moving) return;
             // Only the click the release itself makes is swallowed.
             dragged = true;
-            view?.setTimeout(() => { dragged = false; }, 0);
+            view.setTimeout(() => { dragged = false; }, 0);
             const at = released as PointerEvent;
-            const current = this.markerOf(button);
-            if (current === undefined) return;
             // The pin's point moves as far as the pointer did, wherever on the
             // pin it was taken hold of.
             const box = this.element.getBoundingClientRect?.();
             const left = box?.left ?? 0, top = box?.top ?? 0;
-            this.host.onMoveThread?.(current.threadId, current.origin, {
-              x: left + current.point.x + at.clientX - start.x,
-              y: top + current.point.y + at.clientY - start.y,
+            this.host.onMoveThread?.(picked.threadId, picked.origin, {
+              x: left + picked.point.x + at.clientX - start.x,
+              y: top + picked.point.y + at.clientY - start.y,
             });
           };
-          view?.addEventListener("pointermove", move, true);
-          view?.addEventListener("pointerup", up, true);
+          cancelDrag = cancel;
+          view.addEventListener("pointermove", move, true);
+          view.addEventListener("pointerup", up, true);
+          view.addEventListener("pointercancel", cancel, true);
+          view.addEventListener("blur", cancel, true);
         };
         // Keep Canvas drag/selection and hotkeys out of marker activation.
         const isolatedEvents = ["pointerdown", "mousedown", "dblclick", "keydown", "keyup"];
@@ -220,6 +254,7 @@ export class CommentMarkers {
         button.addEventListener("pointerdown", press);
         button.addEventListener("click", open);
         entry = { button, dispose: () => {
+          cancelDrag?.();
           for (const name of isolatedEvents) button.removeEventListener(name, stop);
           button.removeEventListener("pointerdown", press);
           button.removeEventListener("click", open);

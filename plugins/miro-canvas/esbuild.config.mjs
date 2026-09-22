@@ -13,7 +13,7 @@ const context = await esbuild.context({
   platform: "browser",
   format: "cjs",
   target: "es2020",
-  external: ["obsidian"],
+  external: ["obsidian", "electron"],
   sourcemap: production ? false : "inline",
   minify: production,
   logLevel: "info"

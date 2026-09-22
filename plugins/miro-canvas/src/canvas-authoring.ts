@@ -23,6 +23,8 @@ import {
 	type UpdateConnectorEndpointInput,
 } from "./connector-endpoints";
 import type { CanvasAnchor } from "./anchors";
+import { translateBoardSelection } from "./board-selection";
+import { migrateLineNodes, boardConnectors, readBoardConnector, type BoardConnector } from "./board-connectors";
 import { readLocalItem, type LocalItem } from "./local-items";
 import { isSafeColor, normalizeColor } from "./appearance";
 import {
@@ -120,6 +122,7 @@ export interface UpdateItemInput {
  * a node already there or on one added with it.
  */
 export interface InsertGraphInput {
+	readonly connectors?: readonly BoardConnector[];
 	readonly nodes: readonly Readonly<Record<string, unknown>>[];
 	readonly edges: readonly Readonly<Record<string, unknown>>[];
 	/** The plugin's record of an added node or connector, by its id. */
@@ -2084,13 +2087,16 @@ export class CanvasAuthoring {
 		}
 		const nodes = Array.isArray(input?.nodes) ? input.nodes : [];
 		const edges = Array.isArray(input?.edges) ? input.edges : [];
-		if (nodes.length === 0) {
+		if (nodes.length === 0 && edges.length === 0 && !input.connectors?.length) {
 			addDiagnostic(diagnostics, "insert-empty", "error", "Adding to the board needs at least one node.");
 			return reject();
 		}
 		const taken = collectDocumentIds(before);
+		for(const connector of boardConnectors(before.document))taken.add(connector.id);
 		const added = new Set<string>();
-		for (const item of [...nodes, ...edges]) {
+		const connectors=input.connectors??[];
+		if(!connectors.every(c=>readBoardConnector(c)))return reject();
+		for (const item of [...nodes, ...edges, ...connectors]) {
 			const id = isPlainObject(item) ? readRequiredString(item, "id") : undefined;
 			if (id === undefined || taken.has(id) || added.has(id)) {
 				addDiagnostic(diagnostics, "insert-id-invalid", "error", "Every added node and connector needs an id the board does not have.");
@@ -2130,10 +2136,10 @@ export class CanvasAuthoring {
 		setOwn(document, "edges", [...edgesValue.value, ...copies.edges]);
 		const overrides = Object.entries(input.overrides ?? {}).filter(([id]) => added.has(id));
 		const bindings = Object.entries(input.bindings ?? {}).filter(([id]) => added.has(id));
-		if (overrides.length > 0 || bindings.length > 0) {
+		if (overrides.length > 0 || bindings.length > 0 || connectors.length > 0) {
 			const metadata = readMetadataForUpdate(document, diagnostics);
 			if (metadata === undefined) return reject();
-			for (const [key, entries] of [["localOverrides", overrides], ["bindings", bindings]] as const) {
+			for (const [key, entries] of [["localOverrides", overrides], ["bindings", bindings], ["connectors",connectors.map(c=>[c.id,c] as const)]] as const) {
 				if (entries.length === 0) continue;
 				const existing = safeRead(metadata, key);
 				if (!existing.ok || (existing.value !== undefined && !isPlainObject(existing.value))) {
@@ -2174,6 +2180,25 @@ export class CanvasAuthoring {
 	 * Take nodes off the board, with the connectors that ended on them and the
 	 * plugin metadata that described them, in one native history step.
 	 */
+	public moveSelection(ids: readonly string[], dx: number, dy: number, expected?: CanvasAuthoringExpected): CanvasGraphResult {
+		const diagnostics: CanvasAuthoringDiagnostic[]=[];
+		const reject=():CanvasGraphResult=>({ok:false,status:"rejected",diagnostics});
+		if(this.disposed||!this.host||!ids.length||![dx,dy].every(Number.isFinite))return reject();
+		const before=readSnapshotFromHost(this.host,diagnostics);
+		if(!before)return reject();
+		if (expected !== undefined) {
+			const snapshot = makeSnapshot(extractExpectedDocument(expected), diagnostics);
+			if (!snapshot || !structurallyEqual(snapshot.document, before.document)) {
+				addDiagnostic(diagnostics, "stale-selection-move", "error", "The board changed during the selection move.");
+				return reject();
+			}
+		}
+		const known=collectDocumentIds(before);for(const c of boardConnectors(before.document))known.add(c.id);
+		for(const id of ids)if(!known.has(id)||!policyAllowsGraphEdit(before.document,"edit",id,"element-style",diagnostics))return reject();
+		const document=translateBoardSelection(before.document,ids,dx,dy);
+		const verified=this.commitDocument(before,document,diagnostics);
+		return verified?{ok:true,status:"applied",document:verified.document,diagnostics}:reject();
+	}
 	public deleteItems(input: DeleteItemsInput, expected?: CanvasAuthoringExpected): CanvasGraphResult {
 		const ids = Array.isArray(input?.ids) ? input.ids.filter((id): id is string => typeof id === "string" && id.length > 0) : [];
 		if (ids.length === 0) {
@@ -2232,7 +2257,7 @@ export class CanvasAuthoring {
 			if (!policyAllowsGraphEdit(before.document, "edit", change.id, "element-style", diagnostics)) return reject();
 		}
 		for (const id of removals) {
-			if (!before.nodes.some((node) => node.id === id)) {
+			if (!before.nodes.some((node) => node.id === id) && !before.edges.some(edge => edge.id === id) && !boardConnectors(before.document).some(c=>c.id===id)) {
 				addDiagnostic(diagnostics, "delete-node-missing", "error", `Canvas node ${id} does not exist.`);
 				return reject();
 			}
@@ -2286,17 +2311,44 @@ export class CanvasAuthoring {
 			setOwn(document, "edges", (edgesValue.value as readonly unknown[]).filter((edge) => {
 				const from = safeRead(edge, "fromNode"), to = safeRead(edge, "toNode"), id = safeRead(edge, "id");
 				const touches = (side: ReadResult): boolean => side.ok && typeof side.value === "string" && removals.has(side.value);
-				if (!touches(from) && !touches(to)) return true;
+				if (!touches(from) && !touches(to) && !(id.ok && typeof id.value === "string" && removals.has(id.value))) return true;
 				if (id.ok && typeof id.value === "string") removedEdges.push(id.value);
 				return false;
 			}));
 		}
 		const metadataValue = safeRead(document, "miroCanvas");
+		const deletedConnectors=new Set(boardConnectors(before.document).filter(c=>removals.has(c.id)).map(c=>c.id));
+		const independent=boardConnectors(before.document);
+		let expanded=true;
+		while(expanded){expanded=false;
+			const priorMetadata=before.document.miroCanvas;
+			const priorOverrides=isPlainObject(priorMetadata)&&isPlainObject(priorMetadata.localOverrides)?priorMetadata.localOverrides:{};
+			for(const edge of before.edges){
+				if(typeof edge.id!=="string")continue;
+				if(removedEdges.includes(edge.id))continue;
+				const override=priorOverrides[edge.id];
+				const anchors=isPlainObject(override)&&isPlainObject(override.connectorAnchors)?override.connectorAnchors:{};
+				if(Object.values(anchors).some(a=>isPlainObject(a)&&((a.type==="edge"&&(removedEdges.includes(a.edgeId as string)||deletedConnectors.has(a.edgeId as string)))||((a.type==="node"||a.type==="image")&&removals.has(a.nodeId as string))))){removedEdges.push(edge.id);expanded=true;}
+			}
+			for(const c of independent){
+			if(deletedConnectors.has(c.id))continue;
+			if([c.from,c.to].some(a=>(a.type==="node"||a.type==="image")?removals.has(a.nodeId):a.type==="edge"&&(removedEdges.includes(a.edgeId)||deletedConnectors.has(a.edgeId)))){
+				if(!policyAllowsGraphEdit(before.document,"edit",c.id,"element-style",diagnostics))return reject();
+				deletedConnectors.add(c.id);expanded=true;
+			}
+		}}
+		if(removedEdges.length && Array.isArray(document.edges)) document.edges=document.edges.filter(edge=>!isPlainObject(edge)||!removedEdges.includes(edge.id as string));
+		// Check the complete deletion closure, including native edges implicitly
+		// removed with a node. No partial delete may bypass a connector lock.
+		for(const id of [...removedEdges,...deletedConnectors]) {
+			if(!policyAllowsGraphEdit(before.document,"edit",id,"element-style",diagnostics))return reject();
+		}
 		// Removing nodes from a board without plugin metadata leaves it without.
 		if (changes.length > 0 || (metadataValue.ok && isPlainObject(metadataValue.value))) {
 			const metadata = readMetadataForUpdate(document, diagnostics);
 			if (metadata === undefined) return reject();
 			const overridesValue = safeRead(metadata, "localOverrides");
+			if(deletedConnectors.size)setOwn(metadata,"connectors",Object.fromEntries(independent.filter(c=>!deletedConnectors.has(c.id)).map(c=>[c.id,c])));
 			if (!overridesValue.ok || (overridesValue.value !== undefined && !isPlainObject(overridesValue.value))) {
 				addDiagnostic(diagnostics, "metadata-overrides-invalid", "error", "Existing localOverrides are not a safe object map.");
 				return reject();
@@ -2308,7 +2360,7 @@ export class CanvasAuthoring {
 				addDiagnostic(diagnostics, "metadata-overrides-invalid", "error", `Existing localOverrides could not be copied: ${describeError(error)}.`);
 				return reject();
 			}
-			for (const id of [...removals, ...removedEdges]) {
+			for (const id of [...removals, ...removedEdges, ...deletedConnectors]) {
 				if (hasOwn(overrides, id)) deleteOwn(overrides, id);
 			}
 			for (const change of changes) {
@@ -2639,6 +2691,22 @@ export class CanvasAuthoring {
 
 	public dispose(): void {
 		this.disposed = true;
+	}
+
+	/** Explicit migration shares native import, verification, rollback and history. */
+	public migrateLines(): CanvasGraphResult {
+		const diagnostics: CanvasAuthoringDiagnostic[] = [];
+		const reject = (): CanvasGraphResult => ({ ok:false, status:"rejected", diagnostics });
+		if (this.disposed || !this.host) return reject();
+		const before = readSnapshotFromHost(this.host, diagnostics);
+		if (!before || policyAllowsCreate(before.document, diagnostics) === undefined) return reject();
+		const next = migrateLineNodes(before.document);
+		for (const id of next.migrated) if (!policyAllowsGraphEdit(before.document, "edit", id, "element-style", diagnostics)) return reject();
+		if (next.skipped.length) addDiagnostic(diagnostics, "line-migration-skipped", "warning", `Unsupported or connected legacy lines retained: ${next.skipped.join(", ")}`);
+		if (!next.migrated.length) return {ok:true, status:"applied", document:before.document, diagnostics};
+		if (!validateMiroCanvasMetadata(next.document.miroCanvas).valid) return reject();
+		const verified = this.commitDocument(before, next.document, diagnostics);
+		return verified ? {ok:true, status:"applied", document:verified.document, diagnostics} : reject();
 	}
 }
 

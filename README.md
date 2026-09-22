@@ -42,6 +42,10 @@ adapter, an optional Advanced Canvas adapter, versioned schema validation and
 in-memory migrations, an explicit metadata writer with a guarded atomic
 compare-and-swap (CAS) bridge, and a deterministic four-profile compatibility
 matrix with a project-local test vault. The plugin is not production-ready.
+The current development build adds independent line/arrow connectors, an
+explicit undoable legacy-line migration, persistent connector tool settings,
+desktop clipboard hotkeys and a rebindable Escape reset command. See the
+[connector checkpoint and compatibility limits](docs/miro-canvas.md#connector-development-checkpoint).
 The real-Obsidian gate is still open: native Ctrl+Z/redo behavior and visual or
 interaction verification in the real application have not been claimed. The
 current development checkpoint adds M1 controls (navigation, minimap,

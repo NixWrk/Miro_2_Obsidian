@@ -46,7 +46,12 @@ text, comments, themes, shapes, colors, connectors, attachment labels, and
 editing protection. Mind-map editing will evaluate the MIT-licensed
 [`obsidian-enhancing-mindmap`](https://github.com/MarkMindCkm/obsidian-enhancing-mindmap)
 as an implementation reference; the closed-source `obsidian-markmind` is a UX
-reference only.
+reference only. Future migration work will add explicit, non-destructive
+adapters from Excalidraw, mind-map plugins, and other common local formats into
+native Canvas plus `miroCanvas` metadata while preserving source files and
+provenance. Release hardening must cover Windows, macOS, and Linux or
+representative VMs; multiple viewport sizes and pixel ratios; and mouse,
+trackpad, pen tablet/stylus, touch-screen, and phone/tablet interaction.
 
 Completed work is recorded in Git history and the regression suite rather than
 duplicated here.

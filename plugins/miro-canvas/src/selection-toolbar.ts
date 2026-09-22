@@ -75,6 +75,8 @@ export interface SelectionToolbarStyle {
 }
 
 export interface SelectionToolbarState extends SelectionToolbarStyle {
+  readonly independentSelection?: boolean;
+  readonly independentOnly?: boolean;
   readonly selectedIds: readonly string[];
   readonly kinds: readonly SelectionKind[];
   /** False in review mode or on a locked selection; the lock toggle stays live. */
@@ -97,6 +99,7 @@ export interface SelectionToolbarState extends SelectionToolbarStyle {
 export type SelectionStylePatch = SelectionToolbarStyle;
 
 export interface SelectionToolbarActions {
+  readonly onDelete?: () => void;
   readonly onAppearance: (action: AppearanceAction) => void;
   readonly onStyle: (patch: SelectionStylePatch) => void;
   readonly onLock: (locked: boolean) => void;
@@ -404,6 +407,7 @@ interface ToolbarRefs {
   readonly borderWidth: HTMLInputElement;
   readonly borderWidthValue: HTMLElement;
   readonly lock: HTMLButtonElement;
+  readonly deleteSelection: HTMLButtonElement;
   readonly openLink: HTMLButtonElement;
   /** Where the host puts the native Canvas menu, so a selection has one menu. */
   readonly nativeSlot: HTMLElement;
@@ -656,6 +660,10 @@ export class SelectionToolbar {
     const lock = append(bar, makeButton(document, "Lock selection", "miro-canvas-toolbar__button--lock"));
     lock.setAttribute("aria-pressed", "false");
     const nativeSlot = append(bar, make(document, "span", "miro-canvas-toolbar__native"));
+    const deleteSelection = append(nativeSlot, makeButton(document,"Delete selection","miro-canvas-toolbar__button--delete"));
+    this.icon(deleteSelection,"trash-2","⌫");
+    this.listen(deleteSelection,"click",()=>this.actions.onDelete?.());
+    deleteSelection.hidden=true;
 
     const status = append(root, make(document, "p", "miro-canvas-toolbar__status"));
     status.setAttribute("role", "status");
@@ -667,7 +675,7 @@ export class SelectionToolbar {
       format, formats, align, alignments, verticalAlignments, lineHeight,
       edgeGroup, startCap, endCap, startCaps, endCaps, swapEnds, line, routes, strokes, lineWidth, lineWidthValue,
       colors, borderStyles, borderWidth, borderWidthValue,
-      lock, openLink, nativeSlot, status,
+      lock, deleteSelection, openLink, nativeSlot, status,
     };
     this.wire(refs);
     return refs;
@@ -819,8 +827,11 @@ export class SelectionToolbar {
     root.style.top = `${state.placement!.y}px`;
     root.setAttribute("data-miro-canvas-placement", state.placement!.below === true ? "below" : "above");
     root.setAttribute("data-miro-canvas-editable", state.editable ? "true" : "false");
+    root.setAttribute("data-miro-independent-only",state.independentOnly?"true":"false");
 
     const hasEdge = state.kinds.includes("edge");
+    refs.deleteSelection.hidden=state.independentSelection!==true;
+    refs.deleteSelection.disabled=!state.editable;
     const hasNode = state.kinds.some((kind) => kind !== "edge");
     refs.shape.host.hidden = !state.kinds.includes("shape");
     // A connector's label keeps native editing, and a link, file or embed has

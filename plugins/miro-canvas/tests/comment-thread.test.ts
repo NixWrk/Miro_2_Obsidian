@@ -84,6 +84,7 @@ describe("comment thread card", () => {
     const card = new CommentThreadCard(fakeDocument, {
       onReply: (...args) => calls.push(["reply", ...args]),
       onResolve: (...args) => calls.push(["resolve", ...args]),
+      onDelete: (...args) => calls.push(["delete", ...args]),
       onOpenPanel: (...args) => calls.push(["panel", ...args]),
       onClose: () => calls.push(["close"]),
     });
@@ -99,6 +100,7 @@ describe("comment thread card", () => {
     expect(root.byClass("miro-canvas-thread__message")).toHaveLength(2);
     expect(root.byClass("miro-canvas-thread__avatar").map((item) => item.textContent)).toEqual(["N", "A"]);
     expect(root.byLabel("Resolve").disabled).toBe(true);
+    expect(root.byLabel("Delete comment").hidden).toBe(true);
     expect(root.byClass("miro-canvas-thread__composer")[0]!.hidden).toBe(true);
     expect(root.byClass("miro-canvas-thread__note")[0]!.textContent).toBe("Imported from Miro; read-only.");
     expect(root.fire("pointerdown").stopped).toBe(true);
@@ -122,9 +124,12 @@ describe("comment thread card", () => {
     input.value = "   ";
     form.fire("submit");
     expect(calls).toEqual([["resolve", "l1", true], ["reply", "l1", "Thanks"]]);
+    root.byLabel("Delete comment").fire("click");
+    expect(calls.at(-1)).toEqual(["delete", "l1"]);
     card.show({ ...LOCAL, resolved: true }, { editable: false });
     expect(root.getAttribute("data-comment-state")).toBe("resolved");
     expect(root.byLabel("Resolve").disabled).toBe(true);
+    expect(root.byLabel("Delete comment").disabled).toBe(true);
     expect(form.hidden).toBe(true);
     expect(root.byClass("miro-canvas-thread__note")[0]!.hidden).toBe(false);
     card.hide();

@@ -40,6 +40,10 @@ M0: native Canvas adapter, optional Advanced Canvas adapter, версионир�
 проверка schema и in-memory migrations, explicit metadata writer с защищённым
 atomic compare-and-swap (CAS) bridge, а также детерминированная матрица из
 четырёх профилей и project-local test vault. Плагин пока не production-ready.
+Текущая сборка добавляет независимые линии/стрелки, явное отменяемое
+преобразование старых линий, постоянную панель соединителей, desktop-сочетания
+буфера и переназначаемый сброс по Escape. См.
+[состояние доработки и ограничения](docs/miro-canvas.ru.md#текущая-доработка-соединителей).
 Real-Obsidian gate остаётся открытым: поведение native Ctrl+Z/redo и визуальная
 или интерактивная проверка в настоящем приложении пока не заявляются. Текущий
 этап разработки добавляет интерфейс M1 (навигация, minimap, типографика, темы,
