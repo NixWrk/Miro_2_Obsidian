@@ -14,11 +14,13 @@ import {
 } from "../src/settings";
 
 describe("plugin settings", () => {
-  it("defaults to node-only attachments and persists independent opt-ins", () => {
-    expect(normalizeSettings({})).toMatchObject({ connectorAttachNodes: true, connectorAllowFree: false, connectorAttachConnectors: false });
+  it("attaches to nodes and allows free ends by default; chaining lines is an opt-in", () => {
+    expect(normalizeSettings({})).toMatchObject({ connectorAttachNodes: true, connectorAllowFree: true, connectorAttachConnectors: false });
     expect(normalizeSettings({ connectorAttachNodes: false, connectorAllowFree: true, connectorAttachConnectors: true }))
       .toMatchObject({ connectorAttachNodes: false, connectorAllowFree: true, connectorAttachConnectors: true });
-    expect(normalizeSettings({ connectorAllowFree: "true", connectorAttachConnectors: 1 }).connectorAllowFree).toBe(false);
+    // A value that is not a boolean keeps the default.
+    expect(normalizeSettings({ connectorAllowFree: "false", connectorAttachConnectors: 1 })).toMatchObject({ connectorAllowFree: true, connectorAttachConnectors: false });
+    expect(normalizeSettings({ connectorAllowFree: false }).connectorAllowFree).toBe(false);
   });
   it("starts connector labels at the route midpoint and bounds the preference",()=>{
     expect(DEFAULT_SETTINGS.connectorLabelPosition).toBe(0.5);

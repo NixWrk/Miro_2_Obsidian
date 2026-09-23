@@ -3145,7 +3145,7 @@ export class M1CanvasSession {
 		const from = this.connectorLanding(this.viewportPoint(points[0]!) ?? points[0]!, undefined, points[points.length - 1], "");
 		const to = this.connectorLanding(this.viewportPoint(points[points.length - 1]!) ?? points[points.length - 1]!, from?.nodeId, points[0], "");
 		if (from === undefined || to === undefined) {
-			this.options.onNotice?.("Connection not placed: both ends must use enabled attachment targets. Enable free ends in plugin settings to draw on empty canvas.");
+			this.options.onNotice?.("Line not placed: an end was put down where the connector settings do not let it hold. Allow unattached ends to draw on empty board.");
 			this.refresh(); return;
 		}
 		this.writeBoardConnectors([{id:newCanvasId(), from:from.anchor,

@@ -88,7 +88,7 @@ export const DEFAULT_SETTINGS: MiroCanvasSettings = Object.freeze({
   connectorMagnet: 24,
   connectorSnap: 16,
   connectorAttachNodes: true,
-  connectorAllowFree: false,
+  connectorAllowFree: true,
   connectorAttachConnectors: false,
   connectorLabelPosition: 0.5,
   minimapVisible: true,

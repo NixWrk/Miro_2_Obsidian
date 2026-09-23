@@ -82,15 +82,20 @@ export class MiroCanvasSettingTab extends PluginSettingTab {
       "fastPanMultiplier", (value) => `${value}×`);
 
     new Setting(containerEl).setName("Connectors").setHeading();
-    for (const [key, title] of [
-      ["connectorAttachNodes", "Attach to nodes and comments"],
-      ["connectorAllowFree", "Allow unattached ends on the canvas"],
-      ["connectorAttachConnectors", "Attach to other lines and arrows"],
+    // Where an end of a line or an arrow may be put down.  Existing
+    // connections keep their ends whatever is chosen here.
+    for (const [key, title, description] of [
+      ["connectorAttachNodes", "Attach to nodes and comments",
+        "An end put down on a card, a frame, a picture or a comment pin holds on to it."],
+      ["connectorAllowFree", "Allow unattached ends on the canvas",
+        "An end put down on empty board stays there, so lines and arrows can be drawn anywhere."],
+      ["connectorAttachConnectors", "Attach to other lines and arrows (experimental)",
+        "An end put down on another line holds on to a point along it. Experimental: such chains are new and may still behave unexpectedly."],
     ] as const) {
       new Setting(containerEl).setName(title)
-        .setDesc("Applies when creating or moving an endpoint; existing connections are preserved. With all three options off, no new connection can be placed.")
-        .addToggle(toggle => toggle.setValue(this.host.settings[key])
-          .onChange(value => void this.host.saveSettings({ [key]: value })));
+        .setDesc(description)
+        .addToggle((toggle) => toggle.setValue(this.host.settings[key])
+          .onChange((value) => void this.host.saveSettings({ [key]: value })));
     }
     new Setting(containerEl).setName("Lasso gesture")
       .setDesc("Use lasso while Select is active. Middle-button and Space panning remain available; a right-button binding replaces the context menu for that gesture.")
