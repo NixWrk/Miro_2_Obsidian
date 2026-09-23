@@ -240,11 +240,7 @@ const runtime = {
 };
 const view = { canvas: runtime, getViewType: () => "canvas" };
 const writer = new MetadataWriter(createObsidianMetadataStore(view).store!);
-let systemClipboard = "";
-const session = new M1CanvasSession(view, writer, { settings: normalizeSettings({ connectorAllowFree: true, connectorAttachConnectors: true }), desktopClipboard: {
-  readText: () => systemClipboard,
-  writeText: text => { systemClipboard = text; },
-} });
+const session = new M1CanvasSession(view, writer, { settings: normalizeSettings({ connectorAllowFree: true, connectorAttachConnectors: true }) });
 placeCanvas = () => {
   const camera = session as unknown as { viewportPoint(point: { x: number; y: number }): { x: number; y: number } | undefined };
   const origin = camera.viewportPoint({ x: 0, y: 0 }), unit = camera.viewportPoint({ x: 1, y: 0 });

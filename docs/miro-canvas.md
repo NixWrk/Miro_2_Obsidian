@@ -623,8 +623,8 @@ geometry. Attaching connectors does not merge their styles.
 The Lines and arrows tool now stays active until another tool is selected. Its
 bottom row keeps route, color and thickness controls open. Select a connector to
 drag it or its endpoint handles, change its line/arrow style, copy, cut or delete.
-Desktop keyboard clipboard commands use the system clipboard, including physical
-C/X/V keys on non-Latin layouts. File nodes continue to share the original file.
+Copy, cut and paste use the clipboard events Obsidian raises itself (see the
+2026-09-23 clipboard notes below). File nodes continue to share the original file.
 Escape on the board resets tools and selection. `Miro Canvas: Reset tools and
 selection` has no default hotkey, so Escape in a card, a label or a field stays
 theirs; the command can be bound in Obsidian Settings → Hotkeys.
@@ -831,6 +831,22 @@ All three synthetic browser suites pass (default, `--interactions`,
 `--controls`). The synthetic host now has native Canvas's moving layer and
 live card positions; the default suite had been failing at the local tools
 rotation step because a press on that panel cleared the selection.
+
+Clipboard (2026-09-23): Ctrl+C, Ctrl+X and Ctrl+V are no longer intercepted.
+They reach the board as the clipboard events Obsidian raises for them in any
+keyboard layout, as do Cut, Copy and Paste in native Canvas's selection menu
+and in the plugin's menu for the board's own connectors. A copy writes
+`obsidian/canvas` (the graph, which native Canvas pastes by itself on any
+board, with the board's own connectors beside it), `obsidian/miro-canvas` (the
+plugin's record of every item) and `text/plain` (card texts, files as
+`[[links]]`, pages as addresses), so a paste into a note or another program is
+readable text rather than JSON. A paste of a graph lands centred under the
+pointer as one undo step; files, images, text and links are native Canvas's to
+paste. The plugin's replacement context menu is gone: native Canvas's menus
+stay. Shortcuts are recognised by the key pressed (Ctrl+С in a Russian layout is
+Ctrl+C, and the tool letters work in any layout), and a key with nothing selected
+is no longer refused as a text edit, which had disabled the tool letters and
+paste with an empty selection.
 
 | Requested feature | Evidence / remaining boundary |
 | --- | --- |

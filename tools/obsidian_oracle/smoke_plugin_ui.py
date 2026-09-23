@@ -744,11 +744,15 @@ def main() -> int:
                   const clipboard = new DataTransfer();
                   b.select('n1'); b.root.focus();
                   const initialCount=b.runtime.nodes.size;
+                  // Ctrl+C in any layout is the browser's: it raises the copy event itself.
                   const keyCopy=new KeyboardEvent('keydown',{code:'KeyC',key:'с',ctrlKey:true,bubbles:true,cancelable:true});
                   b.root.dispatchEvent(keyCopy);
-                  check(keyCopy.defaultPrevented,'Physical Ctrl+C was not handled');
-                  b.root.dispatchEvent(new KeyboardEvent('keydown',{code:'KeyV',key:'м',ctrlKey:true,bubbles:true,cancelable:true}));
-                  check(b.runtime.nodes.size===initialCount+1,'Physical Ctrl+V did not paste');
+                  check(!keyCopy.defaultPrevented,'Ctrl+C was taken from the browser');
+                  const own=new DataTransfer();
+                  b.root.dispatchEvent(new ClipboardEvent('copy',{clipboardData:own,bubbles:true,cancelable:true}));
+                  check(own.getData('text/plain')==='Canvas text with native DOM inheritance','Copy reads as its card text elsewhere: '+own.getData('text/plain'));
+                  b.root.dispatchEvent(new ClipboardEvent('paste',{clipboardData:own,bubbles:true,cancelable:true}));
+                  check(b.runtime.nodes.size===initialCount+1,'Paste of a copy added no card');
                   b.runtime.undo(); b.session.refresh();
                   b.select('n1', 'file');
                   b.node.nodeEl.tabIndex = 0;
@@ -756,9 +760,9 @@ def main() -> int:
                   const copy = new ClipboardEvent('copy', {clipboardData: clipboard, bubbles:true, cancelable:true});
                   b.node.nodeEl.dispatchEvent(copy);
                   check(copy.defaultPrevented, 'Copy from focused child was ignored');
-                  const payload = JSON.parse(clipboard.getData('text/plain'));
-                  check(payload.graph.nodes.length === 2, 'Selection not copied');
-                  check(payload.graph.edges.length === 1, 'Internal connector not copied');
+                  const payload = JSON.parse(clipboard.getData('obsidian/canvas'));
+                  check(payload.nodes.length === 2, 'Selection not copied');
+                  check(payload.edges.length === 1, 'Internal connector not copied');
                   const before = b.runtime.nodes.size;
                   b.root.focus();
                   const pasteAt={x:235,y:140}, screen=b.session.viewportPoint(pasteAt);
@@ -828,7 +832,7 @@ def main() -> int:
                   window.dispatchEvent(new PointerEvent('pointerup',{button:0,pointerId:25,bubbles:true}));
                   const connectorClipboard = new DataTransfer();
                   b.root.focus(); b.root.dispatchEvent(new ClipboardEvent('copy',{clipboardData:connectorClipboard,bubbles:true,cancelable:true}));
-                  check(JSON.parse(connectorClipboard.getData('text/plain')).graph.connectors.length === 1, 'Connector selection not copied');
+                  check(JSON.parse(connectorClipboard.getData('obsidian/canvas')).connectors.length === 1, 'Connector selection not copied');
                   b.root.dispatchEvent(new ClipboardEvent('paste',{clipboardData:connectorClipboard,bubbles:true,cancelable:true}));
                   check(Object.keys(b.runtime.getData().miroCanvas.connectors).length === 2, 'Connector paste failed: '+JSON.stringify(b.session.transientDiagnostics));
                   check(b.runtime.nodes.size === nodeCount, 'Connector paste created nodes');
@@ -876,8 +880,8 @@ def main() -> int:
                   window.dispatchEvent(new PointerEvent('pointerup',{pointerId:93,bubbles:true}));
                   const mixedCopy=new DataTransfer();
                   b.root.dispatchEvent(new ClipboardEvent('copy',{clipboardData:mixedCopy,bubbles:true,cancelable:true}));
-                  const mixed=JSON.parse(mixedCopy.getData('text/plain'));
-                  check(mixed.graph.nodes.length===1 && mixed.graph.connectors.length===1,'Shift selection did not copy nodes and connectors together');
+                  const mixed=JSON.parse(mixedCopy.getData('obsidian/canvas'));
+                  check(mixed.nodes.length===1 && mixed.connectors.length===1,'Shift selection did not copy nodes and connectors together');
                   const beforeMixedPaste=b.runtime.getData();
                   b.root.dispatchEvent(new ClipboardEvent('paste',{clipboardData:mixedCopy,bubbles:true,cancelable:true}));
                   check(b.runtime.nodes.size===beforeMixedPaste.nodes.length+1,'Mixed paste lost its node');
@@ -940,7 +944,7 @@ def main() -> int:
                   check(JSON.stringify(b.runtime.getData())===JSON.stringify(beforeDelete),'Mixed delete undo lost graph data');
                   b.session.resetTools(); b.select('n1'); b.session.connectorLayer.select(['live-bound']); b.root.focus();
                   const boundCopy=new DataTransfer();b.root.dispatchEvent(new ClipboardEvent('copy',{clipboardData:boundCopy,bubbles:true,cancelable:true}));
-                  const boundPayload=JSON.parse(boundCopy.getData('text/plain')).graph.connectors[0];
+                  const boundPayload=JSON.parse(boundCopy.getData('obsidian/canvas')).connectors[0];
                   check(boundPayload.from.type==='node'&&boundPayload.from.nodeId==='n1'&&boundPayload.to.type==='free','Mixed copy did not detach an external anchor');
                   b.session.resetTools();
                   b.session.penPoints=[{x:-500,y:-500},{x:2500,y:-500},{x:2500,y:2500},{x:-500,y:2500}];

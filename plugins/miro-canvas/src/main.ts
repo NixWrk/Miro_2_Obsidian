@@ -301,19 +301,13 @@ export default class MiroCanvasPlugin extends Plugin {
       onStateChange: () => this.updateStatus(true),
       setIcon: (element, icon) => setIcon(element, icon),
       onOpenSettings: () => this.openOwnSettings(),
-      desktopClipboard: (() => {
-        try {
-          const clipboard = typeof require === "function" ? require("electron").clipboard : undefined;
-          return clipboard ? { readText: () => clipboard.readText() as string, writeText: (text:string) => clipboard.writeText(text) as void } : undefined;
-        } catch { return undefined; }
-      })(),
-      onClipboardMenu: (event, run, nativeMenu) => {
+      onConnectorMenu: (event, run) => {
+        // The clipboard and danger sections of native Canvas's selection menu.
         const menu = new Menu();
-        for (const [action, title, icon] of [["copy", "Copy", "copy"], ["cut", "Cut", "scissors"], ["paste", "Paste", "clipboard-paste"]] as const) {
-          menu.addItem(item => item.setTitle(title).setIcon(icon).onClick(() => run(action)));
+        for (const [action, title, icon] of [["cut", "Cut", "lucide-scissors"], ["copy", "Copy", "lucide-copy"], ["paste", "Paste", "lucide-clipboard-check"]] as const) {
+          menu.addItem((item) => item.setTitle(title).setIcon(icon).setSection("clipboard").onClick(() => run(action)));
         }
-        menu.addSeparator();
-        menu.addItem(item => item.setTitle("More Canvas actions").setIcon("ellipsis").onClick(nativeMenu));
+        menu.addItem((item) => item.setTitle("Delete").setIcon("lucide-trash-2").setSection("danger").onClick(() => run("delete")));
         menu.showAtMouseEvent(event);
       },
       onOpenCommentThread: (threadId, origin) => {

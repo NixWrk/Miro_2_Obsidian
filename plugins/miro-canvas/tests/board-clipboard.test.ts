@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { linkedFilePaths, planPaste, readCanvasClipboard, readClipboardRecord } from "../src/board-clipboard";
+import { clipboardText, linkedFilePaths, planPaste, readCanvasClipboard, readClipboardRecord } from "../src/board-clipboard";
 
 const CANVAS = {
   nodes: [
@@ -70,5 +70,19 @@ describe("files a clipboard names", () => {
     expect(linkedFilePaths({ text: "obsidian://open?vault=V&file=Notes%2FPlan.md" })).toEqual(["Notes/Plan.md"]);
     expect(linkedFilePaths({ text: "just words" })).toEqual([]);
     expect(linkedFilePaths({ text: "[[a]]\n[[b]]" })).toEqual([]);
+  });
+});
+
+describe("what a copy reads as outside a board", () => {
+  it("gives each card's text, files as links and pages as addresses, top down", () => {
+    const text = clipboardText([
+      { id: "b", type: "text", text: "Second", x: 0, y: 200 },
+      { id: "l", type: "link", url: "https://example.com", x: 300, y: 0 },
+      { id: "a", type: "text", text: "First", x: 0, y: 0 },
+      { id: "f", type: "file", file: "Notes/Plan.md", subpath: "#Goals", x: 0, y: 400 },
+      { id: "g", type: "group", label: "Frame", x: -50, y: -50 },
+      { id: "e", type: "text", text: "  ", x: 0, y: 500 },
+    ]);
+    expect(text).toBe("Frame\n\nFirst\n\nhttps://example.com\n\nSecond\n\n[[Notes/Plan.md#Goals]]");
   });
 });

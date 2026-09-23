@@ -136,12 +136,11 @@ import { shapeOutline } from "./shape-geometry";
 import { FRAME_COLORS, MIRO_STICKY_COLORS, readableInk } from "./miro-palette";
 import { highlightText, isHtmlText, markSelection, unhighlightText } from "./text-highlight";
 import {
-	CANVAS_CLIPBOARD_TYPE, CLIPBOARD_TYPE, linkedFilePaths, planPaste, readCanvasClipboard, readClipboardRecord,
+	CANVAS_CLIPBOARD_TYPE, CLIPBOARD_TYPE, clipboardText, linkedFilePaths, planPaste, readCanvasClipboard, readClipboardRecord,
 	type ClipboardItem,
 } from "./board-clipboard";
 
 export interface M1SessionOptions {
-	readonly desktopClipboard?: { readText():string; writeText(text:string):void };
 	readonly document?: Document;
 	readonly panelHost?: HTMLElement;
 	readonly onNotice?: (message: string) => void;
@@ -155,7 +154,11 @@ export interface M1SessionOptions {
 	/** Opens this plugin's page in Obsidian's settings, from the board menu. */
 	readonly onOpenSettings?: () => void;
 	readonly onOpenCommentThread?: (threadId: string, origin: CommentOrigin) => void;
-	readonly onClipboardMenu?: (event: MouseEvent, run: (action: "copy" | "cut" | "paste") => void, nativeMenu: () => void) => void;
+	/**
+	 * Shows a menu for the board's own connectors, which native Canvas has no
+	 * menu for: the same cut, copy, paste and delete its selection menu has.
+	 */
+	readonly onConnectorMenu?: (event: MouseEvent, run: (action: "cut" | "copy" | "paste" | "delete") => void) => void;
 }
 
 export type M1SessionStatus = "ready" | "unavailable" | "incompatible";
@@ -669,7 +672,6 @@ export class M1CanvasSession {
 	private connectorWidth = 2;
 	private ordinaryConnectorWidth = 2;
 	private blockConnectorWidth = 16;
-	private clipboardCommand?: (action: "copy" | "cut" | "paste") => boolean;
 	private liveGeometryDirty = false;
 	/** Whether a press is held on the board: native Canvas moves cards then before it saves them. */
 	private pointerHeld = false;
@@ -3406,7 +3408,9 @@ export class M1CanvasSession {
 			event.preventDefault();
 			return;
 		}
-		const tool = event.shiftKey ? undefined : QUICK_TOOL_KEYS.get(event.key.toUpperCase());
+		// A tool's letter is the key pressed, whatever the layout.
+		const letter = /^Key([A-Z])$/u.exec(event.code ?? "")?.[1] ?? event.key.toUpperCase();
+		const tool = event.shiftKey ? undefined : QUICK_TOOL_KEYS.get(letter);
 		if (tool === undefined) return;
 		this.armTool(tool);
 		event.preventDefault();
@@ -5042,6 +5046,20 @@ export class M1CanvasSession {
 	 * Files copied in the file explorer, or named by a link, are pasted as
 	 * nodes pointing at them.  Anything else is left to native Canvas.
 	 */
+	/**
+	 * Copy, cut and paste go through the clipboard events Obsidian itself
+	 * raises - for Ctrl+C, X and V in any keyboard layout and for the Cut,
+	 * Copy and Paste of native Canvas's menus - so the system clipboard holds
+	 * what native Canvas puts there, and more:
+	 *
+	 * - `obsidian/canvas`: the copied graph, which native Canvas pastes by
+	 *   itself on any board, with the board's own connectors beside it;
+	 * - `obsidian/miro-canvas`: the plugin's record of every item copied;
+	 * - `text/plain`: what the copy reads as in a note or another program.
+	 *
+	 * A paste of a graph lands under the pointer; anything else - files,
+	 * images, text, links - is native Canvas's to paste.
+	 */
 	private attachClipboard(): void {
 		const root = this.root;
 		const document = root?.ownerDocument;
@@ -5051,90 +5069,33 @@ export class M1CanvasSession {
 			return active !== null && (active === root || root.contains?.(active) === true || active === document.body && root.closest?.(".workspace-leaf.mod-active") !== null)
 				&& active.closest?.("input, textarea, [contenteditable=true], .cm-editor") == null;
 		};
-		// A clipboard command through the desktop clipboard where there is one,
-		// which the page's own clipboard events cannot reach.
-		const execute = (action: "copy" | "cut" | "paste"): boolean => {
-			const bridge = this.options.desktopClipboard;
-			if (bridge === undefined) return document.execCommand?.(action) ?? false;
-			try {
-				const data = new DataTransfer();
-				if (action === "paste") data.setData("text/plain", bridge.readText());
-				const event = new ClipboardEvent(action === "cut" ? "copy" : action, { clipboardData: data, bubbles: true, cancelable: true });
-				root.dispatchEvent(event);
-				if (!event.defaultPrevented) return false;
-				if (action !== "paste") bridge.writeText(data.getData("text/plain"));
-				// Cut only after the OS clipboard has accepted the complete payload.
-				if (action === "cut") root.dispatchEvent(new ClipboardEvent("cut", { clipboardData: data, bubbles: true, cancelable: true }));
-				return true;
-			} catch {
-				this.options.onNotice?.("System clipboard was unavailable; the selection was not cut.");
-				return false;
-			}
-		};
-		this.clipboardCommand = execute;
 		const copy = (event: Event): void => {
 			if (!onBoard()) return;
 			const data = readRuntime(event, "clipboardData") as DataTransfer | undefined;
 			const record = this.clipboardRecord();
-			if (data === undefined || record === undefined) return;
+			if (data === undefined || data === null || record === undefined) return;
 			if (event.type === "cut" && !this.editAllowed("delete", this.selectedIds)) {
 				event.preventDefault();
 				event.stopImmediatePropagation();
 				return;
 			}
-			const ids = new Set(this.selectedIds);
-			const nodes = (readRuntime(this.currentRawDocument, "nodes") as Record<string, unknown>[] ?? []).filter(node => ids.has(node.id as string));
-			const edges = (readRuntime(this.currentRawDocument, "edges") as Record<string, unknown>[] ?? []).filter((edge) =>
-				ids.has(edge.id as string) || (ids.has(edge.fromNode as string) && ids.has(edge.toNode as string)));
-			// The board's own connectors selected, or held at both ends by cards copied.
-			const all = boardConnectors(this.currentRawDocument), geometry = this.landingGeometry().geometry;
-			const heldByCopied = (anchor: CanvasAnchor): boolean => (anchor.type === "node" || anchor.type === "image") && ids.has(anchor.nodeId);
-			const included = new Set(all.filter((connector) => ids.has(connector.id) || (heldByCopied(connector.from) && heldByCopied(connector.to)))
-				.map((connector) => connector.id));
-			// An end held by something not copied is let go where it is.
-			const connectors = all.filter((connector) => included.has(connector.id)).map((connector) => {
-				const end = (anchor: CanvasAnchor, point: { x: number; y: number } | undefined): CanvasAnchor => {
-					const kept = heldByCopied(anchor)
-						|| (anchor.type === "edge" && (included.has(anchor.edgeId) || edges.some((edge) => edge.id === anchor.edgeId)));
-					return kept || point === undefined ? anchor : { type: "free", x: point.x, y: point.y };
-				};
-				const route = geometry.edges?.[connector.id];
-				return { ...connector, from: end(connector.from, route?.start), to: end(connector.to, route?.end) };
-			});
-			// The copy's centre, so a paste lands centred under the pointer.
-			const points: { x: number; y: number }[] = [];
-			for (const node of nodes) {
-				const { x, y, width, height } = node;
-				if (![x, y, width, height].every((value) => typeof value === "number" && Number.isFinite(value))) continue;
-				points.push({ x: x as number, y: y as number }, { x: (x as number) + (width as number), y: (y as number) + (height as number) });
-			}
-			for (const connector of connectors) points.push(...(geometry.edges?.[connector.id]?.points ?? []));
-			let left = Infinity, top = Infinity, right = -Infinity, bottom = -Infinity;
-			for (const point of points) {
-				left = Math.min(left, point.x);
-				right = Math.max(right, point.x);
-				top = Math.min(top, point.y);
-				bottom = Math.max(bottom, point.y);
-			}
-			const center = points.length === 0 ? undefined : { x: (left + right) / 2, y: (top + bottom) / 2 };
-			const graph = { nodes, edges, ...(connectors.length > 0 ? { connectors } : {}), ...(center === undefined ? {} : { center }) };
+			const graph = this.clipboardGraph();
 			try {
-				data.setData(CLIPBOARD_TYPE, JSON.stringify(record));
 				data.setData(CANVAS_CLIPBOARD_TYPE, JSON.stringify(graph));
-				data.setData("text/plain", JSON.stringify({ miroCanvasClipboard: 1, graph, record }));
+				data.setData(CLIPBOARD_TYPE, JSON.stringify(record));
+				const text = clipboardText(graph.nodes);
+				if (text !== "") data.setData("text/plain", text);
 			} catch {
 				return; // A failed copy must never delete the selection.
 			}
 			event.preventDefault();
 			event.stopImmediatePropagation();
-			if (event.type === "cut") {
-				this.deleteBoardSelection();
-			}
+			if (event.type === "cut") this.deleteBoardSelection();
 		};
 		const paste = (event: Event): void => {
 			if (!onBoard() || event.defaultPrevented) return;
 			const data = readRuntime(event, "clipboardData") as DataTransfer | undefined;
-			if (data === undefined || !this.editAllowed("paste", [])) return;
+			if (data === undefined || data === null || !this.editAllowed("paste", [])) return;
 			const read = (type: string): string => {
 				try {
 					return data.getData(type);
@@ -5142,12 +5103,7 @@ export class M1CanvasSession {
 					return "";
 				}
 			};
-			let graphText = read(CANVAS_CLIPBOARD_TYPE), recordText = read(CLIPBOARD_TYPE);
-			try {
-				const text = JSON.parse(read("text/plain"));
-				if (text?.miroCanvasClipboard === 1) { graphText ||= JSON.stringify(text.graph); recordText ||= JSON.stringify(text.record); }
-			} catch { /* Ordinary text belongs to native Canvas. */ }
-			const handled = this.pasteCopy(graphText, recordText)
+			const handled = this.pasteCopy(read(CANVAS_CLIPBOARD_TYPE), read(CLIPBOARD_TYPE))
 				|| this.pasteLinkedFiles(read("obsidian/files"), read("text/plain"));
 			if (!handled) return;
 			event.preventDefault();
@@ -5168,13 +5124,7 @@ export class M1CanvasSession {
 			if (!event.ctrlKey && !event.metaKey && !event.altKey && this.connectorKey(event)) {
 				event.preventDefault();
 				event.stopImmediatePropagation();
-				return;
 			}
-			if (!(event.ctrlKey || event.metaKey) || event.altKey || event.shiftKey) return;
-			const command = ({ KeyC: "copy", KeyX: "cut", KeyV: "paste" } as Record<string, "copy"|"cut"|"paste">)[event.code];
-			if (command === undefined) return;
-			// Capture before Obsidian's hotkey scope; physical codes also work in Russian layouts.
-			if (execute(command)) { event.preventDefault(); event.stopImmediatePropagation(); }
 		};
 		const context = (event: MouseEvent): void => {
 			// A right button bound to a lasso, a pan or a line opens no menu.
@@ -5188,16 +5138,18 @@ export class M1CanvasSession {
 				event.stopImmediatePropagation();
 				return;
 			}
-			if (this.options.onClipboardMenu === undefined || this.inControls(event)
-				|| this.closestTarget(event, "input, textarea, [contenteditable=true], .cm-editor")) return;
-			this.readInteractionState();
-			if (this.selectedIds.length === 0) return;
+			// Native Canvas has a menu for its cards and edges; the board's own
+			// connectors, which it knows nothing of, get the same actions here.
+			if (this.options.onConnectorMenu === undefined || !this.closestTarget(event, ".miro-board-connector, .miro-canvas-connector-labels")) return;
+			const id = this.connectorAt(event) ?? (eventTarget(event) as Element | null)?.closest?.("[data-connector-id]")?.getAttribute("data-connector-id") ?? undefined;
+			if (id === undefined || !boardConnectors(this.currentRawDocument).some((connector) => connector.id === id)) return;
 			event.preventDefault();
 			event.stopImmediatePropagation();
-			this.options.onClipboardMenu(event, action => {
-				root.focus();
-				if (!execute(action)) this.options.onNotice?.("Clipboard action was unavailable. Focus the canvas and use Ctrl+C, Ctrl+X or Ctrl+V.");
-			}, () => { this.callNative("onSelectionContextMenu", [event]); });
+			if (!(this.connectorLayer?.selection() ?? []).includes(id)) this.selectConnectors([id]);
+			this.options.onConnectorMenu(event, (action) => {
+				if (action === "delete") this.deleteBoardSelection();
+				else this.clipboardCommand(action);
+			});
 		};
 		const keyTarget = document.defaultView ?? document;
 		keyTarget.addEventListener("keydown", key as EventListener, true);
@@ -5216,6 +5168,76 @@ export class M1CanvasSession {
 			root.removeEventListener("pointermove", track);
 			root.removeEventListener("pointerdown", track, true);
 		});
+	}
+
+	/**
+	 * Copy, cut or paste as the Edit menu does, raising the clipboard events
+	 * the handlers above serve: through the window's own editing commands in
+	 * the desktop app, else through the document.
+	 */
+	private clipboardCommand(action: "copy" | "cut" | "paste"): void {
+		this.root?.focus({ preventScroll: true });
+		const view = ownerDocument(this.root)?.defaultView;
+		const contents = readRuntime(readRuntime(readRuntime(view, "electron"), "remote"), "getCurrentWebContents");
+		try {
+			const webContents = typeof contents === "function" ? Reflect.apply(contents, undefined, []) as unknown : undefined;
+			const run = readRuntime(webContents, action);
+			if (typeof run === "function") {
+				Reflect.apply(run, webContents, []);
+				return;
+			}
+		} catch {
+			// Fall back on the document's command below.
+		}
+		if (ownerDocument(this.root)?.execCommand?.(action) !== true) {
+			this.options.onNotice?.("The clipboard is unavailable here. Focus the board and use Ctrl+C, Ctrl+X or Ctrl+V.");
+		}
+	}
+
+	/**
+	 * The selection as native Canvas copies it - its cards, the edges between
+	 * them and its own edges - with the board's own connectors selected or
+	 * held at both ends by cards copied, and the centre a paste is laid out
+	 * around.
+	 */
+	private clipboardGraph(): { nodes: Record<string, unknown>[]; edges: Record<string, unknown>[]; connectors?: BoardConnector[]; center?: { x: number; y: number } } {
+		const ids = new Set(this.selectedIds);
+		const nodes = (readRuntime(this.currentRawDocument, "nodes") as Record<string, unknown>[] ?? []).filter((node) => ids.has(node.id as string));
+		const edges = (readRuntime(this.currentRawDocument, "edges") as Record<string, unknown>[] ?? []).filter((edge) =>
+			ids.has(edge.id as string) || (ids.has(edge.fromNode as string) && ids.has(edge.toNode as string)));
+		const all = boardConnectors(this.currentRawDocument), geometry = this.landingGeometry().geometry;
+		const heldByCopied = (anchor: CanvasAnchor): boolean => (anchor.type === "node" || anchor.type === "image") && ids.has(anchor.nodeId);
+		const included = new Set(all.filter((connector) => ids.has(connector.id) || (heldByCopied(connector.from) && heldByCopied(connector.to)))
+			.map((connector) => connector.id));
+		// An end held by something not copied is let go where it is.
+		const connectors = all.filter((connector) => included.has(connector.id)).map((connector) => {
+			const end = (anchor: CanvasAnchor, point: { x: number; y: number } | undefined): CanvasAnchor => {
+				const kept = heldByCopied(anchor)
+					|| (anchor.type === "edge" && (included.has(anchor.edgeId) || edges.some((edge) => edge.id === anchor.edgeId)));
+				return kept || point === undefined ? anchor : { type: "free", x: point.x, y: point.y };
+			};
+			const route = geometry.edges?.[connector.id];
+			return { ...connector, from: end(connector.from, route?.start), to: end(connector.to, route?.end) };
+		});
+		const points: { x: number; y: number }[] = [];
+		for (const node of nodes) {
+			const { x, y, width, height } = node;
+			if (![x, y, width, height].every((value) => typeof value === "number" && Number.isFinite(value))) continue;
+			points.push({ x: x as number, y: y as number }, { x: (x as number) + (width as number), y: (y as number) + (height as number) });
+		}
+		for (const connector of connectors) points.push(...(geometry.edges?.[connector.id]?.points ?? []));
+		let left = Infinity, top = Infinity, right = -Infinity, bottom = -Infinity;
+		for (const point of points) {
+			left = Math.min(left, point.x);
+			right = Math.max(right, point.x);
+			top = Math.min(top, point.y);
+			bottom = Math.max(bottom, point.y);
+		}
+		return {
+			nodes, edges,
+			...(connectors.length > 0 ? { connectors } : {}),
+			...(points.length === 0 ? {} : { center: { x: (left + right) / 2, y: (top + bottom) / 2 } }),
+		};
 	}
 
 	/**
@@ -5287,7 +5309,7 @@ export class M1CanvasSession {
 	private pasteCopy(canvasText: string, recordText: string): boolean {
 		const canvas = readCanvasClipboard(canvasText);
 		const record = readClipboardRecord(recordText);
-		if (canvas === undefined || record === undefined || canvas.nodes.length === 0 && !canvas.connectors?.length) return false;
+		if (canvas === undefined || (canvas.nodes.length === 0 && !canvas.connectors?.length)) return false;
 		const target = this.pastePoint();
 		const centre = canvas.center;
 		const offset = target === undefined || centre === undefined ? { x: 40, y: 40 } : { x: target.x - centre.x, y: target.y - centre.y };
@@ -5297,12 +5319,14 @@ export class M1CanvasSession {
 			offset,
 			newId: newCanvasId,
 			// A Miro item is shown again only on the board that has it.
-			sourceExists: (sourceId) => record.board === board && sources.has(sourceId),
+			sourceExists: (sourceId) => record !== undefined && record.board === board && sources.has(sourceId),
 		});
 		this.readInteractionState();
 		this.authoring ??= createCanvasAuthoring(this.view);
 		const result = this.authoring.insertGraph(plan);
 		if (!result.ok) {
+			// A graph copied elsewhere that this board cannot take whole is native Canvas's to paste.
+			if (record === undefined && !canvas.connectors?.length) return false;
 			this.addDiagnostic(firstProblem(result.diagnostics) ?? "Canvas rejected the paste.");
 			this.refresh();
 			return true;
@@ -5310,7 +5334,7 @@ export class M1CanvasSession {
 		this.refresh();
 		const pasted = new Set(plan.nodes.map((node) => node.id as string));
 		this.callNative("deselectAll");
-		this.connectorLayer?.select(plan.connectors?.map(c=>c.id) ?? []);
+		this.connectorLayer?.select(plan.connectors?.map((connector) => connector.id) ?? []);
 		for (const node of this.adapter.getNodes() ?? []) {
 			const id = readCanvasElementId(node);
 			if (id !== undefined && pasted.has(id)) this.callNative("select", [node]);
@@ -6641,38 +6665,30 @@ export class M1CanvasSession {
 				this.spacePanHeld = true;
 				return;
 			}
-			const modified = keyboard.ctrlKey || keyboard.metaKey;
-			const lowerKey = typeof key === "string" ? key.toLowerCase() : "";
-			// Preserve native history, search, and selection shortcuts.  They are
-			// read/navigation actions even while review/lock policy is active.
-			if (modified && ["z", "y", "f", "a", "s"].includes(lowerKey)) {
+			if (keyboard.ctrlKey || keyboard.metaKey) {
+				// A chord is a shortcut, never text, and is known by the key pressed
+				// whatever the layout: Ctrl+С on a Russian keyboard is Ctrl+C.
+				const letter = /^Key([A-Z])$/u.exec(keyboard.code ?? "")?.[1]?.toLowerCase()
+					?? (typeof key === "string" ? key.toLowerCase() : "");
+				const operation = ({ v: "paste", x: "delete", d: "duplicate" } as Record<string, string>)[letter];
+				// History, search, copy and select-all stay available in review mode.
+				if (operation !== undefined) this.blockIfNeeded(event, operation, this.eventIds(event));
 				return;
 			}
-			if (modified && lowerKey === "c") {
-				return; // Copy remains available in review mode.
-			}
-			if (modified && lowerKey === "v") {
-				this.blockIfNeeded(event, "paste", this.eventIds(event));
-				return;
-			}
-			if (modified && lowerKey === "x") {
-				this.blockIfNeeded(event, "delete", this.eventIds(event));
-				return;
-			}
-			if (modified && lowerKey === "d") {
-				this.blockIfNeeded(event, "duplicate", this.eventIds(event));
-				return;
-			}
+			// With nothing selected or under the key, a key edits nothing: the
+			// tools' letters and the arrows' panning are the board's.
+			const ids = this.eventIds(event);
+			if (ids.length === 0) return;
 			if (key === "Delete" || key === "Backspace") {
-				this.blockIfNeeded(event, "delete", this.eventIds(event));
+				this.blockIfNeeded(event, "delete", ids);
 				return;
 			}
 			if (["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(key)) {
-				this.blockIfNeeded(event, "move", this.eventIds(event));
+				this.blockIfNeeded(event, "move", ids);
 				return;
 			}
 			if (key === "Enter" || (typeof key === "string" && keyIsPrintable(key))) {
-				this.blockIfNeeded(event, "edit-text", this.eventIds(event));
+				this.blockIfNeeded(event, "edit-text", ids);
 			}
 		});
 		listen("keyup", (event) => {

@@ -175,3 +175,22 @@ export function linkedFilePaths(data: { readonly files?: string; readonly text?:
   }
   return [];
 }
+
+/**
+ * What a copy of board items reads as outside a board - in a note or another
+ * program: each card's text, a file as a link to it, a web page as its
+ * address, a group as its name, from the top down and left to right.
+ */
+export function clipboardText(nodes: readonly Record_[]): string {
+  const at = (value: unknown): number => (typeof value === "number" && Number.isFinite(value) ? value : 0);
+  return [...nodes]
+    .sort((a, b) => at(a.y) - at(b.y) || at(a.x) - at(b.x))
+    .flatMap((node): string[] => {
+      if (node.type === "text" && typeof node.text === "string") return node.text.trim() === "" ? [] : [node.text];
+      if (node.type === "file" && typeof node.file === "string") return [`[[${node.file}${typeof node.subpath === "string" ? node.subpath : ""}]]`];
+      if (node.type === "link" && typeof node.url === "string") return [node.url];
+      if (node.type === "group" && typeof node.label === "string" && node.label !== "") return [node.label];
+      return [];
+    })
+    .join("\n\n");
+}
