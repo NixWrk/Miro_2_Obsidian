@@ -588,6 +588,13 @@ and covered by automated tests.
 
 ### Future: product tasks (set 2026-09-23)
 
+The agreed order of this work - finish PDF/PPTX export; foundations (schema,
+translations, agent skill); the converter as a product of its own; delivery and
+the Miro import guide; onboarding board and visual guide; testing with people;
+ecosystem - is recorded in the [ROADMAP](../ROADMAP.md) plan. The exporter stays
+in Python and is offered as a per-OS build or set up by an agent through a
+miro2obsidian skill or MCP server; the plugin never installs it by itself.
+
 - Choose the settings and interface language automatically from Obsidian's own
   language, falling back to English; ship English and Russian first.
 - Offer an optional onboarding board on first setup (and from settings) that
@@ -598,9 +605,9 @@ and covered by automated tests.
   deck and marked board areas as pages.
 - Move the plugin into its own repository tied to miro2obsidian by a shared
   schema and fixtures; offer a guided, illustrated Miro import from first setup
-  and from settings, fetching the exporter on demand and removing it afterwards
-  if the user wishes; walk the full user journey on a clean machine
-  (see [ROADMAP](../ROADMAP.md), including the open delivery decision).
+  and from settings, offering the exporter for download or an agent to set it
+  up, and letting the user remove it afterwards; walk the full user journey on a
+  clean machine (see [ROADMAP](../ROADMAP.md)).
 - Provide a skill or an MCP server so agents can work with miro-canvas boards as
   natively as with Canvas files.
 - Tune settings and layouts for other operating systems, phones and tablets

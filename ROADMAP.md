@@ -53,6 +53,41 @@ provenance. Release hardening must cover Windows, macOS, and Linux or
 representative VMs; multiple viewport sizes and pixel ratios; and mouse,
 trackpad, pen tablet/stylus, touch-screen, and phone/tablet interaction.
 
+## Plan (agreed 2026-09-23)
+
+The work below is done in this order; each phase builds on the ones before it.
+
+0. **Finish what is started.** PDF/PPTX export of boards (draft on branch
+   `wip/board-export`).
+1. **Foundations.** A formal, versioned schema of `miroSource` and
+   `miroCanvas` with compatibility fixtures; the plugin's translation system
+   with English and Russian, its language taken from Obsidian's own; a light
+   agent skill that describes the format and validates boards against the
+   schema.
+2. **The converter as a product of its own.** Attachment deduplication by
+   SHA-256; export to raw JSON, native Canvas, Advanced Canvas and miro-canvas;
+   a simple GUI; Python builds for Windows, then macOS and Linux.
+3. **Delivery and the import guide.** The plugin in its own repository tied to
+   miro2obsidian by the schema and fixtures; the first-setup question "Import
+   from Miro?" with an illustrated step-by-step guide and a settings button to
+   repeat it.
+4. **Getting to know the plugin.** An optional onboarding board, then a visual
+   guide to features and setup order in both languages, illustrated from that
+   board.
+5. **Testing with people.** The full user journey on a clean Windows machine and
+   fixes; then other operating systems, phones and tablets.
+6. **Ecosystem.** An MCP server beside the skill; import from other plugins'
+   formats; faster card dragging on very large boards; the remaining small
+   limitations.
+
+**Exporter delivery (decided 2026-09-23).** The exporter stays in Python. The
+plugin does not install it by itself - the Obsidian Community directory forbids
+plugins that install or update themselves or their dependencies - but either
+offers the user a ready build for their operating system to download, or
+hands the setup to an agent through a skill or MCP server for miro2obsidian
+that walks the user through the Miro app, export and conversion. The exporter
+can be removed afterwards; the settings button repeats the flow.
+
 ## Future (set 2026-09-23)
 
 ### Converter and plugin as two products
@@ -71,14 +106,13 @@ trackpad, pen tablet/stylus, touch-screen, and phone/tablet interaction.
   what the vault already has.
 - [ ] Plugin onboarding for Miro imports: a plugin-only user needs none of the
   Miro export code, so on first setup the plugin asks whether to import from
-  Miro; if so the exporter is fetched on demand, set up automatically, guides
-  the user through every step with a clear, illustrated guide, and is removed
-  afterwards if the user wishes. A button in the plugin settings repeats the
-  flow whenever needed. Open decision: the Obsidian Community directory forbids
-  plugins that "install or update themselves or their dependencies", so the
-  delivery must be chosen to stay listed (a separate importer plugin installed
-  through Obsidian itself, a companion app the user confirms, or distribution
-  outside the directory).
+  Miro; if so it offers the Python exporter build for the user's operating
+  system, or an agent set up through the miro2obsidian skill or MCP server, and
+  guides every step with a clear, illustrated guide. The exporter can be
+  removed afterwards; a button in the plugin settings repeats the flow.
+- [ ] Python builds of the exporter for Windows, macOS and Linux.
+- [ ] A skill or MCP server for miro2obsidian itself, so an agent can set up the
+  Miro app, run the export and conversion, and fix problems with the user.
 - [ ] Walk the full user journey on a clean machine - install, first setup,
   Miro app, export, conversion, opening and editing the board - and fix every
   problem found.
