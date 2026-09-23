@@ -289,12 +289,21 @@ function endpointDocument(): CanvasDocument {
 	};
 }
 
+/**
+ * A frame (never moved), four cards back to front - a, b, c, d - where a
+ * overlaps b, b overlaps c, and d overlaps nothing, plus an edge and an
+ * independent connector, neither of which has a layer.  miroCanvas.zOrder
+ * tracks a, b (through its source-ID alias) and c, but not d, so the tests
+ * can see an untracked card left alone in the metadata.
+ */
 function layerDocument(): CanvasDocument {
 	return {
 		nodes: [
-			{ id: "a", type: "text", x: 0, y: 0, width: 100, height: 80, text: "A", futureNode: { keep: "a" } },
-			{ id: "b", type: "text", x: 200, y: 0, width: 100, height: 80, text: "B", futureNode: { keep: "b" } },
-			{ id: "c", type: "text", x: 400, y: 0, width: 100, height: 80, text: "C" },
+			{ id: "frame1", type: "group", x: -50, y: -50, width: 700, height: 300, label: "Frame" },
+			{ id: "a", type: "text", x: 0, y: 0, width: 150, height: 80, text: "A", futureNode: { keep: "a" } },
+			{ id: "b", type: "text", x: 100, y: 0, width: 150, height: 80, text: "B", futureNode: { keep: "b" } },
+			{ id: "c", type: "text", x: 200, y: 0, width: 150, height: 80, text: "C" },
+			{ id: "d", type: "text", x: 500, y: 0, width: 80, height: 80, text: "D" },
 		],
 		edges: [{ id: "e1", fromNode: "a", toNode: "b", futureEdge: { keep: true } }],
 		miroSource: { board: "source", zOrder: ["source-a", "source-b"], nested: { keep: true } },
@@ -305,7 +314,13 @@ function layerDocument(): CanvasDocument {
 				a: { sourceId: "source-a", role: "item" },
 				b: { sourceId: "source-b", role: "item" },
 			},
-			zOrder: ["a", "b", "c", "e1"],
+			connectors: {
+				conn1: {
+					id: "conn1", from: { type: "free", x: 10, y: 500 }, to: { type: "free", x: 100, y: 500 },
+					route: "straight", color: "#123456", width: 2, startCap: "none", endCap: "arrow",
+				},
+			},
+			zOrder: ["frame1", "a", "source-b", "c", "e1"],
 			localOverrides: {
 				b: { futureOverrideField: { keep: true } },
 			},
@@ -640,27 +655,38 @@ describe("CanvasAuthoring", () => {
 		expect(runtime.history).toHaveLength(1);
 	});
 
-	it("supports every z-order direction and treats front/back bounds as noops", () => {
-		const cases: Array<[ChangeZOrderInput, string[]]> = [
-			[{ id: "b", direction: "front" }, ["a", "c", "e1", "b"]],
-			[{ id: "b", direction: "back" }, ["b", "a", "c", "e1"]],
-			[{ id: "b", direction: "forward" }, ["a", "c", "b", "e1"]],
-			[{ id: "b", direction: "backward" }, ["b", "a", "c", "e1"]],
+	it("reorders only the selected card among the card slots for every direction, rewriting its zOrder token in place", () => {
+		// frame1 never moves; e1 and conn1 have no layer at all; a/b/c overlap
+		// in a chain (a-b, b-c) and d overlaps nothing.
+		const cases: Array<[ChangeZOrderInput, readonly string[], readonly string[]]> = [
+			[{ ids: ["b"], direction: "front" }, ["frame1", "a", "c", "d", "b"], ["frame1", "a", "c", "source-b", "e1"]],
+			[{ ids: ["c"], direction: "back" }, ["frame1", "c", "a", "b", "d"], ["frame1", "c", "a", "source-b", "e1"]],
+			[{ ids: ["a"], direction: "forward" }, ["frame1", "b", "a", "c", "d"], ["frame1", "source-b", "a", "c", "e1"]],
+			[{ ids: ["c"], direction: "backward" }, ["frame1", "a", "c", "b", "d"], ["frame1", "a", "c", "source-b", "e1"]],
 		];
-		for (const [input, expected] of cases) {
-			const runtime = new NativeGraph(layerDocument());
+		for (const [input, expectedNodeOrder, expectedZOrder] of cases) {
+			const initial = layerDocument();
+			const runtime = new NativeGraph(initial);
 			const result = createCanvasAuthoring(runtime).changeZOrder(input);
 			expect(result.ok).toBe(true);
-			expect((runtime.getData().miroCanvas as CanvasDocument).zOrder).toEqual(expected);
+			const applied = runtime.getData() as CanvasDocument;
+			expect((applied.nodes as CanvasDocument[]).map((node) => node.id)).toEqual(expectedNodeOrder);
+			expect((applied.miroCanvas as CanvasDocument).zOrder).toEqual(expectedZOrder);
+			expect(applied.edges).toEqual(initial.edges);
+			expect((applied.miroCanvas as CanvasDocument).connectors).toEqual((initial.miroCanvas as CanvasDocument).connectors);
+			expect(applied.miroSource).toEqual(initial.miroSource);
 			expect(runtime.requestSaveSpy).toHaveBeenCalledTimes(1);
 			expect(runtime.history).toHaveLength(2);
 		}
+	});
 
+	it("treats an already-front, already-back, or unopposed card as a noop", () => {
 		for (const input of [
-			{ id: "e1", direction: "front" },
-			{ id: "e1", direction: "forward" },
-			{ id: "a", direction: "back" },
-			{ id: "a", direction: "backward" },
+			{ ids: ["d"], direction: "front" },
+			{ ids: ["a"], direction: "back" },
+			// d overlaps nothing, so forward and backward leave it in place.
+			{ ids: ["d"], direction: "forward" },
+			{ ids: ["a"], direction: "backward" },
 		] as ChangeZOrderInput[]) {
 			const runtime = new NativeGraph(layerDocument());
 			const result = createCanvasAuthoring(runtime).changeZOrder(input);
@@ -672,50 +698,40 @@ describe("CanvasAuthoring", () => {
 		}
 	});
 
-	it("preserves unknown z-order entries and source-ID bindings while using native order for missing graph entries", () => {
-		const initial = layerDocument();
-		(initial.miroCanvas as CanvasDocument).zOrder = [
-			"unknown-left",
-			"a",
-			"source-b",
-			"unknown-mid",
-			"c",
-			"unknown-right",
-		];
-		const sourceBefore = clone(initial.miroSource);
-		const runtime = new NativeGraph(initial);
-		const result = createCanvasAuthoring(runtime).changeZOrder({ id: "b", direction: "front" });
+	it("moves several selected cards together in their existing relative order and ignores lines, frames, and connectors in the same request", () => {
+		const multi = new NativeGraph(layerDocument());
+		const multiResult = createCanvasAuthoring(multi).changeZOrder({ ids: ["a", "c"], direction: "front" });
+		expect(multiResult.ok).toBe(true);
+		expect(((multi.getData() as CanvasDocument).nodes as CanvasDocument[]).map((node) => node.id))
+			.toEqual(["frame1", "b", "d", "a", "c"]);
 
-		expect(result.ok).toBe(true);
-		expect(result.diagnostics.map((item) => item.code)).toContain("z-order-source-limited-fallback");
-		const applied = runtime.getData();
-		expect((applied.miroCanvas as CanvasDocument).zOrder).toEqual([
-			"unknown-left",
-			"a",
-			"c",
-			"unknown-mid",
-			"e1",
-			"unknown-right",
-			"source-b",
-		]);
-		expect(applied.miroSource).toEqual(sourceBefore);
-		expect(applied.futureRootField).toEqual(initial.futureRootField);
-		expect(applied.nodes).toEqual(initial.nodes);
-		expect(applied.edges).toEqual(initial.edges);
-		expect((applied.miroCanvas as CanvasDocument).bindings).toEqual((initial.miroCanvas as CanvasDocument).bindings);
-		expect((applied.miroCanvas as CanvasDocument).futureMetadataField).toEqual(["keep"]);
+		// A line, a frame, and an independent connector among the requested IDs
+		// change nothing beyond what the one real card would have done alone.
+		const mixed = new NativeGraph(layerDocument());
+		const mixedResult = createCanvasAuthoring(mixed).changeZOrder({ ids: ["e1", "frame1", "conn1", "a"], direction: "front" });
+		const solo = new NativeGraph(layerDocument());
+		const soloResult = createCanvasAuthoring(solo).changeZOrder({ ids: ["a"], direction: "front" });
+		expect(mixedResult.ok).toBe(true);
+		expect(soloResult.ok).toBe(true);
+		expect(mixed.getData()).toEqual(solo.getData());
+
+		const noCards = new NativeGraph(layerDocument());
+		const rejected = createCanvasAuthoring(noCards).changeZOrder({ ids: ["e1", "frame1", "conn1"], direction: "front" });
+		expect(rejected.ok).toBe(false);
+		expect(rejected.diagnostics.map((item) => item.code)).toContain("z-order-no-cards");
+		expect(noCards.importDataSpy).not.toHaveBeenCalled();
 	});
 
-	it("uses native graph order when no explicit z-order exists and replays the transaction through undo/redo", () => {
+	it("never creates miroCanvas.zOrder when it is absent, and replays the card reorder through undo and redo", () => {
 		const initial = layerDocument();
 		delete (initial.miroCanvas as CanvasDocument).zOrder;
 		const runtime = new NativeGraph(initial);
-		const result = createCanvasAuthoring(runtime).changeZOrder({ id: "b", direction: "forward" });
+		const result = createCanvasAuthoring(runtime).changeZOrder({ ids: ["a"], direction: "forward" });
 
 		expect(result.ok).toBe(true);
-		expect(result.diagnostics.map((item) => item.code)).toContain("z-order-source-limited-fallback");
-		const applied = runtime.getData();
-		expect((applied.miroCanvas as CanvasDocument).zOrder).toEqual(["a", "c", "b", "e1"]);
+		const applied = runtime.getData() as CanvasDocument;
+		expect((applied.nodes as CanvasDocument[]).map((node) => node.id)).toEqual(["frame1", "b", "a", "c", "d"]);
+		expect(applied.miroCanvas).not.toHaveProperty("zOrder");
 		expect(runtime.history).toHaveLength(2);
 		runtime.undo();
 		expect(runtime.getData()).toEqual(initial);
@@ -723,49 +739,42 @@ describe("CanvasAuthoring", () => {
 		expect(runtime.getData()).toEqual(applied);
 	});
 
-	it("applies stale, review, lock, readonly, and source-ID collision guards to M3 graph transactions", () => {
+	it("applies stale, review, lock, readonly, and source-ID collision guards to layer transactions", () => {
 		const staleRuntime = new NativeGraph(layerDocument());
 		const staleAuthoring = createCanvasAuthoring(staleRuntime);
 		const expected = staleAuthoring.readSnapshot();
 		staleRuntime.importData({ ...layerDocument(), externalEdit: true }, true);
-		const stale = staleAuthoring.updateRotation({ id: "a", rotation: 15 }, expected);
+		const stale = staleAuthoring.changeZOrder({ ids: ["a"], direction: "front" }, expected);
 		expect(stale.ok).toBe(false);
 		expect(stale.diagnostics.map((item) => item.code)).toContain("stale-document");
 		expect(staleRuntime.requestSaveSpy).not.toHaveBeenCalled();
 
 		const reviewDocument = layerDocument();
 		(reviewDocument.miroCanvas as CanvasDocument).settings = { reviewMode: true };
-		for (const run of [
-			(authoring: ReturnType<typeof createCanvasAuthoring>) => authoring.updateRotation({ id: "b", rotation: 15 }),
-			(authoring: ReturnType<typeof createCanvasAuthoring>) => authoring.changeZOrder({ id: "b", direction: "front" }),
-		]) {
+		{
 			const runtime = new NativeGraph(reviewDocument);
-			const result = run(createCanvasAuthoring(runtime));
+			const result = createCanvasAuthoring(runtime).changeZOrder({ ids: ["b"], direction: "front" });
 			expect(result.ok).toBe(false);
 			expect(result.diagnostics.some((item) => item.code.endsWith("blocked-review"))).toBe(true);
 			expect(runtime.importDataSpy).not.toHaveBeenCalled();
 		}
 
+		// b is locked; the whole multi-card transaction is refused, although a
+		// on its own would be free to move.
 		const lockedDocument = layerDocument();
 		(((lockedDocument.miroCanvas as CanvasDocument).localOverrides as CanvasDocument).b as CanvasDocument).locked = true;
-		for (const run of [
-			(authoring: ReturnType<typeof createCanvasAuthoring>) => authoring.updateRotation({ id: "b", rotation: 15 }),
-			(authoring: ReturnType<typeof createCanvasAuthoring>) => authoring.changeZOrder({ id: "b", direction: "front" }),
-		]) {
+		{
 			const runtime = new NativeGraph(lockedDocument);
-			const result = run(createCanvasAuthoring(runtime));
+			const result = createCanvasAuthoring(runtime).changeZOrder({ ids: ["a", "b"], direction: "front" });
 			expect(result.ok).toBe(false);
 			expect(result.diagnostics.some((item) => item.code.endsWith("blocked-lock"))).toBe(true);
 			expect(runtime.importDataSpy).not.toHaveBeenCalled();
 		}
 
-		for (const run of [
-			(authoring: ReturnType<typeof createCanvasAuthoring>) => authoring.updateRotation({ id: "b", rotation: 15 }),
-			(authoring: ReturnType<typeof createCanvasAuthoring>) => authoring.changeZOrder({ id: "b", direction: "front" }),
-		]) {
+		{
 			const runtime = new NativeGraph(layerDocument());
 			Object.defineProperty(runtime, "readonly", { configurable: true, value: true });
-			const result = run(createCanvasAuthoring(runtime));
+			const result = createCanvasAuthoring(runtime).changeZOrder({ ids: ["b"], direction: "front" });
 			expect(result.ok).toBe(false);
 			expect(result.diagnostics.map((item) => item.code)).toContain("native-runtime-readonly");
 			expect(runtime.importDataSpy).not.toHaveBeenCalled();
@@ -778,7 +787,7 @@ describe("CanvasAuthoring", () => {
 			b: { sourceId: "source-b", role: "item" },
 		};
 		const collisionRuntime = new NativeGraph(collisionDocument);
-		const collision = createCanvasAuthoring(collisionRuntime).changeZOrder({ id: "a", direction: "front" });
+		const collision = createCanvasAuthoring(collisionRuntime).changeZOrder({ ids: ["a"], direction: "front" });
 		expect(collision.ok).toBe(false);
 		expect(collision.diagnostics.map((item) => item.code)).toContain("z-order-id-collision");
 		expect(collisionRuntime.importDataSpy).not.toHaveBeenCalled();
@@ -788,7 +797,7 @@ describe("CanvasAuthoring", () => {
 		const initial = layerDocument();
 		const runtime = new NativeGraph(initial);
 		runtime.throwOnSave = true;
-		const result = createCanvasAuthoring(runtime).changeZOrder({ id: "b", direction: "front" });
+		const result = createCanvasAuthoring(runtime).changeZOrder({ ids: ["b"], direction: "front" });
 
 		expect(result.ok).toBe(false);
 		expect(result.diagnostics.map((item) => item.code)).toContain("native-history-failed");

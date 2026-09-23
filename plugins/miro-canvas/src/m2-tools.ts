@@ -7,6 +7,7 @@ import {
 } from "./local-comments";
 import { readCanvasElementFile, readCanvasElementId, readCanvasElementType } from "./canvas-elements";
 import { createCanvasAuthoring, type CanvasAuthoring } from "./canvas-authoring";
+import { LAYER_ACTIONS } from "./layer-order";
 import { SHAPE_CATALOG } from "./shape-catalog";
 import { buildCanvasAnchorGeometry } from "./connector-endpoints";
 import { DocumentControls } from "./document-controls";
@@ -277,18 +278,14 @@ export class M2CanvasTools {
       this.refreshFromNative();
     });
     geometryActions.append(applyRotation);
-    const layerActions = [
-      ["back", "Send to back"], ["backward", "Move backward"],
-      ["forward", "Move forward"], ["front", "Bring to front"],
-    ] as const;
-    for (const [direction, label] of layerActions) {
+    for (const { direction, label } of LAYER_ACTIONS) {
       const button = document.createElement("button");
       button.type = "button";
       button.textContent = label;
       button.addEventListener("click", () => {
-        const id = this.session.snapshot.selectedIds[0];
-        if (id === undefined) { this.status.textContent = "Select one Canvas element to reorder."; return; }
-        const result = this.authoring.changeZOrder({ id, direction });
+        const ids = this.session.snapshot.selectedIds;
+        if (ids.length === 0) { this.status.textContent = "Select a card to reorder."; return; }
+        const result = this.authoring.changeZOrder({ ids, direction });
         this.status.textContent = result.ok ? "Layer order saved in native Canvas history."
           : result.diagnostics[0]?.message ?? "Layer order change was rejected.";
         this.refreshFromNative();

@@ -1122,7 +1122,14 @@ def main() -> int:
             page.evaluate("miroBrowser.runtime.redo(); miroBrowser.session.refresh(); miroBrowser.m2.refresh()")
             assert page.evaluate("miroBrowser.node.nodeEl.style.transform").endswith("rotate(30deg)")
             m2.get_by_role("button", name="Bring to front", exact=True).click()
-            assert page.evaluate("miroBrowser.runtime.data.miroCanvas.zOrder.at(-1)") == "n1"
+            # n1 is the only card selected, so it becomes the last card in node
+            # order; there is no frame in this fixture, so it is simply last.
+            assert page.evaluate("miroBrowser.runtime.data.nodes.at(-1).id") == "n1"
+            # An explicit but empty zOrder has no card slot to rewrite, so it
+            # stays empty; only a non-empty zOrder is checked for n1's slot.
+            z_order = page.evaluate("(miroBrowser.runtime.data.miroCanvas || {}).zOrder")
+            if z_order:
+                assert z_order[-1] == "n1"
             assert page.evaluate("miroBrowser.sourceUnchanged()")
             page.evaluate("miroBrowser.runtime.undo(); miroBrowser.runtime.undo(); miroBrowser.session.refresh(); miroBrowser.m2.refresh()")
             assert page.evaluate("miroBrowser.node.nodeEl.style.rotate") == ""

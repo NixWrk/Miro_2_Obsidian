@@ -27,6 +27,7 @@ import { selectedComment, translateBoardSelection, type SelectedRouteEnds } from
 import { migrateLineNodes, boardConnectors, readBoardConnector, type BoardConnector } from "./board-connectors";
 import { readLocalItem, type LocalItem } from "./local-items";
 import { listCommentThreads } from "./local-comments";
+import { reorderCards, type LayerCard, type LayerDirection } from "./layer-order";
 import { isSafeColor, normalizeColor } from "./appearance";
 import {
 	LOCAL_SHAPE_KINDS, CONNECTOR_CAPS, CONNECTOR_ROUTES, CONNECTOR_STROKES,
@@ -164,10 +165,11 @@ export interface UpdateRotationInput {
 	readonly rotation: number;
 }
 
-export type ZOrderDirection = "front" | "back" | "forward" | "backward";
+/** Kept as its own exported name; the type itself lives with the layer-order logic it feeds. */
+export type ZOrderDirection = LayerDirection;
 
 export interface ChangeZOrderInput {
-	readonly id: string;
+	readonly ids: readonly string[];
 	readonly direction: ZOrderDirection;
 }
 
@@ -1437,10 +1439,51 @@ function buildSourceAliases(
 	return aliases;
 }
 
+/** Native Canvas node types that carry a layer; a frame (`group`) never does. */
+const CARD_NODE_TYPES: ReadonlySet<string> = new Set(["text", "file", "link"]);
+
+function numericNodeField(node: UnknownRecord, key: string): number {
+	const value = safeRead(node, key);
+	return value.ok && isFiniteNumber(value.value) ? value.value : 0;
+}
+
+/**
+ * A document's cards, back to front, and the node-array slot each occupies.
+ * Frames keep their own slots among these; only the listed slots are ever
+ * rewritten by a layer-order transaction.
+ */
+function readLayerCards(nodesArray: readonly UnknownRecord[]): {
+	readonly cards: readonly LayerCard[];
+	readonly slots: readonly number[];
+} {
+	const cards: LayerCard[] = [];
+	const slots: number[] = [];
+	for (let index = 0; index < nodesArray.length; index += 1) {
+		const node = nodesArray[index]!;
+		const type = safeRead(node, "type");
+		if (!type.ok || typeof type.value !== "string" || !CARD_NODE_TYPES.has(type.value)) {
+			continue;
+		}
+		const id = readRequiredString(node, "id");
+		if (id === undefined) {
+			continue;
+		}
+		cards.push({
+			id,
+			x: numericNodeField(node, "x"),
+			y: numericNodeField(node, "y"),
+			width: numericNodeField(node, "width"),
+			height: numericNodeField(node, "height"),
+		});
+		slots.push(index);
+	}
+	return { cards, slots };
+}
+
 function buildZOrderDocument(
 	snapshot: InternalSnapshot,
-	id: string,
-	direction: ZOrderDirection,
+	selected: ReadonlySet<string>,
+	direction: LayerDirection,
 	diagnostics: CanvasAuthoringDiagnostic[],
 ): ZOrderBuildResult | undefined {
 	let document: UnknownRecord;
@@ -1454,6 +1497,32 @@ function buildZOrderDocument(
 	if (metadata === undefined) {
 		return undefined;
 	}
+	const nodesValue = safeRead(document, "nodes");
+	if (!nodesValue.ok || !Array.isArray(nodesValue.value)) {
+		addDiagnostic(diagnostics, "z-order-invalid", "error", "The Canvas document's nodes could not be read safely.");
+		return undefined;
+	}
+	const nodesArray = nodesValue.value as UnknownRecord[];
+	const { cards, slots } = readLayerCards(nodesArray);
+	const cardIds = new Set(cards.map((card) => card.id));
+	const newCardOrder = reorderCards(cards, selected, direction);
+	const cardsChanged = !structurallyEqual(newCardOrder, cards.map((card) => card.id));
+	if (cardsChanged) {
+		// Only the identities in the existing card slots change; a frame keeps
+		// whichever slot native Canvas already gave it.
+		const cardNodeById = new Map<string, UnknownRecord>();
+		for (const slot of slots) {
+			const node = nodesArray[slot]!;
+			const id = readRequiredString(node, "id");
+			if (id !== undefined) {
+				cardNodeById.set(id, node);
+			}
+		}
+		for (let index = 0; index < slots.length; index += 1) {
+			nodesArray[slots[index]!] = cardNodeById.get(newCardOrder[index]!)!;
+		}
+	}
+
 	const nativeOrder = graphElementIds(snapshot);
 	const graphIds = new Set(nativeOrder);
 	const aliases = buildSourceAliases(metadata, graphIds, diagnostics);
@@ -1488,74 +1557,39 @@ function buildZOrderDocument(
 			explicitOrder.push(token);
 		}
 	}
-	const canonicalBySlot: Array<string | undefined> = [];
-	const preferredTokens = new Map<string, string>();
-	const represented = new Set<string>();
-	for (const token of explicitOrder) {
-		const canonical = resolveToken(token);
-		canonicalBySlot.push(canonical);
-		if (canonical === undefined) {
-			continue;
-		}
-		if (represented.has(canonical)) {
-			addDiagnostic(diagnostics, "z-order-id-collision", "error", "The explicit z-order names one graph element through multiple IDs.");
-			return undefined;
-		}
-		represented.add(canonical);
-		preferredTokens.set(canonical, token);
-	}
-	const canonicalOrder = canonicalBySlot.filter((entry): entry is string => entry !== undefined);
-	const fallbackIds = nativeOrder.filter((graphId) => !represented.has(graphId));
-	canonicalOrder.push(...fallbackIds);
-	if (fallbackIds.length > 0) {
-		addDiagnostic(
-			diagnostics,
-			"z-order-source-limited-fallback",
-			"info",
-			"Explicit source/local layer order is incomplete; native Canvas graph order supplies the unresolved graph entries.",
-		);
-	}
-	const index = canonicalOrder.indexOf(id);
-	if (index < 0) {
-		addDiagnostic(diagnostics, "z-order-id-missing", "error", "The target Canvas graph ID is not present in the native graph.");
-		return undefined;
-	}
-	let destination = index;
-	if (direction === "front") {
-		destination = canonicalOrder.length - 1;
-	} else if (direction === "back") {
-		destination = 0;
-	} else if (direction === "forward") {
-		destination = Math.min(index + 1, canonicalOrder.length - 1);
-	} else {
-		destination = Math.max(index - 1, 0);
-	}
-	if (destination === index) {
-		return { changed: false, document: snapshot.document };
-	}
-	const reordered = [...canonicalOrder];
-	const [moved] = reordered.splice(index, 1);
-	if (moved === undefined) {
-		addDiagnostic(diagnostics, "z-order-invalid", "error", "The target z-order entry could not be moved safely.");
-		return undefined;
-	}
-	reordered.splice(destination, 0, moved);
-	const orderedTokens = reordered.map((graphId) => preferredTokens.get(graphId) ?? graphId);
-	let nextOrder: string[];
 	if (hasExplicitOrder) {
-		nextOrder = [...explicitOrder];
+		// Only the tokens that resolve to a card are rewritten; every other
+		// token and slot - a frame, an edge, a connector, a comment pin, an
+		// entry the explicit order does not cover - is kept exactly as is.
+		const canonicalBySlot: Array<string | undefined> = [];
+		const preferredTokens = new Map<string, string>();
+		const found = new Set<string>();
+		for (const token of explicitOrder) {
+			const canonical = resolveToken(token);
+			if (canonical !== undefined && cardIds.has(canonical)) {
+				if (found.has(canonical)) {
+					addDiagnostic(diagnostics, "z-order-id-collision", "error", "The explicit z-order names one card through multiple IDs.");
+					return undefined;
+				}
+				found.add(canonical);
+				preferredTokens.set(canonical, token);
+				canonicalBySlot.push(canonical);
+			} else {
+				canonicalBySlot.push(undefined);
+			}
+		}
+		const newCardTokenOrder = newCardOrder.filter((cardId) => found.has(cardId));
+		const nextOrder = [...explicitOrder];
 		let tokenIndex = 0;
 		for (let slot = 0; slot < canonicalBySlot.length; slot += 1) {
 			if (canonicalBySlot[slot] !== undefined) {
-				nextOrder[slot] = orderedTokens[tokenIndex]!;
+				const cardId = newCardTokenOrder[tokenIndex]!;
 				tokenIndex += 1;
+				nextOrder[slot] = preferredTokens.get(cardId) ?? cardId;
 			}
 		}
-		nextOrder.push(...orderedTokens.slice(tokenIndex));
-	} else {
-		nextOrder = orderedTokens;
+		setOwn(metadata, "zOrder", nextOrder);
 	}
-	setOwn(metadata, "zOrder", nextOrder);
 	const validation = validateMiroCanvasMetadata(metadata);
 	if (!validation.valid) {
 		addDiagnostic(diagnostics, "metadata-validation-failed", "error", "The proposed z-order metadata failed validation; no graph import was attempted.");
@@ -2806,26 +2840,37 @@ export class CanvasAuthoring {
 			return { ok: false, status: "rejected", diagnostics: [...this.diagnosticList, ...diagnostics, ...liveDiagnostics] };
 		}
 		diagnostics.push(...liveDiagnostics);
-		const id = readGraphActionId(input, diagnostics, "z-order");
+		const idsValue = actionProperty(input, "ids");
+		const idsGiven = idsValue.ok && Array.isArray(idsValue.value) && idsValue.value.every((item) => isSafeIdentifier(item));
 		const directionValue = actionProperty(input, "direction");
 		const direction = directionValue.ok && typeof directionValue.value === "string"
 			&& ["front", "back", "forward", "backward"].includes(directionValue.value)
-			? directionValue.value as ZOrderDirection
+			? directionValue.value as LayerDirection
 			: undefined;
-		if (id === undefined || direction === undefined) {
-			if (id !== undefined) {
-				addDiagnostic(diagnostics, "z-order-direction-invalid", "error", "Z-order direction must be front, back, forward, or backward.");
+		if (!idsGiven) {
+			addDiagnostic(diagnostics, "z-order-ids-invalid", "error", "The target Canvas graph IDs are missing or invalid.");
+			return { ok: false, status: "rejected", diagnostics: [...this.diagnosticList, ...diagnostics] };
+		}
+		if (direction === undefined) {
+			addDiagnostic(diagnostics, "z-order-direction-invalid", "error", "Z-order direction must be front, back, forward, or backward.");
+			return { ok: false, status: "rejected", diagnostics: [...this.diagnosticList, ...diagnostics] };
+		}
+		// Mixed selections are normal: a line, a frame, a comment pin, or an
+		// unknown ID among the requested IDs is simply ignored.  Only cards
+		// carry a layer.
+		const requestedIds = [...new Set(idsValue.value as string[])];
+		const cardIds = new Set(readLayerCards(before.nodes as UnknownRecord[]).cards.map((card) => card.id));
+		const selectedCardIds = requestedIds.filter((requestedId) => cardIds.has(requestedId));
+		if (selectedCardIds.length === 0) {
+			addDiagnostic(diagnostics, "z-order-no-cards", "error", "None of the selected IDs is a card; there is nothing to reorder.");
+			return { ok: false, status: "rejected", diagnostics: [...this.diagnosticList, ...diagnostics] };
+		}
+		for (const cardId of selectedCardIds) {
+			if (!policyAllowsGraphEdit(before.document, "edit", cardId, "z-order", diagnostics)) {
+				return { ok: false, status: "rejected", diagnostics: [...this.diagnosticList, ...diagnostics] };
 			}
-			return { ok: false, status: "rejected", diagnostics: [...this.diagnosticList, ...diagnostics] };
 		}
-		if (!hasGraphElement(before, id)) {
-			addDiagnostic(diagnostics, "z-order-id-missing", "error", "The target Canvas graph ID does not exist.");
-			return { ok: false, status: "rejected", diagnostics: [...this.diagnosticList, ...diagnostics] };
-		}
-		if (!policyAllowsGraphEdit(before.document, "edit", id, "z-order", diagnostics)) {
-			return { ok: false, status: "rejected", diagnostics: [...this.diagnosticList, ...diagnostics] };
-		}
-		const update = buildZOrderDocument(before, id, direction, diagnostics);
+		const update = buildZOrderDocument(before, new Set(selectedCardIds), direction, diagnostics);
 		if (update === undefined) {
 			return { ok: false, status: "rejected", diagnostics: [...this.diagnosticList, ...diagnostics] };
 		}
