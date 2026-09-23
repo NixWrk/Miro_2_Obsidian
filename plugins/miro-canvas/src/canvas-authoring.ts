@@ -132,6 +132,23 @@ export interface InsertGraphInput {
 	readonly bindings?: Readonly<Record<string, { readonly sourceId: string; readonly role: string }>>;
 }
 
+/**
+ * A change to the graph and the plugin's record together: what turns one
+ * kind of element into another - a free line into an edge when an end is
+ * put on a node, say - in one step, undone as one.
+ */
+export interface RewriteGraphInput {
+	/** Nodes to take off the board, with any connector that ended on them. */
+	readonly removeNodes?: readonly string[];
+	readonly removeEdges?: readonly string[];
+	readonly addNodes?: readonly Readonly<Record<string, unknown>>[];
+	readonly addEdges?: readonly Readonly<Record<string, unknown>>[];
+	/** Where the ends of added connectors are: on an outline, or free on the board. */
+	readonly edgeEnds?: readonly { readonly edgeId: string; readonly end: "from" | "to"; readonly anchor: CanvasAnchor }[];
+	/** Changes the plugin's record in place; it is validated afterwards like any other. */
+	readonly metadata?: (metadata: Record<string, unknown>) => void;
+}
+
 export interface UpdateElementStyleInput {
 	readonly id: string;
 	readonly shape?: CanvasShapeKind;
@@ -1014,7 +1031,8 @@ function readStylePatch(action: unknown, diagnostics: CanvasAuthoringDiagnostic[
 		if (patch.borderStyle !== undefined && !["solid", "dashed", "dotted", "none"].includes(patch.borderStyle as string)) throw new SnapshotError("invalid border style");
 		if (patch.borderWidth !== undefined && (!isFiniteNumber(patch.borderWidth) || patch.borderWidth < 0 || patch.borderWidth > 100)) throw new SnapshotError("invalid border width");
 		if (patch.connector !== undefined) {
-			const connector = only(patch.connector, ["route", "strokeStyle", "startCap", "endCap", "width", "headSize", "labelT", "color", "waypoints"]);
+			const connector = only(patch.connector, ["route", "strokeStyle", "startCap", "endCap", "width", "headSize", "labelT", "color", "waypoints", "block"]);
+			if (connector.block !== undefined && typeof connector.block !== "boolean") throw new SnapshotError("invalid connector block");
 			if (hasOwn(connector, "waypoints")) {
 				const waypoints = readWaypoints(connector.waypoints);
 				if (waypoints === undefined) throw new SnapshotError("invalid connector waypoints");
@@ -2173,6 +2191,111 @@ export class CanvasAuthoring {
 		}
 		// Native Canvas lays groups under other nodes, whatever order they came in.
 		const verified = this.commitDocument(before, document, diagnostics, copies.nodes.some((node) => node.type === "group"));
+		if (verified === undefined) return reject();
+		return { ok: true, status: "applied", document: verified.document, diagnostics: [...this.diagnosticList, ...diagnostics] };
+	}
+
+	/**
+	 * Take away and add nodes and connectors and change the plugin's record,
+	 * all in one transaction and one history step.
+	 */
+	public rewriteGraph(input: RewriteGraphInput, expected?: CanvasAuthoringExpected): CanvasGraphResult {
+		const diagnostics: CanvasAuthoringDiagnostic[] = [];
+		const reject = (): CanvasGraphResult => ({ ok: false, status: "rejected", diagnostics: [...this.diagnosticList, ...diagnostics] });
+		if (this.disposed || this.host === undefined) return reject();
+		const before = readSnapshotFromHost(this.host, diagnostics);
+		if (before === undefined) return reject();
+		if (expected !== undefined) {
+			const snapshot = makeSnapshot(extractExpectedDocument(expected), diagnostics);
+			if (snapshot === undefined || !structurallyEqual(snapshot.document, before.document)) {
+				addDiagnostic(diagnostics, "stale-document", "warning", "The Canvas document changed since the supplied expected snapshot.");
+				return reject();
+			}
+		}
+		const removeNodes = new Set(input.removeNodes ?? []);
+		const removeEdges = new Set(input.removeEdges ?? []);
+		const addNodes = input.addNodes ?? [], addEdges = input.addEdges ?? [];
+		for (const id of [...removeNodes, ...removeEdges]) {
+			const exists = removeNodes.has(id) ? before.nodes.some((node) => node.id === id) : before.edges.some((edge) => edge.id === id);
+			const decision = decideEditOperation(before.document, "delete", id);
+			if (!exists || !decision.valid || !decision.allowed) {
+				addDiagnostic(diagnostics, "rewrite-remove-refused", "warning", `Canvas element ${id} cannot be taken away.`);
+				return reject();
+			}
+		}
+		const taken = collectDocumentIds(before);
+		const added = new Set<string>();
+		for (const item of [...addNodes, ...addEdges]) {
+			const id = isPlainObject(item) ? readRequiredString(item, "id") : undefined;
+			if (id === undefined || (taken.has(id) && !removeNodes.has(id) && !removeEdges.has(id)) || added.has(id)) {
+				addDiagnostic(diagnostics, "rewrite-id-invalid", "error", "Every added node and connector needs an id the board does not have.");
+				return reject();
+			}
+			added.add(id);
+		}
+		const nodeIds = new Set([...before.nodes.map((node) => node.id as string).filter((id) => !removeNodes.has(id)), ...addNodes.map((node) => node.id as string)]);
+		for (const edge of addEdges) {
+			if (typeof edge.fromNode !== "string" || typeof edge.toNode !== "string" || !nodeIds.has(edge.fromNode) || !nodeIds.has(edge.toNode)) {
+				addDiagnostic(diagnostics, "rewrite-edge-invalid", "error", "An added connector must join nodes the board keeps or gains.");
+				return reject();
+			}
+		}
+		if ((addNodes.length > 0 || addEdges.length > 0) && policyAllowsCreate(before.document, diagnostics) === undefined) return reject();
+		let document: UnknownRecord;
+		try {
+			document = cloneRecord(before.document);
+		} catch (error) {
+			addDiagnostic(diagnostics, "document-copy-failed", "error", `The Canvas document could not be copied: ${describeError(error)}.`);
+			return reject();
+		}
+		const nodesValue = safeRead(document, "nodes"), edgesValue = safeRead(document, "edges");
+		if (!nodesValue.ok || !Array.isArray(nodesValue.value) || !edgesValue.ok || !Array.isArray(edgesValue.value)) {
+			addDiagnostic(diagnostics, "canvas-document-invalid", "error", "The target Canvas nodes or edges array is unavailable.");
+			return reject();
+		}
+		const idOf = (item: unknown): string | undefined => {
+			const id = safeRead(item, "id");
+			return id.ok && typeof id.value === "string" ? id.value : undefined;
+		};
+		const endsOnRemoved = (edge: unknown): boolean => ["fromNode", "toNode"].some((key) => {
+			const end = safeRead(edge, key);
+			return end.ok && typeof end.value === "string" && removeNodes.has(end.value);
+		});
+		try {
+			setOwn(document, "nodes", [
+				...(nodesValue.value as readonly unknown[]).filter((node) => !removeNodes.has(idOf(node) ?? "")),
+				...addNodes.map((node) => cloneRecord(node)),
+			]);
+			setOwn(document, "edges", [
+				...(edgesValue.value as readonly unknown[]).filter((edge) => !removeEdges.has(idOf(edge) ?? "") && !endsOnRemoved(edge)),
+				...addEdges.map((edge) => cloneRecord(edge)),
+			]);
+		} catch (error) {
+			addDiagnostic(diagnostics, "document-copy-failed", "error", `The added elements could not be copied: ${describeError(error)}.`);
+			return reject();
+		}
+		for (const { edgeId, end, anchor } of input.edgeEnds ?? []) {
+			const update = buildConnectorEndpointUpdate(document, { edgeId, end, anchor });
+			for (const item of update.diagnostics) addDiagnostic(diagnostics, item.code, update.ok ? "info" : "error", item.message);
+			if (!update.ok || update.document === undefined) return reject();
+			document = update.document;
+		}
+		if (input.metadata !== undefined) {
+			const metadata = readMetadataForUpdate(document, diagnostics);
+			if (metadata === undefined) return reject();
+			try {
+				input.metadata(metadata);
+			} catch (error) {
+				addDiagnostic(diagnostics, "metadata-change-failed", "error", `The record could not be changed: ${describeError(error)}.`);
+				return reject();
+			}
+			if (!validateMiroCanvasMetadata(metadata).valid) {
+				addDiagnostic(diagnostics, "metadata-validation-failed", "error", "The changed metadata failed validation; no graph import was attempted.");
+				return reject();
+			}
+			setOwn(document, "miroCanvas", metadata);
+		}
+		const verified = this.commitDocument(before, document, diagnostics, addNodes.some((node) => node.type === "group"));
 		if (verified === undefined) return reject();
 		return { ok: true, status: "applied", document: verified.document, diagnostics: [...this.diagnosticList, ...diagnostics] };
 	}

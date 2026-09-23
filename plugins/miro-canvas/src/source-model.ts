@@ -123,6 +123,8 @@ export interface SourceStructuredDescriptor {
 }
 
 export interface SourceConnectorStyle {
+  /** Drawn as a filled block arrow from start to end instead of a stroked line. */
+  readonly block?: true;
   readonly headSize?: number;
   readonly labelT?: number;
   readonly shape?: "straight" | "elbowed" | "curved";
@@ -219,6 +221,7 @@ export const CONNECTOR_CAPS = [
 
 /** Local settings are partial: absent fields continue to use source/native values. */
 export interface LocalConnectorSettings {
+  readonly block?: boolean;
   readonly headSize?: number;
   readonly labelT?: number;
   readonly route?: (typeof CONNECTOR_ROUTES)[number];
@@ -694,6 +697,8 @@ function applyLocalConnector(
   const headSize = finiteNumber(valueOf(local, "headSize"));
   const labelT = finiteNumber(valueOf(local, "labelT"));
   if (headSize !== undefined && headSize >= 1 && headSize <= 1000) result.headSize = headSize;
+  if (valueOf(local, "block") === true) result.block = true;
+  else if (valueOf(local, "block") === false) delete result.block;
   if (labelT !== undefined && labelT >= 0 && labelT <= 1) result.labelT = labelT;
   if (width !== undefined && width > 0 && width <= 100) css["stroke-width"] = String(width);
   const color = readOwn(local, "color");

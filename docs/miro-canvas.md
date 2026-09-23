@@ -625,8 +625,9 @@ bottom row keeps route, color and thickness controls open. Select a connector to
 drag it or its endpoint handles, change its line/arrow style, copy, cut or delete.
 Desktop keyboard clipboard commands use the system clipboard, including physical
 C/X/V keys on non-Latin layouts. File nodes continue to share the original file.
-`Miro Canvas: Reset tools and selection` defaults to Escape and can be reassigned
-in Obsidian Settings → Hotkeys.
+Escape on the board resets tools and selection. `Miro Canvas: Reset tools and
+selection` has no default hotkey, so Escape in a card, a label or a field stays
+theirs; the command can be bound in Obsidian Settings → Hotkeys.
 
 Run `Miro Canvas: Convert legacy line nodes to connectors` explicitly to migrate
 old line cards. The transaction is undoable, idempotent, preserves source data,
@@ -779,10 +780,57 @@ translates the existing independent-connector SVG instead of rebuilding it.
   supported by the unified paste path. Independent connectors are supported.
 - Formatting a mixed native/independent selection still uses separate style
   transactions; it is not yet guaranteed to be one undo step like group movement.
-- Connector SVG rebuilding and native/independent route resolution should be
-  profiled on large boards before any performance guarantee.
+- Large boards are measured below; no guarantee is made beyond them.
 - Live Obsidian mouse/clipboard, other OSes, touch/stylus and high-DPI rotated
   text remain separate acceptance gates, not covered by the synthetic browser.
+
+#### Standard edges, one label editor, large boards (2026-09-23)
+
+A line or arrow whose both ends hold on to cards (node or image anchors on two
+different cards) is now a native Canvas edge, as one drawn between cards in
+Obsidian is: it opens and stays usable without the plugin. Its route, caps,
+dashes, width, colour and exact anchors live in `localOverrides`. A line with
+a free end, an end on another line or on a comment stays a
+`miroCanvas.connectors` record. Moving an end converts between the two under
+the same id and keeps the look and the label; each conversion is one undo step.
+An imported edge stays the native edge its Miro connector is bound to: a moved
+end is held by the plugin's anchor, as before. Drawing with the Lines and
+arrows tool from card to card creates the native edge directly.
+
+The board's own connectors are drawn in native Canvas's moving layer, beside its
+edges and under the cards, with native Canvas's edge classes: hover, selection
+halo, end grips, bend grips and the toolbar are the ones native edges use, and
+pan or zoom costs them nothing. Only a connector whose route, style or selection
+changed is redrawn.
+
+Labels of native edges and of the board's own connectors are the same element:
+native Canvas's label style, placed on the route the plugin draws, in board
+units. Click selects the line; drag slides the label along the route; a
+double-click, Enter or the toolbar button edits it in place (Enter keeps,
+Shift+Enter breaks the line, Escape cancels). Native Canvas's own hidden editor
+is no longer opened by its Enter or double-click.
+
+Undo fix: writing plugin metadata during a graph transaction replaced the
+document native Canvas also keeps as its latest history entry, so Undo could
+bring back new metadata with the old graph (for example a native edge reappearing
+beside its converted connector). The document is now replaced by a copy.
+
+Large boards: on a synthetic board with 2,000 cards, 980 native edges (labelled
+every fifth) and 520 own connectors, one plugin refresh dropped from about 130 ms
+to about 4 ms and the plugin's work per panned frame from about 10 ms to about
+2 ms. A card dragged there used to move at about 7 frames a second; the plugin's
+work per dragged frame is now about 35 ms. The board is read
+again only when native Canvas saves (or while a press is held), metadata is parsed
+once per metadata object, native elements are guarded once, the minimap content
+is projected once per scene, routes that hold on only to unmoved cards are kept
+mid-drag, and the overlay frame loop runs only during gestures and settling
+animations. These are main-thread measurements in the isolated harness, not a
+frame-rate guarantee.
+
+All three synthetic browser suites pass (default, `--interactions`,
+`--controls`). The synthetic host now has native Canvas's moving layer and
+live card positions; the default suite had been failing at the local tools
+rotation step because a press on that panel cleared the selection.
 
 | Requested feature | Evidence / remaining boundary |
 | --- | --- |

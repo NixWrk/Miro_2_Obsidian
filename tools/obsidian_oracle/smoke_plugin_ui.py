@@ -51,8 +51,8 @@ def main() -> int:
                 toolbar = page.locator('.miro-canvas-toolbar').filter(has=page.get_by_role('button', name='Swap line ends', exact=True))
                 assert toolbar.is_visible()
                 toolbar.get_by_role('button', name='Add or edit line label', exact=True).click()
-                label_editor = page.get_by_role('textbox', name='Connector label', exact=True)
-                assert label_editor.is_visible(), 'Drawn arrow has no visible label action'
+                label_editor = page.locator('.miro-canvas-connector-label[data-connector-id="menu-line"] .canvas-path-label')
+                assert label_editor.get_attribute('contenteditable') == 'true', 'Drawn arrow has no label editor'
                 label_editor.fill('First label')
                 label_editor.press('Enter')
                 assert page.evaluate("miroBrowser.runtime.getData().miroCanvas.connectors['menu-line'].label") == 'First label'
@@ -60,28 +60,27 @@ def main() -> int:
                   const b=miroBrowser;
                   b.root.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true,cancelable:true}));
                 }""")
-                assert label_editor.is_visible(), 'Selected independent arrow has no label editor'
+                assert label_editor.get_attribute('contenteditable') == 'true', 'Selected independent arrow has no label editor'
                 label_editor.fill('Moving label')
                 label_editor.press('Enter')
                 assert page.evaluate("miroBrowser.runtime.getData().miroCanvas.connectors['menu-line'].label") == 'Moving label'
-                assert page.locator('.miro-board-connector-label').first.text_content() == 'Moving label'
+                assert page.locator('.miro-canvas-connector-label[data-connector-id="menu-line"]').text_content() == 'Moving label'
                 page.evaluate("""() => {
-                  const b=miroBrowser,s=b.session,label=b.root.querySelector('.miro-board-connector-label');
-                  const x=Number(label.getAttribute('x')),y=Number(label.getAttribute('y'));
-                  label.dispatchEvent(new PointerEvent('pointerdown',{button:0,pointerId:455,clientX:x+8,clientY:y+8,bubbles:true,cancelable:true}));
-                  const active=!!s.connectorLayer.dragEnd;
-                  window.dispatchEvent(new PointerEvent('pointermove',{pointerId:455,clientX:x+90,clientY:y+8}));
-                  const preview=s.connectorLayer.preview?.labelT;
-                  window.dispatchEvent(new PointerEvent('pointerup',{pointerId:455,clientX:x+90,clientY:y+8}));
+                  const b=miroBrowser,s=b.session;
+                  const labelAt=()=>{const r=b.root.querySelector('.miro-canvas-connector-label[data-connector-id="menu-line"]').getBoundingClientRect();return {x:r.left+r.width/2,y:r.top+r.height/2};};
+                  const label=b.root.querySelector('.miro-canvas-connector-label[data-connector-id="menu-line"]'),{x,y}=labelAt();
+                  label.dispatchEvent(new PointerEvent('pointerdown',{button:0,pointerId:455,clientX:x,clientY:y,bubbles:true,cancelable:true}));
+                  window.dispatchEvent(new PointerEvent('pointermove',{pointerId:455,clientX:x+90,clientY:y}));
+                  window.dispatchEvent(new PointerEvent('pointerup',{pointerId:455,clientX:x+90,clientY:y}));
                   const c=b.runtime.getData().miroCanvas.connectors['menu-line'];
-                  if(!(c.labelT>0.5))throw Error('Dragging label did not change its route position: '+JSON.stringify({labelT:c.labelT,x,y,active,preview,board:s.boardPoint({x:x+90,y:y+8})}));
-                  const beforeX=Number(b.root.querySelector('.miro-board-connector-label').getAttribute('x'));
+                  if(!(c.labelT>0.5))throw Error('Dragging label did not change its route position: '+JSON.stringify({labelT:c.labelT,x,y,board:s.boardPoint({x:x+90,y})}));
+                  const beforeX=labelAt().x;
                   const hit=b.root.querySelector('.miro-board-connector-hit[data-connector-id="menu-line"]');
                   const body=s.viewportPoint({x:-100,y:100});
                   hit.dispatchEvent(new PointerEvent('pointerdown',{button:0,pointerId:456,clientX:body.x,clientY:body.y,bubbles:true,cancelable:true}));
                   window.dispatchEvent(new PointerEvent('pointermove',{pointerId:456,clientX:body.x+40,clientY:body.y,bubbles:true}));
                   window.dispatchEvent(new PointerEvent('pointerup',{pointerId:456,clientX:body.x+40,clientY:body.y,bubbles:true}));
-                  const afterX=Number(b.root.querySelector('.miro-board-connector-label').getAttribute('x'));
+                  const afterX=labelAt().x;
                   if(Math.abs(afterX-beforeX-40)>1)throw Error('Connector body moved without its label');
                   b.runtime.undo();s.refresh();
                 }""")
@@ -89,16 +88,17 @@ def main() -> int:
                   const b=miroBrowser,s=b.session;
                   s.writeBoardConnectors([{id:'menu-line-2',from:{type:'free',x:-150,y:140},to:{type:'free',x:90,y:140},route:'straight',color:'#334455',width:2,startCap:'none',endCap:'arrow'}]);
                   s.connectorLayer.select(['menu-line','menu-line-2']);s.refresh();
-                  const before=Number(b.root.querySelector('.miro-board-connector-label[data-connector-id="menu-line"]').getAttribute('x'));
+                  const labelX=()=>b.root.querySelector('.miro-canvas-connector-label[data-connector-id="menu-line"]').getBoundingClientRect().left;
+                  const before=labelX();
                   const frame=b.root.querySelector('.miro-canvas-mixed-selection-frame');
                   if(!frame)throw Error('Two selected arrows have no group frame');
                   const r=frame.getBoundingClientRect(),x=r.left+r.width/2,y=r.top+r.height/2;
                   frame.dispatchEvent(new PointerEvent('pointerdown',{button:0,pointerId:457,clientX:x,clientY:y,bubbles:true,cancelable:true}));
                   window.dispatchEvent(new PointerEvent('pointermove',{pointerId:457,clientX:x+35,clientY:y+10}));
-                  const during=Number(b.root.querySelector('.miro-board-connector-label[data-connector-id="menu-line"]').getAttribute('x'));
+                  const during=labelX();
                   if(Math.abs(during-before-35)>1)throw Error('Arrow label lagged behind group drag');
                   window.dispatchEvent(new PointerEvent('pointerup',{pointerId:457,clientX:x+35,clientY:y+10}));
-                  const after=Number(b.root.querySelector('.miro-board-connector-label[data-connector-id="menu-line"]').getAttribute('x'));
+                  const after=labelX();
                   if(Math.abs(after-before-35)>1)throw Error('Arrow label reverted after group drag');
                   b.runtime.undo();s.refresh();
                   s.writeBoardConnectors([],['menu-line-2']);
@@ -159,10 +159,10 @@ def main() -> int:
                 assert panel.get_by_label('New connector width', exact=True).input_value() == '23'
                 panel.locator('[data-shape="arrow"]').click()
                 assert toolbar.get_by_role('button', name='Delete selection', exact=True).is_visible()
-                # Drag an existing end while the creation tool is still armed.
-                assert not page.locator('.miro-canvas-handles').is_visible(), 'Duplicate native handles'
+                # Drag an existing end while the creation tool is still armed: the
+                # grips are the ones native edges use.
                 before_end = page.evaluate("miroBrowser.runtime.getData().miroCanvas.connectors['menu-line'].from")
-                box = page.evaluate("document.querySelector('.miro-board-connector-grip[data-end=from]').getBoundingClientRect().toJSON()")
+                box = page.evaluate("document.querySelector('.miro-canvas-handles [data-connector-end=from]').getBoundingClientRect().toJSON()")
                 assert box is not None
                 gx, gy = box['x'] + box['width'] / 2, box['y'] + box['height'] / 2
                 page.mouse.move(gx, gy)
@@ -173,10 +173,10 @@ def main() -> int:
                 assert abs(after_end['x'] - before_end['x'] - 30) < 1, (before_end, after_end)
                 assert abs(after_end['y'] - before_end['y'] - 40) < 1, (before_end, after_end)
                 assert page.locator('.miro-board-connector-hit').count() == 1, 'Grip created a new connector'
-                assert page.locator('.miro-board-connector-grip[data-end]').count() == 2
+                assert page.locator('.miro-canvas-handles [data-connector-end]:visible').count() == 2
                 # Non-unit zoom and an offset camera must use the same endpoint origin.
                 page.evaluate("miroBrowser.runtime.setViewport(60,30,1);miroBrowser.session.followViewport()")
-                box = page.evaluate("document.querySelector('.miro-board-connector-grip[data-end=from]').getBoundingClientRect().toJSON()")
+                box = page.evaluate("document.querySelector('.miro-canvas-handles [data-connector-end=from]').getBoundingClientRect().toJSON()")
                 assert box is not None
                 gx, gy = box['x'] + box['width'] / 2, box['y'] + box['height'] / 2
                 before_zoom_end = after_end
@@ -187,7 +187,6 @@ def main() -> int:
                 after_zoom_end = page.evaluate("miroBrowser.runtime.getData().miroCanvas.connectors['menu-line'].from")
                 assert abs(after_zoom_end['x'] - before_zoom_end['x'] - 10) < 1, (box, before_zoom_end, after_zoom_end)
                 assert abs(after_zoom_end['y'] - before_zoom_end['y'] - 15) < 1, (box, before_zoom_end, after_zoom_end)
-                assert not page.locator('.miro-canvas-handles').is_visible()
                 page.evaluate("miroBrowser.runtime.setViewport(0,0,0);miroBrowser.session.followViewport()")
                 page.evaluate("""() => {
                   const b=miroBrowser,s=b.session,path=b.root.querySelector('.miro-board-connector-hit');
@@ -197,7 +196,7 @@ def main() -> int:
                   const after=b.root.querySelector('.miro-board-connector-hit').getBoundingClientRect(),next=s.viewportPoint({x:0,y:0});
                   if(path!==b.root.querySelector('.miro-board-connector-hit'))throw Error('Pure pan rebuilt connector DOM');
                   if(Math.abs(after.left-before.left-(next.x-origin.x))>1||Math.abs(after.top-before.top-(next.y-origin.y))>1)
-                    throw Error('Pure pan left the connector behind the canvas: '+JSON.stringify({before:before.toJSON(),after:after.toJSON(),transform:s.connectorLayer.svg.style.transform}));
+                    throw Error('Pure pan left the connector behind the canvas: '+JSON.stringify({before:before.toJSON(),after:after.toJSON(),canvas:b.runtime.canvasEl.style.transform}));
                   b.runtime.setViewport(0,0,0);s.followViewport();
                 }""")
                 page.evaluate("""() => {
@@ -369,7 +368,7 @@ def main() -> int:
                   const b=miroBrowser,s=b.session;s.resetTools();s.connectorLayer.select(['menu-line']);
                   const first=b.runtime.getData().miroCanvas.connectors['menu-line'];
                   const press=()=>{
-                    const grip=document.querySelector('.miro-board-connector-grip[data-end=from]');
+                    const grip=document.querySelector('.miro-canvas-handles [data-connector-end=from]');
                     const r=grip.getBoundingClientRect();
                     grip.dispatchEvent(new PointerEvent('pointerdown',{button:0,pointerId:91,clientX:r.x+6,clientY:r.y+6,bubbles:true,cancelable:true}));
                   };
@@ -390,7 +389,7 @@ def main() -> int:
                   s.writeBoardConnectors([block]);s.connectorLayer.select(['menu-line']);
                   s.applyElementStyle({connector:{startCap:'stealth',endCap:'none'}});
                   const hit=document.querySelector('[data-connector-id="menu-line"]');
-                  if(hit.getAttribute('fill')!=='transparent')throw Error('Hit overlay paints over block arrow');
+                  if(!['none','transparent'].includes(hit.getAttribute('fill')))throw Error('Hit overlay paints over block arrow');
                   if(!b.runtime.getData().miroCanvas.connectors['menu-line'].block)throw Error('Swapping block head lost block style');
                   s.applyElementStyle({connector:{startCap:'none',endCap:'none'}});
                   if(b.runtime.getData().miroCanvas.connectors['menu-line'].block)throw Error('Removing block head did not make a line');
@@ -421,7 +420,7 @@ def main() -> int:
                   const b=miroBrowser;b.runtime.getData=b.originalGetData;b.session.refresh();
                   for(const id of ['group-a','group-b']){
                     const c=b.runtime.getData().miroCanvas.connectors[id],old=b.groupBefore.miroCanvas.connectors[id];
-                    if(Math.abs(c.from.x-old.from.x-70)>1||Math.abs(c.from.y-old.from.y-35)>1)throw Error('Group drag snapped back: '+id);
+                    if(Math.abs(c.from.x-old.from.x-70)>1||Math.abs(c.from.y-old.from.y-35)>1)throw Error('Group drag snapped back: '+id+' '+JSON.stringify({now:c.from,before:old.from,diagnostics:b.session.transientDiagnostics.slice(-3)}));
                   }
                   if(b.getSaves()!==b.groupSaves+1)throw Error('Group drag was not one save');
                   b.runtime.undo();b.session.refresh();
@@ -437,11 +436,13 @@ def main() -> int:
                     const grip=b.root.querySelector('[data-route-grip]');
                     if(!grip)throw Error('Missing body grips: '+route);
                     const r=grip.getBoundingClientRect(),x=r.x+r.width/2,y=r.y+r.height/2;
-                    const hit=b.root.querySelector('[data-connector-id="'+c.id+'"]'),before=hit.getAttribute('d'),saves=b.getSaves();
+                    const hit=b.root.querySelector('[data-connector-id="'+c.id+'"]'),saves=b.getSaves();
+                    const shown=()=>b.root.querySelector('.miro-canvas-handles__preview path')?.getAttribute('d')??'';
+                    const before=shown();
                     // Press the path itself, not the grip: attached bodies must bend too.
                     hit.dispatchEvent(new PointerEvent('pointerdown',{button:0,pointerId:98,clientX:x,clientY:y,bubbles:true}));
                     window.dispatchEvent(new PointerEvent('pointermove',{pointerId:98,clientX:x+40,clientY:y+50}));
-                    if(b.root.querySelector('[data-connector-id="'+c.id+'"]').getAttribute('d')===before)throw Error('Body preview did not change: '+route);
+                    if(shown()===before)throw Error('Body preview did not change: '+route);
                     s.refresh();
                     if(b.getSaves()!==saves)throw Error('Body preview saved early');
                     window.dispatchEvent(new PointerEvent('pointerup',{pointerId:98,clientX:x+40,clientY:y+50}));
@@ -691,37 +692,41 @@ def main() -> int:
                 }""")
                 page.evaluate("""() => {
                   const b=miroBrowser,s=b.session,document=b.runtime.getData();
-                  if(b.root.querySelector('.miro-canvas-native-edge-label'))throw Error('Unmodified native edge should keep its native label');
+                  // A labelled native edge shows the plugin's label on the route the plugin
+                  // draws, with native Canvas's own label hidden.
+                  const ours=()=>b.root.querySelector('.miro-canvas-connector-label[data-connector-id="e1"]');
+                  const native=b.runtime.edges.get('e1').labelEl;
+                  if(!ours()||native.style.visibility!=='hidden')throw Error('Native edge label is not stood in for');
+                  const top=()=>ours().getBoundingClientRect().top;
+                  const firstTop=top();
                   const preview=s.previewReshape('e1',{kind:'insert',index:0,x:0,y:0},s.viewportPoint({x:370,y:300}));
-                  if(!preview||!b.root.querySelector('.miro-canvas-native-edge-label'))throw Error('First native edge body drag left the label behind');
-                  s.activeNativeRouteDragId=undefined;s.nativeEdgeLabels.clearPreview('e1');s.updateNativeEdgeLabels();
+                  if(!preview||Math.abs(top()-firstTop)<1)throw Error('First native edge body drag left the label behind');
+                  s.connectorLabels.clearPreview('e1');
                   document.miroCanvas??={schemaVersion:1};document.miroCanvas.localOverrides??={};
                   document.miroCanvas.localOverrides.e1={connector:{route:'straight',waypoints:[{x:370,y:250}]}};
                   b.runtime.importData(document);s.refresh();
-                  const label=b.root.querySelector('.miro-canvas-native-edge-label');
-                  const native=b.runtime.edges.get('e1').labelEl;
-                  if(!label||native.style.visibility!=='hidden')throw Error('Reshaped native edge still shows its stale label');
-                  const oldTop=Number.parseFloat(label.style.top);
+                  if(!ours()||b.runtime.edges.get('e1').labelEl.style.visibility!=='hidden')throw Error('Reshaped native edge still shows its stale label');
+                  const oldTop=top();
                   document.miroCanvas.localOverrides.e1.connector.waypoints=[{x:370,y:300}];
                   b.runtime.importData(document);s.refresh();
-                  const moved=b.root.querySelector('.miro-canvas-native-edge-label');
-                  if(Math.abs(Number.parseFloat(moved.style.top)-oldTop)<1)throw Error('Native edge label lagged behind body move');
-                  const points=s.nativeEdgeLabels.entries.get('e1').item.points;
-                  const originalTop=Number.parseFloat(moved.style.top);
-                  s.nativeEdgeLabels.preview('e1',points.map(p=>({x:p.x,y:p.y+22})));
+                  if(Math.abs(top()-oldTop)<1)throw Error('Native edge label lagged behind body move');
+                  const route=s.landingGeometry().geometry.edges.e1.points;
+                  const originalTop=top(),zoom=2**b.runtime.zoom;
+                  s.connectorLabels.preview('e1',route.map(p=>({x:p.x,y:p.y+22})));
                   s.followViewport();
-                  if(Math.abs(Number.parseFloat(moved.style.top)-originalTop-22)>1)
+                  if(Math.abs(top()-originalTop-22*zoom)>1)
                     throw Error('Viewport frame reverted a live route-label preview');
-                  s.nativeEdgeLabels.clearPreview('e1');s.followViewport();
-                  if(Math.abs(Number.parseFloat(moved.style.top)-originalTop)>1)
+                  s.connectorLabels.clearPreview('e1');s.followViewport();
+                  if(Math.abs(top()-originalTop)>1)
                     throw Error('Cancelled route-label preview did not restore position');
-                  moved.dispatchEvent(new MouseEvent('dblclick',{bubbles:true,cancelable:true}));
-                  const input=b.root.querySelector('input[aria-label="Edge label"]');
-                  if(!input)throw Error('Reshaped native edge label cannot be edited: '+JSON.stringify({editing:!!s.nativeEdgeLabels.editing,children:[...s.nativeEdgeLabels.element.children].map(e=>e.outerHTML.slice(0,100))}));
-                  input.value='Edited edge';input.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true,cancelable:true}));
+                  b.select('e1');
+                  ours().dispatchEvent(new MouseEvent('dblclick',{bubbles:true,cancelable:true}));
+                  const editor=ours().querySelector('.canvas-path-label');
+                  if(editor.getAttribute('contenteditable')!=='true')throw Error('Reshaped native edge label cannot be edited');
+                  editor.textContent='Edited edge';editor.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true,cancelable:true}));
                   if(b.runtime.getData().edges.find(e=>e.id==='e1').label!=='Edited edge')throw Error('Native edge label edit was not saved');
-                  const current=b.root.querySelector('.miro-canvas-native-edge-label'),r=current.getBoundingClientRect(),x=r.left+r.width/2,y=r.top+r.height/2;
-                  current.dispatchEvent(new PointerEvent('pointerdown',{button:0,pointerId:459,clientX:x,clientY:y,bubbles:true,cancelable:true}));
+                  const r=ours().getBoundingClientRect(),x=r.left+r.width/2,y=r.top+r.height/2;
+                  ours().dispatchEvent(new PointerEvent('pointerdown',{button:0,pointerId:459,clientX:x,clientY:y,bubbles:true,cancelable:true}));
                   window.dispatchEvent(new PointerEvent('pointermove',{pointerId:459,clientX:x+20,clientY:y+10}));
                   window.dispatchEvent(new PointerEvent('pointerup',{pointerId:459,clientX:x+20,clientY:y+10}));
                   const t=b.runtime.getData().miroCanvas.localOverrides.e1.connector.labelT;
@@ -847,6 +852,8 @@ def main() -> int:
                   check(b.session.writeBoardConnectors([bound]),'Live test connector was refused');
                   const pathBefore=b.root.querySelector('[data-connector-id="live-bound"]').getAttribute('d');
                   const savesBeforeDrag=b.getSaves();
+                  // Native Canvas selects the card it starts to drag.
+                  b.select('n1');
                   b.node.nodeEl.dispatchEvent(new PointerEvent('pointerdown',{button:0,pointerId:91,bubbles:true}));
                   b.node.nodeEl.style.left=(parseFloat(b.node.nodeEl.style.left)+90)+'px';
                   await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));

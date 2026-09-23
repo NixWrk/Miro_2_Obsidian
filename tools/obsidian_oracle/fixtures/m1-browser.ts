@@ -27,6 +27,14 @@ for (const label of ["Delete", "Zoom to selection", "Edit"]) {
 }
 root.append(nativeMenuContainer);
 
+// Native Canvas's moving layer: what it holds is in board units and moves
+// with the camera.  The synthetic host places it where the session maps the
+// board, once the session exists.
+const canvasEl = root.appendChild(document.createElement("div"));
+canvasEl.className = "canvas";
+canvasEl.style.cssText = "position:absolute;left:0;top:0;transform-origin:0 0;pointer-events:none";
+let placeCanvas = (): void => {};
+
 type RuntimeElement = Record<string, unknown> & {
   getData: () => Record<string, unknown>;
   nodeEl?: HTMLElement;
@@ -116,6 +124,14 @@ function makeNode(data: Record<string, unknown>, previous?: RuntimeElement): Run
       height: Number.parseFloat(nodeEl.style.height) || finite(source.height, 120),
     }),
   });
+  // As in Obsidian, a node's position is live while native Canvas moves it.
+  for (const [key, style] of [["x", "left"], ["y", "top"], ["width", "width"], ["height", "height"]] as const) {
+    Object.defineProperty(element, key, {
+      configurable: true, enumerable: true,
+      get: () => Number.parseFloat(nodeEl.style[style]) || 0,
+      set: (value: number) => { nodeEl.style[style] = `${value}px`; },
+    });
+  }
   if (contentEl) element.contentEl = contentEl; else delete element.contentEl;
   if (labelEl) element.labelEl = labelEl; else delete element.labelEl;
   return element;
@@ -138,6 +154,8 @@ function makeEdge(data: Record<string, unknown>, previous?: RuntimeElement): Run
   const element = previous ?? ({} as RuntimeElement);
   Object.assign(element, source, { edgeEl, getData: () => clone(source) });
   if (labelEl) element.labelEl = labelEl; else delete element.labelEl;
+  // Obsidian 1.13 reaches an edge's label through its label element's wrapper.
+  if (labelEl) element.labelElement = { wrapperEl: labelEl }; else delete element.labelElement;
   return element;
 }
 
@@ -176,12 +194,13 @@ const history = [clone(initial) as unknown as Record<string, unknown>];
 let historyIndex = 0;
 let saves = 0;
 const runtime = {
-  wrapperEl: root, nodes, edges, selection,
+  wrapperEl: root, canvasEl, nodes, edges, selection,
   menu: { menuEl: nativeMenu, containerEl: nativeMenuContainer },
   data: clone(initial) as unknown as Record<string, unknown>, readonly: false,
   x: 0, y: 0, zoom: 0, tx: 0, ty: 0, tZoom: 0, scale: 1,
   setViewport(x: number, y: number, zoom: number) {
     this.x = this.tx = x; this.y = this.ty = y; this.zoom = this.tZoom = zoom; this.scale = 2 ** zoom;
+    placeCanvas();
   },
   markViewportChanged() {},
   getData() {
@@ -226,6 +245,14 @@ const session = new M1CanvasSession(view, writer, { settings: normalizeSettings(
   readText: () => systemClipboard,
   writeText: text => { systemClipboard = text; },
 } });
+placeCanvas = () => {
+  const camera = session as unknown as { viewportPoint(point: { x: number; y: number }): { x: number; y: number } | undefined };
+  const origin = camera.viewportPoint({ x: 0, y: 0 }), unit = camera.viewportPoint({ x: 1, y: 0 });
+  const box = root.getBoundingClientRect();
+  if (origin === undefined || unit === undefined) return;
+  canvasEl.style.transform = `translate(${origin.x - box.left}px, ${origin.y - box.top}px) scale(${unit.x - origin.x})`;
+};
+placeCanvas();
 const mounted = session.mount();
 
 const openCalls: LocalDocument[] = [];

@@ -1,288 +1,207 @@
-import { pointOnPolyline, type CanvasAnchor, type AnchorGeometry, type AnchorPoint } from "./anchors";
-import { boardConnectors, connectorRoutes, nearestRouteFraction, readBoardConnector, reshapeBoardConnector, translateConnector, type BoardConnector } from "./board-connectors";
+/**
+ * Draws the connectors a board keeps of its own - those with an end native
+ * Canvas cannot hold - on the board itself.
+ *
+ * The layer is one SVG inside native Canvas's moving layer, in board units,
+ * so it pans and zooms with everything else for nothing.  A connector is
+ * drawn again only when it, its route or its selection changes; a card
+ * dragged on a large board redraws the few lines that hold on to it.  It wears
+ * native Canvas's own edge classes, so a line held by nothing is grabbed,
+ * hovered and selected exactly as an edge between cards is.
+ *
+ * It only draws and says what was pressed.  Grips, the toolbar, labels and
+ * the clipboard are the ones native edges use; the session serves both.
+ */
+
+import type { AnchorGeometry, AnchorPoint } from "./anchors";
+import { boardConnectors, connectorEndCap, connectorRoutes, type BoardConnector } from "./board-connectors";
+import type { PlannedRoute } from "./connector-route";
 import { CAP_PATHS, capFilled, headMarkerAttributes, strokeDash } from "./connector-style";
-import { gripNear, routeHandles, routePath, routeBends, removeWaypoint, type RouteHandle } from "./connector-route";
 import { blockArrowOutline } from "./free-line";
 
-interface Host {
-  document(): unknown;
-  geometry(): AnchorGeometry;
-  screen(p: AnchorPoint): AnchorPoint;
-  board(p: AnchorPoint): AnchorPoint | undefined;
-  landing(p: AnchorPoint, id: string): CanvasAnchor | undefined;
-  editable(ids: string[]): boolean;
-  write(items: BoardConnector[], remove?: string[], expected?: BoardConnector): boolean;
-  deselectNative(): void;
-  id(): string;
-  clipboard(action:"copy"|"cut"|"paste"):void;
-  removeSelection(): void;
-  moveSelection(event: PointerEvent): boolean;
-  selectionChanged(): void;
-  defaultLabelT?(): number;
+const SVG = "http://www.w3.org/2000/svg";
+/** Arrowheads are drawn at the size native Canvas draws its own. */
+const CAP_SCALE = 0.6;
+
+export interface ConnectorLayerHost {
+  readonly document: () => unknown;
+  readonly geometry: () => AnchorGeometry;
+  /** A press landed on a connector's course. */
+  readonly press: (event: PointerEvent, id: string) => void;
+  /** The selection was set: everything that shows it follows. */
+  readonly selected?: () => void;
 }
-const NS = "http://www.w3.org/2000/svg";
-const MIME = "application/x-miro-board-connectors";
-/** Screen-space overlay; no fake Canvas nodes, and no native graph mutation while rendering. */
+
 export class ConnectorLayer {
-  private svg: SVGSVGElement;
-  private toolbar: HTMLDivElement;
-  private selected = new Set<string>();
-  private dragEnd?: () => void;
-  private disposed = false;
-  private preview?: BoardConnector;
-  private labelEditor?: {id:string;input:HTMLInputElement};
-  private paintedDocument?: unknown;
-  private paintedGeometry?: AnchorGeometry;
-  private paintedSelection = "";
-  private paintedOrigin?: AnchorPoint;
-  private paintedScale?: number;
-  private cleanups: (() => void)[] = [];
-  constructor(private root: HTMLElement, private host: Host) {
-    const doc = root.ownerDocument;
-    this.svg = doc.createElementNS(NS, "svg");
-    this.svg.classList.add("miro-board-connectors");
-    this.toolbar = doc.createElement("div"); this.toolbar.className = "miro-canvas-toolbar miro-board-connector-tools";
-    this.root.append(this.svg, this.toolbar);
-    const listen = (type: string, handler: EventListener) => {
-      root.addEventListener(type, handler, true); this.cleanups.push(() => root.removeEventListener(type, handler, true));
+  public readonly element: SVGSVGElement;
+  private readonly selected = new Set<string>();
+  private previewed: BoardConnector | undefined;
+  private routes = new Map<string, PlannedRoute>();
+  /** Each connector drawn, and what it was drawn from. */
+  private readonly drawn = new Map<string, { readonly group: SVGGElement; readonly signature: string }>();
+  /** What the layer was last drawn from; the same again draws nothing. */
+  private painted: { readonly document: unknown; readonly geometry: AnchorGeometry; readonly selection: string } | undefined;
+  private readonly listeners: (() => void)[] = [];
+
+  public constructor(private readonly document: Document, private readonly host: ConnectorLayerHost) {
+    this.element = document.createElementNS(SVG, "svg");
+    this.element.setAttribute("class", "canvas-edges miro-board-connectors");
+    // As native Canvas's edge style has it, should a page lack that style:
+    // only a line takes presses, never the layer around it.
+    this.element.setAttribute("pointer-events", "none");
+    const press = (event: Event): void => {
+      const id = (event.target as Element | null)?.closest?.("[data-connector-id]")?.getAttribute("data-connector-id");
+      if (typeof id === "string") this.host.press(event as PointerEvent, id);
     };
-    listen("pointerdown", event => {
-      // The shared selection frame belongs to the current selection. Its press
-      // must not clear independent connectors before the group drag starts.
-      if ((event.target as Element)?.closest?.(".miro-canvas-mixed-selection-frame")) return;
-      if (this.selected.size && (event.target as Element)?.closest?.(".canvas-selection") && this.host.moveSelection(event as PointerEvent)) return;
-      if(!(event as PointerEvent).shiftKey && (event.target as Element)?.closest?.(".canvas-node") && this.selected.size && this.host.moveSelection(event as PointerEvent))return;
-      if ((event as PointerEvent).button===0 && !(event as PointerEvent).shiftKey && !this.svg.contains(event.target as Node) && !(event.target as Element)?.closest?.(".miro-canvas-toolbar,.miro-canvas-tools,.miro-canvas-comment-markers")) { this.selected.clear(); this.render();this.host.selectionChanged(); }
-    });
-    listen("keydown", event => {
-      const key = event as KeyboardEvent;
-      if (!this.selected.size || (event.target as Element)?.closest?.("input,textarea,[contenteditable=true],.cm-editor")) return;
-      if (key.key === "Delete" || key.key === "Backspace") {
-        key.preventDefault(); key.stopImmediatePropagation(); this.remove();
-      } else if(key.key === "Enter" && this.selected.size === 1){
-        const c=boardConnectors(this.host.document()).find(item=>this.selected.has(item.id));
-        const route=c&&connectorRoutes(boardConnectors(this.host.document()),this.host.geometry()).get(c.id);
-        if(c&&route){key.preventDefault();key.stopImmediatePropagation();this.editLabel(c,route.points);}
-      }
-    });
-    listen("copy", event => this.copy(event as ClipboardEvent));
-    listen("cut", event => this.copy(event as ClipboardEvent));
-    listen("paste", event => this.paste(event as ClipboardEvent));
+    this.element.addEventListener("pointerdown", press);
+    this.listeners.push(() => this.element.removeEventListener("pointerdown", press));
   }
-  private copy(event: ClipboardEvent): void {
-    if ((event.target as Element)?.closest?.("input,textarea,[contenteditable=true],.cm-editor")) return;
-    if (!this.selected.size || !event.clipboardData) return;
-    if (event.type === "cut" && !this.host.editable([...this.selected])) { event.preventDefault(); event.stopImmediatePropagation(); return; }
-    const all = boardConnectors(this.host.document()), routes = connectorRoutes(all, this.host.geometry());
-    const items = all.filter(c => this.selected.has(c.id)).map(c => {
-      const route = routes.get(c.id);
-      const end = (a: CanvasAnchor, p: AnchorPoint | undefined): CanvasAnchor => a.type === "edge" && this.selected.has(a.edgeId) ? a : p ? {type:"free",x:p.x,y:p.y} : a;
-      return {...c, from:end(c.from,route?.start), to:end(c.to,route?.end)};
-    });
-    const text = JSON.stringify({miroBoardConnectors:1,items});
-    event.clipboardData.setData(MIME,text); event.clipboardData.setData("text/plain",text);
-    event.preventDefault(); event.stopImmediatePropagation();
-    if (event.type === "cut") this.remove();
+
+  /** The connectors selected now, which native Canvas knows nothing of. */
+  public selection(): readonly string[] {
+    return [...this.selected];
   }
-  private paste(event: ClipboardEvent): void {
-    if (!event.clipboardData || (event.target as Element)?.closest?.("input,textarea,[contenteditable=true],.cm-editor")) return;
-    try {
-      const value = JSON.parse(event.clipboardData.getData(MIME) || event.clipboardData.getData("text/plain"));
-      if (value?.miroBoardConnectors !== 1 || !Array.isArray(value.items) || value.items.length > 10000 || !value.items.every((c: unknown) => readBoardConnector(c))) return;
-      event.preventDefault(); event.stopImmediatePropagation();
-      if (!this.host.editable([])) return;
-      const ids = new Map<string,string>(value.items.map((c:BoardConnector) => [c.id,this.host.id()]));
-      const items = value.items.map((c:BoardConnector) => {
-        const moved = translateConnector(c,40,40,ids.get(c.id)!);
-        const end = (a:CanvasAnchor):CanvasAnchor => a.type === "edge" && ids.has(a.edgeId) ? {...a,edgeId:ids.get(a.edgeId)!} : a;
-        return {...moved,from:end(moved.from),to:end(moved.to)};
-      });
-      if (this.host.write(items)) {this.host.deselectNative(); this.selected = new Set(ids.values()); this.render();}
-    } catch { /* Not our clipboard. */ }
+
+  public select(ids: readonly string[]): void {
+    this.selected.clear();
+    for (const id of ids) this.selected.add(id);
+    this.render();
+    this.host.selected?.();
   }
-  private remove(): void {
-    this.host.removeSelection();
+
+  public reset(): void {
+    this.previewed = undefined;
+    this.select([]);
   }
-  render(force = false): void {
-    if (this.disposed || this.dragEnd && !force) return;
-    const document=this.host.document();
-    const geometry=this.host.geometry();
-    const origin=this.host.screen({x:0,y:0}),unit=this.host.screen({x:1,y:0});
-    const scale=Math.hypot(unit.x-origin.x,unit.y-origin.y);
-    const selection=[...this.selected].sort().join("\u0000");
-    // During a pure pan, the paths, grips and labels share one translation.
-    // Rebuilding every SVG child each animation frame caused visible stalls.
-    if(!force&&!this.preview&&!this.labelEditor&&document===this.paintedDocument&&geometry===this.paintedGeometry
-      &&selection===this.paintedSelection&&this.paintedOrigin&&this.paintedScale===scale){
-      if(this.svg.style)this.svg.style.transform=`translate(${origin.x-this.paintedOrigin.x}px, ${origin.y-this.paintedOrigin.y}px)`;
-      return;
+
+  /** Draw a connector being dragged where it is going, in place of where it is; nothing puts it back. */
+  public preview(connector: BoardConnector | undefined): void {
+    this.previewed = connector;
+    this.render(true);
+  }
+
+  /** The route a connector was last drawn along. */
+  public routeOf(id: string): PlannedRoute | undefined {
+    return this.routes.get(id);
+  }
+
+  /** Draw the connectors, unless nothing they are drawn from has changed. */
+  public render(force = false): void {
+    const document = this.host.document(), geometry = this.host.geometry();
+    const connectors = boardConnectors(document).map((connector) => (this.previewed?.id === connector.id ? this.previewed : connector));
+    for (const id of this.selected) if (!connectors.some((connector) => connector.id === id)) this.selected.delete(id);
+    const selection = [...this.selected].sort().join("\u0000");
+    const painted = this.painted;
+    if (!force && this.previewed === undefined && painted !== undefined
+      && painted.document === document && painted.geometry === geometry && painted.selection === selection) return;
+    this.routes = new Map();
+    for (const connector of connectors) {
+      // The anchoring geometry has planned every route already; only one
+      // being dragged is planned here, where it is going.
+      const route = connector === this.previewed
+        ? connectorRoutes([connector], geometry).get(connector.id)
+        : plannedRoute(geometry.edges?.[connector.id]);
+      if (route !== undefined) this.routes.set(connector.id, route);
     }
-    if(this.svg.style)this.svg.style.transform="none";
-    const connectors = boardConnectors(document).map(c=>this.preview?.id===c.id?this.preview:c);
-    for (const id of this.selected) if (!connectors.some(c => c.id === id)) this.selected.delete(id);
-    const routes = connectorRoutes(connectors, geometry);
-    const doc = this.root.ownerDocument;
-    this.svg.replaceChildren(); this.toolbar.replaceChildren(); this.toolbar.hidden = true;
-    const defs = doc.createElementNS(NS,"defs"); this.svg.append(defs);
-    for (const c of connectors) {
-      const route = routes.get(c.id); if (!route) continue;
-      const path = doc.createElementNS(NS,"path");
-      path.setAttribute("d",routePath(route.start,route.segments,p=>this.host.screen(p)));
-      path.setAttribute("fill","none"); path.setAttribute("stroke",c.color); path.setAttribute("stroke-width",String(c.width*scale));
-      path.setAttribute("stroke-dasharray",strokeDash(c.strokeStyle));
-      if (c.block) {
-        const reverse = c.startCap !== "none" && c.endCap === "none";
-        const outline=blockArrowOutline(reverse ? route.end : route.start,reverse ? route.start : route.end,c.width,c.headSize).map(p=>this.host.screen(p));
-        path.setAttribute("d",outline.map((p,i)=>`${i?"L":"M"}${p.x} ${p.y}`).join(" ")+" Z");
-        path.setAttribute("fill",c.color); path.setAttribute("stroke-width","1");
-      }
-      for (const end of ["start","end"] as const) {
-        if (c.block) continue;
-        const cap = end === "start" ? c.startCap : c.endCap;
-        if (!CAP_PATHS[cap]) continue;
-        const marker = doc.createElementNS(NS,"marker"), glyph = doc.createElementNS(NS,"path");
-        const id = `miro-cap-${this.host.id()}`;
-        marker.setAttribute("id",id); marker.setAttribute("viewBox","-16 -8 18 16");
-        marker.setAttribute("refX","0"); marker.setAttribute("refY","0"); marker.setAttribute("markerWidth","14"); marker.setAttribute("markerHeight","14"); marker.setAttribute("orient","auto-start-reverse");
-        for (const [key, value] of Object.entries(headMarkerAttributes(c.headSize, scale))) marker.setAttribute(key, value);
-        glyph.setAttribute("d",CAP_PATHS[cap]!); glyph.setAttribute("stroke",c.color); glyph.setAttribute("fill",capFilled(cap)?c.color:"none"); marker.append(glyph); defs.append(marker);
-        path.setAttribute(`marker-${end}`,`url(#${id})`);
-      }
-      this.svg.append(path);
-      const hit = path.cloneNode(false) as SVGPathElement;
-      hit.removeAttribute("marker-start"); hit.removeAttribute("marker-end"); hit.setAttribute("fill",c.block ? "transparent" : "none"); hit.setAttribute("stroke","transparent"); hit.setAttribute("stroke-width",String(Math.max(14,c.width*scale+8))); hit.classList.add("miro-board-connector-hit");
-      hit.setAttribute("aria-label",`Connector ${c.id}; double-click or press Enter to edit its label`); hit.setAttribute("data-connector-id",c.id);
-      hit.addEventListener("pointerdown", e => {
-        if (e.button !== 0) return;
-        e.preventDefault(); e.stopImmediatePropagation();
-        if(e.detail>=2){this.editLabel(c,route.points);return;}
-        if (!e.shiftKey && !this.selected.has(c.id)) {this.host.deselectNative();this.selected.clear();}
-        if(e.shiftKey && this.selected.has(c.id)){this.selected.delete(c.id);this.render();this.host.selectionChanged();return;}
-        this.selected.add(c.id); this.root.focus(); this.render();this.host.selectionChanged();
-        this.drag(e,c);
-      });
-      hit.addEventListener("contextmenu", e => {e.preventDefault(); e.stopPropagation(); this.selected = new Set([c.id]); this.root.focus(); this.render();this.host.selectionChanged();});
-      this.svg.append(hit);
-      if(c.label){
-        const at=pointOnPolyline(route.points,c.labelT??this.host.defaultLabelT?.()??0.5);
-        if(at){
-          const screen=this.host.screen(at),label=doc.createElementNS(NS,"text");
-          label.classList.add("miro-board-connector-label");
-          label.setAttribute("x",String(screen.x));label.setAttribute("y",String(screen.y));
-          label.setAttribute("text-anchor","middle");label.setAttribute("dominant-baseline","middle");
-          label.setAttribute("data-connector-id",c.id);label.textContent=c.label;
-          label.setAttribute("aria-label",`Drag connector label; double-click to edit: ${c.label}`);
-          label.addEventListener("pointerdown",e=>{if(e.button!==0)return;e.preventDefault();e.stopImmediatePropagation();this.selected=new Set([c.id]);this.host.selectionChanged();this.dragLabel(e,c,route.points);});
-          label.addEventListener("dblclick",e=>{e.preventDefault();e.stopPropagation();this.editLabel(c,route.points);});
-          this.svg.append(label);
-        }
-      }
-      if(this.labelEditor?.id===c.id){
-        const at=pointOnPolyline(route.points,c.labelT??this.host.defaultLabelT?.()??0.5);
-        if(at){const screen=this.host.screen(at);this.labelEditor.input.style.left=`${screen.x}px`;this.labelEditor.input.style.top=`${screen.y}px`;}
-      }
-      if (this.selected.has(c.id)) for (const end of ["from","to"] as const) {
-        const at = this.host.screen(end === "from" ? route.start : route.end);
-        const grip = doc.createElementNS(NS,"circle"); grip.setAttribute("cx",String(at.x)); grip.setAttribute("cy",String(at.y)); grip.setAttribute("r","6"); grip.classList.add("miro-board-connector-grip"); grip.setAttribute("data-end",end);
-        grip.addEventListener("pointerdown", e => { if(e.button!==0)return; e.preventDefault(); e.stopImmediatePropagation(); this.drag(e,c,end); }); this.svg.append(grip);
-      }
-      if (this.selected.size === 1 && this.selected.has(c.id) && !c.block && this.host.editable([c.id])) {
-        for (const handle of routeHandles(route)) {
-          const at = this.host.screen(handle.point);
-          const grip = doc.createElementNS(NS, "circle");
-          grip.setAttribute("cx", String(at.x)); grip.setAttribute("cy", String(at.y)); grip.setAttribute("r", "4");
-          grip.classList.add("miro-board-connector-grip"); grip.setAttribute("data-route-grip", handle.kind);
-          grip.setAttribute("aria-label", "Move connector bend");
-          grip.addEventListener("pointerdown", e => {
-            if (e.button !== 0) return;
-            e.preventDefault(); e.stopImmediatePropagation(); this.drag(e, c, undefined, handle);
-          });
-          grip.addEventListener("dblclick", e => {
-            e.preventDefault(); e.stopPropagation();
-            if (handle.kind === "insert" || !this.host.editable([c.id])) return;
-            this.host.write([{ ...c, waypoints: handle.kind === "waypoint" ? removeWaypoint(routeBends(route), handle.index) : [] }], [], c);
-          });
-          this.svg.append(grip);
-        }
-      }
+    const svg = this.element;
+    const kept = new Set<string>();
+    for (const connector of connectors) {
+      const route = this.routes.get(connector.id);
+      if (route === undefined) continue;
+      kept.add(connector.id);
+      const signature = `${route.path}|${this.selected.has(connector.id)}|${JSON.stringify(connector)}`;
+      const known = this.drawn.get(connector.id);
+      if (known?.signature === signature) continue;
+      const group = this.draw(connector, route);
+      if (known === undefined) svg.appendChild(group);
+      else svg.replaceChild(group, known.group);
+      this.drawn.set(connector.id, { group, signature });
     }
-    this.paintedDocument=this.preview?undefined:document;
-    this.paintedGeometry=this.preview?undefined:geometry;
-    this.paintedSelection=[...this.selected].sort().join("\u0000");
-    this.paintedOrigin=origin;
-    this.paintedScale=scale;
+    for (const [id, known] of this.drawn) {
+      if (kept.has(id)) continue;
+      svg.removeChild(known.group);
+      this.drawn.delete(id);
+    }
+    this.painted = this.previewed === undefined ? { document, geometry, selection } : undefined;
   }
-  private editLabel(c:BoardConnector, points:readonly AnchorPoint[]):void {
-    if(!this.host.editable([c.id]))return;
-    this.labelEditor?.input.remove();
-    const input=this.root.ownerDocument.createElement("input");
-    input.className="miro-board-connector-label-editor";input.type="text";input.maxLength=1024;
-    input.setAttribute("aria-label","Connector label");input.value=c.label??"";
-    const at=pointOnPolyline(points,c.labelT??this.host.defaultLabelT?.()??0.5);
-    if(at){const screen=this.host.screen(at);input.style.left=`${screen.x}px`;input.style.top=`${screen.y}px`;}
-    this.root.appendChild(input);this.labelEditor={id:c.id,input};
-    let done=false;
-    const finish=(save:boolean)=>{
-      if(done)return;done=true;input.remove();if(this.labelEditor?.input===input)this.labelEditor=undefined;
-      if(save&&input.value!==c.label)this.host.write([{...c,label:input.value,labelT:c.labelT??this.host.defaultLabelT?.()??0.5}],[],c);
-      this.render();
-    };
-    input.addEventListener("pointerdown",e=>e.stopPropagation());
-    input.addEventListener("keydown",e=>{e.stopPropagation();if(e.key==="Enter"){e.preventDefault();finish(true);}else if(e.key==="Escape"){e.preventDefault();finish(false);}});
-    input.addEventListener("blur",()=>finish(true));
-    input.focus();input.select();
+
+  public dispose(): void {
+    for (const remove of this.listeners.splice(0)) remove();
+    this.element.remove();
   }
-  private dragLabel(event:PointerEvent,c:BoardConnector,points:readonly AnchorPoint[]):void {
-    if(!this.host.editable([c.id]))return;
-    const view=this.root.ownerDocument.defaultView;if(!view)return;
-    let next=c,changed=false;
-    const move=(e:PointerEvent)=>{
-      if(e.pointerId!==event.pointerId)return;
-      const at=this.host.board({x:e.clientX,y:e.clientY});if(!at)return;
-      changed ||= Math.hypot(e.clientX-event.clientX,e.clientY-event.clientY)>3;
-      if(!changed)return;
-      next={...c,labelT:nearestRouteFraction(points,at)};this.preview=next;this.render(true);
-    };
-    const cleanup=()=>{view.removeEventListener("pointermove",move,true);view.removeEventListener("pointerup",up,true);view.removeEventListener("pointercancel",cancel,true);view.removeEventListener("blur",cancel);this.dragEnd=undefined;this.preview=undefined;};
-    const cancel=()=>{cleanup();this.render();};
-    const up=(e:PointerEvent)=>{if(e.pointerId!==event.pointerId)return;move(e);cleanup();if(changed&&next!==c)this.host.write([next],[],c);this.render();};
-    view.addEventListener("pointermove",move,true);view.addEventListener("pointerup",up,true);view.addEventListener("pointercancel",cancel,true);view.addEventListener("blur",cancel);this.dragEnd=cancel;
+
+  /** One connector: its course, as native Canvas draws an edge's, and the wider copy that takes presses. */
+  private draw(connector: BoardConnector, route: PlannedRoute): SVGGElement {
+    const group = this.document.createElementNS(SVG, "g");
+    // Its arrowheads go with it, and are drawn again with it.
+    const defs = group.appendChild(this.document.createElementNS(SVG, "defs"));
+    group.setAttribute("class", `miro-board-connector${this.selected.has(connector.id) ? " is-focused" : ""}`);
+    group.style.setProperty("--canvas-color", connector.color);
+    const course = route.path;
+    const line = group.appendChild(this.document.createElementNS(SVG, "path"));
+    line.setAttribute("class", "canvas-display-path");
+    // The wider, invisible copy on top takes the presses, and says whose they are.
+    const hit = group.appendChild(this.document.createElementNS(SVG, "path"));
+    hit.setAttribute("class", "canvas-interaction-path miro-board-connector-hit");
+    hit.setAttribute("data-connector-id", connector.id);
+    hit.setAttribute("d", course);
+    // What native Canvas's edge style sets, for a page without it; its rules win.
+    hit.setAttribute("fill", "none");
+    hit.setAttribute("stroke", "transparent");
+    hit.setAttribute("stroke-width", "24");
+    hit.setAttribute("pointer-events", "stroke");
+    // Inline, as the renderer paints a native edge: the width is the
+    // connector's own, in board units, not native Canvas's hairline.
+    const style: Record<string, string> = connector.block === true
+      ? { d: blockOutline(connector, route), fill: connector.color, stroke: connector.color, "stroke-width": "1", "stroke-linejoin": "round" }
+      : {
+        d: course, fill: "none", stroke: connector.color, "stroke-width": String(connector.width),
+        "stroke-dasharray": strokeDash(connector.strokeStyle),
+        "stroke-linecap": connector.strokeStyle === "dotted" ? "round" : "butt",
+        ...this.caps(connector, defs),
+      };
+    for (const [name, value] of Object.entries(style)) {
+      // Markers are references, set as attributes; the rest outranks native Canvas's rules.
+      if (name === "d" || name.startsWith("marker-")) line.setAttribute(name, value);
+      else line.style.setProperty(name, value);
+    }
+    return group;
   }
-  private drag(event:PointerEvent, c:BoardConnector, end?:"from"|"to", handle?: RouteHandle):void {
-    if(!end && !handle && this.host.moveSelection(event))return;
-    if (!this.host.editable([c.id])) return;
-    const first=this.host.board({x:event.clientX,y:event.clientY}), view=this.root.ownerDocument.defaultView;
-    if(!first || !view) return;
-    const route = connectorRoutes(boardConnectors(this.host.document()), this.host.geometry()).get(c.id);
-    // A node-bound line cannot translate its endpoints. Dragging its body
-    // changes its route instead, just like a native Canvas connector.
-    const bend = handle ?? (!end && !c.block && (c.from.type !== "free" || c.to.type !== "free") && route ? gripNear(route, first) : undefined);
-    let next=c, changed=false;
-    const move=(e:PointerEvent)=>{
-      if(e.pointerId!==event.pointerId) return;
-      const at=this.host.board({x:e.clientX,y:e.clientY}); if(!at)return;
-      changed ||= Math.hypot(e.clientX-event.clientX,e.clientY-event.clientY)>3;
-      if(end) {const anchor=this.host.landing({x:e.clientX,y:e.clientY},c.id); next=anchor?{...c,[end]:anchor}:c;}
-      else if (bend && route) next=reshapeBoardConnector(c,route,bend,at);
-      else next=translateConnector(c,at.x-first.x,at.y-first.y);
-      this.preview=next;this.render(true);
-    };
-    const cleanup=()=>{view.removeEventListener("pointermove",move,true); view.removeEventListener("pointerup",up,true); view.removeEventListener("pointercancel",cancel,true); view.removeEventListener("blur",cancel); this.dragEnd=undefined;this.preview=undefined;};
-    const cancel=()=>{cleanup();this.render();};
-    const up=(e:PointerEvent)=>{if(e.pointerId!==event.pointerId)return; move(e);cleanup();if(changed&&next!==c&&this.host.editable([c.id]))this.host.write([next],[],c);this.render();};
-    view.addEventListener("pointermove",move,true);view.addEventListener("pointerup",up,true);view.addEventListener("pointercancel",cancel,true);view.addEventListener("blur",cancel);this.dragEnd=cancel;
+
+  /** Markers for a connector's two ends, sized as native Canvas sizes its own. */
+  private caps(connector: BoardConnector, defs: SVGDefsElement): Record<string, string> {
+    const result: Record<string, string> = {};
+    for (const [end, cap] of [["start", connector.startCap], ["end", connectorEndCap(connector)]] as const) {
+      const path = CAP_PATHS[cap];
+      if (path === undefined) continue;
+      const id = `miro-board-cap-${connector.id}-${end}`;
+      const marker = defs.appendChild(this.document.createElementNS(SVG, "marker"));
+      for (const [name, value] of Object.entries({
+        id, viewBox: "-16 -8 18 16", refX: "0", refY: "0",
+        markerWidth: String(18 * CAP_SCALE), markerHeight: String(16 * CAP_SCALE), orient: "auto-start-reverse",
+        ...headMarkerAttributes(connector.headSize),
+      })) marker.setAttribute(name, value);
+      const glyph = marker.appendChild(this.document.createElementNS(SVG, "path"));
+      glyph.setAttribute("d", path);
+      glyph.setAttribute("fill", capFilled(cap) ? connector.color : "none");
+      glyph.setAttribute("stroke", connector.color);
+      glyph.setAttribute("stroke-linejoin", "round");
+      result[`marker-${end}`] = `url(#${id})`;
+    }
+    return result;
   }
-  dispose():void {this.disposed=true;this.dragEnd?.();this.labelEditor?.input.remove();this.cleanups.forEach(fn=>fn());this.svg.remove();this.toolbar.remove();}
-  reset():void {this.dragEnd?.();this.selected.clear();this.render();}
-  selection(): readonly string[] {return [...this.selected];}
-  select(ids: readonly string[]): void {this.selected=new Set(ids);this.render();this.host.selectionChanged();}
-  /** The shared selection toolbar exposes the same editor as Enter/double-click. */
-  editSelectedLabel(): boolean {
-    if(this.selected.size!==1)return false;
-    const c=boardConnectors(this.host.document()).find(item=>this.selected.has(item.id));
-    const route=c&&connectorRoutes(boardConnectors(this.host.document()),this.host.geometry()).get(c.id);
-    if(!c||!route)return false;
-    this.editLabel(c,route.points);
-    return true;
-  }
+}
+
+function plannedRoute(value: unknown): PlannedRoute | undefined {
+  const route = value as Partial<PlannedRoute> | undefined;
+  return typeof route?.path === "string" && Array.isArray(route.segments) ? route as PlannedRoute : undefined;
+}
+
+/** A block arrow's outline, from its tail to its one head, as an SVG path. */
+function blockOutline(connector: BoardConnector, route: PlannedRoute): string {
+  const reverse = connector.startCap !== "none" && connectorEndCap(connector) === "none";
+  const tail: AnchorPoint = reverse ? route.end : route.start, tip: AnchorPoint = reverse ? route.start : route.end;
+  return blockArrowOutline(tail, tip, connector.width, connector.headSize)
+    .map((point, index) => `${index === 0 ? "M" : "L"} ${Math.round(point.x * 100) / 100} ${Math.round(point.y * 100) / 100}`)
+    .join(" ") + " Z";
 }

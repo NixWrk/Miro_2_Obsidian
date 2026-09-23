@@ -1888,52 +1888,47 @@
   user-select: none;
 }
 
-.miro-board-connectors { position:absolute; inset:0; width:100%; height:100%; overflow:visible; pointer-events:none; z-index:5; }
-.miro-board-connector-hit { pointer-events:stroke; cursor:move; }
-.miro-board-connector-label {
-  fill: var(--text-normal);
-  stroke: var(--background-primary);
-  stroke-width: 4px;
-  paint-order: stroke fill;
-  font: 13px var(--font-interface);
-  pointer-events: auto;
-  cursor: grab;
-  user-select: none;
-}
-.miro-board-connector-label-editor {
+/* The board's own connectors, drawn in native Canvas's moving layer with
+   its edges and wearing their classes, so a line is grabbed, hovered and
+   selected as an edge between cards is. */
+
+/* Labels on every connector, native and the board's own: native Canvas's
+   own label inside, placed in board units over the cards. */
+.miro-canvas-connector-labels {
   position: absolute;
-  z-index: 120;
-  min-width: 120px;
-  max-width: 300px;
-  transform: translate(-50%, -50%);
-}
-.miro-canvas-native-edge-labels {
-  position: absolute;
-  inset: 0;
-  z-index: 8;
+  left: 0;
+  top: 0;
+  width: 0;
+  height: 0;
+  overflow: visible;
   pointer-events: none;
 }
-.miro-canvas-native-edge-label {
+
+.miro-canvas-connector-label {
   position: absolute;
-  transform: translate(-50%, -50%);
-  padding: 2px 4px;
-  color: var(--text-normal);
-  background: var(--background-primary);
-  border: 0;
-  border-radius: 3px;
+  left: 0;
+  top: 0;
+  /* Sized by the label, which wraps only at native Canvas's own width. */
+  width: max-content;
+  height: fit-content;
   pointer-events: auto;
   cursor: grab;
 }
-.miro-canvas-native-edge-label-editor {
-  position: absolute;
-  z-index: 2;
-  transform: translate(-50%, -50%);
-  min-width: 120px;
-  pointer-events: auto;
+
+.miro-canvas-connector-label[hidden] {
+  display: none;
 }
-.miro-board-connector-grip { fill:var(--background-primary); stroke:var(--interactive-accent); stroke-width:2px; pointer-events:all; cursor:crosshair; }
-.miro-board-connector-tools { position:absolute; top:12px; left:50%; transform:translateX(-50%); z-index:30; display:flex; gap:4px; padding:6px; background:var(--background-primary); border:1px solid var(--background-modifier-border); border-radius:8px; }
-.miro-board-connector-tools[hidden] { display:none; }
+
+.miro-canvas-connector-label .canvas-path-label.is-editing {
+  cursor: text;
+  outline: none;
+}
+
+.miro-canvas-connector-label .canvas-path-label:empty::before {
+  content: attr(data-placeholder);
+  color: var(--text-faint);
+}
+
 .miro-canvas-toolbar[data-miro-independent-only="true"] .canvas-menu,
 .miro-canvas-toolbar[data-miro-independent-only="true"] .miro-canvas-toolbar__native-snapshot { display:none !important; }
 

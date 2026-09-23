@@ -21,6 +21,8 @@ export interface SourceRendererHost {
   getNodes(): readonly unknown[] | undefined;
   getEdges(): readonly unknown[] | undefined;
   getRotationPreview?(): { readonly id: string; readonly rotation: number } | undefined;
+  /** The scene the host built from this very document, if it has one. */
+  getSourceScene?(document: unknown): SourceScene | undefined;
   /** Node IDs whose positions come from an uncommitted group-drag document. */
   getSelectionMovePreviewIds?(): readonly string[] | undefined;
   /** A presentation's own buttons: show its slides, or bring them all into view. */
@@ -1019,20 +1021,33 @@ function marker(
 }
 
 /** Map board coordinates into a native path's SVG user space, preserving local transforms. */
+/** How board points map into a native path's own SVG space, or undefined when that cannot be read. */
+function localMap(path: DomElementLike): ((point: AnchorPoint) => AnchorPoint) | undefined {
+  const svg = safeGet(path, "ownerSVGElement");
+  const local = safeCall(path, "getCTM"), board = safeCall(svg, "getCTM");
+  if (local === undefined || local === null || board === undefined || board === null) return (point) => point;
+  const inverse = safeCall(local, "inverse");
+  const matrix = safeCall(inverse, "multiply", [board]);
+  const values = ["a", "b", "c", "d", "e", "f"].map(key => safeGet(matrix, key));
+  if (!values.every(value => typeof value === "number" && Number.isFinite(value))) return undefined;
+  const [a, b, c, d, e, f] = values as number[];
+  return point => ({ x: a! * point.x + c! * point.y + e!, y: b! * point.x + d! * point.y + f! });
+}
+
+/** A block arrow's outline along a route, from its tail to its head, in a native path's own space. */
+function localBlockOutline(path: DomElementLike, geometry: AnchorEdgeGeometry, width: number, headSize: number | undefined, reverse: boolean): string | undefined {
+  const map = localMap(path);
+  const start = geometry.start, end = geometry.end;
+  if (map === undefined || start === undefined || end === undefined) return undefined;
+  const outline = blockArrowOutline(reverse ? end : start, reverse ? start : end, width, headSize).map(map);
+  return outline.map((point, index) => `${index === 0 ? "M" : "L"} ${Math.round(point.x * 1000) / 1000} ${Math.round(point.y * 1000) / 1000}`).join(" ") + " Z";
+}
+
 function localRoute(path: DomElementLike, geometry: AnchorEdgeGeometry): string | undefined {
   const start = geometry.start, end = geometry.end;
   if (start === undefined || end === undefined) return undefined;
-  let map = (point: AnchorPoint): AnchorPoint => point;
-  const svg = safeGet(path, "ownerSVGElement");
-  const local = safeCall(path, "getCTM"), board = safeCall(svg, "getCTM");
-  if (local !== undefined && local !== null && board !== undefined && board !== null) {
-    const inverse = safeCall(local, "inverse");
-    const matrix = safeCall(inverse, "multiply", [board]);
-    const values = ["a", "b", "c", "d", "e", "f"].map(key => safeGet(matrix, key));
-    if (!values.every(value => typeof value === "number" && Number.isFinite(value))) return undefined;
-    const [a, b, c, d, e, f] = values as number[];
-    map = point => ({ x: a! * point.x + c! * point.y + e!, y: b! * point.x + d! * point.y + f! });
-  }
+  const map = localMap(path);
+  if (map === undefined) return undefined;
   const segments = geometry.segments as readonly RouteSegment[] | undefined;
   if (Array.isArray(segments)) return routePath(start, segments, map);
   const p = (point: AnchorPoint): string => { const q = map(point); return `${q.x} ${q.y}`; };
@@ -1071,10 +1086,28 @@ function renderConnectorGeometry(document: Document | undefined, runtime: unknow
     diagnostics.push(`connector-marker-fallback: ${id}.`);
     return undefined;
   }
+  const block = descriptor.connector?.block === true;
+  const width = Number(descriptor.css["stroke-width"] ?? "2") || 2;
   for (const { path, d } of routes) {
     patchAttribute(path, "d", d!, patches);
     // Native hit paths follow the visible route but keep their generous hit width.
     if (safeCall(safeGet(path, "classList"), "contains", ["canvas-interaction-path"]) === true) continue;
+    if (block && geometry !== undefined) {
+      // A block arrow is a filled outline, not a stroked line with heads.
+      const reverse = caps[0] !== "none" && caps[1] === "none";
+      const outline = localBlockOutline(path, geometry, width, descriptor.connector?.headSize, reverse);
+      if (outline !== undefined) {
+        patchAttribute(path, "d", outline, patches);
+        for (const [key, value] of Object.entries({
+          fill: color, stroke: color, "stroke-width": "1", "stroke-dasharray": "none", "stroke-linejoin": "round",
+          "marker-start": "none", "marker-end": "none",
+        })) {
+          patchAttribute(path, key, value, patches);
+          patchStyle(path, key, value, patches);
+        }
+        continue;
+      }
+    }
     const values = { fill: "none", stroke: color, "stroke-width": descriptor.css["stroke-width"] ?? "2",
       "stroke-opacity": descriptor.css["stroke-opacity"] ?? "1",
       "stroke-dasharray": strokeDash(descriptor.connector?.strokeStyle),
@@ -1769,7 +1802,9 @@ export class SourceRenderer {
     const sourceDocument = safeCall(this.host, "getDocument");
     let scene: SourceScene;
     try {
-      scene = buildSourceScene(sourceDocument);
+      // The host may have built this document's scene already; a large board's takes a while.
+      const known = safeCall(this.host, "getSourceScene", [sourceDocument]) as SourceScene | undefined;
+      scene = known ?? buildSourceScene(sourceDocument);
     } catch {
       this.resetRenderedState();
       this.diagnosticList = Object.freeze(["source-scene-build-failed: source metadata could not be projected safely."]);

@@ -131,7 +131,7 @@ export class MiroCanvasSettingTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName("Keyboard shortcuts")
-      .setDesc("Assign commands in Settings → Hotkeys, filtered by \"Miro Canvas\". Reset tools and selection uses Escape by default and can be rebound there. Canvas tools also use letter shortcuts while the canvas has focus; text editors keep their keys.")
+      .setDesc("Assign commands in Settings → Hotkeys, filtered by \"Miro Canvas\". Escape on the board resets tools and selection; the Reset tools and selection command has no default hotkey and can be bound there. Canvas tools also use letter shortcuts while the canvas has focus; text editors keep their keys.")
       .addButton((button) => button
         .setButtonText("Open hotkeys")
         .onClick(() => {

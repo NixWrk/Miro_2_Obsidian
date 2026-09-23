@@ -11,7 +11,7 @@ import type {
   AnchorRect,
   CanvasAnchor,
 } from "./anchors";
-import { buildSourceScene } from "./source-model";
+import { buildSourceScene, type SourceScene } from "./source-model";
 import { boardConnectors } from "./board-connectors";
 import { listCommentThreads } from "./local-comments";
 import { planRoute, type RouteEnd } from "./connector-route";
@@ -383,7 +383,17 @@ function measuredRect(rect: AnchorRect, measured: MeasuredNodeRect | undefined):
   return { ...rect, width, height };
 }
 
-export function buildCanvasAnchorGeometry(document: unknown, measurements?: NodeMeasurements): AnchorGeometry {
+export function buildCanvasAnchorGeometry(
+  document: unknown,
+  measurements?: NodeMeasurements,
+  /** The document's source scene, when the caller has built it already. */
+  scene?: SourceScene,
+  /**
+   * The geometry of the same board a moment ago, mid-gesture: a route whose
+   * ends hold on only to cards that have not moved since is kept as it was.
+   */
+  previous?: AnchorGeometry,
+): AnchorGeometry {
   if (!isRecord(document)) {
     return {};
   }
@@ -393,7 +403,7 @@ export function buildCanvasAnchorGeometry(document: unknown, measurements?: Node
   }
   const nodes = Object.create(null) as Record<string, AnchorRect>;
   const images = Object.create(null) as Record<string, AnchorRect>;
-  const sourceScene = buildSourceScene(document);
+  const sourceScene = scene ?? buildSourceScene(document);
   for (const [id, node] of graph.nodes) {
     const measured = measurements === undefined ? undefined : readOwn(measurements, id);
     const observed = isRecord(measured) ? measured as MeasuredNodeRect : undefined;
@@ -443,6 +453,28 @@ export function buildCanvasAnchorGeometry(document: unknown, measurements?: Node
     if (anchor.type === "comment") resolveComment(`${anchor.origin}:${anchor.commentId}`);
   };
   const independent = new Map(boardConnectors(document).map(c => [c.id,c]));
+  const moved = (nodeId: unknown): boolean => {
+    const before = typeof nodeId === "string" ? previous?.nodes?.[nodeId] : undefined;
+    const after = typeof nodeId === "string" ? nodes[nodeId] : undefined;
+    return before === undefined || after === undefined || before.x !== after.x || before.y !== after.y
+      || before.width !== after.width || before.height !== after.height || before.rotation !== after.rotation;
+  };
+  // Held by nothing, or by a card that stayed where it was: a line or a
+  // comment it holds on to may have moved, so those are planned again.
+  const stillAnchor = (value: unknown): boolean => {
+    const anchor = normalizeAnchor(value).anchor;
+    return anchor !== undefined && (anchor.type === "free" || ((anchor.type === "node" || anchor.type === "image") && !moved(anchor.nodeId)));
+  };
+  const unchanged = (edgeId: string, edge: UnknownRecord | undefined): boolean => {
+    if (edge === undefined) {
+      const connector = independent.get(edgeId);
+      return connector !== undefined && stillAnchor(connector.from) && stillAnchor(connector.to);
+    }
+    return (["from", "to"] as const).every((end) => {
+      const stored = connectorAnchor(document, edgeId, end);
+      return stored === ABSENT ? !moved(readOwn(edge, `${end}Node`)) : stillAnchor(stored);
+    });
+  };
   const resolving = new Set<string>();
   const resolveEdge = (edgeId: string): AnchorEdgeGeometry | undefined => {
     if (edges[edgeId] !== undefined) {
@@ -452,15 +484,32 @@ export function buildCanvasAnchorGeometry(document: unknown, measurements?: Node
       return undefined;
     }
     const edge = graph.edges.get(edgeId);
+    const kept = previous?.edges?.[edgeId];
+    if (kept !== undefined && unchanged(edgeId, edge)) return edges[edgeId] = kept;
     if (edge === undefined) {
-      const c = independent.get(edgeId);
-      if (!c) return undefined;
+      // One of the board's own connectors: its ends are wherever its anchors
+      // are, and an end held by a card leaves its outline square, as an edge's does.
+      const connector = independent.get(edgeId);
+      if (connector === undefined) return undefined;
       resolving.add(edgeId);
-      for (const anchor of [c.from,c.to]) resolveDependency(anchor);
-      const from=resolveAnchor(c.from,{nodes,images,edges,comments}).point, to=resolveAnchor(c.to,{nodes,images,edges,comments}).point;
+      const connectorEnd = (anchor: CanvasAnchor): RouteEnd | undefined => {
+        resolveDependency(anchor);
+        const point = resolveAnchor(anchor, { nodes, images, edges, comments }).point;
+        if (point === undefined) return undefined;
+        const rect = anchor.type === "node" ? nodes[anchor.nodeId] : undefined;
+        const facing = rect === undefined || anchor.type !== "node"
+          ? undefined
+          : nativeAnchorEnd(rect, anchor.u, anchor.v, shapeOutline(sourceScene.items.get(anchor.nodeId)?.shape));
+        return { point: { x: point.x, y: point.y }, ...(facing === undefined ? {} : { normal: facing.normal }) };
+      };
+      const from = connectorEnd(connector.from), to = connectorEnd(connector.to);
       resolving.delete(edgeId);
-      if (!from || !to) return undefined;
-      return edges[edgeId] = {...planRoute({point:from},{point:to},c.route,c.waypoints)};
+      if (from === undefined || to === undefined) return undefined;
+      return edges[edgeId] = {
+        ...planRoute(from, to, connector.route, connector.waypoints ?? []),
+        ends: { from, to },
+        imported: false,
+      };
     }
     resolving.add(edgeId);
     const descriptor = sourceScene.items.get(edgeId);

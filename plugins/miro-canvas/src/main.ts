@@ -207,7 +207,8 @@ export default class MiroCanvasPlugin extends Plugin {
     this.addCommand({
       id: "reset-tools",
       name: "Miro Canvas: Reset tools and selection",
-      hotkeys: [{modifiers:[],key:"Escape"}],
+      // No default hotkey: Obsidian would take Escape from every card being
+      // written, every label and every field.  The board resets on Escape itself.
       checkCallback: checking => this.runM1Command(checking,session=>session.resetTools()),
     });
 

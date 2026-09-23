@@ -30,10 +30,13 @@ import {
 	type CanvasScene,
 } from "./canvas-adapter";
 import { CANVAS_SHAPE_KINDS, createCanvasAuthoring, type CanvasAuthoring, type ConnectorSide } from "./canvas-authoring";
-import { boardConnectors, connectorEndCap, connectorRoutes, restyleBoardConnector, type BoardConnector } from "./board-connectors";
+import {
+	boardConnectors, connectorEndCap, fitsNativeEdge, heldByNode, nativeEdgeOf, readBoardConnector,
+	restyleBoardConnector, translateConnector, type BoardConnector,
+} from "./board-connectors";
 import { commentSelectionId, selectedComment, translateBoardSelection, routeEndsInBox, pointInSelectionBox, rectIntersectsBox, type SelectedRouteEnds } from "./board-selection";
 import { ConnectorLayer } from "./connector-layer";
-import { NativeEdgeLabels, type NativeEdgeLabel } from "./native-edge-labels";
+import { ConnectorLabels, type ConnectorLabel } from "./connector-labels";
 import {
 	MAX_WAYPOINTS, gripNear, moveElbowSegment, placeWaypoint, planRoute, removeWaypoint, routeBends, routeHandles, routePath, simplifyCorners,
 	type PlannedRoute, type RouteEnd,
@@ -196,7 +199,11 @@ function nativeSideOf(anchor: CanvasAnchor | undefined, fallback: ConnectorSide)
 	];
 	return candidates.reduce((best, candidate) => candidate[1] < best[1] ? candidate : best)[0];
 }
-const PANEL_SELECTOR = ".miro-canvas-panel, .miro-canvas-dock, .miro-canvas-thread, .miro-canvas-slideshow, .miro-canvas-toolbar, .miro-canvas-comment-markers, .miro-canvas-handles, .miro-canvas-minimap";
+/** Frames a still board is still followed for, while native Canvas finishes an animated pan or zoom. */
+const SETTLE_FRAMES = 20;
+/** How often, in milliseconds, the minimap follows cards being dragged. */
+const MINIMAP_DRAG_INTERVAL = 200;
+const PANEL_SELECTOR = ".miro-canvas-panel, .miro-canvas-dock, .miro-canvas-thread, .miro-canvas-slideshow, .miro-canvas-toolbar, .miro-canvas-comment-markers, .miro-canvas-handles, .miro-canvas-minimap, .miro-canvas-m2-tools";
 const DEFAULT_TOOLBAR_FONT = "Inter";
 const DEFAULT_TOOLBAR_FONT_SIZE = 16;
 const REFRESH_INTERVAL_MS = 750;
@@ -641,141 +648,536 @@ function keyIsPrintable(key: string): boolean {
 
 /** A single active Canvas runtime and its user-facing M1 controls. */
 export class M1CanvasSession {
+	/** The board's own connectors, drawn in native Canvas's moving layer. */
 	private connectorLayer?: ConnectorLayer;
-	private nativeEdgeLabels?: NativeEdgeLabels;
-	private activeNativeRouteDragId?: string;
+	/** Labels on every connector, native edges and the board's own alike. */
+	private connectorLabels?: ConnectorLabels;
+	/** What the labels were last placed for; the same again places nothing. */
+	private labelsPlaced: { readonly document: unknown; readonly geometry: AnchorGeometry; readonly selected: string | undefined } | undefined;
+	/** What the Lines and arrows tool draws with. */
 	private connectorColor?: string;
 	private connectorHeadSize?: number;
 	private connectorWidth = 2;
 	private ordinaryConnectorWidth = 2;
 	private blockConnectorWidth = 16;
-	private clipboardCommand?: (action:"copy"|"cut"|"paste")=>boolean;
+	private clipboardCommand?: (action: "copy" | "cut" | "paste") => boolean;
 	private liveGeometryDirty = false;
+	/** Whether a press is held on the board: native Canvas moves cards then before it saves them. */
+	private pointerHeld = false;
+	/** The board as native Canvas last saved it, and the saved object it was read for. */
+	private savedBoard: { readonly saved: object; readonly parts: readonly unknown[]; readonly document: unknown } | undefined;
+	/** Where the viewport was when the overlays were last placed. */
+	private followedViewport = "";
+	/** Start following the board frame by frame again, until it settles. */
+	private wakeFrames: (() => void) | undefined;
+
+	/** Put every tool, gesture and selection away, as Escape does. */
 	public resetTools(): void {
 		this.rectangleSelectionEnd?.();
 		this.selectedRouteEnds.clear();
 		this.selectionMoveEnd?.();
-		this.toolGesture?.end();this.panGestureEnd?.();this.linePlacing=undefined;
-		this.cancelHandleRotation();this.connectorLayer?.reset();this.callNative("deselectAll");this.selectedCommentKeys.clear();
-		this.closeCommentThread();this.quickTools?.closePanels();this.armTool("select");this.refresh();
+		this.toolGesture?.end();
+		this.panGestureEnd?.();
+		this.linePlacing = undefined;
+		this.cancelHandleRotation();
+		this.connectorLayer?.reset();
+		this.callNative("deselectAll");
+		this.selectedCommentKeys.clear();
+		this.closeCommentThread();
+		this.quickTools?.closePanels();
+		this.armTool("select");
+		this.refresh();
 	}
+
+	/** Turn lines once drawn as nodes into connectors, as one step that undo takes back. */
 	public migrateLines(): void {
 		this.authoring ??= createCanvasAuthoring(this.view);
 		const result = this.authoring.migrateLines();
-		this.options.onNotice?.(result.ok ? "Line migration finished. Unsupported legacy lines are retained; Undo restores the previous graph." : firstProblem(result.diagnostics) ?? "Line migration was refused.");
+		this.options.onNotice?.(result.ok
+			? "Line migration finished. Unsupported legacy lines are retained; Undo restores the previous graph."
+			: firstProblem(result.diagnostics) ?? "Line migration was refused.");
 		for (const diagnostic of result.diagnostics) this.addDiagnostic(diagnostic.message);
 		this.refresh();
 	}
+
+	/**
+	 * Mount the board's own connectors, and the labels of every connector, in
+	 * native Canvas's moving layer, and draw them.  Both are in board units, so
+	 * a pan or a zoom costs them nothing.
+	 */
 	private refreshBoardConnectors(): void {
-		if (!this.root || typeof this.root.ownerDocument?.createElementNS !== "function" || typeof this.root.append !== "function") return;
-		this.connectorLayer ??= new ConnectorLayer(this.root, {
+		const canvasEl = readRuntime(this.nativeCanvas(), "canvasEl");
+		const document = ownerDocument(this.root);
+		if (!isElement(canvasEl) || document === undefined || typeof document.createElementNS !== "function") return;
+		this.connectorLayer ??= new ConnectorLayer(document, {
 			document: () => this.commentMovePreview ?? this.selectionMovePreview ?? this.currentRawDocument,
 			geometry: () => this.landingGeometry().geometry,
-			screen: p => { const at = this.viewportPoint(p) ?? p; const box = boundingRect(this.root); return {x:at.x-(box?.left??0),y:at.y-(box?.top??0)}; },
-			board: p => this.boardPoint(p),
-			landing: (p,id) => this.connectorLanding(p,undefined,undefined,id)?.anchor,
-			editable: ids => this.editAllowed(ids.length ? "edit" : "paste",ids),
-			write: (items,remove,expected) => this.writeBoardConnectors(items,remove,expected),
-			deselectNative: () => {this.callNative("deselectAll");}, id: newCanvasId,
-			clipboard: action => {this.clipboardCommand?.(action);},
-			removeSelection: () => this.deleteBoardSelection(),
-			moveSelection: event => this.startSelectionMove(event),
-			selectionChanged: () => this.refresh(),
-			defaultLabelT: () => this.settings.connectorLabelPosition,
-		});
-		this.connectorLayer.render();
-	}
-	/** Edit the label of the one selected line: a board connector's, or a native edge's. */
-	private editSelectedConnectorLabel(): void {
-		if (this.connectorLayer?.editSelectedLabel() === true) return;
-		const id = this.selectedIds.length === 1 ? this.selectedIds[0] : undefined;
-		if (id !== undefined) this.nativeEdgeLabels?.edit(id);
-	}
-	private updateNativeEdgeLabels(): void {
-		// Persistence tests and some headless hosts expose a canvas root
-		// without a DOM document; labels are only a visual enhancement.
-		if(!this.root?.ownerDocument)return;
-		this.nativeEdgeLabels??=new NativeEdgeLabels(this.root,{
-			editable:id=>this.editAllowed("edit-text",[id]),
-			move:(id,t)=>{
-				this.authoring??=createCanvasAuthoring(this.view);
-				const result=this.authoring.updateElementStyles([{id,connector:{labelT:t}}]);
-				if(!result.ok)this.options.onNotice?.(firstProblem(result.diagnostics)??"Edge label could not be moved.");
-				this.refresh();
-			},
-			edit:(id,label)=>{
-				this.authoring??=createCanvasAuthoring(this.view);
-				const result=this.authoring.updateEdgeLabel(id,label);
-				if(!result.ok)this.options.onNotice?.(firstProblem(result.diagnostics)??"Edge label could not be edited.");
+			press: (event, id) => this.pressConnector(event, id),
+			selected: () => {
+				this.readInteractionState();
 				this.refresh();
 			},
 		});
-		const raw=this.currentRawDocument,edges=readRuntime(raw,"edges");
-		const byId=new Map((Array.isArray(edges)?edges:[]).filter(isRecord).map(edge=>[readRuntime(edge,"id"),edge]));
-		const geometry=this.landingGeometry().geometry;
-		const items:NativeEdgeLabel[]=[];
-		for(const edge of this.adapter.getEdges()??[]){
-			const id=readCanvasElementId(edge),rawEdge=id===undefined?undefined:byId.get(id);
-			if(!id||!rawEdge)continue;
-			const value=readRuntime(rawEdge,"label"),label=typeof value==="string"?value:"";
-			const override=readRuntime(readRuntime(readRuntime(raw,"miroCanvas"),"localOverrides"),id);
-			const connector=readRuntime(override,"connector");
-			const labelT=readRuntime(connector,"labelT");
-			const dom=readCanvasElementDom(edge)??readRuntime(edge,"edgeEl");
-			const query=readRuntime(dom,"querySelector");
-			const found=typeof query==="function"?Reflect.apply(query,dom,[".canvas-edge-label,.canvas-edge-label-wrapper"]):undefined;
-			const native=[readRuntime(edge,"labelEl"),readRuntime(edge,"textEl"),found]
-				.find(value=>isElement(value)&&isObject(readRuntime(value,"style")));
-			const labelElement=(typeof HTMLElement!=="undefined"&&native instanceof HTMLElement)
-				|| (typeof SVGElement!=="undefined"&&native instanceof SVGElement)?native as HTMLElement|SVGElement:undefined;
-			const route=geometry.edges?.[id];
-			const points=(route?.points??(route?.start&&route.end?[route.start,route.end]:[]))
-				.map(point=>this.viewportPoint(point)).filter((point):point is {x:number;y:number}=>point!==undefined);
-			if(points.length<2)continue;
-			items.push({id,text:label,points,t:typeof labelT==="number"&&labelT>=0&&labelT<=1?labelT:this.settings.connectorLabelPosition,native:labelElement});
+		this.connectorLabels ??= new ConnectorLabels(document, {
+			editable: (id) => this.editAllowed("edit-text", [id]),
+			move: (id, t) => this.setConnectorLabel(id, { labelT: t }),
+			edit: (id, text) => this.setConnectorLabel(id, { label: text }),
+			select: (id, add) => this.selectConnector(id, add),
+			board: (point) => this.boardPoint(point),
+		});
+		// The connectors lie with native Canvas's edges, under the cards, and
+		// the labels over the cards, as native labels are; native Canvas may
+		// rebuild its moving layer, and both go back into it.
+		const layer = this.connectorLayer.element, labels = this.connectorLabels.element;
+		if (layer.parentElement !== canvasEl) {
+			const cards = Array.from(canvasEl.children).find((child) => !child.classList.contains("canvas-edges")) ?? null;
+			canvasEl.insertBefore(layer, cards);
 		}
-		this.nativeEdgeLabels.update(items);
+		if (canvasEl.lastElementChild !== labels) canvasEl.appendChild(labels);
+		this.connectorLayer.render();
+		this.updateConnectorLabels();
 	}
-	private writeBoardConnectors(items: BoardConnector[], remove: string[] = [], expected?: BoardConnector): boolean {
-		this.currentRawDocument = this.adapter.getDocument();
-		this.readInteractionState();
-		if (expected && JSON.stringify(boardConnectors(this.currentRawDocument).find(c => c.id === expected.id)) !== JSON.stringify(expected)) {
-			this.options.onNotice?.("Connector move was cancelled because the connector changed during the drag.");
+
+	/**
+	 * A press on one of the board's own connectors works as a press on an
+	 * edge between cards: it selects the connector, Shift adding it or taking
+	 * it out.  Dragged, it moves the whole selection when there is more than
+	 * one thing in it, bends a connector something holds, and carries one
+	 * that holds on to nothing.
+	 */
+	private pressConnector(event: PointerEvent, id: string): void {
+		const layer = this.connectorLayer;
+		// With the Lines and arrows tool armed too: a line pressed is edited, not drawn over.
+		if (layer === undefined || (this.armedTool !== "select" && this.armedTool !== "connector") || this.isSpacePanHeld()) return;
+		const selected = layer.selection();
+		if (event.button === 2) {
+			// The context menu acts on what was right-clicked.
+			if (!selected.includes(id)) this.selectConnectors([id]);
+			return;
+		}
+		if (event.button !== 0) return;
+		event.preventDefault();
+		event.stopImmediatePropagation();
+		if (event.shiftKey) {
+			this.selectConnectors(selected.includes(id) ? selected.filter((item) => item !== id) : [...selected, id], true);
+			return;
+		}
+		if (!selected.includes(id)) this.selectConnectors([id]);
+		// Keys go to the board now, as after a press on anything on it.
+		this.root?.focus({ preventScroll: true });
+		if (this.selectedIds.length > 1 && this.startSelectionMove(event)) return;
+		const connector = boardConnectors(this.currentRawDocument).find((item) => item.id === id);
+		if (connector === undefined || !this.editAllowed("edit", [id])) return;
+		if (connector.from.type === "free" && connector.to.type === "free") {
+			this.carryConnector(event, connector);
+			return;
+		}
+		// Held by something, a connector bends where it is pulled, as an edge does.
+		const plan = this.plannedRoute(id);
+		const board = this.boardPoint({ x: event.clientX, y: event.clientY });
+		const handle = plan === undefined || board === undefined || connector.block === true ? undefined : gripNear(plan, board);
+		if (handle === undefined) return;
+		this.handles.grabRoute(id, handle.kind === "segment"
+			? { kind: "segment", axis: handle.axis, index: handle.index, x: event.clientX, y: event.clientY }
+			: { kind: handle.kind, index: handle.index, x: event.clientX, y: event.clientY }, event);
+	}
+
+	/** Select the board's own connectors, and nothing native with them unless adding. */
+	private selectConnectors(ids: readonly string[], add = false): void {
+		// A connector just written must be in the board the layer checks the selection against.
+		this.currentRawDocument = this.boardDocument();
+		if (!add) {
+			this.callNative("deselectAll");
+			this.selectedCommentKeys.clear();
+		}
+		this.connectorLayer?.select(ids);
+	}
+
+	/** One of the board's own connectors as it was when an end of it was picked up. */
+	private pickedUp: BoardConnector | undefined;
+
+	/** Keep the connector whose end grip is pressed: a newer edit to it refuses the drop. */
+	private noteEndPickup(event: Event): void {
+		this.pickedUp = undefined;
+		if (!this.closestTarget(event, "[data-connector-end]")) return;
+		const id = this.selectedIds.length === 1 ? this.selectedIds[0] : undefined;
+		this.pickedUp = boardConnectors(this.currentRawDocument).find((connector) => connector.id === id);
+	}
+
+	/** The board's own connectors selected, among those the board still has - an undo may have taken one. */
+	private ownSelection(document: unknown): readonly string[] {
+		const selected = this.connectorLayer?.selection() ?? [];
+		if (selected.length === 0) return selected;
+		const ids = new Set(boardConnectors(document).map((connector) => connector.id));
+		return selected.filter((id) => ids.has(id));
+	}
+
+	/** A connector held by nothing, carried whole: drawn where it goes, written once let go. */
+	private carryConnector(event: PointerEvent, connector: BoardConnector): void {
+		const view = ownerDocument(this.root)?.defaultView;
+		const first = this.boardPoint({ x: event.clientX, y: event.clientY });
+		if (view === null || view === undefined || first === undefined) return;
+		let moved: BoardConnector | undefined;
+		const move = (next: PointerEvent): void => {
+			if (next.pointerId !== event.pointerId) return;
+			const at = this.boardPoint({ x: next.clientX, y: next.clientY });
+			if (at === undefined || (moved === undefined && Math.hypot(next.clientX - event.clientX, next.clientY - event.clientY) <= 3)) return;
+			moved = translateConnector(connector, at.x - first.x, at.y - first.y);
+			this.connectorLayer?.preview(moved);
+			this.handles.update(this.handlesState(true));
+		};
+		const end = (): void => {
+			view.removeEventListener("pointermove", move, true);
+			view.removeEventListener("pointerup", up, true);
+			view.removeEventListener("pointercancel", cancel, true);
+			this.connectorLayer?.preview(undefined);
+		};
+		const cancel = (): void => end();
+		const up = (released: PointerEvent): void => {
+			if (released.pointerId !== event.pointerId) return;
+			move(released);
+			end();
+			this.swallowClickUntil = Date.now() + 400;
+			if (moved !== undefined) this.writeBoardConnectors([moved], [], connector);
 			this.refresh();
+		};
+		view.addEventListener("pointermove", move, true);
+		view.addEventListener("pointerup", up, true);
+		view.addEventListener("pointercancel", cancel, true);
+	}
+
+	/**
+	 * A press anywhere else on the board while some of its own connectors are
+	 * selected: on the selection's frame or a selected card it moves the
+	 * selection with them; anywhere else it puts them away, as native Canvas
+	 * puts its own selection away.
+	 */
+	private pressBoard(event: PointerEvent): void {
+		const layer = this.connectorLayer;
+		if (layer === undefined || layer.selection().length === 0) return;
+		const target = event.target as Element | null;
+		if (target?.closest?.(".miro-canvas-mixed-selection-frame, .miro-board-connector") != null) return;
+		if (target?.closest?.(".canvas-selection") != null && this.startSelectionMove(event)) return;
+		if (!event.shiftKey && target?.closest?.(".canvas-node") != null && this.startSelectionMove(event)) return;
+		if (event.button !== 0 || event.shiftKey) return;
+		if (target?.closest?.(`${PANEL_SELECTOR}, .miro-canvas-tools, .miro-canvas-connector-labels`) != null) return;
+		layer.select([]);
+		this.readInteractionState();
+		this.refresh();
+	}
+
+	/**
+	 * Put a new connector on the board: a native edge when both ends hold on
+	 * to cards, as every connector between cards is, else the board's own.
+	 */
+	private placeConnector(connector: BoardConnector): void {
+		this.readInteractionState();
+		if (!fitsNativeEdge(connector)) {
+			if (this.writeBoardConnectors([connector])) this.selectConnectors([connector.id]);
+			return;
+		}
+		const { edge, override } = nativeEdgeOf(connector);
+		this.authoring ??= createCanvasAuthoring(this.view);
+		const result = this.authoring.insertGraph({ nodes: [], edges: [edge], overrides: { [connector.id]: override } });
+		if (!result.ok) {
+			this.options.onNotice?.(firstProblem(result.diagnostics) ?? "Canvas rejected the new connector.");
+			this.refresh();
+			return;
+		}
+		this.selectNativeEdge(connector.id);
+	}
+
+	private selectNativeEdge(id: string): void {
+		this.connectorLayer?.select([]);
+		this.refresh();
+		const edge = [...(this.adapter.getEdges() ?? [])].find((item) => readCanvasElementId(item) === id);
+		if (edge !== undefined) this.adapter.invoke("selectOnly", edge);
+		this.readInteractionState();
+		this.refresh();
+	}
+
+	/**
+	 * One of the board's own connectors whose ends now both hold on to cards
+	 * becomes the native edge it can be, under the same id, keeping its route,
+	 * ends, dashes, width, colour and label.
+	 */
+	private connectorToNative(connector: BoardConnector, previous: BoardConnector): void {
+		this.readInteractionState();
+		if (!this.editAllowed("reconnect", [connector.id])) {
+			this.refresh();
+			return;
+		}
+		const current = boardConnectors(this.adapter.getDocument()).find((item) => item.id === previous.id);
+		if (JSON.stringify(current) !== JSON.stringify(previous)) {
+			this.options.onNotice?.("The line changed while its end was moved; nothing was changed.");
+			this.refresh();
+			return;
+		}
+		const { edge, override } = nativeEdgeOf(connector);
+		this.authoring ??= createCanvasAuthoring(this.view);
+		const result = this.authoring.rewriteGraph({
+			addEdges: [edge],
+			metadata: (metadata) => {
+				const connectors = isRecord(metadata.connectors) ? { ...metadata.connectors } : {};
+				delete connectors[connector.id];
+				metadata.connectors = connectors;
+				const overrides = isRecord(metadata.localOverrides) ? { ...metadata.localOverrides } : {};
+				const kept = isRecord(overrides[connector.id]) ? overrides[connector.id] as Record<string, unknown> : {};
+				overrides[connector.id] = { ...kept, ...override };
+				metadata.localOverrides = overrides;
+			},
+		});
+		if (!result.ok) {
+			this.options.onNotice?.(firstProblem(result.diagnostics) ?? "Canvas refused to join the line to both cards.");
+			this.refresh();
+			return;
+		}
+		this.selectNativeEdge(connector.id);
+	}
+
+	/**
+	 * A native edge with an end put down where no card is - on empty board,
+	 * on another line or on a comment pin - becomes one of the board's own
+	 * connectors under the same id, looking exactly as it did.
+	 */
+	private nativeToConnector(edgeId: string, end: "from" | "to", anchor: CanvasAnchor): void {
+		const document = this.adapter.getDocument();
+		const edges = readRuntime(document, "edges");
+		const edge = Array.isArray(edges) ? (edges as readonly unknown[]).find((item) => readRuntime(item, "id") === edgeId) : undefined;
+		const plan = this.plannedRoute(edgeId);
+		const descriptor = this.landingGeometry().scene.items.get(edgeId);
+		const override = readRuntime(readRuntime(readRuntime(document, "miroCanvas"), "localOverrides"), edgeId);
+		if (!isRecord(edge) || plan === undefined) {
+			this.refresh();
+			return;
+		}
+		const held = (side: "from" | "to"): CanvasAnchor => {
+			const stored = normalizeAnchor(readRuntime(readRuntime(override, "connectorAnchors"), side));
+			if (stored.valid && stored.anchor !== undefined) return stored.anchor;
+			const point = side === "from" ? plan.start : plan.end;
+			return { type: "free", x: point.x, y: point.y };
+		};
+		const style = descriptor?.connector;
+		const width = Number(descriptor?.css["stroke-width"] ?? "2");
+		const label = readRuntime(edge, "label");
+		const connector: BoardConnector = {
+			id: edgeId,
+			from: end === "from" ? anchor : held("from"),
+			to: end === "to" ? anchor : held("to"),
+			route: style?.shape ?? "curved",
+			color: this.connectorInk(edgeId, descriptor?.css.stroke),
+			width: Number.isFinite(width) && width > 0 ? width : 2,
+			startCap: style?.startCap ?? "none",
+			endCap: style?.endCap ?? "filled_triangle",
+			...(style?.strokeStyle === undefined ? {} : { strokeStyle: style.strokeStyle }),
+			...(style?.headSize === undefined ? {} : { headSize: style.headSize }),
+			...(style?.labelT === undefined ? {} : { labelT: style.labelT }),
+			...(style?.block === true ? { block: true as const } : {}),
+			...(typeof label === "string" && label !== "" ? { label } : {}),
+			waypoints: routeBends(plan).map((point) => ({ x: Math.round(point.x * 100) / 100, y: Math.round(point.y * 100) / 100 })),
+		};
+		if (readBoardConnector(connector) === undefined) {
+			this.options.onNotice?.("This edge's look cannot be kept by a free line; its end stays where it was.");
+			this.refresh();
+			return;
+		}
+		this.authoring ??= createCanvasAuthoring(this.view);
+		const result = this.authoring.rewriteGraph({
+			removeEdges: [edgeId],
+			metadata: (metadata) => {
+				metadata.connectors = { ...(isRecord(metadata.connectors) ? metadata.connectors : {}), [edgeId]: connector };
+				const overrides = isRecord(metadata.localOverrides) ? { ...metadata.localOverrides } : {};
+				if (isRecord(overrides[edgeId])) {
+					// What described the edge now lives in the connector.
+					const { connector: _style, connectorAnchors: _anchors, colors: _colors, ...rest } = overrides[edgeId] as Record<string, unknown>;
+					if (Object.keys(rest).length === 0) delete overrides[edgeId];
+					else overrides[edgeId] = rest;
+				}
+				metadata.localOverrides = overrides;
+			},
+		});
+		if (!result.ok) {
+			this.options.onNotice?.(firstProblem(result.diagnostics) ?? "Canvas refused to let the edge's end go.");
+			this.refresh();
+			return;
+		}
+		this.selectConnectors([edgeId]);
+	}
+
+	/** The colour an edge is drawn in: the one set on it, else what the board shows for it. */
+	private connectorInk(edgeId: string, stroke: string | undefined): string {
+		if (stroke !== undefined && /^#[0-9a-f]{6}$/iu.test(stroke)) return stroke.toLowerCase();
+		const edge = [...(this.adapter.getEdges() ?? [])].find((item) => readCanvasElementId(item) === edgeId);
+		const path = readRuntime(readRuntime(edge, "lineGroupEl"), "querySelector");
+		const drawn = typeof path === "function" ? Reflect.apply(path, readRuntime(edge, "lineGroupEl"), ["path.canvas-display-path"]) : undefined;
+		const view = ownerDocument(this.root)?.defaultView;
+		const computed = isElement(drawn) && view !== undefined && view !== null ? view.getComputedStyle(drawn).stroke : "";
+		const channels = /^rgba?\((\d+),\s*(\d+),\s*(\d+)/u.exec(computed ?? "");
+		if (channels === null) return this.boardInk();
+		return `#${channels.slice(1, 4).map((value) => Number(value).toString(16).padStart(2, "0")).join("")}`;
+	}
+
+	/** Edit the label of the one selected connector, a native edge's or the board's own. */
+	private editSelectedConnectorLabel(): void {
+		const id = this.selectedIds.length === 1 ? this.selectedIds[0] : undefined;
+		if (id !== undefined) this.editConnectorLabel(id);
+	}
+
+	/**
+	 * Edit a connector's label in place, selecting the connector first as
+	 * native Canvas does.  Native Canvas's own editor is never used: the label
+	 * shown is the plugin's, where the plugin draws the edge.
+	 */
+	private editConnectorLabel(id: string): void {
+		if (this.selectedIds.length !== 1 || this.selectedIds[0] !== id) this.selectConnector(id, false);
+		this.updateConnectorLabels();
+		this.connectorLabels?.edit(id);
+	}
+
+	/** Select a connector, native or the board's own, as a press on its line does; Shift adds it. */
+	private selectConnector(id: string, add: boolean): void {
+		if (boardConnectors(this.currentRawDocument).some((connector) => connector.id === id)) {
+			const selected = this.connectorLayer?.selection() ?? [];
+			this.selectConnectors(add ? (selected.includes(id) ? selected.filter((item) => item !== id) : [...selected, id]) : [id], add);
+			return;
+		}
+		const edge = [...(this.adapter.getEdges() ?? [])].find((item) => readCanvasElementId(item) === id);
+		if (edge === undefined) return;
+		if (!add) this.connectorLayer?.select([]);
+		this.adapter.invoke(add ? "select" : "selectOnly", edge);
+		this.readInteractionState();
+		this.refresh();
+	}
+
+	/**
+	 * Labels for every connector that has one, native and the board's own, on
+	 * the route the plugin draws; and for the one selected even without a
+	 * label, so that one can be written.  They are placed again only when the
+	 * board, its geometry or the selection changes.
+	 */
+	private updateConnectorLabels(): void {
+		const labels = this.connectorLabels;
+		if (labels === undefined) return;
+		const raw = this.commentMovePreview ?? this.selectionMovePreview ?? this.currentRawDocument;
+		const geometry = this.landingGeometry().geometry;
+		const selected = this.selectedIds.length === 1 ? this.selectedIds[0] : undefined;
+		const placed = this.labelsPlaced;
+		if (placed !== undefined && placed.document === raw && placed.geometry === geometry && placed.selected === selected) return;
+		this.labelsPlaced = { document: raw, geometry, selected };
+		const fallback = this.settings.connectorLabelPosition;
+		const along = (id: string): readonly { readonly x: number; readonly y: number }[] => {
+			const route = geometry.edges?.[id];
+			return route?.points ?? (route?.start !== undefined && route.end !== undefined ? [route.start, route.end] : []);
+		};
+		const items: ConnectorLabel[] = [];
+		const rawEdges = readRuntime(raw, "edges");
+		const byId = new Map((Array.isArray(rawEdges) ? rawEdges as readonly unknown[] : []).map((edge) => [readRuntime(edge, "id"), edge]));
+		const overrides = readRuntime(readRuntime(raw, "miroCanvas"), "localOverrides");
+		for (const edge of this.adapter.getEdges() ?? []) {
+			const id = readCanvasElementId(edge);
+			const value = id === undefined ? undefined : readRuntime(byId.get(id), "label");
+			const text = typeof value === "string" ? value : "";
+			if (id === undefined || (text === "" && id !== selected)) continue;
+			const points = along(id);
+			if (points.length < 2) continue;
+			const labelT = readRuntime(readRuntime(readRuntime(overrides, id), "connector"), "labelT");
+			const native = readRuntime(readRuntime(edge, "labelElement"), "wrapperEl");
+			items.push({
+				id, text, points, t: typeof labelT === "number" && labelT >= 0 && labelT <= 1 ? labelT : fallback,
+				...(isElement(native) ? { native } : {}),
+			});
+		}
+		for (const connector of boardConnectors(raw)) {
+			const text = connector.label ?? "";
+			if (text === "" && connector.id !== selected) continue;
+			const points = along(connector.id);
+			if (points.length >= 2) items.push({ id: connector.id, text, points, t: connector.labelT ?? fallback, color: connector.color });
+		}
+		labels.update(items);
+	}
+
+	/** Change a connector's label, or where it sits, the native way for an edge. */
+	private setConnectorLabel(id: string, change: { readonly label?: string; readonly labelT?: number }): void {
+		const connector = boardConnectors(this.currentRawDocument).find((item) => item.id === id);
+		if (connector !== undefined) {
+			this.writeBoardConnectors([{
+				...connector, ...change,
+				...(change.label !== undefined && connector.labelT === undefined ? { labelT: this.settings.connectorLabelPosition } : {}),
+			}], [], connector);
+			this.refresh();
+			return;
+		}
+		this.authoring ??= createCanvasAuthoring(this.view);
+		const result = change.label !== undefined
+			? this.authoring.updateEdgeLabel(id, change.label)
+			: this.authoring.updateElementStyles([{ id, connector: { labelT: change.labelT ?? this.settings.connectorLabelPosition } }]);
+		if (!result.ok) this.options.onNotice?.(firstProblem(result.diagnostics) ?? "The label could not be changed.");
+		this.refresh();
+	}
+
+	/**
+	 * Store the board's own connectors: `items` added or replaced, `remove`
+	 * taken away.  A connector that held on to one taken away keeps its end
+	 * where it was, free.  `expected` refuses the write when the connector
+	 * changed since a drag began.
+	 */
+	private writeBoardConnectors(items: readonly BoardConnector[], remove: readonly string[] = [], expected?: BoardConnector): boolean {
+		this.currentRawDocument = this.boardDocument();
+		this.readInteractionState();
+		if (expected !== undefined) {
+			const current = boardConnectors(this.currentRawDocument).find((connector) => connector.id === expected.id);
+			if (JSON.stringify(current) !== JSON.stringify(expected)) {
+				this.options.onNotice?.("Connector move was cancelled because the connector changed during the drag.");
+				this.refresh();
+				return false;
+			}
+		}
+		if (!this.editAllowed("edit", [...items.map((connector) => connector.id), ...remove])) return false;
+		const old = boardConnectors(this.currentRawDocument);
+		const next = old.filter((connector) => !remove.includes(connector.id) && !items.some((item) => item.id === connector.id)).concat(items);
+		const geometry = buildCanvasAnchorGeometry(this.currentRawDocument);
+		const freed = (anchor: CanvasAnchor, point: { x: number; y: number } | undefined): CanvasAnchor =>
+			anchor.type === "edge" && remove.includes(anchor.edgeId) && point !== undefined ? { type: "free", x: point.x, y: point.y } : anchor;
+		const detached = next.map((connector) => {
+			const route = geometry.edges?.[connector.id];
+			return { ...connector, from: freed(connector.from, route?.start), to: freed(connector.to, route?.end) };
+		});
+		const changed = detached.filter((connector) => JSON.stringify(connector) !== JSON.stringify(old.find((item) => item.id === connector.id)));
+		if (changed.length > 0 && !this.editAllowed("edit", changed.map((connector) => connector.id))) return false;
+		const metadata = readRuntime(this.currentRawDocument, "miroCanvas");
+		const overrides = { ...(isRecord(metadata) && isRecord(metadata.localOverrides) ? metadata.localOverrides : {}) };
+		// Native edges that held on to a connector taken away keep their end too.
+		for (const [id, value] of Object.entries(overrides)) {
+			if (!isRecord(value) || !isRecord(value.connectorAnchors)) continue;
+			const anchors = { ...value.connectorAnchors };
+			let edited = false;
+			for (const end of ["from", "to"] as const) {
+				const anchor = anchors[end];
+				const route = geometry.edges?.[id];
+				const point = end === "from" ? route?.start : route?.end;
+				if (!isRecord(anchor) || anchor.type !== "edge" || !remove.includes(anchor.edgeId as string)) continue;
+				if (point === undefined || !this.editAllowed("edit", [id])) return false;
+				anchors[end] = { type: "free", x: point.x, y: point.y };
+				edited = true;
+			}
+			if (edited) overrides[id] = { ...value, connectorAnchors: anchors };
+		}
+		const connectors = Object.fromEntries(detached.map((connector) => [connector.id, connector]));
+		const proposed = {
+			...(isRecord(this.currentRawDocument) ? this.currentRawDocument : {}),
+			miroCanvas: { ...(isRecord(metadata) ? metadata : {}), connectors, localOverrides: overrides },
+		};
+		const nextGeometry = buildCanvasAnchorGeometry(proposed);
+		if (detached.some((connector) => nextGeometry.edges?.[connector.id] === undefined)) {
+			this.options.onNotice?.("Connector target is missing or would create a cycle.");
 			return false;
 		}
-		if (!this.editAllowed("edit",[...items.map(c=>c.id),...remove])) return false;
-		const old = boardConnectors(this.currentRawDocument);
-		const next = old.filter(c=>!remove.includes(c.id) && !items.some(item=>item.id===c.id)).concat(items);
-		const geometry = buildCanvasAnchorGeometry(this.currentRawDocument);
-		const routes = connectorRoutes(old,geometry);
-		const detached = next.map(c => {
-			const route=routes.get(c.id);
-			const end=(a:CanvasAnchor,p:{x:number;y:number}|undefined):CanvasAnchor=>a.type==="edge"&&remove.includes(a.edgeId)&&p?{type:"free",x:p.x,y:p.y}:a;
-			return {...c,from:end(c.from,route?.start),to:end(c.to,route?.end)};
-		});
-		const changed = detached.filter(c=>JSON.stringify(c)!==JSON.stringify(old.find(o=>o.id===c.id)));
-		if (changed.length && !this.editAllowed("edit",changed.map(c=>c.id))) return false;
-		const metadata=readRuntime(this.currentRawDocument,"miroCanvas");
-		const overrides={...(isRecord(metadata)&&isRecord(metadata.localOverrides)?metadata.localOverrides:{})};
-		for (const [id,value] of Object.entries(overrides)) {
-			if (!isRecord(value) || !isRecord(value.connectorAnchors)) continue;
-			const anchors={...value.connectorAnchors};let edited=false;
-			for (const end of ["from","to"] as const) {
-				const a=anchors[end]; const route=geometry.edges?.[id]; const p=end==="from"?route?.start:route?.end;
-				if(isRecord(a)&&a.type==="edge"&&remove.includes(a.edgeId as string)) {
-					if(!p || !this.editAllowed("edit",[id])) return false;
-					anchors[end]={type:"free",x:p.x,y:p.y};edited=true;
-				}
-			}
-			if(edited)overrides[id]={...value,connectorAnchors:anchors};
-		}
-		const connectors=Object.fromEntries(detached.map(c=>[c.id,c]));
-		const proposed={...(isRecord(this.currentRawDocument)?this.currentRawDocument:{}),miroCanvas:{...(isRecord(metadata)?metadata:{}),connectors,localOverrides:overrides}};
-		const nextGeometry=buildCanvasAnchorGeometry(proposed);
-		if (detached.some(c=>nextGeometry.edges?.[c.id]===undefined)) {this.options.onNotice?.("Connector target is missing or would create a cycle.");return false;}
-		return this.writeMetadata("board-connectors",draft=>{draft.connectors=connectors;draft.localOverrides=overrides;})?.ok === true;
+		return this.writeMetadata("board-connectors", (draft) => {
+			draft.connectors = connectors;
+			draft.localOverrides = overrides;
+		})?.ok === true;
 	}
+
 	public readonly kind = "miro-canvas-m1-session" as const;
 	public readonly view: unknown;
 	public readonly adapter: CanvasAdapter;
@@ -811,6 +1213,13 @@ export class M1CanvasSession {
 	private commentMovePreview: Record<string, unknown> | undefined;
 	private appearance: AppearanceState = normalizeAppearanceState(undefined);
 	private policy: InteractionPolicy = createInteractionPolicy(undefined);
+	/** What the appearance, the policy and the parsed metadata were last worked out from. */
+	private appearanceSource: unknown;
+	private appearanceSigned: { readonly appearance: AppearanceState; readonly signature: string } | undefined;
+	private policyFor: { readonly parsed: unknown; readonly policy: InteractionPolicy } | undefined;
+	private parsedMetadata: { readonly source: object; readonly result: ReturnType<typeof parseMiroCanvasMetadata> } | undefined;
+	/** Native cards and edges whose methods are guarded already. */
+	private readonly guardedElements = new WeakSet<object>();
 	private selectedIds: readonly string[] = [];
 	private selectedCommentKeys = new Set<string>();
 	private scene: CanvasScene = { nodes: [], edges: [] };
@@ -896,6 +1305,11 @@ export class M1CanvasSession {
 	private readonly guardedMethods = new WeakMap<object, Set<string>>();
 	private nextDomIdentity = 1;
 	private lastSceneSignature = "";
+	/** How many times the board was read mid-gesture, and when the minimap was last drawn. */
+	private liveGeneration = 0;
+	private minimapDrawnAt = 0;
+	/** The saved board the scene was last described for. */
+	private sceneSignedFor: unknown;
 	private lastAppearanceSignature = "";
 	private lastPolicySignature = "";
 	private lastMinimapSignature = "";
@@ -917,11 +1331,15 @@ export class M1CanvasSession {
 				: undefined;
 		const renderDocument = options.document ?? ownerDocument(this.root);
 		this.sourceRenderer = renderDocument === undefined ? undefined : new SourceRenderer({
-			getDocument: () => this.commentMovePreview ?? this.selectionMovePreview ?? this.adapter.getDocument(),
+			getDocument: () => this.commentMovePreview ?? this.selectionMovePreview ?? this.boardDocument(),
 			getNodes: () => this.adapter.getNodes(),
 			getEdges: () => this.adapter.getEdges(),
 			getSelectionMovePreviewIds: () => this.selectionMovePreview === undefined ? undefined : this.selectionMoveIds,
 			getRotationPreview: () => this.rotationPreview,
+			getSourceScene: (document) => {
+				const cache = this.landingCache;
+				return cache !== undefined && cache.document === document ? cache.scene : undefined;
+			},
 			onDeckAction: (deckId, action) => this.runDeckAction(deckId, action),
 		}, renderDocument);
 		const settings = options.settings ?? DEFAULT_SETTINGS;
@@ -968,7 +1386,7 @@ export class M1CanvasSession {
 			onResize: (rect, commit) => this.applyHandleResize(rect, commit),
 			onCancelResize: () => this.cancelHandleResize(),
 			previewRoute: (edgeId, grip, point) => this.previewReshape(edgeId, grip, point),
-			onCancelRoutePreview: edgeId => {this.activeNativeRouteDragId=undefined;this.nativeEdgeLabels?.clearPreview(edgeId);this.updateNativeEdgeLabels();},
+			onCancelRoutePreview: (edgeId) => this.connectorLabels?.clearPreview(edgeId),
 			onReshape: (edgeId, grip, point) => this.reshapeConnector(edgeId, grip, point),
 			onStraighten: (edgeId, grip) => this.straightenConnector(edgeId, grip),
 		}, { document: controlDocument });
@@ -1163,7 +1581,8 @@ export class M1CanvasSession {
 	/** Where the selected connector's route can be grabbed, in overlay pixels. */
 	private routeGrips(edgeId: string): RouteGrip[] | undefined {
 		// A block arrow runs straight from tail to tip: only its ends move.
-		if (this.lineOf(edgeId)?.line.block === true) return [];
+		if (this.lineOf(edgeId)?.line.block === true || this.landingGeometry().scene.items.get(edgeId)?.connector?.block === true
+			|| boardConnectors(this.currentRawDocument).find((connector) => connector.id === edgeId)?.block === true) return [];
 		const plan = this.plannedRoute(edgeId);
 		const origin = this.overlayOrigin();
 		if (plan === undefined || origin === undefined) return undefined;
@@ -1212,11 +1631,7 @@ export class M1CanvasSession {
 		if (shaped === undefined || origin === undefined) return undefined;
 		const { plan, bends } = shaped;
 		const route = planRoute(plan.ends.from, plan.ends.to, plan.route, bends, { imported: plan.imported });
-		if(this.activeNativeRouteDragId!==edgeId){
-			this.activeNativeRouteDragId=edgeId;
-			this.updateNativeEdgeLabels();
-		}
-		this.nativeEdgeLabels?.preview(edgeId,route.points.flatMap(item=>{const at=this.viewportPoint(item);return at?[at]:[];}));
+		this.connectorLabels?.preview(edgeId, route.points);
 		return route.points.flatMap((item) => {
 			const at = this.viewportPoint(item);
 			return at === undefined ? [] : [{ x: at.x - origin.left, y: at.y - origin.top }];
@@ -1231,17 +1646,7 @@ export class M1CanvasSession {
 	 */
 	private grabConnectorLine(event: Event): void {
 		if (readRuntime(event, "button") !== 0 || readRuntime(event, "shiftKey") === true || this.isSpacePanHeld()) return;
-		if (!this.closestTarget(event, "path.canvas-interaction-path")) return;
-		const target = eventTarget(event);
-		const edge = [...(this.adapter.getEdges() ?? [])].find((item) => {
-			const group = readRuntime(item, "lineGroupEl");
-			const contains = readRuntime(group, "contains");
-			try {
-				return typeof contains === "function" && Reflect.apply(contains, group, [target]) === true;
-			} catch {
-				return false;
-			}
-		});
+		const edge = this.nativeEdgeAt(event);
 		const id = readCanvasElementId(edge);
 		const x = finite(readRuntime(event, "clientX")), y = finite(readRuntime(event, "clientY"));
 		if (edge === undefined || id === undefined || x === undefined || y === undefined) return;
@@ -1265,6 +1670,27 @@ export class M1CanvasSession {
 			? { kind: "segment", axis: handle.axis, index: handle.index, x, y }
 			: { kind: handle.kind, index: handle.index, x, y };
 		this.handles.grabRoute(id, grip, event);
+	}
+
+	/** The native edge whose line an event landed on. */
+	private nativeEdgeAt(event: Event): unknown {
+		if (!this.closestTarget(event, "path.canvas-interaction-path")) return undefined;
+		const target = eventTarget(event);
+		return [...(this.adapter.getEdges() ?? [])].find((item) => {
+			const group = readRuntime(item, "lineGroupEl");
+			const contains = readRuntime(group, "contains");
+			try {
+				return typeof contains === "function" && Reflect.apply(contains, group, [target]) === true;
+			} catch {
+				return false;
+			}
+		});
+	}
+
+	/** The connector, native or the board's own, whose line an event landed on. */
+	private connectorAt(event: Event): string | undefined {
+		const own = (eventTarget(event) as Element | null)?.closest?.("[data-connector-id]")?.getAttribute("data-connector-id");
+		return typeof own === "string" ? own : readCanvasElementId(this.nativeEdgeAt(event));
 	}
 
 	/**
@@ -1296,8 +1722,7 @@ export class M1CanvasSession {
 	}
 
 	private reshapeConnector(edgeId: string, grip: RouteGrip, point: { readonly x: number; readonly y: number }): void {
-		this.activeNativeRouteDragId=undefined;
-		this.nativeEdgeLabels?.clearPreview(edgeId);
+		this.connectorLabels?.clearPreview(edgeId);
 		// The release that ends a drag must not also click the board clear.
 		this.swallowClickUntil = Date.now() + 400;
 		const shaped = this.reshapedBends(edgeId, grip, point);
@@ -1335,6 +1760,12 @@ export class M1CanvasSession {
 			x: Math.round(point.x * 100) / 100,
 			y: Math.round(point.y * 100) / 100,
 		}));
+		const own = boardConnectors(this.currentRawDocument).find((connector) => connector.id === edgeId);
+		if (own !== undefined) {
+			this.writeBoardConnectors([{ ...own, route, waypoints }], [], own);
+			this.refresh();
+			return;
+		}
 		this.authoring ??= createCanvasAuthoring(this.view);
 		const result = this.authoring.updateElementStyles([{ id: edgeId, connector: { route, waypoints } }]);
 		if (!result.ok) this.addDiagnostic(firstProblem(result.diagnostics) ?? "Canvas rejected the new connector shape.");
@@ -1390,15 +1821,17 @@ export class M1CanvasSession {
 	}
 
 	/** Node boxes, silhouettes and routes of the current document, measured once per document. */
-	private landingGeometry(): { readonly geometry: AnchorGeometry; readonly scene: SourceScene } {
+	private landingGeometry(previous?: AnchorGeometry): { readonly geometry: AnchorGeometry; readonly scene: SourceScene } {
 		const document = this.commentMovePreview ?? this.currentRawDocument;
 		const preview = this.rotationPreview;
-		if (preview) return {geometry: buildCanvasAnchorGeometry(document, {[preview.id]: {rotation: preview.rotation}}), scene: buildSourceScene(document)};
+		if (preview !== undefined) {
+			const scene = buildSourceScene(document);
+			return { geometry: buildCanvasAnchorGeometry(document, { [preview.id]: { rotation: preview.rotation } }, scene), scene };
+		}
 		let cache = this.landingCache;
 		if (cache === undefined || cache.document !== document) {
-			cache = { document, geometry: buildCanvasAnchorGeometry(document), scene: buildSourceScene(document) };
-			const independent = connectorRoutes(boardConnectors(document),cache.geometry);
-			cache = {...cache,geometry:{...cache.geometry,edges:{...cache.geometry.edges,...Object.fromEntries([...independent].map(([id,r])=>[id,{start:r.start,end:r.end,points:r.points}]))}}};
+			const scene = buildSourceScene(document);
+			cache = { document, geometry: buildCanvasAnchorGeometry(document, undefined, scene, previous), scene };
 			this.landingCache = cache;
 		}
 		return cache;
@@ -1494,6 +1927,16 @@ export class M1CanvasSession {
 	private oppositeEnd(edgeId: string, end: "from" | "to"): { readonly nodeId?: string; readonly point?: { readonly x: number; readonly y: number } } {
 		const other = end === "from" ? "to" : "from";
 		const document = this.currentRawDocument;
+		const own = boardConnectors(document).find((connector) => connector.id === edgeId);
+		if (own !== undefined) {
+			const anchor = own[other];
+			const route = this.landingGeometry().geometry.edges?.[edgeId];
+			const point = other === "to" ? route?.end : route?.start;
+			return {
+				...(heldByNode(anchor) ? { nodeId: anchor.nodeId } : {}),
+				...(point === undefined ? {} : { point }),
+			};
+		}
 		const edges = readRuntime(document, "edges");
 		const edge = Array.isArray(edges) ? (edges as readonly unknown[]).find((item) => readRuntime(item, "id") === edgeId) : undefined;
 		const stored = readRuntime(readRuntime(readRuntime(readRuntime(document, "miroCanvas"), "localOverrides"), edgeId), "connectorAnchors");
@@ -1591,6 +2034,28 @@ export class M1CanvasSession {
 			this.refresh();
 			return;
 		}
+		const own = boardConnectors(this.currentRawDocument).find((connector) => connector.id === edgeId);
+		if (own !== undefined) {
+			// Changed since its end was picked up, the connector is not overwritten.
+			const expected = this.pickedUp?.id === edgeId ? this.pickedUp : own;
+			this.pickedUp = undefined;
+			// Put down on a second card, the connector becomes an edge between the two.
+			const moved = { ...own, [end]: landing.anchor };
+			if (fitsNativeEdge(moved)) this.connectorToNative(moved, expected);
+			else {
+				this.writeBoardConnectors([moved], [], expected);
+				this.refresh();
+			}
+			return;
+		}
+		// An edge holds on to cards only; let go of one, it becomes a connector
+		// of the board's own.  An imported edge stays the edge its Miro
+		// connector is bound to, holding its end by the plugin's anchor.
+		const imported = this.landingGeometry().scene.items.get(edgeId)?.sourceId !== undefined;
+		if (!heldByNode(landing.anchor) && !imported) {
+			this.nativeToConnector(edgeId, end, landing.anchor);
+			return;
+		}
 		this.authoring ??= createCanvasAuthoring(this.view);
 		const result = this.authoring.updateConnectorEndpoint({ edgeId, end, anchor: landing.anchor });
 		if (!result.ok) {
@@ -1677,7 +2142,7 @@ export class M1CanvasSession {
 		const lines = this.selectedIds.filter((id) => this.lineOf(id) !== undefined);
 		const independent=boardConnectors(this.currentRawDocument).filter(c=>this.selectedIds.includes(c.id));
 		if(independent.length && patch.connector){
-			const {route,color,...style}=patch.connector;
+			const {route,color,block:_block,...style}=patch.connector;
 			this.writeBoardConnectors(independent.map(c=>restyleBoardConnector(c,{...style,...(route?{route,...(route!==c.route?{waypoints:[]}: {})}:{}),...(typeof color==="string"?{color}: {})})));
 		}
 		if (lines.length > 0) this.restyleLines(lines, patch);
@@ -1958,6 +2423,8 @@ export class M1CanvasSession {
 		this.attachRefreshPolling();
 		this.attachViewportFrames();
 		this.attachRectangleSelection();
+		this.listen(this.root, "pointerdown", (event) => this.pressBoard(event as PointerEvent), true);
+		this.listen(this.root, "pointerdown", (event) => this.noteEndPickup(event), true);
 		this.refresh();
 		return true;
 	}
@@ -1994,6 +2461,14 @@ export class M1CanvasSession {
 		});
 	}
 
+	/** The appearance written out once for each appearance object: a large board's is long. */
+	private appearanceSignature(): string {
+		if (this.appearanceSigned?.appearance !== this.appearance) {
+			this.appearanceSigned = { appearance: this.appearance, signature: safeSignature(this.appearance) };
+		}
+		return this.appearanceSigned.signature;
+	}
+
 	private viewportSignature(viewport: ViewportTransform | undefined, size: { readonly width: number; readonly height: number }): string {
 		return safeSignature({ viewport, size, coordinateMode: this.viewport.coordinateMode });
 	}
@@ -2010,14 +2485,16 @@ export class M1CanvasSession {
 		for (const diagnostic of this.viewport.diagnostics) {
 			diagnostics.push(diagnostic.message);
 		}
-		this.currentRawDocument = this.selectionMovePreview ?? this.adapter.getDocument();
-		const parsed = parseMiroCanvasMetadata(this.currentRawDocument);
+		this.currentRawDocument = this.selectionMovePreview ?? this.boardDocument();
+		const parsed = this.parseMetadata(this.currentRawDocument);
 		if (parsed.status === "valid" && parsed.metadata !== undefined) {
 			this.currentMetadata = parsed.metadata;
-			this.appearance = normalizeAppearanceState(parsed.metadata);
+			if (this.appearanceSource !== parsed.metadata) this.appearance = normalizeAppearanceState(parsed.metadata);
+			this.appearanceSource = parsed.metadata;
 		} else {
 			this.currentMetadata = undefined;
 			this.appearance = normalizeAppearanceState(undefined);
+			this.appearanceSource = undefined;
 			if (parsed.status !== "absent") {
 				for (const diagnostic of parsed.diagnostics) {
 					diagnostics.push(`${diagnostic.path}: ${diagnostic.message}`);
@@ -2033,17 +2510,25 @@ export class M1CanvasSession {
 				: `Metadata persistence is unavailable, so appearance, locking and every other write is disabled: ${this.options.persistenceProblem}`);
 		}
 		const selection = this.adapter.getSelection();
-		this.selectedIds = [...new Set([...(selection === undefined ? [] : allIds(selection)),...(this.connectorLayer?.selection() ?? [])])];
+		this.selectedIds = [...new Set([...(selection === undefined ? [] : allIds(selection)), ...this.ownSelection(this.currentRawDocument)])];
 		this.scene = this.adapter.getScene() ?? sceneFromDocument(this.currentRawDocument) ?? { nodes: [], edges: [] };
-		const independentGeometry=buildCanvasAnchorGeometry(this.currentRawDocument);
-		const independentEdges=boardConnectors(this.currentRawDocument).flatMap(c=>{
-			const route=independentGeometry.edges?.[c.id];return route?[{id:c.id,...route}]:[];
+		// The board's own connectors show on the minimap as edges do.
+		const routes = this.landingGeometry().geometry.edges ?? {};
+		const ownEdges = boardConnectors(this.currentRawDocument).flatMap((connector) => {
+			const route = routes[connector.id];
+			return route === undefined ? [] : [{ id: connector.id, ...route }];
 		});
-		if(independentEdges.length)this.scene={...this.scene,edges:[...this.scene.edges,...independentEdges]};
+		if (ownEdges.length > 0) this.scene = { ...this.scene, edges: [...this.scene.edges, ...ownEdges] };
 		this.policy = this.policyFromDocument(this.currentRawDocument);
 		this.attachNativeGuards();
-		const sceneSignature = this.sceneSignature(this.scene);
-		const appearanceSignature = safeSignature(this.appearance);
+		// Described again only when native Canvas saved a change or a press is
+		// held: describing every card of a large board is not free.
+		const signedFor = this.pointerHeld || this.selectionMovePreview !== undefined ? undefined : this.savedBoard?.document;
+		const sceneSignature = signedFor !== undefined && signedFor === this.sceneSignedFor
+			? this.lastSceneSignature
+			: this.sceneSignature(this.scene);
+		this.sceneSignedFor = signedFor;
+		const appearanceSignature = this.appearanceSignature();
 		const policySignature = safeSignature({
 			reviewMode: this.policy.reviewMode,
 			lockedElementIds: this.policy.lockedElementIds,
@@ -2098,7 +2583,6 @@ export class M1CanvasSession {
 			diagnostics.push(diagnostic);
 		}
 		this.refreshBoardConnectors();
-		this.updateNativeEdgeLabels();
 		this.updateMixedSelectionFrame();
 		const markerModel = this.updateCommentMarkers();
 		for (const diagnostic of markerModel?.diagnostics ?? []) {
@@ -2135,8 +2619,7 @@ export class M1CanvasSession {
 			...(viewport === undefined ? {} : { viewport }),
 			...(this.minimap.contentBounds === undefined ? {} : { contentBounds: this.minimap.contentBounds }),
 		};
-		const controlSignature = safeSignature({
-			appearance: state.appearance,
+		const controlSignature = appearanceSignature + safeSignature({
 			selectedIds: state.selectedIds,
 			reviewMode: state.reviewMode,
 			lockedSelection: state.lockedSelection,
@@ -2330,8 +2813,9 @@ export class M1CanvasSession {
 	 * positions are recomputed, from measurements cached per document.
 	 */
 	private followViewport(): void {
+		this.followedViewport = this.viewportSignature(this.displayViewport(), clientSize(this.root));
 		this.connectorLayer?.render();
-		this.updateNativeEdgeLabels();
+		this.updateConnectorLabels();
 		this.updateMixedSelectionFrame();
 		if (this.disposed) {
 			return;
@@ -2350,12 +2834,18 @@ export class M1CanvasSession {
 		}
 		this.handles.update(this.handlesState(previous?.editable ?? false));
 		this.updateCommentMarkers();
-		const size=clientSize(this.root), viewport=this.displayViewport();
-		const signature=`${this.lastSceneSignature}|${this.viewportSignature(viewport,size)}`;
-		if(signature!==this.lastMinimapSignature) {
-			this.minimap=new MinimapModel(this.scene,{width:240,height:160,padding:8,viewport,viewportSize:size,coordinateMode:this.viewport.coordinateMode});
-			this.lastMinimapSignature=signature;this.drawMinimap();
-		}
+		const size = clientSize(this.root), viewport = this.displayViewport();
+		const signature = `${this.lastSceneSignature}|${this.viewportSignature(viewport, size)}`;
+		// Mid-drag, the minimap follows the cards a few times a second: redrawn
+		// every frame, a large board's would cost more than the drag itself.
+		const now = Date.now();
+		if (signature === this.lastMinimapSignature || (this.pointerHeld && now - this.minimapDrawnAt < MINIMAP_DRAG_INTERVAL)) return;
+		this.minimap = new MinimapModel(this.scene, {
+			width: 240, height: 160, padding: 8, viewport, viewportSize: size, coordinateMode: this.viewport.coordinateMode,
+		});
+		this.lastMinimapSignature = signature;
+		this.minimapDrawnAt = now;
+		this.drawMinimap();
 	}
 
 	public commentLocked(id: string, origin: CommentOrigin): boolean {
@@ -2403,7 +2893,7 @@ export class M1CanvasSession {
 			}
 			if(event.button!==0||this.armedTool!=="select"||this.isSpacePanHeld()||this.inControls(event)
 				||matchesPointer(this.settings.panBinding,event)||matchesPointer(this.settings.lassoBinding,event)
-				||this.closestTarget(event,".canvas-node,.canvas-edge,.canvas-selection,.miro-canvas-mixed-selection-frame,.miro-board-connector-hit,.miro-board-connector-grip,.miro-board-connector-label,.miro-canvas-native-edge-label,input,textarea,[contenteditable=true]"))return;
+				||this.closestTarget(event,".canvas-node,.canvas-edge,.canvas-selection,.miro-canvas-mixed-selection-frame,.miro-board-connector,.miro-canvas-connector-label,.miro-canvas-connector-label-editor,input,textarea,[contenteditable=true]"))return;
 			const first={x:event.clientX,y:event.clientY};
 			this.rectangleSelectionEnd?.();
 			// Own the gesture once. Letting Canvas also see this press creates a
@@ -2432,7 +2922,7 @@ export class M1CanvasSession {
 				cleanup();
 				if(!wasDragged){if(!event.shiftKey){this.callNative("deselectAll");this.connectorLayer?.select([]);this.selectedCommentKeys.clear();this.selectedRouteEnds.clear();this.refresh();}return;}
 				const last={x:e.clientX,y:e.clientY};
-				const geometry=buildCanvasAnchorGeometry(this.adapter.getDocument());
+				const geometry=buildCanvasAnchorGeometry(this.boardDocument());
 				const groups=new Set(((readRuntime(this.currentRawDocument,"nodes")??[]) as readonly unknown[])
 					.filter(item=>readRuntime(item,"type")==="group").map(item=>readRuntime(item,"id")));
 				const caught:unknown[]=[];
@@ -2481,40 +2971,127 @@ export class M1CanvasSession {
 		root.addEventListener("pointerdown",down,true);
 		this.disposers.push(()=>{this.rectangleSelectionEnd?.();root.ownerDocument.removeEventListener("pointerdown",frameDown,true);root.removeEventListener("pointerdown",down,true);});
 	}
+	/**
+	 * Keep what the plugin draws over the board with native Canvas while it
+	 * moves: frame by frame during a press, a wheel or a transform native
+	 * Canvas animates, and not at all while the board is still.
+	 *
+	 * Native Canvas moves a dragged card before it saves anything; the board
+	 * is read again only when a selected card has actually moved, so a drag
+	 * on a large board does not serialise the whole of it every frame.
+	 */
 	private attachViewportFrames(): void {
-		const view=this.root?.ownerDocument?.defaultView;
-		if(typeof view?.requestAnimationFrame!=="function")return;
-		let frame=0, stopped=false, previous="", dragging=false, geometrySignature="";
-		const down=()=>{dragging=true;this.liveGeometryDirty=true;};
-		const up=()=>{dragging=false;this.liveGeometryDirty=true;};
-		this.root?.addEventListener("pointerdown",down,true);
-		view.addEventListener("pointerup",up,true);view.addEventListener("pointercancel",up,true);view.addEventListener("blur",up);
-		const tick=()=>{
-			if(stopped || this.disposed)return;
-			let geometryChanged=false;
-			if(dragging || this.liveGeometryDirty){
-				this.liveGeometryDirty=false;
-				// Native dragging updates runtime geometry before the saved document.
-				// Read its current graph, but do not write or add history during preview.
-				const document=this.selectionMovePreview ?? this.adapter.getDocument();
-				if(isRecord(document)&&Array.isArray(document.nodes)&&Array.isArray(document.edges)){
-					const signature=safeSignature({nodes:document.nodes.map(n=>isRecord(n)?[n.id,n.x,n.y,n.width,n.height]:n),edges:document.edges});
-					if(signature!==geometrySignature){
-						geometrySignature=signature;geometryChanged=true;
-						this.currentRawDocument=document;this.landingCache=undefined;
-						this.sourceRenderer?.refresh();
-						const geometry=this.landingGeometry().geometry;
-						this.scene={nodes:document.nodes,edges:[...document.edges,...boardConnectors(document).flatMap(c=>geometry.edges?.[c.id]?[{id:c.id,...geometry.edges[c.id]}]:[])]};
-						this.lastSceneSignature=this.sceneSignature(this.scene);
-					}
+		const view = this.root?.ownerDocument?.defaultView;
+		const root = this.root;
+		if (root === undefined || typeof view?.requestAnimationFrame !== "function") return;
+		let frame = 0, held = false, idle = 0, moving = "";
+		const tick = (): void => {
+			frame = 0;
+			if (this.disposed) return;
+			let moved = false;
+			if (held || this.liveGeometryDirty) {
+				this.liveGeometryDirty = false;
+				const now = this.movingSignature();
+				if (now !== moving) {
+					moving = now;
+					moved = this.readLiveGeometry();
 				}
 			}
-			const signature=this.viewportSignature(this.displayViewport(),clientSize(this.root));
-			if(signature!==previous||geometryChanged){previous=signature;this.followViewport();}
-			frame=view.requestAnimationFrame(tick);
+			const viewport = this.viewportSignature(this.displayViewport(), clientSize(this.root));
+			if (moved || viewport !== this.followedViewport) {
+				this.followViewport();
+				idle = 0;
+			} else {
+				idle += 1;
+			}
+			if (held || idle < SETTLE_FRAMES) frame = view.requestAnimationFrame(tick);
 		};
-		frame=view.requestAnimationFrame(tick);
-		this.disposers.push(()=>{stopped=true;view.cancelAnimationFrame(frame);this.root?.removeEventListener("pointerdown",down,true);view.removeEventListener("pointerup",up,true);view.removeEventListener("pointercancel",up,true);view.removeEventListener("blur",up);});
+		const wake = (): void => {
+			idle = 0;
+			if (frame === 0) frame = view.requestAnimationFrame(tick);
+		};
+		this.wakeFrames = wake;
+		const down = (): void => {
+			held = true;
+			this.pointerHeld = true;
+			this.liveGeometryDirty = true;
+			wake();
+		};
+		const up = (): void => {
+			held = false;
+			this.pointerHeld = false;
+			this.liveGeometryDirty = true;
+			wake();
+		};
+		this.listen(root, "pointerdown", down, true);
+		this.listen(root, "wheel", wake);
+		this.listen(view, "pointerup", up, true);
+		this.listen(view, "pointercancel", up, true);
+		this.listen(view, "blur", up);
+		this.disposers.push(() => {
+			if (frame !== 0) view.cancelAnimationFrame(frame);
+			this.wakeFrames = undefined;
+		});
+	}
+
+	/**
+	 * The board as native Canvas has it.  Reading it rebuilds the whole board,
+	 * so it is read again only when native Canvas has saved a change - it
+	 * replaces its saved document each time - or while a press is held, when
+	 * cards move before they are saved.
+	 */
+	private boardDocument(): unknown {
+		return this.pointerHeld ? this.adapter.getDocument() : this.savedDocument();
+	}
+
+	/** The board as native Canvas last saved it, read once for each save. */
+	private savedDocument(): unknown {
+		const saved = readRuntime(this.nativeCanvas(), "data");
+		if (!isObject(saved)) return this.adapter.getDocument();
+		// Its parts too, should anything write into the saved document in place.
+		const parts = ["nodes", "edges", "miroCanvas"].map((key) => readRuntime(saved, key));
+		const known = this.savedBoard;
+		if (known === undefined || known.saved !== saved || known.parts.some((part, index) => part !== parts[index])) {
+			this.savedBoard = { saved, parts, document: this.adapter.getDocument() };
+		}
+		return this.savedBoard!.document;
+	}
+
+	/** Where the selected cards are now, as native Canvas moves and sizes them. */
+	private movingSignature(): string {
+		let signature = "";
+		for (const item of this.adapter.getSelection() ?? []) {
+			signature += `${String(readRuntime(item, "id"))}:${String(readRuntime(item, "x"))},${String(readRuntime(item, "y"))},`
+				+ `${String(readRuntime(item, "width"))},${String(readRuntime(item, "height"))}|`;
+		}
+		return signature;
+	}
+
+	/**
+	 * Read the board as native Canvas has it now, mid-gesture, without writing
+	 * or adding history; true when anything drawn from it has to follow.
+	 */
+	private readLiveGeometry(): boolean {
+		const document = this.selectionMovePreview ?? this.adapter.getDocument();
+		if (!isRecord(document) || !Array.isArray(document.nodes) || !Array.isArray(document.edges)) return false;
+		// Mid-gesture only cards move: routes that hold on to none of them are kept.
+		const before = this.landingCache;
+		const same = before !== undefined && readRuntime(before.document, "miroCanvas") === document.miroCanvas
+			&& readRuntime(readRuntime(before.document, "edges"), "length") === document.edges.length;
+		this.currentRawDocument = document;
+		this.landingCache = undefined;
+		const routes = this.landingGeometry(same ? before.geometry : undefined).geometry.edges ?? {};
+		this.sourceRenderer?.refresh();
+		const ownEdges = boardConnectors(document).flatMap((connector) => {
+			const route = routes[connector.id];
+			return route === undefined ? [] : [{ id: connector.id, ...route }];
+		});
+		this.scene = { nodes: document.nodes, edges: [...document.edges, ...ownEdges] };
+		// Read only when something moved, so a new token is as good as a description.
+		this.liveGeneration += 1;
+		this.lastSceneSignature = `live:${this.liveGeneration}`;
+		this.sceneSignedFor = undefined;
+		return true;
 	}
 
 	/** Watch the canvas transform and the selected elements, and nothing else. */
@@ -2537,7 +3114,11 @@ export class M1CanvasSession {
 				return;
 			}
 			try {
-				this.followObserver = Reflect.construct(Observer, [() => {this.liveGeometryDirty=true;this.followViewport();}]) as NonNullable<M1CanvasSession["followObserver"]>;
+				this.followObserver = Reflect.construct(Observer, [() => {
+					this.liveGeometryDirty = true;
+					this.followViewport();
+					this.wakeFrames?.();
+				}]) as NonNullable<M1CanvasSession["followObserver"]>;
 			} catch {
 				return;
 			}
@@ -2717,7 +3298,7 @@ export class M1CanvasSession {
 			this.startLine(lineKind(this.toolShape) ?? lineKind("arrow")!, event);
 			return;
 		}
-		if (this.closestTarget(event, ".miro-board-connector-grip,.miro-board-connector-hit")) return;
+		if (this.closestTarget(event, ".miro-canvas-connector-labels, .miro-board-connector")) return;
 		const lasso = this.armedTool === "select" && matchesPointer(this.settings.lassoBinding, event) && !this.isSpacePanHeld();
 		const tool = lasso ? "lasso" : this.armedTool;
 		const root = this.root;
@@ -3057,7 +3638,7 @@ export class M1CanvasSession {
 		const swallow = (dbl: Event): void => {
 			// A later double-click on an interactive overlay is not the
 			// gesture that finished this line.
-			if (this.closestTarget(dbl, ".miro-canvas-native-edge-label,.miro-board-connector-label")) return;
+			if (this.closestTarget(dbl, ".miro-canvas-connector-labels")) return;
 			dbl.preventDefault();
 			dbl.stopImmediatePropagation();
 		};
@@ -3148,11 +3729,14 @@ export class M1CanvasSession {
 			this.options.onNotice?.("Line not placed: an end was put down where the connector settings do not let it hold. Allow unattached ends to draw on empty board.");
 			this.refresh(); return;
 		}
-		this.writeBoardConnectors([{id:newCanvasId(), from:from.anchor,
-			to:to.anchor, route:spec.route, color:this.connectorColor??this.boardInk(), width:this.connectorWidth,
-			...(this.connectorHeadSize === undefined ? {} : {headSize: this.connectorHeadSize}),
-			startCap:"none",endCap:spec.endCap??(spec.block?"stealth":"none"),waypoints:points.slice(1,-1),...(spec.block?{block:true as const}:{})}]);
-		return;
+		this.placeConnector({
+			id: newCanvasId(), from: from.anchor, to: to.anchor, route: spec.route,
+			color: this.connectorColor ?? this.boardInk(), width: this.connectorWidth,
+			...(this.connectorHeadSize === undefined ? {} : { headSize: this.connectorHeadSize }),
+			startCap: "none", endCap: spec.endCap ?? (spec.block ? "stealth" : "none"),
+			waypoints: points.slice(1, -1).map((point) => ({ x: point.x, y: point.y })),
+			...(spec.block ? { block: true as const } : {}),
+		});
 	}
 	/** Ink that shows on the board whatever its theme: near-black on light, near-white on dark. */
 	private boardInk(): string {
@@ -3458,7 +4042,10 @@ export class M1CanvasSession {
 	): void {
 		const landing = this.connectorLanding(end, from.nodeId, from.board, "");
 		if (landing === undefined) return;
-		this.writeBoardConnectors([{id:newCanvasId(),from:from.anchor,to:landing.anchor,route:"straight",color:this.boardInk(),width:2,startCap:"none",endCap:"arrow"}]);
+		this.placeConnector({
+			id: newCanvasId(), from: from.anchor, to: landing.anchor, route: "straight",
+			color: this.boardInk(), width: 2, startCap: "none", endCap: "arrow",
+		});
 	}
 
 	/** A comment pinned where the board was clicked: on the item there, or on the board. */
@@ -3661,9 +4248,8 @@ export class M1CanvasSession {
 	}
 
 	private handlesState(editable: boolean): SelectionHandlesState {
-		// Independent connectors own their SVG handles. Never render the native
-		// endpoint editor over them (it also uses a different coordinate origin).
-		if (this.connectorLayer?.selection().length || this.selectedCommentKeys.size) return { selectedIds: [], rotation: 0, editable, isEdge: false };
+		// A selected comment pin has no handles; it is moved by itself.
+		if (this.selectedCommentKeys.size > 0) return { selectedIds: [], rotation: 0, editable, isEdge: false };
 		const id = this.selectedIds[0];
 		const { geometry, scene } = this.landingGeometry();
 		return {
@@ -3864,9 +4450,10 @@ export class M1CanvasSession {
 	}
 
 	private selectionKinds(): readonly SelectionKind[] {
+		if (this.selectedIds.length === 0) return [];
 		const edgeIds = new Set(collectCanvasElementIds(this.adapter.getEdges() ?? []));
-		for(const c of boardConnectors(this.currentRawDocument))edgeIds.add(c.id);
-		const source = buildSourceScene(this.currentRawDocument);
+		for (const connector of boardConnectors(this.currentRawDocument)) edgeIds.add(connector.id);
+		const source = this.landingGeometry().scene;
 		const nodes = readRuntime(this.currentRawDocument, "nodes");
 		const kinds = new Set<SelectionKind>();
 		for (const id of this.selectedIds) {
@@ -3929,12 +4516,16 @@ export class M1CanvasSession {
 			right = Math.max(right, rect.right);
 			bottom = Math.max(bottom, rect.bottom);
 		}
-		const geometry=buildCanvasAnchorGeometry(this.currentRawDocument);
-		for(const id of this.connectorLayer?.selection()??[]){
-			const route=geometry.edges?.[id];
-			for(const p of route?.points ?? (route?.start&&route.end?[route.start,route.end]:[])){
-				const at=this.viewportPoint(p);if(!at)continue;
-				left=Math.min(left,at.x);right=Math.max(right,at.x);top=Math.min(top,at.y);bottom=Math.max(bottom,at.y);
+		const routes = this.landingGeometry().geometry.edges ?? {};
+		for (const id of this.connectorLayer?.selection() ?? []) {
+			const route = routes[id];
+			for (const point of route?.points ?? (route?.start !== undefined && route.end !== undefined ? [route.start, route.end] : [])) {
+				const at = this.viewportPoint(point);
+				if (at === undefined) continue;
+				left = Math.min(left, at.x);
+				right = Math.max(right, at.x);
+				top = Math.min(top, at.y);
+				bottom = Math.max(bottom, at.y);
 			}
 		}
 		if (!Number.isFinite(left) || !Number.isFinite(top) || !Number.isFinite(right)) {
@@ -4415,7 +5006,18 @@ export class M1CanvasSession {
 			if (x !== undefined && y !== undefined) this.lastPointer = { x, y, at: Date.now() };
 		};
 		const key = (event: KeyboardEvent): void => {
-			if (!onBoard() || !(event.ctrlKey || event.metaKey) || event.altKey || event.shiftKey) return;
+			if (!onBoard()) return;
+			if (event.key === "Escape" && !event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey) {
+				// Native Canvas puts its own selection away on Escape too.
+				this.resetTools();
+				return;
+			}
+			if (!event.ctrlKey && !event.metaKey && !event.altKey && this.connectorKey(event)) {
+				event.preventDefault();
+				event.stopImmediatePropagation();
+				return;
+			}
+			if (!(event.ctrlKey || event.metaKey) || event.altKey || event.shiftKey) return;
 			const command = ({ KeyC: "copy", KeyX: "cut", KeyV: "paste" } as Record<string, "copy"|"cut"|"paste">)[event.code];
 			if (command === undefined) return;
 			// Capture before Obsidian's hotkey scope; physical codes also work in Russian layouts.
@@ -4453,6 +5055,25 @@ export class M1CanvasSession {
 			root.removeEventListener("pointermove", track);
 			root.removeEventListener("pointerdown", track, true);
 		});
+	}
+
+	/**
+	 * Keys that act on connectors as native Canvas's act on its own selection:
+	 * Delete takes the board's own connectors away with everything else
+	 * selected, and Enter writes the label of the one selected connector.
+	 */
+	private connectorKey(event: KeyboardEvent): boolean {
+		this.readInteractionState();
+		if ((event.key === "Delete" || event.key === "Backspace") && (this.connectorLayer?.selection().length ?? 0) > 0) {
+			this.deleteBoardSelection();
+			return true;
+		}
+		// Native Canvas opens an edge's label on Enter itself, through `editLabel`.
+		const id = this.selectedIds.length === 1 ? this.selectedIds[0] : undefined;
+		if (event.key !== "Enter" || event.shiftKey || id === undefined
+			|| !boardConnectors(this.currentRawDocument).some((connector) => connector.id === id)) return false;
+		this.editConnectorLabel(id);
+		return true;
 	}
 
 	/** The plugin's record of what is selected, as a copy carries it. */
@@ -4678,13 +5299,14 @@ export class M1CanvasSession {
 
 	private previewCommentMove(threadId: string, origin: CommentOrigin, point: { readonly x: number; readonly y: number }): void {
 		if (this.commentLocked(threadId, origin)) return;
-		const board = this.boardPoint(point), document = this.adapter.getDocument();
+		const board = this.boardPoint(point), document = this.boardDocument();
 		if (!board || !isRecord(document)) return;
 		const metadata = isRecord(document.miroCanvas) ? document.miroCanvas : {};
 		const places = isRecord(metadata.commentPlaces) ? metadata.commentPlaces : {};
 		this.commentMovePreview = { ...document, miroCanvas: { ...metadata,
 			commentPlaces: { ...places, [commentPlaceKey(origin, threadId)]: { type: "free", x: board.x, y: board.y } } } };
 		this.connectorLayer?.render();
+		this.updateConnectorLabels();
 		this.sourceRenderer?.refresh();
 	}
 
@@ -4692,6 +5314,7 @@ export class M1CanvasSession {
 		if (!this.commentMovePreview) return;
 		this.commentMovePreview = undefined;
 		this.connectorLayer?.render();
+		this.updateConnectorLabels();
 		this.sourceRenderer?.refresh();
 	}
 
@@ -5445,11 +6068,26 @@ export class M1CanvasSession {
 	}
 
 	private policyFromDocument(document: unknown): InteractionPolicy {
-		const parsed = parseMiroCanvasMetadata(document);
+		const parsed = this.parseMetadata(document);
+		if (this.policyFor?.parsed === parsed) return this.policyFor.policy;
 		// A missing extension is an ordinary Canvas. Invalid/unsupported data
 		// must never be normalized into an unlocked default policy.
-		return createInteractionPolicy(parsed.status === "valid" ? parsed.metadata
+		const policy = createInteractionPolicy(parsed.status === "valid" ? parsed.metadata
 			: parsed.status === "absent" ? { settings: {}, localOverrides: {} } : undefined);
+		this.policyFor = { parsed, policy };
+		return policy;
+	}
+
+	/**
+	 * The board's metadata, parsed once for each metadata object: native
+	 * Canvas hands the same one on until something writes a new one, and
+	 * checking a large board's takes long enough to be felt on every press.
+	 */
+	private parseMetadata(document: unknown): ReturnType<typeof parseMiroCanvasMetadata> {
+		const source = readRuntime(document, "miroCanvas");
+		if (!isObject(source)) return parseMiroCanvasMetadata(document);
+		if (this.parsedMetadata?.source !== source) this.parsedMetadata = { source, result: parseMiroCanvasMetadata(document) };
+		return this.parsedMetadata.result;
 	}
 
 	/**
@@ -5459,10 +6097,10 @@ export class M1CanvasSession {
 	 */
 	private readInteractionState(): void {
 		this.interactionBlock = undefined;
-		const document = this.adapter.getDocument();
+		const document = this.savedDocument();
 		this.policy = this.policyFromDocument(document);
 		const selection = this.adapter.getSelection();
-		this.selectedIds = [...new Set([...(selection === undefined ? [] : allIds(selection)),...(this.connectorLayer?.selection() ?? [])])];
+		this.selectedIds = [...new Set([...(selection === undefined ? [] : allIds(selection)), ...this.ownSelection(document)])];
 		if (selection === undefined) {
 			this.interactionBlock = "this Canvas runtime does not report its selection";
 			this.policy = createInteractionPolicy(undefined);
@@ -5474,7 +6112,7 @@ export class M1CanvasSession {
 			this.policy = createInteractionPolicy(undefined);
 			return;
 		}
-		const parsed = parseMiroCanvasMetadata(document);
+		const parsed = this.parseMetadata(document);
 		if (parsed.status !== "valid" && parsed.status !== "absent") {
 			this.interactionBlock = `the board metadata is ${parsed.status}`;
 		}
@@ -5600,13 +6238,24 @@ export class M1CanvasSession {
 			moveTo: "move", moveAndResize: "resize", resize: "resize",
 			setText: "edit-text", startEditing: "edit-text", setColor: "restyle", setData: "restyle",
 		};
+		// Each element once: a large board has thousands, and a refresh comes often.
 		for (const element of [...(this.adapter.getNodes() ?? []), ...(this.adapter.getEdges() ?? [])]) {
+			if (!isObject(element) || this.guardedElements.has(element)) continue;
+			this.guardedElements.add(element);
 			for (const [key, operation] of Object.entries(operations)) {
 				this.guardNativeMethod(element, key, (original, receiver, args) => {
 					const ids = allIds([element]);
 					return this.nativeEditAllowed(operation, ids) ? Reflect.apply(original, receiver, args) : undefined;
 				});
 			}
+			// Native Canvas edits an edge's label - on Enter, a double click or
+			// its menu - in its own label, hidden while the plugin's stands in.
+			this.guardNativeMethod(element, "editLabel", (original, receiver, args) => {
+				const id = readCanvasElementId(element);
+				if (id === undefined || this.connectorLabels === undefined) return Reflect.apply(original, receiver, args);
+				this.editConnectorLabel(id);
+				return undefined;
+			});
 		}
 	}
 
@@ -5777,7 +6426,14 @@ export class M1CanvasSession {
 			});
 		}
 		listen("dblclick", (event) => {
-			if(this.closestTarget(event,".miro-canvas-native-edge-label,.miro-board-connector-label"))return;
+			if (this.closestTarget(event, ".miro-canvas-connector-labels")) return;
+			const connector = this.connectorAt(event);
+			if (connector !== undefined) {
+				event.preventDefault();
+				event.stopImmediatePropagation();
+				if (this.selectedIds.length === 1 && this.selectedIds[0] === connector) this.editSelectedConnectorLabel();
+				return;
+			}
 			const id = this.eventElementId(eventTarget(event));
 			this.blockIfNeeded(event, id === undefined ? "create" : "edit-text", id === undefined ? [] : this.eventIds(event));
 		});
@@ -5812,7 +6468,9 @@ export class M1CanvasSession {
 			}
 		});
 		const clearGesture = (): void => { this.pointerEditIds = undefined; };
-		const host = ownerDocument(this.root) ?? this.root;
+		// The window sees every move and release of a grip gesture, wherever it lands.
+		const view = readRuntime(ownerDocument(this.root), "defaultView");
+		const host = (isObject(view) ? view : ownerDocument(this.root) ?? this.root) as EventTarget;
 		this.listen(host, "pointermove", (event) => this.handles.handlePointerMove(event), true);
 		this.listen(host, "pointerup", (event) => this.handles.handlePointerUp(event), true);
 		this.listen(host, "pointercancel", () => this.handles.cancelGesture(), true);
@@ -5850,7 +6508,7 @@ export class M1CanvasSession {
 		this.slideShow?.stop();
 		this.controls.dispose();
 		this.connectorLayer?.dispose();
-		this.nativeEdgeLabels?.dispose();
+		this.connectorLabels?.dispose();
 		this.toolbar.dispose();
 		this.handles.dispose();
 		this.commentMarkers?.destroy();
