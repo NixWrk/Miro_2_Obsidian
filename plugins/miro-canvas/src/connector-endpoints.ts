@@ -433,26 +433,28 @@ export function buildCanvasAnchorGeometry(
 
   const edges = Object.create(null) as Record<string, AnchorEdgeGeometry>;
   const comments = Object.create(null) as Record<string, AnchorPoint>;
-  const threads = new Map(listCommentThreads(document).map(t => [`${t.origin}:${t.id}`, t]));
+  const threads = new Map(listCommentThreads(document).map((thread) => [`${thread.origin}:${thread.id}`, thread]));
+  // A comment pin is where it was put, else on what its thread is anchored to.
   const resolvingComments = new Set<string>();
   const resolveComment = (key: string): void => {
-    if (comments[key] || resolvingComments.has(key)) return;
-    const thread = threads.get(key); if (!thread) return;
+    if (comments[key] !== undefined || resolvingComments.has(key)) return;
+    const thread = threads.get(key);
+    if (thread === undefined) return;
     resolvingComments.add(key);
     const metadata = isRecord(document.miroCanvas) ? document.miroCanvas : {};
     const place = isRecord(metadata.commentPlaces) ? metadata.commentPlaces[key] : undefined;
     const anchor = normalizeAnchor(place ?? thread.anchor).anchor;
     if (anchor?.type === "edge") resolveEdge(anchor.edgeId);
     if (anchor?.type === "comment") resolveComment(`${anchor.origin}:${anchor.commentId}`);
-    const point = resolveAnchor(anchor, {nodes, images, edges, comments}).point;
-    if (point) comments[key] = {x: point.x, y: point.y};
+    const point = resolveAnchor(anchor, { nodes, images, edges, comments }).point;
+    if (point !== undefined) comments[key] = { x: point.x, y: point.y };
     resolvingComments.delete(key);
   };
   const resolveDependency = (anchor: CanvasAnchor): void => {
     if (anchor.type === "edge") resolveEdge(anchor.edgeId);
     if (anchor.type === "comment") resolveComment(`${anchor.origin}:${anchor.commentId}`);
   };
-  const independent = new Map(boardConnectors(document).map(c => [c.id,c]));
+  const independent = new Map(boardConnectors(document).map((connector) => [connector.id, connector]));
   const moved = (nodeId: unknown): boolean => {
     const before = typeof nodeId === "string" ? previous?.nodes?.[nodeId] : undefined;
     const after = typeof nodeId === "string" ? nodes[nodeId] : undefined;

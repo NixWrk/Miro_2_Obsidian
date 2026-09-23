@@ -203,6 +203,9 @@ function nativeSideOf(anchor: CanvasAnchor | undefined, fallback: ConnectorSide)
 const SETTLE_FRAMES = 20;
 /** How often, in milliseconds, the minimap follows cards being dragged. */
 const MINIMAP_DRAG_INTERVAL = 200;
+/** What a press starts no rectangle selection on: the things it would select, and text. */
+const RECTANGLE_EXEMPT_SELECTOR = ".canvas-node,.canvas-edge,.canvas-selection,.miro-canvas-mixed-selection-frame,"
+	+ ".miro-board-connector,.miro-canvas-connector-labels,input,textarea,[contenteditable=true]";
 const PANEL_SELECTOR = ".miro-canvas-panel, .miro-canvas-dock, .miro-canvas-thread, .miro-canvas-slideshow, .miro-canvas-toolbar, .miro-canvas-comment-markers, .miro-canvas-handles, .miro-canvas-minimap, .miro-canvas-m2-tools";
 const DEFAULT_TOOLBAR_FONT = "Inter";
 const DEFAULT_TOOLBAR_FONT_SIZE = 16;
@@ -640,6 +643,12 @@ function safeSignature(value: unknown): string {
 	} catch {
 		return "<unserializable>";
 	}
+}
+
+/** The origin:id key of the comment pin an event target is in. */
+function markerKey(target: EventTarget | null): string | undefined {
+	const marker = typeof Element !== "undefined" && target instanceof Element ? target.closest(".miro-canvas-comment-marker") : null;
+	return marker === null ? undefined : `${marker.getAttribute("data-comment-origin")}:${marker.getAttribute("data-comment-id")}`;
 }
 
 function keyIsPrintable(key: string): boolean {
@@ -1409,7 +1418,12 @@ export class M1CanvasSession {
 				this.toolShape = shape;
 				this.updateQuickTools();
 			},
-			onConnector: settings => {this.connectorColor=settings.color??this.connectorColor;this.connectorWidth=settings.width??this.connectorWidth;this.connectorHeadSize=settings.headSize??this.connectorHeadSize;this.updateQuickTools();},
+			onConnector: (settings) => {
+				this.connectorColor = settings.color ?? this.connectorColor;
+				this.connectorWidth = settings.width ?? this.connectorWidth;
+				this.connectorHeadSize = settings.headSize ?? this.connectorHeadSize;
+				this.updateQuickTools();
+			},
 			onPen: (settings) => {
 				if (settings.color !== undefined) this.penColor = settings.color;
 				if (settings.width !== undefined) this.penWidth = settings.width;
@@ -1798,26 +1812,45 @@ export class M1CanvasSession {
 	/** The board point under a viewport point. */
 	private boardPoint(point: { readonly x: number; readonly y: number }): { readonly x: number; readonly y: number } | undefined {
 		const rootRect = boundingRect(this.root);
-		const displayed=this.displayViewport(), size=clientSize(this.root);
-		if(displayed && this.viewport.coordinateMode==="center") return {x:(point.x-(rootRect?.left??0)-size.width/2)/displayed.zoom+displayed.x,y:(point.y-(rootRect?.top??0)-size.height/2)/displayed.zoom+displayed.y};
-		return this.viewport.screenToBoard({ x: point.x - (rootRect?.left ?? 0), y: point.y - (rootRect?.top ?? 0) });
+		const left = rootRect?.left ?? 0, top = rootRect?.top ?? 0;
+		const displayed = this.displayViewport(), size = clientSize(this.root);
+		if (displayed !== undefined && this.viewport.coordinateMode === "center") {
+			return {
+				x: (point.x - left - size.width / 2) / displayed.zoom + displayed.x,
+				y: (point.y - top - size.height / 2) / displayed.zoom + displayed.y,
+			};
+		}
+		return this.viewport.screenToBoard({ x: point.x - left, y: point.y - top });
 	}
-	/** Native target camera animates toward x/y/zoom. Overlays follow the displayed camera. */
+
+	/**
+	 * The camera native Canvas shows now.  It animates towards the camera it
+	 * is asked for; the overlays follow the one on screen.
+	 */
 	private displayViewport(): ViewportTransform | undefined {
-		const viewport=this.viewport.getViewport();
-		if(this.viewport.coordinateMode!=="center")return viewport;
-		const canvas=this.nativeCanvas(), x=finite(readRuntime(canvas,"x")),y=finite(readRuntime(canvas,"y")),logZoom=finite(readRuntime(canvas,"zoom"));
-		const zoom=logZoom===undefined?undefined:2**logZoom;
-		return viewport && x!==undefined && y!==undefined && zoom!==undefined && Number.isFinite(zoom) && zoom>0 ? {...viewport,x,y,zoom} : viewport;
+		const viewport = this.viewport.getViewport();
+		if (this.viewport.coordinateMode !== "center") return viewport;
+		const canvas = this.nativeCanvas();
+		const x = finite(readRuntime(canvas, "x")), y = finite(readRuntime(canvas, "y")), logZoom = finite(readRuntime(canvas, "zoom"));
+		const zoom = logZoom === undefined ? undefined : 2 ** logZoom;
+		return viewport !== undefined && x !== undefined && y !== undefined && zoom !== undefined && Number.isFinite(zoom) && zoom > 0
+			? { ...viewport, x, y, zoom }
+			: viewport;
 	}
 
 	/** The viewport point over a board point. */
 	private viewportPoint(point: { readonly x: number; readonly y: number }): { readonly x: number; readonly y: number } | undefined {
 		const rootRect = boundingRect(this.root);
-		const displayed=this.displayViewport(), size=clientSize(this.root);
-		if(displayed && this.viewport.coordinateMode==="center") return {x:(point.x-displayed.x)*displayed.zoom+size.width/2+(rootRect?.left??0),y:(point.y-displayed.y)*displayed.zoom+size.height/2+(rootRect?.top??0)};
+		const left = rootRect?.left ?? 0, top = rootRect?.top ?? 0;
+		const displayed = this.displayViewport(), size = clientSize(this.root);
+		if (displayed !== undefined && this.viewport.coordinateMode === "center") {
+			return {
+				x: (point.x - displayed.x) * displayed.zoom + size.width / 2 + left,
+				y: (point.y - displayed.y) * displayed.zoom + size.height / 2 + top,
+			};
+		}
 		const screen = this.viewport.boardToScreen(point);
-		return screen === undefined ? undefined : { x: screen.x + (rootRect?.left ?? 0), y: screen.y + (rootRect?.top ?? 0) };
+		return screen === undefined ? undefined : { x: screen.x + left, y: screen.y + top };
 	}
 
 	/** Node boxes, silhouettes and routes of the current document, measured once per document. */
@@ -2140,13 +2173,19 @@ export class M1CanvasSession {
 		}
 		this.authoring ??= createCanvasAuthoring(this.view);
 		const lines = this.selectedIds.filter((id) => this.lineOf(id) !== undefined);
-		const independent=boardConnectors(this.currentRawDocument).filter(c=>this.selectedIds.includes(c.id));
-		if(independent.length && patch.connector){
-			const {route,color,block:_block,...style}=patch.connector;
-			this.writeBoardConnectors(independent.map(c=>restyleBoardConnector(c,{...style,...(route?{route,...(route!==c.route?{waypoints:[]}: {})}:{}),...(typeof color==="string"?{color}: {})})));
+		// The board's own connectors keep their style in their own record.
+		const own = boardConnectors(this.currentRawDocument).filter((connector) => this.selectedIds.includes(connector.id));
+		if (own.length > 0 && patch.connector !== undefined) {
+			const { route, color, block: _block, ...style } = patch.connector;
+			this.writeBoardConnectors(own.map((connector) => restyleBoardConnector(connector, {
+				...style,
+				// A connector changing its kind of route starts unbent, as an edge does.
+				...(route === undefined ? {} : { route, ...(route === connector.route ? {} : { waypoints: [] }) }),
+				...(typeof color === "string" ? { color } : {}),
+			})));
 		}
 		if (lines.length > 0) this.restyleLines(lines, patch);
-		const others = this.selectedIds.filter((id) => !lines.includes(id) && !independent.some(c=>c.id===id));
+		const others = this.selectedIds.filter((id) => !lines.includes(id) && !own.some((connector) => connector.id === id));
 		if (others.length === 0) {
 			this.refresh();
 			return;
@@ -2725,16 +2764,30 @@ export class M1CanvasSession {
 		if (this.root === undefined || document === undefined) return undefined;
 		if (this.commentCard === undefined) {
 			const card = new CommentThreadCard(document, {
-				onReply: (id, text, name) => {if(!this.commentLocked(id,"local"))this.mutateComment("reply-comment", (draft) => addReply(draft, id, text, { author: {name: name?.trim() || this.commentAuthor().name} }));},
-				onRenameAuthor: (id, messageId, name, origin) => {if(!this.commentLocked(id,origin??"local"))this.mutateComment("rename-comment-author", draft => renameCommentDisplayAuthor(draft, origin ?? "local", id, messageId, name));},
-				onResolve: (id, resolved) => {if(!this.commentLocked(id,"local"))this.mutateComment("resolve-comment", (draft) => setCommentResolved(draft, id, resolved));},
-				onDelete: (id) => {if(!this.commentLocked(id,"local"))this.mutateComment("delete-comment", draft => deleteLocalComment(draft,id));},
-				onDeleteReply: (id, replyId) => {if(!this.commentLocked(id,"local"))this.mutateComment("delete-comment-reply",draft => deleteLocalReply(draft,id,replyId));},
+				// A locked thread takes no replies, renames, resolving or deleting.
+				onReply: (id, text, name) => {
+					if (this.commentLocked(id, "local")) return;
+					const author = { name: name?.trim() || this.commentAuthor().name };
+					this.mutateComment("reply-comment", (draft) => addReply(draft, id, text, { author }));
+				},
+				onRenameAuthor: (id, messageId, name, origin) => {
+					if (this.commentLocked(id, origin ?? "local")) return;
+					this.mutateComment("rename-comment-author", (draft) => renameCommentDisplayAuthor(draft, origin ?? "local", id, messageId, name));
+				},
+				onResolve: (id, resolved) => {
+					if (!this.commentLocked(id, "local")) this.mutateComment("resolve-comment", (draft) => setCommentResolved(draft, id, resolved));
+				},
+				onDelete: (id) => {
+					if (!this.commentLocked(id, "local")) this.mutateComment("delete-comment", (draft) => deleteLocalComment(draft, id));
+				},
+				onDeleteReply: (id, replyId) => {
+					if (!this.commentLocked(id, "local")) this.mutateComment("delete-comment-reply", (draft) => deleteLocalReply(draft, id, replyId));
+				},
 				onAppearance: (id, origin, patch) => this.setCommentAppearance(id, origin, patch),
 				onPreviewColor: (id, origin, color) => this.commentMarkers?.previewColor(id, origin, color),
 				onHideImported: (id) => {
-					if(this.commentLocked(id,"imported"))return;
-					this.writeMetadata("hide-imported-comment", draft => {
+					if (this.commentLocked(id, "imported")) return;
+					this.writeMetadata("hide-imported-comment", (draft) => {
 						const previous = Array.isArray(draft.hiddenImportedComments) ? draft.hiddenImportedComments : [];
 						draft.hiddenImportedComments = [...new Set([...previous, id])];
 						this.detachMissingCommentAnchors(draft);
@@ -2852,125 +2905,190 @@ export class M1CanvasSession {
 		return this.commentThreads().some(thread => thread.id === id && thread.origin === origin && thread.locked === true);
 	}
 
-	private setCommentAppearance(id: string, origin: CommentOrigin, patch: {color?: string; locked?: boolean}): void {
-		if (this.appearance.settings.reviewMode || !this.commentThreads().some(thread => thread.id === id && thread.origin === origin)) return;
+	/** Colour a comment thread or lock it; a locked thread only takes being unlocked. */
+	private setCommentAppearance(id: string, origin: CommentOrigin, patch: { color?: string; locked?: boolean }): void {
+		if (this.appearance.settings.reviewMode || !this.commentThreads().some((thread) => thread.id === id && thread.origin === origin)) return;
 		if (this.commentLocked(id, origin) && (patch.locked !== false || patch.color !== undefined)) return;
-		if (patch.color !== undefined && !/^#[0-9a-f]{6}$/i.test(patch.color)) return;
-		this.writeMetadata("comment-appearance", draft => {
-			const map: Record<string, unknown> = isRecord(draft.commentDecorations) ? {...draft.commentDecorations} : {};
-			const key = commentPlaceKey(origin,id), previous = isRecord(map[key]) ? map[key] : {};
-			map[key] = {...previous,...patch};draft.commentDecorations=map;
+		if (patch.color !== undefined && !/^#[0-9a-f]{6}$/iu.test(patch.color)) return;
+		this.writeMetadata("comment-appearance", (draft) => {
+			const decorations: Record<string, unknown> = isRecord(draft.commentDecorations) ? { ...draft.commentDecorations } : {};
+			const key = commentPlaceKey(origin, id);
+			decorations[key] = { ...(isRecord(decorations[key]) ? decorations[key] : {}), ...patch };
+			draft.commentDecorations = decorations;
 			return draft;
 		});
 		this.refresh();
 	}
-	private rectangleSelectionEnd?:()=>void;
-	private selectedRouteEnds=new Map<string,SelectedRouteEnds>();
+
+	private rectangleSelectionEnd?: () => void;
+	/** Connector ends caught by a rectangle without the rest of their line. */
+	private selectedRouteEnds = new Map<string, SelectedRouteEnds>();
+
+	/**
+	 * The left-button rectangle selects nodes, native edges, the board's own
+	 * connectors and comment pins together.  The plugin draws the one marquee:
+	 * letting native Canvas see the press would start a second one that
+	 * selects a different set of things.
+	 */
 	private attachRectangleSelection(): void {
-		const root=this.root,view=root?.ownerDocument?.defaultView;if(!root||!view)return;
+		const root = this.root, view = root?.ownerDocument?.defaultView;
+		if (root === undefined || view === undefined || view === null) return;
 		// A press on the shared frame must be claimed before native Canvas sees a
-		// press on empty board space and drops its part of the selection.
-		const frameDown=(event:PointerEvent)=>{
-			if(!root.contains(event.target as Node))return;
-			if(this.closestTarget(event,".miro-canvas-mixed-selection-frame")){this.startSelectionMove(event);return;}
-			const marker=event.target instanceof Element ? event.target.closest(".miro-canvas-comment-marker") : null;
-			if(marker){
-				const key=`${marker.getAttribute("data-comment-origin")}:${marker.getAttribute("data-comment-id")}`;
-				if(this.selectedCommentKeys.has(key))this.startSelectionMove(event);
+		// press on empty board and drops its part of the selection.
+		const frameDown = (event: PointerEvent): void => {
+			if (!root.contains(event.target as Node)) return;
+			if (this.closestTarget(event, ".miro-canvas-mixed-selection-frame")) {
+				this.startSelectionMove(event);
+				return;
 			}
+			const key = markerKey(event.target);
+			if (key !== undefined && this.selectedCommentKeys.has(key)) this.startSelectionMove(event);
 		};
-		root.ownerDocument.addEventListener("pointerdown",frameDown,true);
-		const down=(event:PointerEvent)=>{
-			if(event.defaultPrevented)return;
-			if(event.button===0&&!event.shiftKey&&this.selectedCommentKeys.size){
-				const id=this.eventElementId(event.target);
-				const marker=event.target instanceof Element ? event.target.closest(".miro-canvas-comment-marker") : null;
-				const key=marker?`${marker.getAttribute("data-comment-origin")}:${marker.getAttribute("data-comment-id")}`:undefined;
-				if((id&&!this.selectedIds.includes(id))||(key&&!this.selectedCommentKeys.has(key)))this.selectedCommentKeys.clear();
+		root.ownerDocument.addEventListener("pointerdown", frameDown, true);
+		const down = (event: PointerEvent): void => {
+			if (event.defaultPrevented) return;
+			if (event.button === 0 && !event.shiftKey && this.selectedCommentKeys.size > 0) {
+				// A press on something not selected puts the selected pins away.
+				const id = this.eventElementId(event.target);
+				const key = markerKey(event.target);
+				if ((id !== undefined && !this.selectedIds.includes(id)) || (key !== undefined && !this.selectedCommentKeys.has(key))) {
+					this.selectedCommentKeys.clear();
+				}
 			}
-			if(this.connectorLayer?.selection().length && this.closestTarget(event,".canvas-selection") && !this.closestTarget(event,".canvas-node-resizer")) {
-				if(this.startSelectionMove(event))return;
-			}
-			if(event.button!==0||this.armedTool!=="select"||this.isSpacePanHeld()||this.inControls(event)
-				||matchesPointer(this.settings.panBinding,event)||matchesPointer(this.settings.lassoBinding,event)
-				||this.closestTarget(event,".canvas-node,.canvas-edge,.canvas-selection,.miro-canvas-mixed-selection-frame,.miro-board-connector,.miro-canvas-connector-label,.miro-canvas-connector-label-editor,input,textarea,[contenteditable=true]"))return;
-			const first={x:event.clientX,y:event.clientY};
+			if ((this.connectorLayer?.selection().length ?? 0) > 0 && this.closestTarget(event, ".canvas-selection")
+				&& !this.closestTarget(event, ".canvas-node-resizer") && this.startSelectionMove(event)) return;
+			if (event.button !== 0 || this.armedTool !== "select" || this.isSpacePanHeld() || this.inControls(event)
+				|| matchesPointer(this.settings.panBinding, event) || matchesPointer(this.settings.lassoBinding, event)
+				|| this.closestTarget(event, RECTANGLE_EXEMPT_SELECTOR)) return;
 			this.rectangleSelectionEnd?.();
-			// Own the gesture once. Letting Canvas also see this press creates a
-			// second marquee with a different set of selectable element types.
-			event.preventDefault();event.stopImmediatePropagation();
-			let dragged=false;
-			const bounds=boundingRect(root);
-			const marquee=root.ownerDocument.createElement("div");
-			marquee.className="miro-canvas-rectangle-marquee";
-			marquee.hidden=true;root.appendChild(marquee);
-			root.setAttribute("data-miro-rectangle-selecting","true");
-			const move=(e:PointerEvent)=>{
-				if(e.pointerId!==event.pointerId)return;
-				dragged ||= Math.hypot(e.clientX-event.clientX,e.clientY-event.clientY)>3;
-				if(!dragged||!bounds)return;
-				marquee.hidden=false;
-				marquee.style.left=`${Math.min(event.clientX,e.clientX)-bounds.left}px`;
-				marquee.style.top=`${Math.min(event.clientY,e.clientY)-bounds.top}px`;
-				marquee.style.width=`${Math.abs(e.clientX-event.clientX)}px`;
-				marquee.style.height=`${Math.abs(e.clientY-event.clientY)}px`;
-			};
-			const cleanup=()=>{root.removeAttribute("data-miro-rectangle-selecting");marquee.remove();view.removeEventListener("pointermove",move,true);view.removeEventListener("pointerup",up,true);view.removeEventListener("pointercancel",cancel,true);view.removeEventListener("blur",cancel);this.rectangleSelectionEnd=undefined;};
-			const up=(e:PointerEvent)=>{
-				if(e.pointerId!==event.pointerId)return;
-				const wasDragged=dragged || Math.hypot(e.clientX-event.clientX,e.clientY-event.clientY)>3;
-				cleanup();
-				if(!wasDragged){if(!event.shiftKey){this.callNative("deselectAll");this.connectorLayer?.select([]);this.selectedCommentKeys.clear();this.selectedRouteEnds.clear();this.refresh();}return;}
-				const last={x:e.clientX,y:e.clientY};
-				const geometry=buildCanvasAnchorGeometry(this.boardDocument());
-				const groups=new Set(((readRuntime(this.currentRawDocument,"nodes")??[]) as readonly unknown[])
-					.filter(item=>readRuntime(item,"type")==="group").map(item=>readRuntime(item,"id")));
-				const caught:unknown[]=[];
-				const endpointSelection=event.shiftKey?new Map(this.selectedRouteEnds):new Map<string,SelectedRouteEnds>();
-				const catchEnds=(id:string,points:readonly {x:number;y:number}[]):boolean=>{
-					const mask=routeEndsInBox(points,first,last);
-					if(!mask)return false;
-					// Shift-add never turns an already whole-selected edge into a partial one.
-					if(!(event.shiftKey&&this.selectedIds.includes(id)&&!endpointSelection.has(id))){
-						const prior=endpointSelection.get(id);
-						endpointSelection.set(id,prior?{from:prior.from||mask.from,to:prior.to||mask.to,wholeRoute:prior.wholeRoute||mask.wholeRoute}:mask);
-					}
-					return true;
-				};
-				for(const node of this.adapter.getNodes()??[]){
-					const id=readCanvasElementId(node),rect=boundingRect(readCanvasElementDom(node));
-					if(id&&rect&&(groups.has(id)?rectIntersectsBox(rect,first,last,true)
-						:pointInSelectionBox({x:(rect.left+rect.right)/2,y:(rect.top+rect.bottom)/2},first,last)))caught.push(node);
-				}
-				for(const edge of this.adapter.getEdges()??[]){
-					const id=readCanvasElementId(edge),route=id===undefined?undefined:geometry.edges?.[id];
-					const points=(route?.points??(route?.start&&route.end?[route.start,route.end]:[])).map(p=>this.viewportPoint(p)).filter((p):p is {x:number;y:number}=>p!==undefined);
-					if(id&&catchEnds(id,points))caught.push(edge);
-				}
-				const connectorIds=boardConnectors(this.currentRawDocument).filter(c=>{
-					const route=geometry.edges?.[c.id];
-					const points=(route?.points??(route?.start&&route.end?[route.start,route.end]:[])).map(p=>this.viewportPoint(p)).filter((p):p is {x:number;y:number}=>p!==undefined);
-					return catchEnds(c.id,points);
-				}).map(c=>c.id);
-				this.selectedRouteEnds=endpointSelection;
-				if(!event.shiftKey){this.callNative("deselectAll");this.selectedCommentKeys.clear();}
-				for(const item of caught)this.callNative("select",[item]);
-				this.connectorLayer?.select([...new Set([...(event.shiftKey?this.connectorLayer.selection():[]),...connectorIds])]);
-				for(const [key,point] of Object.entries(geometry.comments??{})){
-					const at=this.viewportPoint(point);
-					// The 32 px avatar sits above and to the right of its anchor.
-					if(at&&pointInSelectionBox({x:at.x+16,y:at.y-16},first,last))
-						this.selectedCommentKeys.add(key);
-				}
-				this.refresh();
-			};
-			const cancel=()=>{cleanup();this.followViewport();};
-			view.addEventListener("pointermove",move,true);view.addEventListener("pointerup",up,true);view.addEventListener("pointercancel",cancel,true);view.addEventListener("blur",cancel);
-			this.rectangleSelectionEnd=cancel;
+			event.preventDefault();
+			event.stopImmediatePropagation();
+			this.rectangleSelect(root, view, event);
 		};
-		root.addEventListener("pointerdown",down,true);
-		this.disposers.push(()=>{this.rectangleSelectionEnd?.();root.ownerDocument.removeEventListener("pointerdown",frameDown,true);root.removeEventListener("pointerdown",down,true);});
+		root.addEventListener("pointerdown", down, true);
+		this.disposers.push(() => {
+			this.rectangleSelectionEnd?.();
+			root.ownerDocument.removeEventListener("pointerdown", frameDown, true);
+			root.removeEventListener("pointerdown", down, true);
+		});
 	}
+
+	/** Draw the marquee from a press, and select what it caught when let go; a click clears the selection. */
+	private rectangleSelect(root: HTMLElement, view: Window, event: PointerEvent): void {
+		const first = { x: event.clientX, y: event.clientY };
+		const bounds = boundingRect(root);
+		const marquee = root.ownerDocument.createElement("div");
+		marquee.className = "miro-canvas-rectangle-marquee";
+		marquee.hidden = true;
+		root.appendChild(marquee);
+		root.setAttribute("data-miro-rectangle-selecting", "true");
+		let dragged = false;
+		const move = (moved: PointerEvent): void => {
+			if (moved.pointerId !== event.pointerId) return;
+			dragged ||= Math.hypot(moved.clientX - first.x, moved.clientY - first.y) > 3;
+			if (!dragged || bounds === undefined) return;
+			// Only the box moves with the pointer: nothing is measured or selected yet.
+			marquee.hidden = false;
+			marquee.style.left = `${Math.min(first.x, moved.clientX) - bounds.left}px`;
+			marquee.style.top = `${Math.min(first.y, moved.clientY) - bounds.top}px`;
+			marquee.style.width = `${Math.abs(moved.clientX - first.x)}px`;
+			marquee.style.height = `${Math.abs(moved.clientY - first.y)}px`;
+		};
+		const cleanup = (): void => {
+			root.removeAttribute("data-miro-rectangle-selecting");
+			marquee.remove();
+			view.removeEventListener("pointermove", move, true);
+			view.removeEventListener("pointerup", up, true);
+			view.removeEventListener("pointercancel", cancel, true);
+			view.removeEventListener("blur", cancel);
+			this.rectangleSelectionEnd = undefined;
+		};
+		const up = (released: PointerEvent): void => {
+			if (released.pointerId !== event.pointerId) return;
+			const wasDragged = dragged || Math.hypot(released.clientX - first.x, released.clientY - first.y) > 3;
+			cleanup();
+			if (!wasDragged) {
+				if (!event.shiftKey) {
+					this.callNative("deselectAll");
+					this.connectorLayer?.select([]);
+					this.selectedCommentKeys.clear();
+					this.selectedRouteEnds.clear();
+					this.refresh();
+				}
+				return;
+			}
+			this.selectInRectangle(first, { x: released.clientX, y: released.clientY }, event.shiftKey);
+		};
+		const cancel = (): void => {
+			cleanup();
+			this.followViewport();
+		};
+		view.addEventListener("pointermove", move, true);
+		view.addEventListener("pointerup", up, true);
+		view.addEventListener("pointercancel", cancel, true);
+		view.addEventListener("blur", cancel);
+		this.rectangleSelectionEnd = cancel;
+	}
+
+	/**
+	 * Select what a rectangle between two window points caught, as it was
+	 * painted: a node by its middle, a group only whole, a connector by the
+	 * ends inside - one end alone moves without the other - and a comment pin
+	 * by its avatar.  Shift adds to the selection.
+	 */
+	private selectInRectangle(first: { x: number; y: number }, last: { x: number; y: number }, add: boolean): void {
+		const geometry = buildCanvasAnchorGeometry(this.boardDocument());
+		const nodes = readRuntime(this.currentRawDocument, "nodes");
+		const groups = new Set((Array.isArray(nodes) ? nodes as readonly unknown[] : [])
+			.filter((item) => readRuntime(item, "type") === "group").map((item) => readRuntime(item, "id")));
+		const onScreen = (id: string): { x: number; y: number }[] => {
+			const route = geometry.edges?.[id];
+			return (route?.points ?? (route?.start !== undefined && route.end !== undefined ? [route.start, route.end] : []))
+				.map((point) => this.viewportPoint(point))
+				.filter((point): point is { x: number; y: number } => point !== undefined);
+		};
+		const ends = add ? new Map(this.selectedRouteEnds) : new Map<string, SelectedRouteEnds>();
+		const catchEnds = (id: string): boolean => {
+			const mask = routeEndsInBox(onScreen(id), first, last);
+			if (mask === undefined) return false;
+			// Shift-add never turns an already whole-selected line into a partial one.
+			if (!(add && this.selectedIds.includes(id) && !ends.has(id))) {
+				const prior = ends.get(id);
+				ends.set(id, prior === undefined ? mask : {
+					from: prior.from || mask.from, to: prior.to || mask.to, wholeRoute: prior.wholeRoute || mask.wholeRoute,
+				});
+			}
+			return true;
+		};
+		const caught: unknown[] = [];
+		for (const node of this.adapter.getNodes() ?? []) {
+			const id = readCanvasElementId(node), rect = boundingRect(readCanvasElementDom(node));
+			if (id === undefined || rect === undefined) continue;
+			const inside = groups.has(id)
+				? rectIntersectsBox(rect, first, last, true)
+				: pointInSelectionBox({ x: (rect.left + rect.right) / 2, y: (rect.top + rect.bottom) / 2 }, first, last);
+			if (inside) caught.push(node);
+		}
+		for (const edge of this.adapter.getEdges() ?? []) {
+			const id = readCanvasElementId(edge);
+			if (id !== undefined && catchEnds(id)) caught.push(edge);
+		}
+		const connectorIds = boardConnectors(this.currentRawDocument).filter((connector) => catchEnds(connector.id)).map((connector) => connector.id);
+		this.selectedRouteEnds = ends;
+		if (!add) {
+			this.callNative("deselectAll");
+			this.selectedCommentKeys.clear();
+		}
+		for (const item of caught) this.callNative("select", [item]);
+		for (const [key, point] of Object.entries(geometry.comments ?? {})) {
+			const at = this.viewportPoint(point);
+			// The 32 px avatar sits above and to the right of its anchor.
+			if (at !== undefined && pointInSelectionBox({ x: at.x + 16, y: at.y - 16 }, first, last)) this.selectedCommentKeys.add(key);
+		}
+		this.connectorLayer?.select([...new Set([...(add ? this.connectorLayer.selection() : []), ...connectorIds])]);
+		this.refresh();
+	}
+
 	/**
 	 * Keep what the plugin draws over the board with native Canvas while it
 	 * moves: frame by frame during a press, a wheel or a transform native
@@ -3256,7 +3374,9 @@ export class M1CanvasSession {
 		if (!editable && this.armedTool !== "select" && this.armedTool !== "lasso") this.armedTool = "select";
 		if (!isDrawingTool(this.armedTool)) this.hideBrush();
 		this.quickTools?.update({
-			connectorColor:this.connectorColor??this.boardInk(), connectorWidth:this.connectorWidth, ...(this.connectorHeadSize === undefined ? {} : {connectorHeadSize: this.connectorHeadSize}),
+			connectorColor: this.connectorColor ?? this.boardInk(),
+			connectorWidth: this.connectorWidth,
+			...(this.connectorHeadSize === undefined ? {} : { connectorHeadSize: this.connectorHeadSize }),
 			showLassoTool: this.settings.showLassoTool, showConnectorTool: this.settings.showConnectorTool,
 			editable, armed: this.armedTool, shape: this.toolShape,
 			penColor: this.penInk(), penWidth: this.penWidth, eraserSize: this.eraserSize,
@@ -3916,22 +4036,23 @@ export class M1CanvasSession {
 				: pointInLasso(ring, { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 });
 			if (inside) caught.push(node);
 		}
-		// A long connector must not pull the shared frame far outside the ring.
+		// A connector is caught only whole: a long one must not pull the shared
+		// frame far outside the ring.
+		const ringed = (id: string): boolean => {
+			const route = geometry.edges?.[id];
+			const points = route?.points ?? (route?.start !== undefined && route.end !== undefined ? [route.start, route.end] : []);
+			return points.length >= 2 && points.every((point) => pointInLasso(ring, point));
+		};
 		for (const edge of this.adapter.getEdges() ?? []) {
 			const id = readCanvasElementId(edge);
-			const route = id === undefined ? undefined : geometry.edges?.[id];
-			const points=route?.points??(route?.start&&route.end?[route.start,route.end]:[]);
-			if (points.length>=2 && points.every(point=>pointInLasso(ring,point))) caught.push(edge);
+			if (id !== undefined && ringed(id)) caught.push(edge);
 		}
-		const connectors=boardConnectors(this.currentRawDocument).filter(c=>{
-			const route=geometry.edges?.[c.id],points=route?.points??(route?.start&&route.end?[route.start,route.end]:[]);
-			return points.length>=2&&points.every(point=>pointInLasso(ring,point));
-		});
-		this.selectedCommentKeys=new Set(Object.entries(geometry.comments??{})
-			.filter(([,point])=>pointInLasso(ring,point)).map(([key])=>key));
+		const connectors = boardConnectors(this.currentRawDocument).filter((connector) => ringed(connector.id));
+		this.selectedCommentKeys = new Set(Object.entries(geometry.comments ?? {})
+			.filter(([, point]) => pointInLasso(ring, point)).map(([key]) => key));
 		this.callNative("deselectAll");
 		for (const node of caught) this.callNative("select", [node]);
-		this.connectorLayer?.select(connectors.map(c=>c.id));
+		this.connectorLayer?.select(connectors.map((connector) => connector.id));
 		this.refresh();
 	}
 
@@ -4351,7 +4472,8 @@ export class M1CanvasSession {
 	private toolbarState(state: M1ControlsState, lockedSelection: boolean): SelectionToolbarState {
 		const id = this.selectedIds[0];
 		const presentation = resolveSelectionToolbarPresentation(this.currentRawDocument, id);
-		const independent=boardConnectors(this.currentRawDocument).find(c=>c.id===id);
+		const own = boardConnectors(this.currentRawDocument).find((connector) => connector.id === id);
+		const ownSelected = this.connectorLayer?.selection() ?? [];
 		const placement = this.selectionPlacement();
 		const kinds = this.selectionKinds();
 		const link = this.selectedLink();
@@ -4375,10 +4497,22 @@ export class M1CanvasSession {
 			...(kinds.length > 0 && kinds.every((kind) => kind === "frame") ? { fillPalette: FRAME_PALETTE } : {}),
 			recentColors: this.appearance.settings.recentColors,
 			...presentation.style,
-			...(independent?{connector:{route:independent.route,startCap:independent.startCap as never,endCap:connectorEndCap(independent) as never,width:independent.width,...(independent.headSize === undefined ? {} : {headSize: independent.headSize}),strokeStyle:independent.strokeStyle??"solid",waypoints:independent.waypoints??[]},colors:{...presentation.colors,edge:independent.color}}:{}),
-			independentSelection: !!this.connectorLayer?.selection().length,
-			independentOnly: this.selectedIds.length>0 && this.selectedIds.every(id=>this.connectorLayer?.selection().includes(id)),
-			canEditConnectorLabel: this.selectedIds.length===1 && kinds.includes("edge"),
+			// One of the board's own connectors shows its own record's style.
+			...(own === undefined ? {} : {
+				connector: {
+					route: own.route,
+					startCap: own.startCap as never,
+					endCap: connectorEndCap(own) as never,
+					width: own.width,
+					...(own.headSize === undefined ? {} : { headSize: own.headSize }),
+					strokeStyle: own.strokeStyle ?? "solid",
+					waypoints: own.waypoints ?? [],
+				},
+				colors: { ...presentation.colors, edge: own.color },
+			}),
+			independentSelection: ownSelected.length > 0,
+			independentOnly: this.selectedIds.length > 0 && this.selectedIds.every((selected) => ownSelected.includes(selected)),
+			canEditConnectorLabel: this.selectedIds.length === 1 && kinds.includes("edge"),
 			...(placement === undefined ? {} : { placement }),
 			...(link === undefined ? {} : { link }),
 		};
@@ -4712,11 +4846,14 @@ export class M1CanvasSession {
 					next = appearanceReducer(next, { ...action, nodeId });
 				}
 			}
-			const merged=mergeAppearanceMetadata(draft, next, previous);
-			if(slot==="edge"){
-				const connectors=boardConnectors(merged);
-				const color=readRuntime(action,"color");
-				merged.connectors=Object.fromEntries(connectors.map(c=>[c.id,this.selectedIds.includes(c.id)?{...c,color:typeof color==="string"&&/^#[0-9a-f]{6}$/i.test(color)?color:"#1a1a1a"}:c]));
+			const merged = mergeAppearanceMetadata(draft, next, previous);
+			if (slot === "edge") {
+				// The board's own connectors carry their colour in their record; a reset gives them the default ink.
+				const color = readRuntime(action, "color");
+				const ink = typeof color === "string" && /^#[0-9a-f]{6}$/iu.test(color) ? color : "#1a1a1a";
+				merged.connectors = Object.fromEntries(boardConnectors(merged).map((connector) => [
+					connector.id, this.selectedIds.includes(connector.id) ? { ...connector, color: ink } : connector,
+				]));
 			}
 			return merged;
 		});
@@ -4914,22 +5051,27 @@ export class M1CanvasSession {
 			return active !== null && (active === root || root.contains?.(active) === true || active === document.body && root.closest?.(".workspace-leaf.mod-active") !== null)
 				&& active.closest?.("input, textarea, [contenteditable=true], .cm-editor") == null;
 		};
-		const execute = (action:"copy"|"cut"|"paste"): boolean => {
-			const bridge=this.options.desktopClipboard;
-			if(!bridge) return document.execCommand?.(action) ?? false;
+		// A clipboard command through the desktop clipboard where there is one,
+		// which the page's own clipboard events cannot reach.
+		const execute = (action: "copy" | "cut" | "paste"): boolean => {
+			const bridge = this.options.desktopClipboard;
+			if (bridge === undefined) return document.execCommand?.(action) ?? false;
 			try {
-				const data=new DataTransfer();
-				if(action==="paste") data.setData("text/plain",bridge.readText());
-				const event=new ClipboardEvent(action==="cut"?"copy":action,{clipboardData:data,bubbles:true,cancelable:true});
+				const data = new DataTransfer();
+				if (action === "paste") data.setData("text/plain", bridge.readText());
+				const event = new ClipboardEvent(action === "cut" ? "copy" : action, { clipboardData: data, bubbles: true, cancelable: true });
 				root.dispatchEvent(event);
-				if(!event.defaultPrevented) return false;
-				if(action!=="paste") bridge.writeText(data.getData("text/plain"));
+				if (!event.defaultPrevented) return false;
+				if (action !== "paste") bridge.writeText(data.getData("text/plain"));
 				// Cut only after the OS clipboard has accepted the complete payload.
-				if(action==="cut") root.dispatchEvent(new ClipboardEvent("cut",{clipboardData:data,bubbles:true,cancelable:true}));
+				if (action === "cut") root.dispatchEvent(new ClipboardEvent("cut", { clipboardData: data, bubbles: true, cancelable: true }));
 				return true;
-			} catch {this.options.onNotice?.("System clipboard was unavailable; the selection was not cut.");return false;}
+			} catch {
+				this.options.onNotice?.("System clipboard was unavailable; the selection was not cut.");
+				return false;
+			}
 		};
-		this.clipboardCommand=execute;
+		this.clipboardCommand = execute;
 		const copy = (event: Event): void => {
 			if (!onBoard()) return;
 			const data = readRuntime(event, "clipboardData") as DataTransfer | undefined;
@@ -4942,29 +5084,40 @@ export class M1CanvasSession {
 			}
 			const ids = new Set(this.selectedIds);
 			const nodes = (readRuntime(this.currentRawDocument, "nodes") as Record<string, unknown>[] ?? []).filter(node => ids.has(node.id as string));
-			const edges = (readRuntime(this.currentRawDocument, "edges") as Record<string, unknown>[] ?? []).filter(edge => ids.has(edge.id as string) || (ids.has(edge.fromNode as string) && ids.has(edge.toNode as string)));
-			const all=boardConnectors(this.currentRawDocument), geometry=buildCanvasAnchorGeometry(this.currentRawDocument);
-			const included=new Set(all.filter(c=>ids.has(c.id)||[c.from,c.to].every(a=>(a.type==="node"||a.type==="image")&&ids.has(a.nodeId))).map(c=>c.id));
-			const connectors=all.filter(c=>included.has(c.id)).map(c=>{
-				const end=(a:CanvasAnchor,p:{x:number;y:number}|undefined):CanvasAnchor=>{
-					if((a.type==="node"||a.type==="image")&&ids.has(a.nodeId)||a.type==="edge"&&(included.has(a.edgeId)||edges.some(e=>e.id===a.edgeId)))return a;
-					return p?{type:"free",x:p.x,y:p.y}:a;
+			const edges = (readRuntime(this.currentRawDocument, "edges") as Record<string, unknown>[] ?? []).filter((edge) =>
+				ids.has(edge.id as string) || (ids.has(edge.fromNode as string) && ids.has(edge.toNode as string)));
+			// The board's own connectors selected, or held at both ends by cards copied.
+			const all = boardConnectors(this.currentRawDocument), geometry = this.landingGeometry().geometry;
+			const heldByCopied = (anchor: CanvasAnchor): boolean => (anchor.type === "node" || anchor.type === "image") && ids.has(anchor.nodeId);
+			const included = new Set(all.filter((connector) => ids.has(connector.id) || (heldByCopied(connector.from) && heldByCopied(connector.to)))
+				.map((connector) => connector.id));
+			// An end held by something not copied is let go where it is.
+			const connectors = all.filter((connector) => included.has(connector.id)).map((connector) => {
+				const end = (anchor: CanvasAnchor, point: { x: number; y: number } | undefined): CanvasAnchor => {
+					const kept = heldByCopied(anchor)
+						|| (anchor.type === "edge" && (included.has(anchor.edgeId) || edges.some((edge) => edge.id === anchor.edgeId)));
+					return kept || point === undefined ? anchor : { type: "free", x: point.x, y: point.y };
 				};
-				return {...c,from:end(c.from,geometry.edges?.[c.id]?.start),to:end(c.to,geometry.edges?.[c.id]?.end)};
+				const route = geometry.edges?.[connector.id];
+				return { ...connector, from: end(connector.from, route?.start), to: end(connector.to, route?.end) };
 			});
-			const points: {x:number;y:number}[] = [];
+			// The copy's centre, so a paste lands centred under the pointer.
+			const points: { x: number; y: number }[] = [];
 			for (const node of nodes) {
-				if ([node.x,node.y,node.width,node.height].every(v=>typeof v==="number"&&Number.isFinite(v))) {
-					points.push({x:node.x as number,y:node.y as number},{x:(node.x as number)+(node.width as number),y:(node.y as number)+(node.height as number)});
-				}
+				const { x, y, width, height } = node;
+				if (![x, y, width, height].every((value) => typeof value === "number" && Number.isFinite(value))) continue;
+				points.push({ x: x as number, y: y as number }, { x: (x as number) + (width as number), y: (y as number) + (height as number) });
 			}
-			for (const c of connectors) points.push(...(geometry.edges?.[c.id]?.points ?? []));
-			const bounds = points.reduce((box, p) => ({
-				left: Math.min(box.left, p.x), right: Math.max(box.right, p.x),
-				top: Math.min(box.top, p.y), bottom: Math.max(box.bottom, p.y),
-			}), {left: Infinity, right: -Infinity, top: Infinity, bottom: -Infinity});
-			const center = points.length ? {x:(bounds.left+bounds.right)/2,y:(bounds.top+bounds.bottom)/2} : undefined;
-			const graph = { nodes, edges, ...(connectors.length?{connectors}:{}), ...(center?{center}:{}) };
+			for (const connector of connectors) points.push(...(geometry.edges?.[connector.id]?.points ?? []));
+			let left = Infinity, top = Infinity, right = -Infinity, bottom = -Infinity;
+			for (const point of points) {
+				left = Math.min(left, point.x);
+				right = Math.max(right, point.x);
+				top = Math.min(top, point.y);
+				bottom = Math.max(bottom, point.y);
+			}
+			const center = points.length === 0 ? undefined : { x: (left + right) / 2, y: (top + bottom) / 2 };
+			const graph = { nodes, edges, ...(connectors.length > 0 ? { connectors } : {}), ...(center === undefined ? {} : { center }) };
 			try {
 				data.setData(CLIPBOARD_TYPE, JSON.stringify(record));
 				data.setData(CANVAS_CLIPBOARD_TYPE, JSON.stringify(graph));
@@ -5024,15 +5177,23 @@ export class M1CanvasSession {
 			if (execute(command)) { event.preventDefault(); event.stopImmediatePropagation(); }
 		};
 		const context = (event: MouseEvent): void => {
-			if (!this.inControls(event) && ((this.armedTool === "select" && !this.isSpacePanHeld() && (matchesPointer(this.settings.lassoBinding, event) || matchesPointer(this.settings.panBinding, event)))
-				|| this.panGestureEnd !== undefined || this.toolGesture !== undefined || Date.now() < this.suppressContextUntil
-				|| ((this.armedTool === "connector" || (this.armedTool === "shape" && lineKind(this.toolShape) !== undefined)) && matchesPointer(this.settings.lineBinding, event)))) {
-				event.preventDefault(); event.stopImmediatePropagation(); return;
+			// A right button bound to a lasso, a pan or a line opens no menu.
+			const drawingLine = this.armedTool === "connector" || (this.armedTool === "shape" && lineKind(this.toolShape) !== undefined);
+			const gestureButton = (this.armedTool === "select" && !this.isSpacePanHeld()
+				&& (matchesPointer(this.settings.lassoBinding, event) || matchesPointer(this.settings.panBinding, event)))
+				|| (drawingLine && matchesPointer(this.settings.lineBinding, event));
+			const gestureOn = this.panGestureEnd !== undefined || this.toolGesture !== undefined || Date.now() < this.suppressContextUntil;
+			if (!this.inControls(event) && (gestureButton || gestureOn)) {
+				event.preventDefault();
+				event.stopImmediatePropagation();
+				return;
 			}
-			if (this.options.onClipboardMenu === undefined || this.inControls(event) || this.closestTarget(event, "input, textarea, [contenteditable=true], .cm-editor")) return;
+			if (this.options.onClipboardMenu === undefined || this.inControls(event)
+				|| this.closestTarget(event, "input, textarea, [contenteditable=true], .cm-editor")) return;
 			this.readInteractionState();
 			if (this.selectedIds.length === 0) return;
-			event.preventDefault(); event.stopImmediatePropagation();
+			event.preventDefault();
+			event.stopImmediatePropagation();
 			this.options.onClipboardMenu(event, action => {
 				root.focus();
 				if (!execute(action)) this.options.onNotice?.("Clipboard action was unavailable. Focus the canvas and use Ctrl+C, Ctrl+X or Ctrl+V.");
@@ -5158,142 +5319,240 @@ export class M1CanvasSession {
 		this.refresh();
 		return true;
 	}
-	private selectionMovePreview?: Record<string,unknown>;
+	/** The board as a selection being dragged would leave it, and what the drag carries. */
+	private selectionMovePreview?: Record<string, unknown>;
 	private selectionMoveIds?: readonly string[];
-	private selectionMoveEnd?: ()=>void;
+	private selectionMoveEnd?: () => void;
 	private mixedSelectionFrame?: HTMLElement;
-	/** One draggable frame around every multi-item selection, however it was made. */
+
+	/**
+	 * One draggable frame around every multi-item selection, however it was
+	 * made - native items, the board's own connectors and comment pins
+	 * together - and around a connector end caught alone.
+	 */
 	private updateMixedSelectionFrame(): void {
 		const root = this.root;
-		if (!root) return;
+		if (root === undefined) return;
 		// The marquee is the only live frame while the button is held.
 		if (root.hasAttribute("data-miro-rectangle-selecting")) return;
 		const connectorIds = this.connectorLayer?.selection() ?? [];
-		const nativeIds = new Set((this.adapter.getSelection() ?? []).flatMap(item => allIds([item])));
-		const activeEnds=[...this.selectedRouteEnds.keys()].filter(id=>nativeIds.has(id)||connectorIds.includes(id));
-		const framed = new Set([...nativeIds,...connectorIds,...this.selectedCommentKeys]).size > 1
-			|| activeEnds.length>0;
-		if (framed) root.classList.add("miro-canvas-mixed-selection");
-		else root.classList.remove("miro-canvas-mixed-selection");
-		if (framed && (connectorIds.length > 0 || this.selectedCommentKeys.size > 0 || activeEnds.length > 0)) root.classList.add("miro-canvas-mixed-selection--independent");
-		else root.classList.remove("miro-canvas-mixed-selection--independent");
-		if (!framed) {this.mixedSelectionFrame?.remove();this.mixedSelectionFrame=undefined;return;}
-		const box = boundingRect(root);
-		if (!box) return;
-		let left=Infinity,top=Infinity,right=-Infinity,bottom=-Infinity;
-		const add = (x:number,y:number):void => {left=Math.min(left,x);right=Math.max(right,x);top=Math.min(top,y);bottom=Math.max(bottom,y);};
+		const nativeIds = new Set((this.adapter.getSelection() ?? []).flatMap((item) => allIds([item])));
+		const partial = [...this.selectedRouteEnds.keys()].filter((id) => nativeIds.has(id) || connectorIds.includes(id));
+		const framed = new Set([...nativeIds, ...connectorIds, ...this.selectedCommentKeys]).size > 1 || partial.length > 0;
+		const mark = (name: string, on: boolean): void => {
+			if (on) root.classList.add(name);
+			else root.classList.remove(name);
+		};
+		mark("miro-canvas-mixed-selection", framed);
+		// Native Canvas's own frame cannot enclose what it does not know of; the plugin's shows then.
+		mark("miro-canvas-mixed-selection--independent",
+			framed && (connectorIds.length > 0 || this.selectedCommentKeys.size > 0 || partial.length > 0));
+		const box = framed ? boundingRect(root) : undefined;
+		if (!framed || box === undefined) {
+			if (!framed) this.removeMixedSelectionFrame();
+			return;
+		}
+		let left = Infinity, top = Infinity, right = -Infinity, bottom = -Infinity;
+		const add = (x: number, y: number): void => {
+			left = Math.min(left, x);
+			right = Math.max(right, x);
+			top = Math.min(top, y);
+			bottom = Math.max(bottom, y);
+		};
 		for (const element of this.adapter.getNodes() ?? []) {
 			if (!nativeIds.has(readCanvasElementId(element) ?? "")) continue;
 			const rect = boundingRect(readCanvasElementDom(element));
-			if(rect){add(rect.left-box.left,rect.top-box.top);add(rect.right-box.left,rect.bottom-box.top);}
+			if (rect === undefined) continue;
+			add(rect.left - box.left, rect.top - box.top);
+			add(rect.right - box.left, rect.bottom - box.top);
 		}
-		const geometry=this.landingGeometry().geometry;
-		for(const id of [...nativeIds,...connectorIds]){
-			const route=geometry.edges?.[id];
-			const mask=this.selectedRouteEnds.get(id);
-			const points=mask&&route?[...(mask.from&&route.start?[route.start]:[]),...(mask.to&&route.end?[route.end]:[]),...(mask.wholeRoute?route.points??[]:[])]
-				:route?.points??(route?.start&&route.end?[route.start,route.end]:[]);
-			for(const p of points){
-				const at=this.viewportPoint(p);if(at)add(at.x-box.left,at.y-box.top);
+		const geometry = this.landingGeometry().geometry;
+		for (const id of [...nativeIds, ...connectorIds]) {
+			const route = geometry.edges?.[id];
+			if (route === undefined) continue;
+			// A connector caught by one end is framed by that end only.
+			const mask = this.selectedRouteEnds.get(id);
+			const points = mask === undefined
+				? route.points ?? (route.start !== undefined && route.end !== undefined ? [route.start, route.end] : [])
+				: [
+					...(mask.from && route.start !== undefined ? [route.start] : []),
+					...(mask.to && route.end !== undefined ? [route.end] : []),
+					...(mask.wholeRoute ? route.points ?? [] : []),
+				];
+			for (const point of points) {
+				const at = this.viewportPoint(point);
+				if (at !== undefined) add(at.x - box.left, at.y - box.top);
 			}
 		}
-		for(const key of this.selectedCommentKeys){
-			const point=geometry.comments?.[key],at=point&&this.viewportPoint(point);
-			if(at){add(at.x-box.left,at.y-box.top-32);add(at.x-box.left+32,at.y-box.top);}
+		for (const key of this.selectedCommentKeys) {
+			const point = geometry.comments?.[key];
+			const at = point === undefined ? undefined : this.viewportPoint(point);
+			if (at === undefined) continue;
+			// The 32 px avatar sits above and to the right of its anchor.
+			add(at.x - box.left, at.y - box.top - 32);
+			add(at.x - box.left + 32, at.y - box.top);
 		}
-		if(!Number.isFinite(left)||!Number.isFinite(right)||!Number.isFinite(bottom)){
+		if (!Number.isFinite(left) || !Number.isFinite(right) || !Number.isFinite(bottom)) {
 			root.classList.remove("miro-canvas-mixed-selection");
-			this.mixedSelectionFrame?.remove();this.mixedSelectionFrame=undefined;return;
+			this.removeMixedSelectionFrame();
+			return;
 		}
-		if(!this.mixedSelectionFrame){
-			const frame=root.ownerDocument.createElement("div");frame.className="miro-canvas-mixed-selection-frame";
-			frame.setAttribute("aria-label","Move selected elements");
-			for(const side of ["top","right","bottom","left"]){
-				const grab=root.ownerDocument.createElement("div");grab.className=`miro-canvas-mixed-selection-frame__${side}`;
-				frame.appendChild(grab);
+		if (this.mixedSelectionFrame === undefined) {
+			const frame = root.ownerDocument.createElement("div");
+			frame.className = "miro-canvas-mixed-selection-frame";
+			frame.setAttribute("aria-label", "Move selected elements");
+			for (const side of ["top", "right", "bottom", "left"]) {
+				frame.appendChild(root.ownerDocument.createElement("div")).className = `miro-canvas-mixed-selection-frame__${side}`;
 			}
-			root.appendChild(frame);this.mixedSelectionFrame=frame;
+			root.appendChild(frame);
+			this.mixedSelectionFrame = frame;
 		}
-		const pad=8,frame=this.mixedSelectionFrame;
-		frame.style.left=`${left-pad}px`;frame.style.top=`${top-pad}px`;
-		frame.style.width=`${right-left+pad*2}px`;frame.style.height=`${bottom-top+pad*2}px`;
+		const pad = 8, frame = this.mixedSelectionFrame;
+		frame.style.left = `${left - pad}px`;
+		frame.style.top = `${top - pad}px`;
+		frame.style.width = `${right - left + pad * 2}px`;
+		frame.style.height = `${bottom - top + pad * 2}px`;
 	}
+
+	private removeMixedSelectionFrame(): void {
+		this.mixedSelectionFrame?.remove();
+		this.mixedSelectionFrame = undefined;
+	}
+
+	/**
+	 * Drag the whole selection - cards, native edges, the board's own
+	 * connectors and comment pins, or a connector end caught alone - as one
+	 * preview, and write it as one step when let go.  False when this press
+	 * is not one that moves the selection.
+	 */
 	private startSelectionMove(event: PointerEvent): boolean {
 		this.readInteractionState();
-		const commentIds=[...this.selectedCommentKeys].map(key=>{
-			const separator=key.indexOf(":");return separator<0?undefined:commentSelectionId(key.slice(0,separator) as CommentOrigin,key.slice(separator+1));
-		}).filter((id):id is string=>id!==undefined);
-		const ids=[...this.selectedIds,...commentIds];
-		if(event.button!==0 || event.shiftKey || !ids.length || ids.length<2&&!this.selectedRouteEnds.has(ids[0]!)
-			|| this.closestTarget(event,"input,textarea,[contenteditable=true],.cm-editor"))return false;
-		const target=this.eventElementId(event.target);
-		if(target && !this.selectedIds.includes(target))return false;
-		const connectorIds=[...(this.connectorLayer?.selection()??[])], original=this.adapter.getDocument();
-		const routeEnds=Object.fromEntries([...this.selectedRouteEnds].filter(([id])=>ids.includes(id)));
-		const first=this.boardPoint({x:event.clientX,y:event.clientY}), view=this.root?.ownerDocument.defaultView;
-		if(!first || !view || !isRecord(original))return false;
-		event.preventDefault();event.stopImmediatePropagation();
-		if([...this.selectedCommentKeys].some(key=>{const separator=key.indexOf(":");return this.commentLocked(key.slice(separator+1),key.slice(0,separator) as CommentOrigin);})){this.options.onNotice?.("A locked comment cannot be moved.");return true;}
-		if(!this.editAllowed("move",ids))return true;
+		const commentIds = [...this.selectedCommentKeys].flatMap((key) => {
+			const separator = key.indexOf(":");
+			return separator < 0 ? [] : [commentSelectionId(key.slice(0, separator) as CommentOrigin, key.slice(separator + 1))];
+		});
+		const ids = [...this.selectedIds, ...commentIds];
+		if (event.button !== 0 || event.shiftKey || ids.length === 0 || (ids.length < 2 && !this.selectedRouteEnds.has(ids[0]!))
+			|| this.closestTarget(event, "input,textarea,[contenteditable=true],.cm-editor")) return false;
+		const target = this.eventElementId(event.target);
+		if (target !== undefined && !this.selectedIds.includes(target)) return false;
+		const connectorIds = [...(this.connectorLayer?.selection() ?? [])];
+		const original = this.adapter.getDocument();
+		const routeEnds = Object.fromEntries([...this.selectedRouteEnds].filter(([id]) => ids.includes(id)));
+		const first = this.boardPoint({ x: event.clientX, y: event.clientY });
+		const view = this.root?.ownerDocument.defaultView;
+		if (first === undefined || view === undefined || view === null || !isRecord(original)) return false;
+		event.preventDefault();
+		event.stopImmediatePropagation();
+		const lockedComment = [...this.selectedCommentKeys].some((key) => {
+			const separator = key.indexOf(":");
+			return this.commentLocked(key.slice(separator + 1), key.slice(0, separator) as CommentOrigin);
+		});
+		if (lockedComment) {
+			this.options.onNotice?.("A locked comment cannot be moved.");
+			return true;
+		}
+		if (!this.editAllowed("move", ids)) return true;
 		this.selectionMoveEnd?.();
-		this.selectionMoveIds=ids;
-		const dom=(this.adapter.getNodes()??[]).filter(n=>ids.includes(readCanvasElementId(n)??"")).map(n=>readCanvasElementDom(n)).filter(isElement);
-		const styles=dom.map(el=>({el,value:el.style.getPropertyValue("translate"),priority:el.style.getPropertyPriority("translate")}));
-		let dx=0,dy=0,changed=false;
-		const move=(e:PointerEvent)=>{
-			if(e.pointerId!==event.pointerId)return;
-			const at=this.boardPoint({x:e.clientX,y:e.clientY});if(!at)return;
-			dx=at.x-first.x;dy=at.y-first.y;changed ||= Math.hypot(e.clientX-event.clientX,e.clientY-event.clientY)>3;
-			if(!changed)return;
-			this.selectionMovePreview=translateBoardSelection(original,ids,dx,dy,routeEnds);
-			this.currentRawDocument=this.selectionMovePreview;this.landingCache=undefined;
-			for(const {el} of styles)el.style.setProperty("translate",`${dx}px ${dy}px`);
-			this.liveGeometryDirty=true;this.sourceRenderer?.refresh();this.connectorLayer?.render();this.followViewport();
+		this.selectionMoveIds = ids;
+		// Cards show where they are going by a translate native Canvas does not use.
+		const cards = (this.adapter.getNodes() ?? [])
+			.filter((node) => ids.includes(readCanvasElementId(node) ?? ""))
+			.map((node) => readCanvasElementDom(node))
+			.filter(isElement)
+			.map((element) => ({
+				element, value: element.style.getPropertyValue("translate"), priority: element.style.getPropertyPriority("translate"),
+			}));
+		let dx = 0, dy = 0, changed = false;
+		const move = (moved: PointerEvent): void => {
+			if (moved.pointerId !== event.pointerId) return;
+			const at = this.boardPoint({ x: moved.clientX, y: moved.clientY });
+			if (at === undefined) return;
+			dx = at.x - first.x;
+			dy = at.y - first.y;
+			changed ||= Math.hypot(moved.clientX - event.clientX, moved.clientY - event.clientY) > 3;
+			if (!changed) return;
+			this.selectionMovePreview = translateBoardSelection(original, ids, dx, dy, routeEnds);
+			this.currentRawDocument = this.selectionMovePreview;
+			this.landingCache = undefined;
+			for (const { element } of cards) element.style.setProperty("translate", `${dx}px ${dy}px`);
+			this.liveGeometryDirty = true;
+			this.sourceRenderer?.refresh();
+			this.connectorLayer?.render();
+			this.followViewport();
 		};
-		const cleanup=()=>{
-			view.removeEventListener("pointermove",move,true);view.removeEventListener("pointerup",up,true);view.removeEventListener("pointercancel",cancel,true);view.removeEventListener("blur",cancel);
-			for(const {el,value,priority} of styles){if(value)el.style.setProperty("translate",value,priority);else el.style.removeProperty("translate");}
-			this.selectionMovePreview=undefined;this.selectionMoveIds=undefined;this.selectionMoveEnd=undefined;this.landingCache=undefined;
-		};
-		const cancel=()=>{cleanup();this.refresh();};
-		const restoreSelection=()=>{
-			if(this.disposed)return;
-			const nativeIds=ids.filter(id=>!connectorIds.includes(id)&&!selectedComment(id));
-			const selected=(this.adapter.getSelection()??[]).flatMap(item=>allIds([item]));
-			if(selected.length!==nativeIds.length || nativeIds.some(id=>!selected.includes(id))){
-				this.callNative("deselectAll");
-				for(const item of [...(this.adapter.getNodes()??[]),...(this.adapter.getEdges()??[])])
-					if(nativeIds.includes(readCanvasElementId(item)??""))this.callNative("select",[item]);
+		const cleanup = (): void => {
+			view.removeEventListener("pointermove", move, true);
+			view.removeEventListener("pointerup", up, true);
+			view.removeEventListener("pointercancel", cancel, true);
+			view.removeEventListener("blur", cancel);
+			for (const { element, value, priority } of cards) {
+				if (value !== "") element.style.setProperty("translate", value, priority);
+				else element.style.removeProperty("translate");
 			}
-			const retained=this.connectorLayer?.selection()??[];
-			if(retained.length!==connectorIds.length || connectorIds.some(id=>!retained.includes(id)))this.connectorLayer?.select(connectorIds);
+			this.selectionMovePreview = undefined;
+			this.selectionMoveIds = undefined;
+			this.selectionMoveEnd = undefined;
+			this.landingCache = undefined;
+		};
+		const cancel = (): void => {
+			cleanup();
 			this.refresh();
 		};
-		const up=(e:PointerEvent)=>{
-			if(e.pointerId!==event.pointerId)return;move(e);cleanup();
-			if(changed){
-				this.authoring??=createCanvasAuthoring(this.view);
-				const result=this.authoring.moveSelection(ids,dx,dy,original,routeEnds);
-				if(!result.ok)this.options.onNotice?.("Selection move was refused because the board changed or an item is locked.");
+		// Native Canvas may change its own selection while the move is written; it is put back.
+		const restoreSelection = (): void => {
+			if (this.disposed) return;
+			const nativeIds = ids.filter((id) => !connectorIds.includes(id) && selectedComment(id) === undefined);
+			const selected = (this.adapter.getSelection() ?? []).flatMap((item) => allIds([item]));
+			if (selected.length !== nativeIds.length || nativeIds.some((id) => !selected.includes(id))) {
+				this.callNative("deselectAll");
+				for (const item of [...(this.adapter.getNodes() ?? []), ...(this.adapter.getEdges() ?? [])]) {
+					if (nativeIds.includes(readCanvasElementId(item) ?? "")) this.callNative("select", [item]);
+				}
+			}
+			const retained = this.connectorLayer?.selection() ?? [];
+			if (retained.length !== connectorIds.length || connectorIds.some((id) => !retained.includes(id))) {
+				this.connectorLayer?.select(connectorIds);
+			}
+			this.refresh();
+		};
+		const up = (released: PointerEvent): void => {
+			if (released.pointerId !== event.pointerId) return;
+			move(released);
+			cleanup();
+			if (changed) {
+				this.authoring ??= createCanvasAuthoring(this.view);
+				const result = this.authoring.moveSelection(ids, dx, dy, original, routeEnds);
+				if (!result.ok) this.options.onNotice?.("Selection move was refused because the board changed or an item is locked.");
 				else {
 					restoreSelection();
 					// Native Canvas may finish its own pointer-up after this capture
-					// listener; restore once more after that event dispatch.
+					// listener; the selection is put back once more after it.
 					queueMicrotask(restoreSelection);
 				}
 			}
 			this.refresh();
 		};
-		view.addEventListener("pointermove",move,true);view.addEventListener("pointerup",up,true);view.addEventListener("pointercancel",cancel,true);view.addEventListener("blur",cancel);
-		this.selectionMoveEnd=cancel;return true;
+		view.addEventListener("pointermove", move, true);
+		view.addEventListener("pointerup", up, true);
+		view.addEventListener("pointercancel", cancel, true);
+		view.addEventListener("blur", cancel);
+		this.selectionMoveEnd = cancel;
+		return true;
 	}
+
+	/** Delete everything selected - native items and the board's own connectors - as one step. */
 	private deleteBoardSelection(): void {
 		this.readInteractionState();
-		if(!this.selectedIds.length || !this.editAllowed("delete",this.selectedIds))return;
+		if (this.selectedIds.length === 0 || !this.editAllowed("delete", this.selectedIds)) return;
 		this.authoring ??= createCanvasAuthoring(this.view);
-		const result=this.authoring.deleteItems({ids:this.selectedIds});
-		if(result.ok){this.connectorLayer?.reset();this.callNative("deselectAll");}
-		else this.options.onNotice?.(firstProblem(result.diagnostics)??"Delete was refused.");
+		const result = this.authoring.deleteItems({ ids: this.selectedIds });
+		if (result.ok) {
+			this.connectorLayer?.reset();
+			this.callNative("deselectAll");
+		} else {
+			this.options.onNotice?.(firstProblem(result.diagnostics) ?? "Delete was refused.");
+		}
 		this.refresh();
 	}
 
@@ -6230,7 +6489,11 @@ export class M1CanvasSession {
 			this.guardNativeMethod(canvas, key, (original, receiver, args) => {
 				this.readInteractionState();
 				const ids = key.endsWith("Selection") ? this.selectedIds : allIds([args[0]]);
-				if(key.endsWith("Selection") && ids.length){this.deleteBoardSelection();return undefined;}
+				// A selection deleted natively takes the board's own connectors with it, as one step.
+				if (key.endsWith("Selection") && ids.length > 0) {
+					this.deleteBoardSelection();
+					return undefined;
+				}
 				return this.nativeEditAllowed("delete", ids) ? Reflect.apply(original, receiver, args) : undefined;
 			});
 		}
@@ -6512,7 +6775,7 @@ export class M1CanvasSession {
 		this.toolbar.dispose();
 		this.handles.dispose();
 		this.commentMarkers?.destroy();
-		this.mixedSelectionFrame?.remove();this.mixedSelectionFrame=undefined;
+		this.removeMixedSelectionFrame();
 		this.root?.classList.remove("miro-canvas-mixed-selection");
 		this.commentCard?.destroy();
 		this.authoring?.dispose();

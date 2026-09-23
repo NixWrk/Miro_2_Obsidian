@@ -199,8 +199,8 @@ export class CommentMarkers {
           // A second press or disposal cannot leave listeners from the first
           // gesture behind on the window.
           cancelDrag?.();
-          const picked=this.markerOf(button);
-          if(picked===undefined)return;
+          const picked = this.markerOf(button);
+          if (picked === undefined) return;
           pointer.preventDefault();
           pointer.stopPropagation();
           // Own the first press before focus changes or periodic rendering can
@@ -219,7 +219,7 @@ export class CommentMarkers {
           let moving = false;
           const move = (moved: Event) => {
             const at = moved as PointerEvent;
-            if(at.pointerId!==pointer.pointerId)return;
+            if (at.pointerId !== pointer.pointerId) return;
             const dx = at.clientX - start.x, dy = at.clientY - start.y;
             if (!moving && Math.hypot(dx, dy) < DRAG_THRESHOLD) return;
             moving = true;
@@ -235,7 +235,11 @@ export class CommentMarkers {
             view.removeEventListener("pointercancel", cancel, true);
             view.removeEventListener("blur", cancel, true);
             cancelDrag = undefined;
-            try { if(button.hasPointerCapture?.(pointer.pointerId))button.releasePointerCapture(pointer.pointerId); } catch { /* The host may already have released it. */ }
+            try {
+              if (button.hasPointerCapture?.(pointer.pointerId)) button.releasePointerCapture(pointer.pointerId);
+            } catch {
+              // The host may already have released it.
+            }
           };
           const reset = () => {
             stopListening();
@@ -250,7 +254,7 @@ export class CommentMarkers {
           };
           const cancel = () => reset();
           const up = (released: Event) => {
-            if((released as PointerEvent).pointerId!==pointer.pointerId)return;
+            if ((released as PointerEvent).pointerId !== pointer.pointerId) return;
             stopListening();
             this.dragging.delete(button);
             button.setAttribute("data-comment-dragging", "false");

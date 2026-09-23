@@ -2119,10 +2119,10 @@ export class CanvasAuthoring {
 			return reject();
 		}
 		const taken = collectDocumentIds(before);
-		for(const connector of boardConnectors(before.document))taken.add(connector.id);
+		for (const connector of boardConnectors(before.document)) taken.add(connector.id);
 		const added = new Set<string>();
-		const connectors=input.connectors??[];
-		if(!connectors.every(c=>readBoardConnector(c)))return reject();
+		const connectors = input.connectors ?? [];
+		if (!connectors.every((connector) => readBoardConnector(connector) !== undefined)) return reject();
 		for (const item of [...nodes, ...edges, ...connectors]) {
 			const id = isPlainObject(item) ? readRequiredString(item, "id") : undefined;
 			if (id === undefined || taken.has(id) || added.has(id)) {
@@ -2309,18 +2309,21 @@ export class CanvasAuthoring {
 	}
 
 	/**
-	 * Take nodes off the board, with the connectors that ended on them and the
-	 * plugin metadata that described them, in one native history step.
+	 * Move a selection - cards, native edges, the board's own connectors and
+	 * comment pins, or a connector caught by one end - in one native history
+	 * step, as the dragged preview showed it.
 	 */
 	public moveSelection(ids: readonly string[], dx: number, dy: number, expected?: CanvasAuthoringExpected,
-		routeEnds:Readonly<Record<string,SelectedRouteEnds>>={}): CanvasGraphResult {
-		const diagnostics: CanvasAuthoringDiagnostic[]=[];
-		const reject=():CanvasGraphResult=>({ok:false,status:"rejected",diagnostics});
-		if(this.disposed||!this.host||!ids.length||![dx,dy].every(Number.isFinite)
-			||Object.entries(routeEnds).some(([id,mask])=>!ids.includes(id)||typeof mask?.from!=="boolean"
-				||typeof mask?.to!=="boolean"||typeof mask?.wholeRoute!=="boolean"||!mask.from&&!mask.to))return reject();
-		const before=readSnapshotFromHost(this.host,diagnostics);
-		if(!before)return reject();
+		routeEnds: Readonly<Record<string, SelectedRouteEnds>> = {}): CanvasGraphResult {
+		const diagnostics: CanvasAuthoringDiagnostic[] = [];
+		const reject = (): CanvasGraphResult => ({ ok: false, status: "rejected", diagnostics });
+		const validMask = ([id, mask]: [string, SelectedRouteEnds]): boolean => ids.includes(id)
+			&& typeof mask?.from === "boolean" && typeof mask?.to === "boolean" && typeof mask?.wholeRoute === "boolean"
+			&& (mask.from || mask.to);
+		if (this.disposed || this.host === undefined || ids.length === 0 || ![dx, dy].every(Number.isFinite)
+			|| !Object.entries(routeEnds).every(validMask)) return reject();
+		const before = readSnapshotFromHost(this.host, diagnostics);
+		if (before === undefined) return reject();
 		if (expected !== undefined) {
 			const snapshot = makeSnapshot(extractExpectedDocument(expected), diagnostics);
 			if (!snapshot || !structurallyEqual(snapshot.document, before.document)) {
@@ -2328,44 +2331,63 @@ export class CanvasAuthoring {
 				return reject();
 			}
 		}
-		const known=collectDocumentIds(before);for(const c of boardConnectors(before.document))known.add(c.id);
-		const comments=new Map(listCommentThreads(before.document).map(thread=>[`${thread.origin}:${thread.id}`,thread]));
-		const decorationRead=isObject(before.document.miroCanvas) ? safeRead(before.document.miroCanvas,"commentDecorations") : undefined;
-		const decorations=decorationRead?.ok ? decorationRead.value : undefined;
-		for(const id of ids){
-			const comment=selectedComment(id);
-			if(comment){
-				const thread=comments.get(comment.key);
-				const decoratedRead=isObject(decorations) ? safeRead(decorations,comment.key) : undefined;
-				const decorated=decoratedRead?.ok ? decoratedRead.value : undefined;
-				const lockedRead=isObject(decorated) ? safeRead(decorated,"locked") : undefined;
-				if(!thread || thread.locked===true || lockedRead?.ok && lockedRead.value===true
-					|| !policyAllowsGraphEdit(before.document,"edit",id,"element-style",diagnostics))return reject();
-			}else if(!known.has(id)||!policyAllowsGraphEdit(before.document,"edit",id,"element-style",diagnostics))return reject();
+		const known = collectDocumentIds(before);
+		for (const connector of boardConnectors(before.document)) known.add(connector.id);
+		const comments = new Map(listCommentThreads(before.document).map((thread) => [`${thread.origin}:${thread.id}`, thread]));
+		const decorationRead = isObject(before.document.miroCanvas) ? safeRead(before.document.miroCanvas, "commentDecorations") : undefined;
+		const decorations = decorationRead?.ok ? decorationRead.value : undefined;
+		// A locked comment, or an element locked or unknown, refuses the whole move.
+		const lockedComment = (key: string): boolean => {
+			const decoratedRead = isObject(decorations) ? safeRead(decorations, key) : undefined;
+			const decorated = decoratedRead?.ok ? decoratedRead.value : undefined;
+			const lockedRead = isObject(decorated) ? safeRead(decorated, "locked") : undefined;
+			return lockedRead?.ok === true && lockedRead.value === true;
+		};
+		for (const id of ids) {
+			const comment = selectedComment(id);
+			if (comment !== undefined) {
+				const thread = comments.get(comment.key);
+				if (thread === undefined || thread.locked === true || lockedComment(comment.key)) return reject();
+			} else if (!known.has(id)) {
+				return reject();
+			}
+			if (!policyAllowsGraphEdit(before.document, "edit", id, "element-style", diagnostics)) return reject();
 		}
-		const document=translateBoardSelection(before.document,ids,dx,dy,routeEnds);
-		const verified=this.commitDocument(before,document,diagnostics);
-		return verified?{ok:true,status:"applied",document:verified.document,diagnostics}:reject();
+		const document = translateBoardSelection(before.document, ids, dx, dy, routeEnds);
+		const verified = this.commitDocument(before, document, diagnostics);
+		return verified === undefined ? reject() : { ok: true, status: "applied", document: verified.document, diagnostics };
 	}
+
 	/** Change only a native edge's editable label, with normal Canvas history. */
 	public updateEdgeLabel(id: string, label: string, expected?: CanvasAuthoringExpected): CanvasGraphResult {
-		const diagnostics: CanvasAuthoringDiagnostic[]=[];
-		const reject=():CanvasGraphResult=>({ok:false,status:"rejected",diagnostics});
-		if(this.disposed||!this.host||typeof label!=="string"||label.length>1024)return reject();
-		const before=readSnapshotFromHost(this.host,diagnostics);if(!before)return reject();
-		if(expected!==undefined){
-			const snapshot=makeSnapshot(extractExpectedDocument(expected),diagnostics);
-			if(!snapshot||!structurallyEqual(snapshot.document,before.document))return reject();
+		const diagnostics: CanvasAuthoringDiagnostic[] = [];
+		const reject = (): CanvasGraphResult => ({ ok: false, status: "rejected", diagnostics });
+		if (this.disposed || this.host === undefined || typeof label !== "string" || label.length > 1024) return reject();
+		const before = readSnapshotFromHost(this.host, diagnostics);
+		if (before === undefined) return reject();
+		if (expected !== undefined) {
+			const snapshot = makeSnapshot(extractExpectedDocument(expected), diagnostics);
+			if (snapshot === undefined || !structurallyEqual(snapshot.document, before.document)) return reject();
 		}
-		if(!before.edges.some(edge=>edge.id===id)||!policyAllowsGraphEdit(before.document,"edit",id,"element-style",diagnostics))return reject();
-		const document=cloneRecord(before.document);
-		const edges=safeRead(document,"edges");if(!edges.ok||!Array.isArray(edges.value))return reject();
-		const edge=edges.value.find(item=>{const key=safeRead(item,"id");return isPlainObject(item)&&key.ok&&key.value===id;});
-		if(!isPlainObject(edge))return reject();
-		setOwn(edge,"label",label);
-		const verified=this.commitDocument(before,document,diagnostics);
-		return verified?{ok:true,status:"applied",document:verified.document,diagnostics}:reject();
+		if (!before.edges.some((edge) => edge.id === id)
+			|| !policyAllowsGraphEdit(before.document, "edit", id, "element-style", diagnostics)) return reject();
+		const document = cloneRecord(before.document);
+		const edges = safeRead(document, "edges");
+		if (!edges.ok || !Array.isArray(edges.value)) return reject();
+		const edge = edges.value.find((item) => {
+			const key = safeRead(item, "id");
+			return isPlainObject(item) && key.ok && key.value === id;
+		});
+		if (!isPlainObject(edge)) return reject();
+		setOwn(edge, "label", label);
+		const verified = this.commitDocument(before, document, diagnostics);
+		return verified === undefined ? reject() : { ok: true, status: "applied", document: verified.document, diagnostics };
 	}
+
+	/**
+	 * Take nodes off the board, with the connectors that ended on them and the
+	 * plugin metadata that described them, in one native history step.
+	 */
 	public deleteItems(input: DeleteItemsInput, expected?: CanvasAuthoringExpected): CanvasGraphResult {
 		const ids = Array.isArray(input?.ids) ? input.ids.filter((id): id is string => typeof id === "string" && id.length > 0) : [];
 		if (ids.length === 0) {
@@ -2484,38 +2506,53 @@ export class CanvasAuthoring {
 			}));
 		}
 		const metadataValue = safeRead(document, "miroCanvas");
-		const deletedConnectors=new Set(boardConnectors(before.document).filter(c=>removals.has(c.id)).map(c=>c.id));
-		const independent=boardConnectors(before.document);
-		let expanded=true;
-		while(expanded){expanded=false;
-			const priorMetadata=before.document.miroCanvas;
-			const priorOverrides=isPlainObject(priorMetadata)&&isPlainObject(priorMetadata.localOverrides)?priorMetadata.localOverrides:{};
-			for(const edge of before.edges){
-				if(typeof edge.id!=="string")continue;
-				if(removedEdges.includes(edge.id))continue;
-				const override=priorOverrides[edge.id];
-				const anchors=isPlainObject(override)&&isPlainObject(override.connectorAnchors)?override.connectorAnchors:{};
-				if(Object.values(anchors).some(a=>isPlainObject(a)&&((a.type==="edge"&&(removedEdges.includes(a.edgeId as string)||deletedConnectors.has(a.edgeId as string)))||((a.type==="node"||a.type==="image")&&removals.has(a.nodeId as string))))){removedEdges.push(edge.id);expanded=true;}
+		// Whatever held on to something taken away goes with it, to the end of
+		// the chain: native edges by their anchors, the board's own connectors
+		// by theirs.
+		const own = boardConnectors(before.document);
+		const deletedConnectors = new Set(own.filter((connector) => removals.has(connector.id)).map((connector) => connector.id));
+		const priorMetadata = before.document.miroCanvas;
+		const priorOverrides = isPlainObject(priorMetadata) && isPlainObject(priorMetadata.localOverrides) ? priorMetadata.localOverrides : {};
+		const lineGone = (id: unknown): boolean => typeof id === "string" && (removedEdges.includes(id) || deletedConnectors.has(id));
+		const holdsGone = (anchor: unknown): boolean => isPlainObject(anchor)
+			&& ((anchor.type === "edge" && lineGone(anchor.edgeId))
+				|| ((anchor.type === "node" || anchor.type === "image") && removals.has(anchor.nodeId as string)));
+		let expanded = true;
+		while (expanded) {
+			expanded = false;
+			for (const edge of before.edges) {
+				if (typeof edge.id !== "string" || removedEdges.includes(edge.id)) continue;
+				const override = priorOverrides[edge.id];
+				const anchors = isPlainObject(override) && isPlainObject(override.connectorAnchors) ? override.connectorAnchors : {};
+				if (!Object.values(anchors).some(holdsGone)) continue;
+				removedEdges.push(edge.id);
+				expanded = true;
 			}
-			for(const c of independent){
-			if(deletedConnectors.has(c.id))continue;
-			if([c.from,c.to].some(a=>(a.type==="node"||a.type==="image")?removals.has(a.nodeId):a.type==="edge"&&(removedEdges.includes(a.edgeId)||deletedConnectors.has(a.edgeId)))){
-				if(!policyAllowsGraphEdit(before.document,"edit",c.id,"element-style",diagnostics))return reject();
-				deletedConnectors.add(c.id);expanded=true;
+			for (const connector of own) {
+				if (deletedConnectors.has(connector.id) || !(holdsGone(connector.from) || holdsGone(connector.to))) continue;
+				if (!policyAllowsGraphEdit(before.document, "edit", connector.id, "element-style", diagnostics)) return reject();
+				deletedConnectors.add(connector.id);
+				expanded = true;
 			}
-		}}
-		if(removedEdges.length && Array.isArray(document.edges)) document.edges=document.edges.filter(edge=>!isPlainObject(edge)||!removedEdges.includes(edge.id as string));
+		}
+		if (removedEdges.length > 0 && Array.isArray(document.edges)) {
+			document.edges = document.edges.filter((edge) => !isPlainObject(edge) || !removedEdges.includes(edge.id as string));
+		}
 		// Check the complete deletion closure, including native edges implicitly
 		// removed with a node. No partial delete may bypass a connector lock.
-		for(const id of [...removedEdges,...deletedConnectors]) {
-			if(!policyAllowsGraphEdit(before.document,"edit",id,"element-style",diagnostics))return reject();
+		for (const id of [...removedEdges, ...deletedConnectors]) {
+			if (!policyAllowsGraphEdit(before.document, "edit", id, "element-style", diagnostics)) return reject();
 		}
 		// Removing nodes from a board without plugin metadata leaves it without.
 		if (changes.length > 0 || (metadataValue.ok && isPlainObject(metadataValue.value))) {
 			const metadata = readMetadataForUpdate(document, diagnostics);
 			if (metadata === undefined) return reject();
 			const overridesValue = safeRead(metadata, "localOverrides");
-			if(deletedConnectors.size)setOwn(metadata,"connectors",Object.fromEntries(independent.filter(c=>!deletedConnectors.has(c.id)).map(c=>[c.id,c])));
+			if (deletedConnectors.size > 0) {
+				setOwn(metadata, "connectors", Object.fromEntries(own
+					.filter((connector) => !deletedConnectors.has(connector.id))
+					.map((connector) => [connector.id, connector])));
+			}
 			if (!overridesValue.ok || (overridesValue.value !== undefined && !isPlainObject(overridesValue.value))) {
 				addDiagnostic(diagnostics, "metadata-overrides-invalid", "error", "Existing localOverrides are not a safe object map.");
 				return reject();

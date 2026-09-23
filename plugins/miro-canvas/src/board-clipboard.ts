@@ -70,7 +70,9 @@ export function readCanvasClipboard(text: string | undefined): CanvasClipboard |
     const value: unknown = JSON.parse(text);
     if (!isRecord(value) || !Array.isArray(value.nodes) || !Array.isArray(value.edges)) return undefined;
     if (!value.nodes.every(isRecord) || !value.edges.every(isRecord)) return undefined;
-    if(value.connectors!==undefined && (!Array.isArray(value.connectors) || !value.connectors.every(c=>readBoardConnector(c))))return undefined;
+    const connectors = value.connectors;
+    if (connectors !== undefined
+      && (!Array.isArray(connectors) || !connectors.every((connector) => readBoardConnector(connector) !== undefined))) return undefined;
     return value as unknown as CanvasClipboard;
   } catch {
     return undefined;
