@@ -926,7 +926,13 @@ function restoreDiscardedRootMetadata(
 	const data = safeRead(host.runtime, "data");
 	if (!data.ok || !isPlainObject(data.value)) return imported;
 	try {
-		for (const [key, value] of repairs) setOwn(data.value as UnknownRecord, key, cloneJson(value));
+		// Native Canvas keeps its document as the latest history entry too:
+		// written in place, the metadata would also rewrite the step before
+		// this one, and Undo would bring back the new metadata with the old
+		// graph.  The document is replaced by a copy instead.
+		const next: UnknownRecord = { ...(data.value as UnknownRecord) };
+		for (const [key, value] of repairs) setOwn(next, key, cloneJson(value));
+		if (!Reflect.set(host.runtime as object, "data", next)) return imported;
 	} catch {
 		return imported;
 	}
