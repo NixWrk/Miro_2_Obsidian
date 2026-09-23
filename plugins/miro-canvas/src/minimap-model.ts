@@ -855,19 +855,41 @@ function validCanvasSize(options: unknown): { readonly width: number; readonly h
 	};
 }
 
-function makeGeometry(scene: unknown, options: MinimapModelOptions): MinimapGeometry {
-	const diagnostics: MinimapDiagnostic[] = [];
-	const diagnosticKeys = new Set<string>();
-	const computed = computeContentBounds(scene, options);
-	diagnostics.push(...computed.diagnostics);
-	const contentBounds = computed.bounds;
-	const hasContent = contentBounds !== undefined;
-	const bounds = contentBounds ?? normaliseRect(0, 0, 1, 1);
+/** The board drawn on a map of one size: everything but the viewport frame. */
+interface ProjectedContent {
+	readonly computed: ReturnType<typeof computeContentBounds>;
+	readonly size: { readonly width: number; readonly height: number };
+	readonly padding: number;
+	readonly innerRect: MinimapRect;
+	readonly bounds: MinimapRect;
+	readonly scale: number;
+	readonly offsetX: number;
+	readonly offsetY: number;
+	readonly nodeItems: readonly MinimapSceneItem[];
+	readonly edgeItems: readonly MinimapSceneItem[];
+}
+
+/**
+ * The content projected for each scene and map size.  A pan or a zoom moves
+ * only the viewport frame, so a large board is measured and projected once
+ * for each scene rather than on every frame of the gesture.
+ */
+const projectedScenes = new WeakMap<object, Map<string, ProjectedContent>>();
+
+function projectedContent(scene: unknown, options: MinimapModelOptions): ProjectedContent {
 	const size = validCanvasSize(options);
 	const requestedPadding = finite(safeRead(options, "padding"));
 	const padding = requestedPadding !== undefined && requestedPadding >= 0
 		? Math.min(requestedPadding, Math.min(size.width, size.height) / 2)
 		: DEFAULT_MINIMAP_PADDING;
+	// Only content measured the plain way is kept: a limit or fixed bounds
+	// are the caller's to change between calls.
+	const plain = ["maxItems", "bounds", "contentBounds"].every((key) => safeRead(options, key) === NO_VALUE || safeRead(options, key) === undefined);
+	const key = `${size.width}|${size.height}|${padding}`;
+	const cached = plain && isObject(scene) ? projectedScenes.get(scene)?.get(key) : undefined;
+	if (cached !== undefined) return cached;
+	const computed = computeContentBounds(scene, options);
+	const bounds = computed.bounds ?? normaliseRect(0, 0, 1, 1);
 	const innerRect: MinimapRect = {
 		x: padding,
 		y: padding,
@@ -889,8 +911,26 @@ function makeGeometry(scene: unknown, options: MinimapModelOptions): MinimapGeom
 		mapRect: projectRect(item.bounds, scale, offsetX, offsetY),
 		...(item.line === undefined ? {} : { mapLine: [project(item.line[0]), project(item.line[1])] as const }),
 	}));
-	const nodeItems = mapItems(computed.nodes, "node");
-	const edgeItems = mapItems(computed.edges, "edge");
+	const content: ProjectedContent = {
+		computed, size, padding, innerRect, bounds, scale, offsetX, offsetY,
+		nodeItems: mapItems(computed.nodes, "node"),
+		edgeItems: mapItems(computed.edges, "edge"),
+	};
+	if (plain && isObject(scene)) {
+		const sizes = projectedScenes.get(scene) ?? new Map<string, ProjectedContent>();
+		sizes.set(key, content);
+		projectedScenes.set(scene, sizes);
+	}
+	return content;
+}
+
+function makeGeometry(scene: unknown, options: MinimapModelOptions): MinimapGeometry {
+	const diagnostics: MinimapDiagnostic[] = [];
+	const diagnosticKeys = new Set<string>();
+	const { computed, size, padding, innerRect, bounds, scale, offsetX, offsetY, nodeItems, edgeItems } = projectedContent(scene, options);
+	diagnostics.push(...computed.diagnostics);
+	const contentBounds = computed.bounds;
+	const hasContent = contentBounds !== undefined;
 	const items = [...nodeItems, ...edgeItems];
 	const rawViewport = safeRead(options, "viewport");
 	const viewport = normaliseViewport(rawViewport);
