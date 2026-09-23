@@ -1911,6 +1911,11 @@
   /* Sized by the label, which wraps only at native Canvas's own width. */
   width: max-content;
   height: fit-content;
+  /* The label is drawn centred on this box's corner: only the label takes presses. */
+  pointer-events: none;
+}
+
+.miro-canvas-connector-label .canvas-path-label {
   pointer-events: auto;
   cursor: grab;
 }

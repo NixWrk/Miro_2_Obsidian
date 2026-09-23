@@ -847,7 +847,9 @@ export class SelectionToolbar {
     root.setAttribute("data-miro-independent-only",state.independentOnly?"true":"false");
 
     const hasEdge = state.kinds.includes("edge");
-    refs.deleteSelection.hidden=state.independentSelection!==true;
+    // Native Canvas's own delete takes the board's connectors with it; this one
+    // stands in only when its menu has nothing to act on.
+    refs.deleteSelection.hidden = state.independentOnly !== true;
     refs.deleteSelection.disabled=!state.editable;
     const hasNode = state.kinds.some((kind) => kind !== "edge");
     refs.shape.host.hidden = !state.kinds.includes("shape");
