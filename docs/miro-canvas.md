@@ -588,7 +588,9 @@ and covered by automated tests.
 
 ### Future: product tasks (set 2026-09-23)
 
-The agreed order of this work - finish PDF/PPTX export; foundations (schema,
+The agreed order of this work - finish PDF/PPTX export and bring manual layer
+order (to front, forward, backward, to back) into the selection toolbar and
+menu; foundations (schema,
 translations, agent skill); the converter as a product of its own; delivery and
 the Miro import guide; onboarding board and visual guide; testing with people;
 ecosystem - is recorded in the [ROADMAP](../ROADMAP.md) plan. The exporter stays

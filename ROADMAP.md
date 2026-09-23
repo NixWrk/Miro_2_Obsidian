@@ -58,7 +58,10 @@ trackpad, pen tablet/stylus, touch-screen, and phone/tablet interaction.
 The work below is done in this order; each phase builds on the ones before it.
 
 0. **Finish what is started.** PDF/PPTX export of boards (draft on branch
-   `wip/board-export`).
+   `wip/board-export`). Manual layer order in the main interface: bring to
+   front, bring forward, send backward and send to back from the selection
+   toolbar and menu, for one item or a whole selection; the ordering core exists
+   but is only reachable from the local tools panel.
 1. **Foundations.** A formal, versioned schema of `miroSource` and
    `miroCanvas` with compatibility fixtures; the plugin's translation system
    with English and Russian, its language taken from Obsidian's own; a light
