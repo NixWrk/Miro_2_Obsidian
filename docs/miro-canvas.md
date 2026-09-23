@@ -642,8 +642,11 @@ valid and its other nodes/native edges remain usable without the plugin.
 Shift-click and lasso support mixed node/connector selections. Copy, paste, cut,
 selection deletion and group dragging use one native history step; external
 connector anchors are detached on copy while internal anchors are remapped.
-Native Canvas rectangle selection also includes independent connectors when
-their route intersects the box, including crossings with both ends outside.
+Rectangle selection includes independent connectors by the endpoints inside
+the box. A line merely crossing the box with both ends outside is not selected.
+On a group drag, only caught ends move; the far ends remain fixed.
+Every multi-item selection, whether made by rectangle or lasso, keeps one
+draggable frame after a move; its entire interior can start another group drag.
 Selection deletion checks locks across the dependent-connector closure before
 removing anything. A refused save or stale group-drag preview leaves the graph
 unchanged. Real-Obsidian mouse
@@ -651,7 +654,10 @@ QA is still open because Windows screenshot capture fails with
 `SetIsBorderRequired / 0x80004002`; accessibility clicks also lack geometry.
 The connector tool uses one persistent bottom panel, without a second floating
 route picker. Attached routes and selection frames follow live drag geometry on
-animation frames; the focused test disables periodic refresh to verify this.
+animation frames; group-drag previews now project native and source-backed
+edges from the same pending positions as independent connectors. Choosing a
+comment color saves once on selection instead of on every picker movement.
+The focused test disables periodic refresh to verify live geometry.
 The focused browser gate covers keyboard clipboard, connector persistence,
 undo/redo, copying, displayed-camera following and reset. Both focused and full
 browser UI smoke tests pass against the synthetic host; neither replaces real
@@ -719,13 +725,55 @@ and imported-hide buttons from appearing together.
 
 The comment card now edits an author's displayed name before posting and after
 posting, deletes individual local replies, and sets a thread's color and lock.
+Locking visibly marks the pin and card and prevents replies, author edits,
+color changes, resolving, and deletion for that thread in both the card and
+comments panel. Unlocking restores those controls; it does not prevent adding
+separate comments elsewhere on the board.
 The default name still comes from the plugin setting; imported author changes
 are local display aliases, not edits to Miro metadata. Connectors can anchor to
 comment markers and resolve their endpoints as comments move. A connector's
 arrowhead size is adjustable independently of stroke width. The mixed lasso
-frame encloses selected native items and independent connectors; dragging its
-border moves the whole selection in one transaction. These behaviors have
+frame encloses selected native items, independent connectors, and comment pins;
+dragging its interior moves the whole selection in one transaction. These behaviors have
 focused unit and synthetic-browser coverage, not live Obsidian acceptance.
+The left-button rectangular gesture draws one lightweight plugin marquee.
+On release it selects native nodes and edges, independent connectors and comment
+pins together; pointer movement only updates that one box, without rebuilding
+the board or asking native Canvas to draw a competing marquee.
+Selection uses the painted screen centers of nodes and comment pins, and the
+visible endpoint positions of native and independent connectors. A group/frame
+must be fully enclosed so a small rectangle inside a large frame does not take
+it. A single caught connector end has a small draggable selection frame; its
+other end does not move. When both ends and the full route are inside, route
+bends move too.
+Native-only selections keep Obsidian's visible frame; the plugin's full-area
+drag target is transparent. Mixed selections with independent connectors use
+the plugin's visible frame because the native one cannot enclose them; comments
+use the same rule. An unrotated single node keeps native border plus plugin
+grips, without a second outline. The neighboring-node arrow buttons stay in
+the transparent handles overlay anchored to that native border. While dragging
+a marquee, shared-frame geometry is not recomputed.
+Sticky fill offers Miro's 17 named colors in an eight-column grid, followed
+by up to 12 recently used colors and a separate custom-color input. Recent
+colors may repeat a preset; these are distinct sources, not additional Miro
+sticky colors.
+Only attached endpoints follow a node's rotation; free ends and bends retain
+their board positions. The lasso-to-shared-frame drag is covered by the
+synthetic browser gate.
+Comment colors preview during picker input and persist once on selection, even
+if the card refreshes before the picker closes. During a pin drag, attached connector paths follow the pin
+without saving intermediate positions; cancelling restores the original route.
+The drawing and connector creation bars share a 600 px, single-row layout;
+on narrower screens they scroll horizontally rather than wrapping.
+Independent connectors can receive a label through the **Add or edit line label**
+button in the selection toolbar, Enter, or a double-click on the line. Drag the
+label along the route; its initial
+position defaults to the midpoint and is configurable in plugin settings.
+When a native edge has a plugin-defined route, the plugin positions its label
+on that visible route instead of leaving Obsidian's original label at the old
+midpoint. The label follows the body during its first route drag and during
+group movement. Double-click to edit or drag that label along the route. A pure pan
+translates the existing independent-connector SVG instead of rebuilding it.
 
 - Native-edge-only clipboard payloads without their endpoint nodes are not yet
   supported by the unified paste path. Independent connectors are supported.

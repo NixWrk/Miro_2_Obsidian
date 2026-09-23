@@ -14,6 +14,9 @@ export interface BoardConnector {
   readonly color: string;
   readonly width: number;
   readonly headSize?: number;
+  readonly label?: string;
+  /** Length fraction; absent uses the configured default (50% initially). */
+  readonly labelT?: number;
   readonly startCap: string;
   readonly endCap: string;
   readonly strokeStyle?: "solid" | "dashed" | "dotted";
@@ -30,12 +33,31 @@ export function readBoardConnector(v: unknown): BoardConnector | undefined {
     || typeof v.color !== "string" || !/^#[0-9a-f]{6}$/i.test(v.color)
     || typeof v.width !== "number" || !Number.isFinite(v.width) || v.width <= 0 || v.width > 1000
     || (v.headSize !== undefined && !validHeadSize(v.headSize))
+    || (v.label !== undefined && (typeof v.label !== "string" || v.label.length > 1024))
+    || (v.labelT !== undefined && (typeof v.labelT !== "number" || !Number.isFinite(v.labelT) || v.labelT < 0 || v.labelT > 1))
     || ![...CONNECTOR_CAPS, "circle", "filled_circle", "er_one", "er_many", "er_one_or_many"].includes(v.startCap as never)
     || ![...CONNECTOR_CAPS, "circle", "filled_circle", "er_one", "er_many", "er_one_or_many"].includes(v.endCap as never)
     || (v.strokeStyle !== undefined && !["solid", "dashed", "dotted"].includes(v.strokeStyle as string))
     || (v.block !== undefined && v.block !== true)
     || (v.waypoints !== undefined && (!Array.isArray(v.waypoints) || v.waypoints.length > 64 || !v.waypoints.every(point)))) return undefined;
   return v as unknown as BoardConnector;
+}
+/** Closest length fraction of a route to a dragged label. */
+export function nearestRouteFraction(points: readonly AnchorPoint[], at: AnchorPoint): number {
+  const lengths=points.slice(1).map((point,index)=>Math.hypot(point.x-points[index]!.x,point.y-points[index]!.y));
+  const total=lengths.reduce((sum,length)=>sum+length,0);
+  if(total<=0)return 0.5;
+  let before=0,best=Infinity,fraction=0.5;
+  for(let index=0;index<lengths.length;index++){
+    const start=points[index]!,end=points[index+1]!,length=lengths[index]!;
+    if(length<=0)continue;
+    const u=Math.max(0,Math.min(1,((at.x-start.x)*(end.x-start.x)+(at.y-start.y)*(end.y-start.y))/(length*length)));
+    const x=start.x+(end.x-start.x)*u,y=start.y+(end.y-start.y)*u;
+    const distance=Math.hypot(at.x-x,at.y-y);
+    if(distance<best){best=distance;fraction=(before+u*length)/total;}
+    before+=length;
+  }
+  return Math.round(fraction*1000)/1000;
 }
 export function boardConnectors(document: unknown): BoardConnector[] {
   const metadata = record(document) && record(document.miroCanvas) ? document.miroCanvas : document;

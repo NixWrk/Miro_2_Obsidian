@@ -172,10 +172,13 @@ describe("comment marker DOM renderer", () => {
       geometry: { nodes: { n: { x: 0, y: 0, width: 100, height: 100 } } } };
     renderer.update(state);
     const button = root.children[0];
+    renderer.update({ ...state, selectedKeys: new Set(["local:t"]) });
+    expect(button.attributes.get("data-comment-selected")).toBe("true");
     renderer.update({ ...state, threads: [{ ...state.threads[0], resolved: true }],
       geometry: { nodes: { n: { x: 100, y: 100, width: 100, height: 100 } } },
       boardToViewport: ({ x, y }) => ({ x: x / 2, y: y / 2 }) });
     expect(root.children[0]).toBe(button);
+    expect(button.attributes.get("data-comment-selected")).toBe("false");
     expect(button.style.left).toBe("75px");
     expect(button.style.top).toBe("75px");
     expect(button.textContent).toBe("✓");
@@ -195,15 +198,19 @@ describe("comment marker DOM renderer", () => {
 
   it("moves a pin on release and restores it when the pointer is cancelled", () => {
     const onMoveThread = vi.fn();
-    const renderer = new CommentMarkers({ onOpenThread: vi.fn(), onMoveThread }, { document: dom, ...display });
+    const onPreviewThreadMove = vi.fn(), onCancelThreadMove = vi.fn();
+    const renderer = new CommentMarkers({ onOpenThread: vi.fn(), onMoveThread,
+      onPreviewThreadMove, onCancelThreadMove }, { document: dom, ...display });
     renderer.update({ threads: [thread], geometry: {}, boardPoint: { x: 10, y: 20 } });
     const button = (renderer.element as unknown as Element).children[0]!;
 
     button.dispatch("pointerdown", { button: 0, clientX: 10, clientY: 20 });
     windowTarget.dispatch("pointermove", { clientX: 30, clientY: 50 });
     expect([button.style.left, button.style.top]).toEqual(["30px", "50px"]);
+    expect(onPreviewThreadMove).toHaveBeenCalledWith("t", "local", { x: 30, y: 50 });
     windowTarget.dispatch("pointercancel");
     expect([button.style.left, button.style.top]).toEqual(["10px", "20px"]);
+    expect(onCancelThreadMove).toHaveBeenCalledOnce();
     expect(onMoveThread).not.toHaveBeenCalled();
 
     button.dispatch("pointerdown", { button: 0, clientX: 10, clientY: 20 });

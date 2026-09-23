@@ -31,6 +31,7 @@ export interface CommentMarker {
 export interface CommentMarkersState extends CommentListOptions {
   readonly threads: readonly CommentThread[];
   readonly geometry: AnchorGeometry;
+  readonly selectedKeys?: ReadonlySet<string>;
   /** Board coordinates for threads without an anchor. Omit to leave them in the panel. */
   readonly boardPoint?: AnchorPoint;
   /** Convert board coordinates to overlay pixels, including the current pan and zoom. */
@@ -86,7 +87,7 @@ export function buildCommentMarkers(
       anchorType: anchor.type === "free" ? "board" : anchor.type,
       state: thread.resolved ? "resolved" : "open",
       point: Object.freeze({ x: point.x, y: point.y }),
-      label: `${status} comment by ${author}, ${commentTimeLabel(thread.createdAt, display)}: ${messages[0]?.text ?? thread.text}. ${replyCount} replies. Open thread`,
+      label: `${thread.locked === true ? "Locked " : ""}${status} comment by ${author}, ${commentTimeLabel(thread.createdAt, display)}: ${messages[0]?.text ?? thread.text}. ${replyCount} replies. Open thread`,
       replyCount,
       initial: authorInitial(author),
       color: typeof thread.color === "string" && /^#[0-9a-f]{6}$/i.test(thread.color) ? thread.color : authorColor(author),
@@ -100,6 +101,8 @@ export interface CommentMarkersHost {
   readonly onOpenThread: (threadId: string, origin: CommentOrigin) => void;
   /** A pin was dragged and let go at a point in the window; without it pins stay put. */
   readonly onMoveThread?: (threadId: string, origin: CommentOrigin, point: { readonly x: number; readonly y: number }) => void;
+  readonly onPreviewThreadMove?: (threadId: string, origin: CommentOrigin, point: { readonly x: number; readonly y: number }) => void;
+  readonly onCancelThreadMove?: () => void;
 }
 
 /** How far a pin must be pulled before a press becomes a drag rather than a click. */
@@ -123,6 +126,7 @@ export class CommentMarkers {
   public readonly element: HTMLElement;
   private readonly document: Document;
   private readonly entries = new Map<string, MarkerElement>();
+  private readonly previewColors = new Map<string, string>();
   /** The marker each pin shows now, which its listeners read. */
   private readonly current = new WeakMap<HTMLButtonElement, CommentMarker>();
   /** Pins being dragged, which stay under the pointer until let go. */
@@ -140,6 +144,16 @@ export class CommentMarkers {
     Object.assign(this.element.style, { position: "absolute", inset: "0", pointerEvents: "none" });
   }
 
+  /** Paint a pin immediately while its native color picker is moving. No board write. */
+  public previewColor(threadId: string, origin: CommentOrigin, color?: string): void {
+    const key = JSON.stringify([origin, threadId]);
+    if (color !== undefined && /^#[0-9a-f]{6}$/i.test(color)) this.previewColors.set(key, color);
+    else this.previewColors.delete(key);
+    const entry = this.entries.get(key);
+    const current = entry === undefined ? undefined : this.markerOf(entry.button);
+    if (entry && current) entry.button.style.setProperty?.("--miro-avatar", this.previewColors.get(key) ?? current.color);
+  }
+
   public update(state: CommentMarkersState): CommentMarkersModel {
     const model = buildCommentMarkers(state, this.options);
     if (this.destroyed) return model;
@@ -149,6 +163,7 @@ export class CommentMarkers {
         entry.dispose();
         entry.button.remove();
         this.entries.delete(key);
+        this.previewColors.delete(key);
       }
     }
     for (const marker of model.markers) {
@@ -194,6 +209,13 @@ export class CommentMarkers {
           try { button.setPointerCapture?.(pointer.pointerId); } catch { /* Synthetic events have no active pointer. */ }
           const start = { x: pointer.clientX, y: pointer.clientY };
           const origin = { left: parseFloat(button.style.left) || 0, top: parseFloat(button.style.top) || 0 };
+          const windowPoint = (x: number, y: number) => {
+            const overlay = this.element.getBoundingClientRect?.();
+            return {
+              x: (overlay?.left ?? 0) + picked.point.x + x - start.x,
+              y: (overlay?.top ?? 0) + picked.point.y + y - start.y,
+            };
+          };
           let moving = false;
           const move = (moved: Event) => {
             const at = moved as PointerEvent;
@@ -205,6 +227,7 @@ export class CommentMarkers {
             button.setAttribute("data-comment-dragging", "true");
             button.style.left = `${origin.left + dx}px`;
             button.style.top = `${origin.top + dy}px`;
+            this.host.onPreviewThreadMove?.(picked.threadId, picked.origin, windowPoint(at.clientX, at.clientY));
           };
           const stopListening = () => {
             view.removeEventListener("pointermove", move, true);
@@ -218,6 +241,7 @@ export class CommentMarkers {
             stopListening();
             this.dragging.delete(button);
             button.setAttribute("data-comment-dragging", "false");
+            if (moving) this.host.onCancelThreadMove?.();
             const current = this.markerOf(button);
             if (current !== undefined) {
               button.style.left = `${current.point.x}px`;
@@ -237,12 +261,7 @@ export class CommentMarkers {
             const at = released as PointerEvent;
             // The pin's point moves as far as the pointer did, wherever on the
             // pin it was taken hold of.
-            const box = this.element.getBoundingClientRect?.();
-            const left = box?.left ?? 0, top = box?.top ?? 0;
-            this.host.onMoveThread?.(picked.threadId, picked.origin, {
-              x: left + picked.point.x + at.clientX - start.x,
-              y: top + picked.point.y + at.clientY - start.y,
-            });
+            this.host.onMoveThread?.(picked.threadId, picked.origin, windowPoint(at.clientX, at.clientY));
           };
           cancelDrag = cancel;
           view.addEventListener("pointermove", move, true);
@@ -272,12 +291,14 @@ export class CommentMarkers {
       button.setAttribute("data-comment-origin", marker.origin);
       button.setAttribute("data-comment-anchor", marker.anchorType);
       button.setAttribute("data-comment-state", marker.state);
+      button.setAttribute("data-comment-locked", marker.locked ? "true" : "false");
+      button.setAttribute("data-comment-selected", state.selectedKeys?.has(`${marker.origin}:${marker.threadId}`) ? "true" : "false");
       button.setAttribute("data-comment-has-replies", marker.replyCount > 0 ? "true" : "false");
       button.setAttribute("aria-label", marker.label);
       button.setAttribute("data-tooltip-delay", TOOLTIP_DELAY);
       // A pin shows who started the thread; a badge counts its messages.
       button.textContent = marker.state === "resolved" ? "✓" : marker.initial;
-      button.style.setProperty?.("--miro-avatar", marker.color);
+      button.style.setProperty?.("--miro-avatar", this.previewColors.get(marker.key) ?? marker.color);
       button.setAttribute("data-comment-count", String(marker.replyCount + 1));
       button.style.left = `${marker.point.x}px`;
       button.style.top = `${marker.point.y}px`;
@@ -293,6 +314,7 @@ export class CommentMarkers {
     this.destroyed = true;
     for (const entry of this.entries.values()) entry.dispose();
     this.entries.clear();
+    this.previewColors.clear();
     this.element.remove();
   }
 }

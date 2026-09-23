@@ -124,6 +124,7 @@ export interface SourceStructuredDescriptor {
 
 export interface SourceConnectorStyle {
   readonly headSize?: number;
+  readonly labelT?: number;
   readonly shape?: "straight" | "elbowed" | "curved";
   readonly startCap?: string;
   readonly endCap?: string;
@@ -219,6 +220,7 @@ export const CONNECTOR_CAPS = [
 /** Local settings are partial: absent fields continue to use source/native values. */
 export interface LocalConnectorSettings {
   readonly headSize?: number;
+  readonly labelT?: number;
   readonly route?: (typeof CONNECTOR_ROUTES)[number];
   readonly strokeStyle?: (typeof CONNECTOR_STROKES)[number];
   readonly startCap?: (typeof CONNECTOR_CAPS)[number];
@@ -690,7 +692,9 @@ function applyLocalConnector(
   if (waypoints !== undefined) result.waypoints = waypoints;
   const width = finiteNumber(valueOf(local, "width"));
   const headSize = finiteNumber(valueOf(local, "headSize"));
+  const labelT = finiteNumber(valueOf(local, "labelT"));
   if (headSize !== undefined && headSize >= 1 && headSize <= 1000) result.headSize = headSize;
+  if (labelT !== undefined && labelT >= 0 && labelT <= 1) result.labelT = labelT;
   if (width !== undefined && width > 0 && width <= 100) css["stroke-width"] = String(width);
   const color = readOwn(local, "color");
   if (color.state === "present" && isSafeColor(color.value)) css.stroke = normalizeColor(color.value) ?? "transparent";

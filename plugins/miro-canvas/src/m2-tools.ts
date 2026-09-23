@@ -3,7 +3,7 @@ import { CommentsPanel } from "./comments-panel";
 import { addAnchor, normalizeAnchor, resolveAnchor, type CanvasAnchor } from "./anchors";
 import {
   addLocalComment, editLocalComment, deleteLocalComment, addReply, setCommentResolved,
-  listCommentThreads, type CommentMutationResult, type CommentOrigin, type CommentScope, type CommentThread,
+  type CommentMutationResult, type CommentOrigin, type CommentScope, type CommentThread,
 } from "./local-comments";
 import { readCanvasElementFile, readCanvasElementId, readCanvasElementType } from "./canvas-elements";
 import { createCanvasAuthoring, type CanvasAuthoring } from "./canvas-authoring";
@@ -305,12 +305,12 @@ export class M2CanvasTools {
           draft, { text, ...(current ? { anchor: current } : {}) }, { author: this.session.commentAuthor() },
         ));
       },
-      onEditComment: (id, text) => this.mutate("edit-comment", (draft) => editLocalComment(draft, id, text)),
-      onDeleteComment: (id) => this.mutate("delete-comment", (draft) => deleteLocalComment(draft, id)),
-      onReplyComment: (id, text) => this.mutate(
+      onEditComment: (id, text) => { if (!this.session.commentLocked(id, "local")) this.mutate("edit-comment", (draft) => editLocalComment(draft, id, text)); },
+      onDeleteComment: (id) => { if (!this.session.commentLocked(id, "local")) this.mutate("delete-comment", (draft) => deleteLocalComment(draft, id)); },
+      onReplyComment: (id, text) => { if (!this.session.commentLocked(id, "local")) this.mutate(
         "reply-comment", (draft) => addReply(draft, id, text, { author: this.session.commentAuthor() }),
-      ),
-      onResolveComment: (id, resolved) => this.mutate("resolve-comment", (draft) => setCommentResolved(draft, id, resolved)),
+      ); },
+      onResolveComment: (id, resolved) => { if (!this.session.commentLocked(id, "local")) this.mutate("resolve-comment", (draft) => setCommentResolved(draft, id, resolved)); },
       onFilterChange: (scope) => { this.scope = scope; this.refresh(); },
       onPickAnchor: (kind) => this.pickAnchor(kind),
       onSelectTarget: (thread) => this.focusComment(thread),
@@ -498,7 +498,7 @@ export class M2CanvasTools {
     this.refreshTargetSelectors();
     const current = this.currentAnchor(false);
     this.comments.update({
-      threads: listCommentThreads(this.session.adapter.getDocument(), { includeResolved: true }),
+      threads: this.session.commentThreads(),
       scope: this.scope, selectedElementIds: this.session.snapshot.selectedIds,
       includeResolved: true, reviewMode: this.session.snapshot.reviewMode,
       anchorDraft: current.ok ? current.anchor : undefined,

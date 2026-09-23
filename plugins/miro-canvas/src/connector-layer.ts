@@ -1,5 +1,5 @@
-import { type CanvasAnchor, type AnchorGeometry, type AnchorPoint } from "./anchors";
-import { boardConnectors, connectorRoutes, readBoardConnector, reshapeBoardConnector, translateConnector, type BoardConnector } from "./board-connectors";
+import { pointOnPolyline, type CanvasAnchor, type AnchorGeometry, type AnchorPoint } from "./anchors";
+import { boardConnectors, connectorRoutes, nearestRouteFraction, readBoardConnector, reshapeBoardConnector, translateConnector, type BoardConnector } from "./board-connectors";
 import { CAP_PATHS, capFilled, headMarkerAttributes, strokeDash } from "./connector-style";
 import { gripNear, routeHandles, routePath, routeBends, removeWaypoint, type RouteHandle } from "./connector-route";
 import { blockArrowOutline } from "./free-line";
@@ -18,6 +18,7 @@ interface Host {
   removeSelection(): void;
   moveSelection(event: PointerEvent): boolean;
   selectionChanged(): void;
+  defaultLabelT?(): number;
 }
 const NS = "http://www.w3.org/2000/svg";
 const MIME = "application/x-miro-board-connectors";
@@ -29,6 +30,12 @@ export class ConnectorLayer {
   private dragEnd?: () => void;
   private disposed = false;
   private preview?: BoardConnector;
+  private labelEditor?: {id:string;input:HTMLInputElement};
+  private paintedDocument?: unknown;
+  private paintedGeometry?: AnchorGeometry;
+  private paintedSelection = "";
+  private paintedOrigin?: AnchorPoint;
+  private paintedScale?: number;
   private cleanups: (() => void)[] = [];
   constructor(private root: HTMLElement, private host: Host) {
     const doc = root.ownerDocument;
@@ -52,6 +59,10 @@ export class ConnectorLayer {
       if (!this.selected.size || (event.target as Element)?.closest?.("input,textarea,[contenteditable=true],.cm-editor")) return;
       if (key.key === "Delete" || key.key === "Backspace") {
         key.preventDefault(); key.stopImmediatePropagation(); this.remove();
+      } else if(key.key === "Enter" && this.selected.size === 1){
+        const c=boardConnectors(this.host.document()).find(item=>this.selected.has(item.id));
+        const route=c&&connectorRoutes(boardConnectors(this.host.document()),this.host.geometry()).get(c.id);
+        if(c&&route){key.preventDefault();key.stopImmediatePropagation();this.editLabel(c,route.points);}
       }
     });
     listen("copy", event => this.copy(event as ClipboardEvent));
@@ -94,9 +105,22 @@ export class ConnectorLayer {
   }
   render(force = false): void {
     if (this.disposed || this.dragEnd && !force) return;
-    const connectors = boardConnectors(this.host.document()).map(c=>this.preview?.id===c.id?this.preview:c);
+    const document=this.host.document();
+    const geometry=this.host.geometry();
+    const origin=this.host.screen({x:0,y:0}),unit=this.host.screen({x:1,y:0});
+    const scale=Math.hypot(unit.x-origin.x,unit.y-origin.y);
+    const selection=[...this.selected].sort().join("\u0000");
+    // During a pure pan, the paths, grips and labels share one translation.
+    // Rebuilding every SVG child each animation frame caused visible stalls.
+    if(!force&&!this.preview&&!this.labelEditor&&document===this.paintedDocument&&geometry===this.paintedGeometry
+      &&selection===this.paintedSelection&&this.paintedOrigin&&this.paintedScale===scale){
+      if(this.svg.style)this.svg.style.transform=`translate(${origin.x-this.paintedOrigin.x}px, ${origin.y-this.paintedOrigin.y}px)`;
+      return;
+    }
+    if(this.svg.style)this.svg.style.transform="none";
+    const connectors = boardConnectors(document).map(c=>this.preview?.id===c.id?this.preview:c);
     for (const id of this.selected) if (!connectors.some(c => c.id === id)) this.selected.delete(id);
-    const routes = connectorRoutes(connectors, this.host.geometry());
+    const routes = connectorRoutes(connectors, geometry);
     const doc = this.root.ownerDocument;
     this.svg.replaceChildren(); this.toolbar.replaceChildren(); this.toolbar.hidden = true;
     const defs = doc.createElementNS(NS,"defs"); this.svg.append(defs);
@@ -104,8 +128,6 @@ export class ConnectorLayer {
       const route = routes.get(c.id); if (!route) continue;
       const path = doc.createElementNS(NS,"path");
       path.setAttribute("d",routePath(route.start,route.segments,p=>this.host.screen(p)));
-      const origin=this.host.screen({x:0,y:0}), unit=this.host.screen({x:1,y:0});
-      const scale=Math.hypot(unit.x-origin.x,unit.y-origin.y);
       path.setAttribute("fill","none"); path.setAttribute("stroke",c.color); path.setAttribute("stroke-width",String(c.width*scale));
       path.setAttribute("stroke-dasharray",strokeDash(c.strokeStyle));
       if (c.block) {
@@ -129,10 +151,11 @@ export class ConnectorLayer {
       this.svg.append(path);
       const hit = path.cloneNode(false) as SVGPathElement;
       hit.removeAttribute("marker-start"); hit.removeAttribute("marker-end"); hit.setAttribute("fill",c.block ? "transparent" : "none"); hit.setAttribute("stroke","transparent"); hit.setAttribute("stroke-width",String(Math.max(14,c.width*scale+8))); hit.classList.add("miro-board-connector-hit");
-      hit.setAttribute("aria-label",`Connector ${c.id}`); hit.setAttribute("data-connector-id",c.id);
+      hit.setAttribute("aria-label",`Connector ${c.id}; double-click or press Enter to edit its label`); hit.setAttribute("data-connector-id",c.id);
       hit.addEventListener("pointerdown", e => {
         if (e.button !== 0) return;
         e.preventDefault(); e.stopImmediatePropagation();
+        if(e.detail>=2){this.editLabel(c,route.points);return;}
         if (!e.shiftKey && !this.selected.has(c.id)) {this.host.deselectNative();this.selected.clear();}
         if(e.shiftKey && this.selected.has(c.id)){this.selected.delete(c.id);this.render();this.host.selectionChanged();return;}
         this.selected.add(c.id); this.root.focus(); this.render();this.host.selectionChanged();
@@ -140,6 +163,24 @@ export class ConnectorLayer {
       });
       hit.addEventListener("contextmenu", e => {e.preventDefault(); e.stopPropagation(); this.selected = new Set([c.id]); this.root.focus(); this.render();this.host.selectionChanged();});
       this.svg.append(hit);
+      if(c.label){
+        const at=pointOnPolyline(route.points,c.labelT??this.host.defaultLabelT?.()??0.5);
+        if(at){
+          const screen=this.host.screen(at),label=doc.createElementNS(NS,"text");
+          label.classList.add("miro-board-connector-label");
+          label.setAttribute("x",String(screen.x));label.setAttribute("y",String(screen.y));
+          label.setAttribute("text-anchor","middle");label.setAttribute("dominant-baseline","middle");
+          label.setAttribute("data-connector-id",c.id);label.textContent=c.label;
+          label.setAttribute("aria-label",`Drag connector label; double-click to edit: ${c.label}`);
+          label.addEventListener("pointerdown",e=>{if(e.button!==0)return;e.preventDefault();e.stopImmediatePropagation();this.selected=new Set([c.id]);this.host.selectionChanged();this.dragLabel(e,c,route.points);});
+          label.addEventListener("dblclick",e=>{e.preventDefault();e.stopPropagation();this.editLabel(c,route.points);});
+          this.svg.append(label);
+        }
+      }
+      if(this.labelEditor?.id===c.id){
+        const at=pointOnPolyline(route.points,c.labelT??this.host.defaultLabelT?.()??0.5);
+        if(at){const screen=this.host.screen(at);this.labelEditor.input.style.left=`${screen.x}px`;this.labelEditor.input.style.top=`${screen.y}px`;}
+      }
       if (this.selected.has(c.id)) for (const end of ["from","to"] as const) {
         const at = this.host.screen(end === "from" ? route.start : route.end);
         const grip = doc.createElementNS(NS,"circle"); grip.setAttribute("cx",String(at.x)); grip.setAttribute("cy",String(at.y)); grip.setAttribute("r","6"); grip.classList.add("miro-board-connector-grip"); grip.setAttribute("data-end",end);
@@ -165,6 +206,47 @@ export class ConnectorLayer {
         }
       }
     }
+    this.paintedDocument=this.preview?undefined:document;
+    this.paintedGeometry=this.preview?undefined:geometry;
+    this.paintedSelection=[...this.selected].sort().join("\u0000");
+    this.paintedOrigin=origin;
+    this.paintedScale=scale;
+  }
+  private editLabel(c:BoardConnector, points:readonly AnchorPoint[]):void {
+    if(!this.host.editable([c.id]))return;
+    this.labelEditor?.input.remove();
+    const input=this.root.ownerDocument.createElement("input");
+    input.className="miro-board-connector-label-editor";input.type="text";input.maxLength=1024;
+    input.setAttribute("aria-label","Connector label");input.value=c.label??"";
+    const at=pointOnPolyline(points,c.labelT??this.host.defaultLabelT?.()??0.5);
+    if(at){const screen=this.host.screen(at);input.style.left=`${screen.x}px`;input.style.top=`${screen.y}px`;}
+    this.root.appendChild(input);this.labelEditor={id:c.id,input};
+    let done=false;
+    const finish=(save:boolean)=>{
+      if(done)return;done=true;input.remove();if(this.labelEditor?.input===input)this.labelEditor=undefined;
+      if(save&&input.value!==c.label)this.host.write([{...c,label:input.value,labelT:c.labelT??this.host.defaultLabelT?.()??0.5}],[],c);
+      this.render();
+    };
+    input.addEventListener("pointerdown",e=>e.stopPropagation());
+    input.addEventListener("keydown",e=>{e.stopPropagation();if(e.key==="Enter"){e.preventDefault();finish(true);}else if(e.key==="Escape"){e.preventDefault();finish(false);}});
+    input.addEventListener("blur",()=>finish(true));
+    input.focus();input.select();
+  }
+  private dragLabel(event:PointerEvent,c:BoardConnector,points:readonly AnchorPoint[]):void {
+    if(!this.host.editable([c.id]))return;
+    const view=this.root.ownerDocument.defaultView;if(!view)return;
+    let next=c,changed=false;
+    const move=(e:PointerEvent)=>{
+      if(e.pointerId!==event.pointerId)return;
+      const at=this.host.board({x:e.clientX,y:e.clientY});if(!at)return;
+      changed ||= Math.hypot(e.clientX-event.clientX,e.clientY-event.clientY)>3;
+      if(!changed)return;
+      next={...c,labelT:nearestRouteFraction(points,at)};this.preview=next;this.render(true);
+    };
+    const cleanup=()=>{view.removeEventListener("pointermove",move,true);view.removeEventListener("pointerup",up,true);view.removeEventListener("pointercancel",cancel,true);view.removeEventListener("blur",cancel);this.dragEnd=undefined;this.preview=undefined;};
+    const cancel=()=>{cleanup();this.render();};
+    const up=(e:PointerEvent)=>{if(e.pointerId!==event.pointerId)return;move(e);cleanup();if(changed&&next!==c)this.host.write([next],[],c);this.render();};
+    view.addEventListener("pointermove",move,true);view.addEventListener("pointerup",up,true);view.addEventListener("pointercancel",cancel,true);view.addEventListener("blur",cancel);this.dragEnd=cancel;
   }
   private drag(event:PointerEvent, c:BoardConnector, end?:"from"|"to", handle?: RouteHandle):void {
     if(!end && !handle && this.host.moveSelection(event))return;
@@ -190,8 +272,17 @@ export class ConnectorLayer {
     const up=(e:PointerEvent)=>{if(e.pointerId!==event.pointerId)return; move(e);cleanup();if(changed&&next!==c&&this.host.editable([c.id]))this.host.write([next],[],c);this.render();};
     view.addEventListener("pointermove",move,true);view.addEventListener("pointerup",up,true);view.addEventListener("pointercancel",cancel,true);view.addEventListener("blur",cancel);this.dragEnd=cancel;
   }
-  dispose():void {this.disposed=true;this.dragEnd?.();this.cleanups.forEach(fn=>fn());this.svg.remove();this.toolbar.remove();}
+  dispose():void {this.disposed=true;this.dragEnd?.();this.labelEditor?.input.remove();this.cleanups.forEach(fn=>fn());this.svg.remove();this.toolbar.remove();}
   reset():void {this.dragEnd?.();this.selected.clear();this.render();}
   selection(): readonly string[] {return [...this.selected];}
   select(ids: readonly string[]): void {this.selected=new Set(ids);this.render();this.host.selectionChanged();}
+  /** The shared selection toolbar exposes the same editor as Enter/double-click. */
+  editSelectedLabel(): boolean {
+    if(this.selected.size!==1)return false;
+    const c=boardConnectors(this.host.document()).find(item=>this.selected.has(item.id));
+    const route=c&&connectorRoutes(boardConnectors(this.host.document()),this.host.geometry()).get(c.id);
+    if(!c||!route)return false;
+    this.editLabel(c,route.points);
+    return true;
+  }
 }

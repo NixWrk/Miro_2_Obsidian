@@ -21,6 +21,8 @@ export interface SourceRendererHost {
   getNodes(): readonly unknown[] | undefined;
   getEdges(): readonly unknown[] | undefined;
   getRotationPreview?(): { readonly id: string; readonly rotation: number } | undefined;
+  /** Node IDs whose positions come from an uncommitted group-drag document. */
+  getSelectionMovePreviewIds?(): readonly string[] | undefined;
   /** A presentation's own buttons: show its slides, or bring them all into view. */
   onDeckAction?(deckId: string, action: DeckAction): void;
 }
@@ -1260,6 +1262,7 @@ function applyNativeRoute(
   native: unknown,
   anchors: RouteAnchors,
   nodeOf: (nodeId: unknown) => RouteNode | undefined,
+  preferDocumentGeometry: boolean,
   patches: RestorePatch[],
   diagnostics: string[],
 ): RenderedItem | undefined {
@@ -1284,7 +1287,7 @@ function applyNativeRoute(
     const nodeId = anchor?.nodeId ?? liveId ?? safeGet(native, `${which}Node`);
     const known = nodeOf(nodeId);
     if (known === undefined) return undefined;
-    const rect = liveId === nodeId ? liveRect(liveNode, known.rect) : known.rect;
+    const rect = !preferDocumentGeometry && liveId === nodeId ? liveRect(liveNode, known.rect) : known.rect;
     return result(anchor === undefined
       ? nativeEdgeEnd(rect, safeGet(live, "side") ?? safeGet(native, `${which}Side`), known.outline)
       : nativeAnchorEnd(rect, anchor.u, anchor.v, known.outline));
@@ -1784,6 +1787,10 @@ export class SourceRenderer {
     }
     const rawEdges = safeGet(sourceDocument, "edges");
     const nativeEdges = Array.isArray(rawEdges) ? itemById(rawEdges) : new Map<string, unknown>();
+    const movingValue = safeCall(this.host, "getSelectionMovePreviewIds");
+    const movingIds = new Set(Array.isArray(movingValue)
+      ? movingValue.filter((id): id is string => typeof id === "string") : []);
+    const moving = movingIds.size > 0;
     for (const id of nativeEdges.keys()) {
       if (!descriptors.has(id) && isObject(safeGet(safeGet(overrides, id), "connectorAnchors"))) {
         descriptors.set(id, { kind: "connector", rotation: 0, css: {} });
@@ -1798,7 +1805,7 @@ export class SourceRenderer {
     if (preview !== undefined && !descriptors.has(preview.id)) {
       descriptors.set(preview.id, { kind: "text", rotation: preview.rotation, css: {} });
     }
-    if (descriptors.size === 0) {
+    if (descriptors.size === 0 && !moving) {
       this.resetRenderedState();
       this.diagnosticList = Object.freeze(diagnostics);
       return this.diagnosticList;
@@ -1852,7 +1859,9 @@ export class SourceRenderer {
     for (const [id, edge] of nativeEdges) {
       const descriptor = descriptors.get(id);
       if (descriptor === undefined) {
-        if (reshaped(safeGet(edge, "fromNode")) || reshaped(safeGet(edge, "toNode"))) nativeRoutes.set(id, { edge, anchors: {} });
+        if (reshaped(safeGet(edge, "fromNode")) || reshaped(safeGet(edge, "toNode"))
+          || movingIds.has(safeGet(edge, "fromNode") as string) || movingIds.has(safeGet(edge, "toNode") as string))
+          nativeRoutes.set(id, { edge, anchors: {} });
         continue;
       }
       if (descriptor.kind !== "connector" || descriptor.sourceId !== undefined
@@ -1875,7 +1884,7 @@ export class SourceRenderer {
       return runtime === undefined ? [] : [`${id}:${safeGet(runtime, "initialized") === false ? "new" : "ready"}`];
     });
     const signature = safeSignature({
-      descriptors: [...descriptors], routes: [...nativeRoutes.keys()], ready, order: scene.order, preview, geometry, diagnostics, fittedTexts,
+      descriptors: [...descriptors], routes: [...nativeRoutes.keys()], ready, order: scene.order, preview, moving, geometry, diagnostics, fittedTexts,
     });
     if (signature !== undefined && signature === this.lastSignature
       && this.decorationsIntact((item) => runtimeOf(item.kind, item.id))) {
@@ -1895,7 +1904,7 @@ export class SourceRenderer {
             diagnostics.push(`connector-runtime-missing: ${id}.`);
             continue;
           }
-          const live = liveConnectorGeometry(sourceDocument, id, runtime, nativeEdges.get(id), routeNode, descriptor);
+          const live = moving ? undefined : liveConnectorGeometry(sourceDocument, id, runtime, nativeEdges.get(id), routeNode, descriptor);
           const item = applyConnector(this.document, geometry.edges?.[id], nativeEdges.get(id), runtime, id, descriptor, nextPatches, diagnostics, live);
           if (item !== undefined) rendered.push(item);
         } else {
@@ -1927,7 +1936,7 @@ export class SourceRenderer {
           diagnostics.push(`connector-runtime-missing: ${id}.`);
           continue;
         }
-        const item = applyNativeRoute(runtime, id, route.edge, route.anchors, routeNode, nextPatches, diagnostics);
+        const item = applyNativeRoute(runtime, id, route.edge, route.anchors, routeNode, moving, nextPatches, diagnostics);
         if (item !== undefined) rendered.push(item);
       }
       this.patches = nextPatches;

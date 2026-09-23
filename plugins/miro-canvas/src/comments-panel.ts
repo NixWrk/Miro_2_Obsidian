@@ -103,6 +103,7 @@ function threadRenderKey(thread: CommentThread): readonly unknown[] {
     thread.createdAt ?? null,
     thread.updatedAt ?? null,
     thread.resolved,
+    thread.locked === true,
     thread.immutable === true,
     commentAuthorLabel(thread),
     anchorLabel(thread.anchor),
@@ -222,12 +223,14 @@ export class CommentsPanel {
     card.className = "miro-canvas-comment-card";
     card.setAttribute("data-comment-id", thread.id);
     card.setAttribute("data-comment-origin", thread.origin);
+    card.setAttribute("data-comment-locked", thread.locked === true ? "true" : "false");
     append(card, this.renderMessageHeader(thread));
     const body = append(card, make(document, "p", thread.text));
     body.className = "miro-canvas-comment-card__body";
     const actions = append(card, make(document, "div"));
     actions.className = "miro-canvas-comment-card__actions";
-    const state = append(actions, make(document, "small", thread.resolved ? "Resolved" : "Open"));
+    const state = append(actions, make(document, "small", thread.locked === true
+      ? `Locked · ${thread.resolved ? "Resolved" : "Open"}` : thread.resolved ? "Resolved" : "Open"));
     state.className = "miro-canvas-comment-card__state";
     const anchor = thread.anchor;
     const target = button(document, anchorLabel(anchor), "select-target");
@@ -238,8 +241,8 @@ export class CommentsPanel {
 
     const resolve = button(document, thread.resolved ? "Reopen" : "Resolve", thread.resolved ? "reopen" : "resolve");
     resolve.className = "miro-canvas-comment-card__resolve";
-    resolve.disabled = thread.origin === "imported" || thread.immutable === true;
-    resolve.addEventListener("click", () => this.host.onResolveComment(thread.id, !thread.resolved));
+    resolve.disabled = thread.origin === "imported" || thread.immutable === true || thread.locked === true;
+    resolve.addEventListener("click", () => { if (!resolve.disabled) this.host.onResolveComment(thread.id, !thread.resolved); });
     append(actions, resolve);
 
     const editor = append(card, make(document, "details"));
@@ -251,11 +254,12 @@ export class CommentsPanel {
     edit.setAttribute("aria-label", `Edit comment ${thread.id}`);
     edit.setAttribute("data-comment-input", `edit-${thread.id}`);
     edit.setAttribute(INPUT_BASELINE_ATTRIBUTE, thread.text);
-    edit.disabled = thread.origin === "imported" || thread.immutable === true;
+    edit.disabled = thread.origin === "imported" || thread.immutable === true || thread.locked === true;
     append(editor, edit);
     const save = button(document, "Save edit", "edit-comment");
     save.disabled = edit.disabled;
     save.addEventListener("click", () => {
+      if (save.disabled) return;
       const text = inputText(edit.value);
       if (text.length > 0) {
         this.host.onEditComment(thread.id, text);
@@ -264,7 +268,7 @@ export class CommentsPanel {
     append(editor, save);
     const remove = button(document, "Delete", "delete-comment");
     remove.disabled = save.disabled;
-    remove.addEventListener("click", () => this.host.onDeleteComment(thread.id));
+    remove.addEventListener("click", () => { if (!remove.disabled) this.host.onDeleteComment(thread.id); });
     append(editor, remove);
 
     const replies = append(card, make(document, "div"));
@@ -286,11 +290,12 @@ export class CommentsPanel {
     replyInput.setAttribute("aria-label", `Reply to ${thread.id}`);
     replyInput.setAttribute("data-comment-input", `reply-${thread.id}`);
     replyInput.setAttribute(INPUT_BASELINE_ATTRIBUTE, "");
-    replyInput.disabled = thread.origin === "imported" || thread.immutable === true;
+    replyInput.disabled = thread.origin === "imported" || thread.immutable === true || thread.locked === true;
     append(replyComposer, replyInput);
     const replyButton = button(document, "Reply", "reply-comment");
     replyButton.disabled = replyInput.disabled;
     replyButton.addEventListener("click", () => {
+      if (replyButton.disabled) return;
       const text = inputText(replyInput.value);
       if (text.length > 0) {
         replyInput.value = "";

@@ -32,6 +32,8 @@ export interface MiroCanvasSettings {
   readonly connectorAttachNodes: boolean;
   readonly connectorAllowFree: boolean;
   readonly connectorAttachConnectors: boolean;
+  /** Initial position of new connector labels, as a fraction of route length. */
+  readonly connectorLabelPosition: number;
   readonly minimapVisible: boolean;
   readonly selectionToolbarEnabled: boolean;
   readonly lassoBinding: PointerBinding;
@@ -59,7 +61,7 @@ interface NumberBound {
 }
 
 export const SETTING_BOUNDS: Readonly<Record<
-  "zoomStep" | "minZoom" | "maxZoom" | "panStep" | "fastPanMultiplier" | "connectorMagnet" | "connectorSnap",
+  "zoomStep" | "minZoom" | "maxZoom" | "panStep" | "fastPanMultiplier" | "connectorMagnet" | "connectorSnap" | "connectorLabelPosition",
   NumberBound
 >> = Object.freeze({
   zoomStep: { min: 1.02, max: 2, step: 0.01 },
@@ -69,6 +71,7 @@ export const SETTING_BOUNDS: Readonly<Record<
   fastPanMultiplier: { min: 1, max: 10, step: 0.5 },
   connectorMagnet: { min: 0, max: 96, step: 2 },
   connectorSnap: { min: 0, max: 64, step: 2 },
+  connectorLabelPosition: { min: 0, max: 1, step: 0.05 },
 });
 
 export const WHEEL_ZOOM_MODIFIERS: readonly WheelZoomModifier[] = ["none", "ctrl", "shift", "alt"];
@@ -87,6 +90,7 @@ export const DEFAULT_SETTINGS: MiroCanvasSettings = Object.freeze({
   connectorAttachNodes: true,
   connectorAllowFree: false,
   connectorAttachConnectors: false,
+  connectorLabelPosition: 0.5,
   minimapVisible: true,
   selectionToolbarEnabled: true,
   lassoBinding: "alt+left",
@@ -181,6 +185,7 @@ export function normalizeSettings(value: unknown): MiroCanvasSettings {
     connectorAttachNodes: readBoolean(value, "connectorAttachNodes", DEFAULT_SETTINGS.connectorAttachNodes),
     connectorAllowFree: readBoolean(value, "connectorAllowFree", DEFAULT_SETTINGS.connectorAllowFree),
     connectorAttachConnectors: readBoolean(value, "connectorAttachConnectors", DEFAULT_SETTINGS.connectorAttachConnectors),
+    connectorLabelPosition: readNumber(value, "connectorLabelPosition", DEFAULT_SETTINGS.connectorLabelPosition),
     minimapVisible: readBoolean(value, "minimapVisible", DEFAULT_SETTINGS.minimapVisible),
     selectionToolbarEnabled: readBoolean(value, "selectionToolbarEnabled", DEFAULT_SETTINGS.selectionToolbarEnabled),
     lassoBinding: POINTER_BINDINGS.includes(value.lassoBinding as PointerBinding) ? value.lassoBinding as PointerBinding : DEFAULT_SETTINGS.lassoBinding,

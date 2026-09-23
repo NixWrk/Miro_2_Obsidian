@@ -164,6 +164,38 @@ describe("comments panel", () => {
     expect(findByAttribute(root, "data-comment-action", "reply-comment").disabled).toBe(true);
   });
 
+  it("blocks edits and replies for a locked thread but restores them on unlock", () => {
+    const calls: string[] = [];
+    const panel = new CommentsPanel({
+      onAddComment: () => calls.push("add"),
+      onEditComment: () => calls.push("edit"),
+      onDeleteComment: () => calls.push("delete"),
+      onReplyComment: () => calls.push("reply"),
+      onResolveComment: () => calls.push("resolve"),
+      onFilterChange: () => {},
+    }, { document: new FakeDocument() as unknown as Document });
+    const root = panel.element as unknown as FakeElement;
+    panel.update({ threads: [{ ...localThread, locked: true }] });
+    expect(findByAttribute(root, "data-comment-id", "local-1").getAttribute("data-comment-locked")).toBe("true");
+    expect(descendants(root).some((item) => item.textContent.includes("Locked · Open"))).toBe(true);
+    for (const action of ["resolve", "edit-comment", "delete-comment", "reply-comment"]) {
+      const button = findByAttribute(root, "data-comment-action", action);
+      expect(button.disabled).toBe(true);
+      button.dispatch("click");
+    }
+    expect(findByAttribute(root, "data-comment-input", "edit-local-1").disabled).toBe(true);
+    expect(findByAttribute(root, "data-comment-input", "reply-local-1").disabled).toBe(true);
+    expect(calls).toEqual([]);
+
+    panel.update({ threads: [localThread] });
+    expect(findByAttribute(root, "data-comment-id", "local-1").getAttribute("data-comment-locked")).toBe("false");
+    expect(findByAttribute(root, "data-comment-action", "reply-comment").disabled).toBe(false);
+    expect(findByAttribute(root, "data-comment-input", "reply-local-1").disabled).toBe(false);
+    findByAttribute(root, "data-comment-input", "reply-local-1").value = "Allowed";
+    findByAttribute(root, "data-comment-action", "reply-comment").dispatch("click");
+    expect(calls).toEqual(["reply"]);
+  });
+
   it("does not rebuild unchanged comment state", () => {
     const noop = () => undefined;
     const panel = new CommentsPanel({

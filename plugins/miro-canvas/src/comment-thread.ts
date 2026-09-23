@@ -84,6 +84,8 @@ export interface CommentThreadCardHost {
   readonly onRenameAuthor?: (threadId: string, messageId: string, name: string, origin?: CommentOrigin) => void;
   readonly onDeleteReply?: (threadId: string, replyId: string) => void;
   readonly onAppearance?: (threadId: string, origin: CommentOrigin, patch: {color?: string; locked?: boolean}) => void;
+  /** Lightweight pin preview; picker input events must not persist the Canvas. */
+  readonly onPreviewColor?: (threadId: string, origin: CommentOrigin, color?: string) => void;
   readonly onResolve: (threadId: string, resolved: boolean) => void;
   /** Deletes an editable local thread. Imported Miro evidence is never deleted. */
   readonly onDelete: (threadId: string) => void;
@@ -141,14 +143,29 @@ export class CommentThreadCard {
     this.colorInput = header.appendChild(this.make("input", "miro-canvas-thread__color"));
     this.colorInput.type = "color";
     this.colorInput.setAttribute("aria-label", "Comment color");
-    this.colorInput.addEventListener("change", () => {
-      if (this.thread) this.host.onAppearance?.(this.thread.id, this.thread.origin, {color: this.colorInput.value});
+    const saveColor = () => {
+      if (this.colorInput.disabled) return;
+      if (this.thread && this.thread.color !== this.colorInput.value) {
+        this.host.onAppearance?.(this.thread.id, this.thread.origin, {color: this.colorInput.value});
+      }
+      if (this.thread) this.host.onPreviewColor?.(this.thread.id, this.thread.origin);
+    };
+    // Native colour pickers emit many input events while the pointer moves.
+    // Persist only the chosen value, or closing the picker would rewrite the
+    // whole Canvas and show a notice for every pixel of pointer travel.
+    this.colorInput.addEventListener("input", () => {
+      if (this.thread && !this.colorInput.disabled) this.host.onPreviewColor?.(this.thread.id, this.thread.origin, this.colorInput.value);
     });
+    this.colorInput.addEventListener("change", saveColor);
+    this.colorInput.addEventListener("blur", saveColor);
     this.lockButton = header.appendChild(this.button("Lock comment", "miro-canvas-thread__icon", "lock", "🔒"));
     this.lockButton.addEventListener("click", () => {
+      if (this.lockButton.disabled) return;
       if (this.composing) {
         this.composingLocked = !this.composingLocked;
         this.lockButton.setAttribute("aria-pressed", this.composingLocked ? "true" : "false");
+        this.lockButton.setAttribute("aria-label", this.composingLocked ? "Unlock comment" : "Lock comment");
+        this.element.setAttribute("data-comment-locked", this.composingLocked ? "true" : "false");
       } else if (this.thread) this.host.onAppearance?.(this.thread.id, this.thread.origin, {locked: this.thread.locked !== true});
     });
     const panel = header.appendChild(this.button("Open in comments panel", "miro-canvas-thread__icon", "more-vertical", "⋮"));
@@ -158,7 +175,7 @@ export class CommentThreadCard {
     });
     this.deleteButton = header.appendChild(this.button("Delete comment", "miro-canvas-thread__icon", "trash-2", "×"));
     this.deleteButton.addEventListener("click", () => {
-      if (this.thread?.origin === "local") this.host.onDelete(this.thread.id);
+      if (this.thread?.origin === "local" && this.thread.locked !== true && !this.deleteButton.disabled) this.host.onDelete(this.thread.id);
     });
     this.hideImportedButton = header.appendChild(this.button("Remove imported comment from board", "miro-canvas-thread__icon", "trash-2", "×"));
     this.hideImportedButton.addEventListener("click", () => {
@@ -211,6 +228,7 @@ export class CommentThreadCard {
     this.composingLocked = false;
     this.lockButton.setAttribute("aria-pressed", "false");
     this.lockButton.setAttribute("aria-label", "Lock comment");
+    this.element.setAttribute("data-comment-locked", "false");
     this.colorInput.value = authorColor(authorName || "Local user");
     this.colorInput.hidden = this.host.onAppearance === undefined;
     this.lockButton.hidden = this.host.onAppearance === undefined;
@@ -241,6 +259,7 @@ export class CommentThreadCard {
 
   public show(thread: CommentThread, options: CommentThreadCardOptions): void {
     const changed = this.thread?.id !== thread.id || this.thread?.origin !== thread.origin || this.composing;
+    if (changed && this.thread) this.host.onPreviewColor?.(this.thread.id, this.thread.origin);
     this.composing = false;
     this.toggle.hidden = false;
     this.panelButton.hidden = false;
@@ -249,33 +268,36 @@ export class CommentThreadCard {
     this.thread = thread;
     this.element.hidden = false;
     this.element.setAttribute("data-comment-state", thread.resolved ? "resolved" : "open");
+    this.element.setAttribute("data-comment-locked", thread.locked === true ? "true" : "false");
     const local = thread.origin === "local";
     const editable = local && !thread.immutable && options.editable;
-    const authorEditable = options.editable && (!local || editable) && this.host.onRenameAuthor !== undefined;
-    this.toggle.setAttribute("aria-checked", thread.resolved ? "true" : "false");
-    this.toggle.disabled = !editable;
     const locked = thread.locked === true;
+    const canEdit = editable && !locked;
+    const authorEditable = !locked && options.editable && (!local || editable) && this.host.onRenameAuthor !== undefined;
+    this.toggle.setAttribute("aria-checked", thread.resolved ? "true" : "false");
+    this.toggle.disabled = !canEdit;
     const color = typeof thread.color === "string" && /^#[0-9a-f]{6}$/i.test(thread.color) ? thread.color : authorColor(commentAuthorLabel(thread));
-    this.colorInput.value = color;
+    if (this.document.activeElement !== this.colorInput) this.colorInput.value = color;
     this.colorInput.hidden = this.host.onAppearance === undefined;
-    this.colorInput.disabled = !options.editable;
+    this.colorInput.disabled = !options.editable || locked;
     this.lockButton.hidden = this.host.onAppearance === undefined;
     this.lockButton.disabled = !options.editable;
     this.lockButton.setAttribute("aria-label", locked ? "Unlock comment" : "Lock comment");
     this.lockButton.setAttribute("aria-pressed", locked ? "true" : "false");
     this.element.style.setProperty("--miro-thread-color", color);
     this.deleteButton.hidden = !local;
-    this.deleteButton.disabled = !editable || locked;
+    this.deleteButton.disabled = !canEdit;
     this.hideImportedButton.hidden = local || this.host.onHideImported === undefined;
     this.hideImportedButton.disabled = !options.editable || locked;
-    this.composer.hidden = !editable;
-    this.note.hidden = local && options.editable;
-    this.note.textContent = local ? "Review mode is on; comments are read-only." : "Imported from Miro; read-only.";
-    if (!local && authorEditable) this.note.textContent = "Imported from Miro; author names are local display aliases.";
+    this.composer.hidden = !canEdit;
+    this.note.hidden = canEdit;
+    this.note.textContent = locked ? "Locked comment. Unlock to reply or edit."
+      : local ? "Review mode is on; comments are read-only." : "Imported from Miro; read-only.";
+    if (!locked && !local && authorEditable) this.note.textContent = "Imported from Miro; author names are local display aliases.";
     const messageSignature = JSON.stringify({
       messages: threadMessages(thread),
       authorEditable,
-      replyEditable: editable,
+      replyEditable: canEdit,
       locale: options.locale,
     });
     // Periodic host refreshes must not replace controls underneath the pointer
@@ -288,7 +310,7 @@ export class CommentThreadCard {
       for (const message of threadMessages(thread)) {
         const mutable = !local || message.id === thread.id || thread.replies.some((reply) =>
           reply.id === message.id && reply.origin === "local" && !reply.immutable);
-        this.list.appendChild(this.message(message, options.locale, authorEditable && mutable, editable && mutable && message.id !== thread.id));
+        this.list.appendChild(this.message(message, options.locale, authorEditable && mutable, canEdit && mutable && message.id !== thread.id));
       }
     }
     if (changed) {
@@ -298,6 +320,7 @@ export class CommentThreadCard {
   }
 
   public hide(): void {
+    if (this.thread) this.host.onPreviewColor?.(this.thread.id, this.thread.origin);
     this.element.hidden = true;
     this.thread = undefined;
     this.composing = false;
@@ -361,7 +384,7 @@ export class CommentThreadCard {
     if (deletable && this.host.onDeleteReply) {
       const remove = head.appendChild(this.button("Delete reply", "miro-canvas-thread__icon", "trash-2", "×"));
       remove.addEventListener("click", () => {
-        if (this.thread && !this.thread.immutable && this.thread.origin === "local") this.host.onDeleteReply?.(this.thread.id, message.id);
+        if (this.thread && !this.thread.immutable && this.thread.locked !== true && this.thread.origin === "local") this.host.onDeleteReply?.(this.thread.id, message.id);
       });
     }
     item.appendChild(this.make("div", "miro-canvas-thread__text", message.text));

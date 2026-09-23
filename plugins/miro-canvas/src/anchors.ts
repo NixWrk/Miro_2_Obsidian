@@ -399,7 +399,7 @@ function mapValue(map: unknown, id: string): unknown | typeof ABSENT {
   return readOwn(map, id);
 }
 
-function pointOnPolyline(points: readonly AnchorPoint[], t: number): AnchorPoint | undefined {
+export function pointOnPolyline(points: readonly AnchorPoint[], t: number): AnchorPoint | undefined {
   if (points.length < 2) {
     return undefined;
   }

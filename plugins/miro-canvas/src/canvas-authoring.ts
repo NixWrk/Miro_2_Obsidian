@@ -23,9 +23,10 @@ import {
 	type UpdateConnectorEndpointInput,
 } from "./connector-endpoints";
 import type { CanvasAnchor } from "./anchors";
-import { translateBoardSelection } from "./board-selection";
+import { selectedComment, translateBoardSelection, type SelectedRouteEnds } from "./board-selection";
 import { migrateLineNodes, boardConnectors, readBoardConnector, type BoardConnector } from "./board-connectors";
 import { readLocalItem, type LocalItem } from "./local-items";
+import { listCommentThreads } from "./local-comments";
 import { isSafeColor, normalizeColor } from "./appearance";
 import {
 	LOCAL_SHAPE_KINDS, CONNECTOR_CAPS, CONNECTOR_ROUTES, CONNECTOR_STROKES,
@@ -1007,7 +1008,7 @@ function readStylePatch(action: unknown, diagnostics: CanvasAuthoringDiagnostic[
 		if (patch.borderStyle !== undefined && !["solid", "dashed", "dotted", "none"].includes(patch.borderStyle as string)) throw new SnapshotError("invalid border style");
 		if (patch.borderWidth !== undefined && (!isFiniteNumber(patch.borderWidth) || patch.borderWidth < 0 || patch.borderWidth > 100)) throw new SnapshotError("invalid border width");
 		if (patch.connector !== undefined) {
-			const connector = only(patch.connector, ["route", "strokeStyle", "startCap", "endCap", "width", "headSize", "color", "waypoints"]);
+			const connector = only(patch.connector, ["route", "strokeStyle", "startCap", "endCap", "width", "headSize", "labelT", "color", "waypoints"]);
 			if (hasOwn(connector, "waypoints")) {
 				const waypoints = readWaypoints(connector.waypoints);
 				if (waypoints === undefined) throw new SnapshotError("invalid connector waypoints");
@@ -1018,6 +1019,7 @@ function readStylePatch(action: unknown, diagnostics: CanvasAuthoringDiagnostic[
 			}
 			if (connector.width !== undefined && (!isFiniteNumber(connector.width) || connector.width <= 0 || connector.width > 100)) throw new SnapshotError("invalid connector width");
 			if (connector.headSize !== undefined && (!isFiniteNumber(connector.headSize) || connector.headSize < 1 || connector.headSize > 1000)) throw new SnapshotError("invalid connector head size");
+			if (connector.labelT !== undefined && (!isFiniteNumber(connector.labelT) || connector.labelT < 0 || connector.labelT > 1)) throw new SnapshotError("invalid connector label position");
 			if (hasOwn(connector, "color")) {
 				if (!isSafeColor(connector.color)) throw new SnapshotError("unsafe connector color");
 				connector.color = normalizeColor(connector.color);
@@ -2181,10 +2183,13 @@ export class CanvasAuthoring {
 	 * Take nodes off the board, with the connectors that ended on them and the
 	 * plugin metadata that described them, in one native history step.
 	 */
-	public moveSelection(ids: readonly string[], dx: number, dy: number, expected?: CanvasAuthoringExpected): CanvasGraphResult {
+	public moveSelection(ids: readonly string[], dx: number, dy: number, expected?: CanvasAuthoringExpected,
+		routeEnds:Readonly<Record<string,SelectedRouteEnds>>={}): CanvasGraphResult {
 		const diagnostics: CanvasAuthoringDiagnostic[]=[];
 		const reject=():CanvasGraphResult=>({ok:false,status:"rejected",diagnostics});
-		if(this.disposed||!this.host||!ids.length||![dx,dy].every(Number.isFinite))return reject();
+		if(this.disposed||!this.host||!ids.length||![dx,dy].every(Number.isFinite)
+			||Object.entries(routeEnds).some(([id,mask])=>!ids.includes(id)||typeof mask?.from!=="boolean"
+				||typeof mask?.to!=="boolean"||typeof mask?.wholeRoute!=="boolean"||!mask.from&&!mask.to))return reject();
 		const before=readSnapshotFromHost(this.host,diagnostics);
 		if(!before)return reject();
 		if (expected !== undefined) {
@@ -2195,8 +2200,40 @@ export class CanvasAuthoring {
 			}
 		}
 		const known=collectDocumentIds(before);for(const c of boardConnectors(before.document))known.add(c.id);
-		for(const id of ids)if(!known.has(id)||!policyAllowsGraphEdit(before.document,"edit",id,"element-style",diagnostics))return reject();
-		const document=translateBoardSelection(before.document,ids,dx,dy);
+		const comments=new Map(listCommentThreads(before.document).map(thread=>[`${thread.origin}:${thread.id}`,thread]));
+		const decorationRead=isObject(before.document.miroCanvas) ? safeRead(before.document.miroCanvas,"commentDecorations") : undefined;
+		const decorations=decorationRead?.ok ? decorationRead.value : undefined;
+		for(const id of ids){
+			const comment=selectedComment(id);
+			if(comment){
+				const thread=comments.get(comment.key);
+				const decoratedRead=isObject(decorations) ? safeRead(decorations,comment.key) : undefined;
+				const decorated=decoratedRead?.ok ? decoratedRead.value : undefined;
+				const lockedRead=isObject(decorated) ? safeRead(decorated,"locked") : undefined;
+				if(!thread || thread.locked===true || lockedRead?.ok && lockedRead.value===true
+					|| !policyAllowsGraphEdit(before.document,"edit",id,"element-style",diagnostics))return reject();
+			}else if(!known.has(id)||!policyAllowsGraphEdit(before.document,"edit",id,"element-style",diagnostics))return reject();
+		}
+		const document=translateBoardSelection(before.document,ids,dx,dy,routeEnds);
+		const verified=this.commitDocument(before,document,diagnostics);
+		return verified?{ok:true,status:"applied",document:verified.document,diagnostics}:reject();
+	}
+	/** Change only a native edge's editable label, with normal Canvas history. */
+	public updateEdgeLabel(id: string, label: string, expected?: CanvasAuthoringExpected): CanvasGraphResult {
+		const diagnostics: CanvasAuthoringDiagnostic[]=[];
+		const reject=():CanvasGraphResult=>({ok:false,status:"rejected",diagnostics});
+		if(this.disposed||!this.host||typeof label!=="string"||label.length>1024)return reject();
+		const before=readSnapshotFromHost(this.host,diagnostics);if(!before)return reject();
+		if(expected!==undefined){
+			const snapshot=makeSnapshot(extractExpectedDocument(expected),diagnostics);
+			if(!snapshot||!structurallyEqual(snapshot.document,before.document))return reject();
+		}
+		if(!before.edges.some(edge=>edge.id===id)||!policyAllowsGraphEdit(before.document,"edit",id,"element-style",diagnostics))return reject();
+		const document=cloneRecord(before.document);
+		const edges=safeRead(document,"edges");if(!edges.ok||!Array.isArray(edges.value))return reject();
+		const edge=edges.value.find(item=>{const key=safeRead(item,"id");return isPlainObject(item)&&key.ok&&key.value===id;});
+		if(!isPlainObject(edge))return reject();
+		setOwn(edge,"label",label);
 		const verified=this.commitDocument(before,document,diagnostics);
 		return verified?{ok:true,status:"applied",document:verified.document,diagnostics}:reject();
 	}

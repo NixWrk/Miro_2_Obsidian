@@ -525,11 +525,14 @@ describe("resizing the box a node is drawn in", () => {
     const { root, update } = build({ rotation: 90 });
     const frame = root.children[0]!;
     expect(frame.getAttribute("data-miro-canvas-resizable")).toBe("true");
+    expect(frame.getAttribute("data-miro-canvas-turned")).toBe("true");
     const grips = descendants(frame).filter((item) => item.attributes.has("data-resize"));
     expect(grips.map((item) => item.attributes.get("data-resize")).sort()).toEqual(
       ["bottom", "bottom-left", "bottom-right", "left", "right", "top", "top-left", "top-right"],
     );
     expect(grip(root, "right").style.cursor).toBe("ns-resize");
+    update({ rotation: 0 });
+    expect(frame.getAttribute("data-miro-canvas-turned")).toBe("false");
     update({ editable: false });
     expect(frame.getAttribute("data-miro-canvas-resizable")).toBe("false");
     expect(grips.every((item) => item.hidden)).toBe(true);

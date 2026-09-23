@@ -175,6 +175,7 @@ export interface SelectionHandlesActions {
    */
   readonly previewRoute?: (edgeId: string, grip: RouteGrip, point: { readonly x: number; readonly y: number }) =>
     readonly { readonly x: number; readonly y: number }[] | undefined;
+  readonly onCancelRoutePreview?: (edgeId: string) => void;
   /** A route grip was dragged and released at a viewport point. */
   readonly onReshape?: (edgeId: string, grip: RouteGrip, point: { readonly x: number; readonly y: number }) => void;
   /** A waypoint or segment was double-clicked: take that bend out. */
@@ -707,6 +708,7 @@ export class SelectionHandles {
       const point = pointOf(event);
       this.routeDrag = undefined;
       if (reshape.moved && point !== undefined) this.actions.onReshape?.(reshape.edgeId, reshape.grip, point);
+      else this.actions.onCancelRoutePreview?.(reshape.edgeId);
     }
     const resize = this.resizeDrag;
     if (resize !== undefined) {
@@ -767,7 +769,10 @@ export class SelectionHandles {
     this.routeDrag = undefined;
     this.element.removeAttribute?.("data-miro-canvas-reshaping");
     // A dragged route grip that was not committed goes back where the route is.
-    if (reshape !== undefined) this.placeRouteGrips(this.state, this.routeGripsShown(this.state));
+    if (reshape !== undefined) {
+      this.actions.onCancelRoutePreview?.(reshape.edgeId);
+      this.placeRouteGrips(this.state, this.routeGripsShown(this.state));
+    }
     if (resize !== undefined) {
       if (resize.moved) this.actions.onCancelResize?.();
       this.showResize(resize.start, resize.rotation);
@@ -873,6 +878,7 @@ export class SelectionHandles {
       : state;
     const refs = this.refs;
     if (refs === undefined) return;
+    refs.frame.setAttribute("data-miro-canvas-turned", Math.abs(this.state.rotation % 360) > 0.01 ? "true" : "false");
     // A gesture keeps the handles it started with rather than hiding them, but
     // it still tracks where the node is: writing only the angle left the frame
     // at the position of the last refresh before the drag.

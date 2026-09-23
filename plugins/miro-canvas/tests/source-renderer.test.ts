@@ -1051,14 +1051,17 @@ function routeFixture({ rotation = 0, shape, observe = false, preview }: {
     },
   };
   edge.updatePath(); edge.redraws = 0;
+  let movingIds: string[] | undefined;
   const renderer = new SourceRenderer({
     getDocument: () => data,
     getNodes: () => [a, b],
     getEdges: () => [edge],
     getRotationPreview: () => preview,
+    getSelectionMovePreviewIds: () => movingIds,
   }, document);
   const numbers = (value: string | null) => (value ?? "").match(/-?\d+(?:\.\d+)?/gu)!.map(Number);
-  return { renderer, data, a, b, edge, display, interaction, head, NATIVE, observers, numbers };
+  return { renderer, data, a, b, edge, display, interaction, head, NATIVE, observers, numbers,
+    get movingIds() { return movingIds; }, set movingIds(value: string[] | undefined) { movingIds = value; } };
 }
 
 describe("native edges on turned and shaped nodes", () => {
@@ -1140,6 +1143,39 @@ describe("native edges on turned and shaped nodes", () => {
     f.renderer.refresh();
     expect(f.display.getAttribute("d")).toBe(f.NATIVE);
     expect(f.edge.redraws).toBe(0);
+  });
+
+  it("draws an ordinary native edge from projected positions during a group drag", () => {
+    const f = routeFixture();
+    f.renderer.refresh();
+    expect(f.display.getAttribute("d")).toBe(f.NATIVE);
+    f.data.nodes[0].x = 120;
+    f.movingIds = ["a"];
+    f.renderer.refresh();
+    expect(f.display.getAttribute("d")).toMatch(/^M 220 40 /);
+    expect(f.interaction.getAttribute("d")).toBe(f.display.getAttribute("d"));
+    expect(f.a.x).toBe(0); // Native runtime still has the old position.
+    f.movingIds = undefined;
+    f.renderer.refresh();
+    expect(f.display.getAttribute("d")).toBe(f.NATIVE);
+  });
+
+  it("uses projected geometry for precise and source-backed arrows as well", () => {
+    const f = routeFixture();
+    f.data.miroCanvas.localOverrides.n1 = { connectorAnchors: {
+      from: { type: "node", nodeId: "a", u: 1, v: 0.25 },
+      to: { type: "node", nodeId: "b", u: 0, v: 0.75 },
+    } };
+    f.renderer.refresh();
+    f.data.nodes[0].x = 120;
+    f.movingIds = ["a"];
+    f.renderer.refresh();
+    expect(f.display.getAttribute("d")).toMatch(/^M 220 20 /);
+    f.data.miroSource = { connectors: [{ id: "n1", shape: "straight", style: { strokeColor: "#123456", strokeWidth: 2 } }] };
+    f.renderer.refresh();
+    expect(f.display.getAttribute("d")).toMatch(/^M 220 20 /);
+    expect(f.display.style.getPropertyValue("stroke")).toBe("#123456");
+    expect(f.a.x).toBe(0);
   });
 
   it("keeps a precisely anchored connector on its anchors while its node is dragged", () => {

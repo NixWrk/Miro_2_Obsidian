@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { commentSelectionId } from "../src/board-selection";
 
 import {
 	createCanvasAuthoring,
@@ -38,6 +39,62 @@ describe("mixed selection transactions",()=>{
     expect(after.miroCanvas.connectors.b).toMatchObject({color:"#ff0000",width:4,from:{type:"edge",edgeId:"a"}});
     expect(runtime.history).toHaveLength(2);runtime.undo();expect(runtime.getData()).toEqual(before);
     runtime.redo();expect(runtime.getData()).toEqual(after);
+  });
+  it("moves only marquee-caught connector ends in one undoable group transaction",()=>{
+    const before=document() as any;
+    before.miroCanvas.connectors.a.from={type:"free",x:50,y:50};
+    before.miroCanvas.connectors.a.to={type:"free",x:300,y:100};
+    const runtime=new NativeGraph(before),authoring=createCanvasAuthoring(runtime);
+    const mask={a:{from:true,to:false,wholeRoute:false}};
+    expect(authoring.moveSelection(["a"],40,30,before,mask).ok).toBe(true);
+    const after=runtime.getData() as any;
+    expect(after.miroCanvas.connectors.a.from).toMatchObject({x:90,y:80});
+    expect(after.miroCanvas.connectors.a.to).toEqual(before.miroCanvas.connectors.a.to);
+    expect(runtime.history).toHaveLength(2);
+    runtime.undo();expect(runtime.getData()).toEqual(before);
+  });
+  it("edits a native edge label atomically without changing its connector override",()=>{
+    const before=document() as any;
+    before.edges[0].label="Old";
+    before.miroCanvas.localOverrides.e={connector:{waypoints:[{x:150,y:50}],labelT:0.3}};
+    const runtime=new NativeGraph(before),authoring=createCanvasAuthoring(runtime);
+    expect(authoring.updateEdgeLabel("e","Moved label",before).ok).toBe(true);
+    const after=runtime.getData() as any;
+    expect(after.edges[0].label).toBe("Moved label");
+    expect(after.miroCanvas.localOverrides.e).toEqual(before.miroCanvas.localOverrides.e);
+    expect(runtime.history).toHaveLength(2);
+    runtime.undo();expect(runtime.getData()).toEqual(before);
+    runtime.redo();expect((runtime.getData() as any).edges[0].label).toBe("Moved label");
+  });
+  it("rejects a stale or locked native edge label edit",()=>{
+    const before=document() as any;
+    const runtime=new NativeGraph(before),authoring=createCanvasAuthoring(runtime);
+    expect(authoring.updateEdgeLabel("e","Text",{...before,unknown:true}).ok).toBe(false);
+    before.miroCanvas.localOverrides.e={locked:true};
+    const locked=new NativeGraph(before);
+    expect(createCanvasAuthoring(locked).updateEdgeLabel("e","Text").ok).toBe(false);
+    expect(locked.history).toHaveLength(1);
+  });
+  it("moves selected comments with nodes and connectors in one undoable transaction",()=>{
+    const before=document() as any;
+    before.miroCanvas.localComments=[{id:"note",text:"Note",anchor:{type:"free",x:500,y:300},replies:[]}];
+    const runtime=new NativeGraph(before),authoring=createCanvasAuthoring(runtime);
+    const id=commentSelectionId("local","note");
+    expect(authoring.moveSelection(["n","a",id],40,30,before).ok).toBe(true);
+    const after=runtime.getData() as any;
+    expect(after.nodes[0].x).toBe(40);
+    expect(after.miroCanvas.connectors.a.to.x).toBe(340);
+    expect(after.miroCanvas.commentPlaces["local:note"]).toEqual({type:"free",x:540,y:330});
+    expect(runtime.history).toHaveLength(2);
+    runtime.undo();expect(runtime.getData()).toEqual(before);
+  });
+  it("refuses a mixed move containing a locked comment",()=>{
+    const before=document() as any;
+    before.miroCanvas.localComments=[{id:"note",text:"Note",anchor:{type:"free",x:500,y:300},replies:[]}];
+    before.miroCanvas.commentDecorations={"local:note":{locked:true}};
+    const runtime=new NativeGraph(before);
+    expect(createCanvasAuthoring(runtime).moveSelection(["n",commentSelectionId("local","note")],40,30,before).ok).toBe(false);
+    expect(runtime.getData()).toEqual(before);expect(runtime.history).toHaveLength(1);
   });
   it("deletes node, native edge and connector dependency chain atomically",()=>{
     const before=document(),runtime=new NativeGraph(before);

@@ -1,11 +1,21 @@
 import { describe, expect, it } from "vitest";
-import { boardConnectors, connectorEndCap, connectorRoutes, migrateLineNodes, readBoardConnector, reshapeBoardConnector, restyleBoardConnector, translateConnector, type BoardConnector } from "../src/board-connectors";
+import { boardConnectors, connectorEndCap, connectorRoutes, migrateLineNodes, nearestRouteFraction, readBoardConnector, reshapeBoardConnector, restyleBoardConnector, translateConnector, type BoardConnector } from "../src/board-connectors";
+import { pointOnPolyline } from "../src/anchors";
 import { routeHandles } from "../src/connector-route";
 import { buildCanvasAnchorGeometry, updateConnectorEndpoint } from "../src/connector-endpoints";
 import { validateMiroCanvasMetadata } from "../src/metadata";
 const line: BoardConnector = {id:"a",from:{type:"free",x:10,y:20},to:{type:"free",x:110,y:20},route:"straight",color:"#123456",width:2,startCap:"none",endCap:"arrow"};
 const legacy = () => ({nodes:[{id:"old",type:"text",text:"",x:10,y:20,width:100,height:50}],edges:[],miroSource:{future:[1]},miroCanvas:{schemaVersion:1,localOverrides:{old:{future:"kept",localItem:{type:"line",line:{route:"straight",color:"#123456",width:2,box:{width:100,height:50},points:[0,0,100,50]}}}}}});
 describe("independent board connectors",()=>{
+  it("stores a bounded label and projects its movable route fraction",()=>{
+    const c={...line,label:"Next step",labelT:0.75};
+    expect(readBoardConnector(c)).toEqual(c);
+    expect(readBoardConnector({...c,labelT:1.1})).toBeUndefined();
+    expect(readBoardConnector({...c,label:"x".repeat(1025)})).toBeUndefined();
+    expect(pointOnPolyline([{x:0,y:0},{x:100,y:0},{x:100,y:100}],0.75)).toEqual({x:100,y:50});
+    expect(nearestRouteFraction([{x:0,y:0},{x:100,y:0},{x:100,y:100}],{x:110,y:50})).toBe(0.75);
+    expect(translateConnector(c,20,30)).toMatchObject({label:"Next step",labelT:0.75});
+  });
   it("validates optional head sizes and preserves them through movement and restyling",()=>{
     for (const headSize of [1, 12.5, 1000]) {
       const c = {...line, headSize};

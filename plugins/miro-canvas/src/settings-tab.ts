@@ -118,6 +118,9 @@ export class MiroCanvasSettingTab extends PluginSettingTab {
     this.slider(containerEl, "Key point snap distance",
       "How close a connector end has to come to a node's standard connection point, in screen pixels, to snap onto it.",
       "connectorSnap", (value) => `${value} px`);
+    this.slider(containerEl, "Default connector label position",
+      "New labels start here along a line or arrow. Drag an individual label to reposition it.",
+      "connectorLabelPosition", (value) => `${Math.round(value * 100)}%`);
 
     new Setting(containerEl).setName("Keyboard").setHeading();
 

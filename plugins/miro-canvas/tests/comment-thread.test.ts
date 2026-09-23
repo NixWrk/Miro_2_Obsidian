@@ -95,6 +95,37 @@ describe("comment thread card", () => {
     return { card, root: card.element as unknown as FakeElement, calls };
   }
 
+  it("keeps picker input responsive and saves once on change or blur", () => {
+    const document = { createElement: (tag: string) => new FakeElement(tag), activeElement: undefined as FakeElement | undefined };
+    const changes: unknown[][] = [];
+    const previews: unknown[][] = [];
+    const card = new CommentThreadCard(document as unknown as Document, {
+      onReply: () => {}, onResolve: () => {}, onDelete: () => {}, onOpenPanel: () => {}, onClose: () => {},
+      onAppearance: (...args) => changes.push(args),
+      onPreviewColor: (...args) => previews.push(args),
+    });
+    const color = (card.element as unknown as FakeElement).byLabel("Comment color");
+    card.show(LOCAL, { editable: true });
+    document.activeElement = color;
+    color.value = "#405080";
+    color.fire("input");
+    color.value = "#3f66aa";
+    card.show(LOCAL, { editable: true });
+    expect(color.value).toBe("#3f66aa");
+    color.fire("input");
+    expect(changes).toEqual([]);
+    expect(previews.at(-1)).toEqual(["l1", "local", "#3f66aa"]);
+    color.fire("change");
+    expect(changes).toEqual([["l1", "local", { color: "#3f66aa" }]]);
+    expect(previews.at(-1)).toEqual(["l1", "local"]);
+    card.show({ ...LOCAL, color: "#3f66aa" }, { editable: true });
+    color.fire("blur");
+    expect(changes).toHaveLength(1);
+    color.value = "#123456";
+    color.fire("blur");
+    expect(changes[1]).toEqual(["l1", "local", { color: "#123456" }]);
+  });
+
   it("passes edited author names for new comments and replies, preserving reply drafts on refresh", () => {
     const { card, root, calls } = setup();
     const form = root.byClass("miro-canvas-thread__composer")[0]!;
@@ -117,6 +148,20 @@ describe("comment thread card", () => {
     expect(calls).toHaveLength(2);
     card.compose();
     expect(root.byLabel("Author name").value).toBe("");
+  });
+
+  it("shows the lock state while composing a new comment", () => {
+    const { card, root, calls } = setup();
+    card.compose("Alice");
+    expect(root.getAttribute("data-comment-locked")).toBe("false");
+    root.byLabel("Lock comment").fire("click");
+    expect(root.getAttribute("data-comment-locked")).toBe("true");
+    expect(root.byLabel("Unlock comment").getAttribute("aria-pressed")).toBe("true");
+    root.byLabel("Reply").value = "Locked from creation";
+    root.byClass("miro-canvas-thread__composer")[0]!.fire("submit");
+    expect(calls).toEqual([["create", "Locked from creation", "Alice", {color: authorColor("Alice"), locked: true}]]);
+    card.compose("Alice");
+    expect(root.getAttribute("data-comment-locked")).toBe("false");
   });
 
   it("renames opening and reply authors without interrupting a focused edit on refresh", () => {
@@ -214,6 +259,51 @@ describe("comment thread card", () => {
     expect(root.byClass("miro-canvas-thread__note")[0]!.hidden).toBe(false);
     card.hide();
     expect(card.threadId).toBeUndefined();
+  });
+
+  it("locks a thread's replies and edits visibly until it is unlocked", () => {
+    const calls: unknown[][] = [];
+    const card = new CommentThreadCard(fakeDocument, {
+      onReply: (...args) => calls.push(["reply", ...args]),
+      onResolve: (...args) => calls.push(["resolve", ...args]),
+      onDelete: (...args) => calls.push(["delete", ...args]),
+      onOpenPanel: () => {}, onClose: () => {},
+      onAppearance: (...args) => calls.push(["appearance", ...args]),
+      onRenameAuthor: (...args) => calls.push(["rename", ...args]),
+      onDeleteReply: (...args) => calls.push(["delete-reply", ...args]),
+    });
+    const root = card.element as unknown as FakeElement;
+    const form = root.byClass("miro-canvas-thread__composer")[0]!;
+    card.show(LOCAL, { editable: true });
+    root.byLabel("Lock comment").fire("click");
+    expect(calls).toEqual([["appearance", "l1", "local", { locked: true }]]);
+
+    card.show({ ...LOCAL, locked: true }, { editable: true });
+    expect(root.getAttribute("data-comment-locked")).toBe("true");
+    expect(root.byLabel("Unlock comment").getAttribute("aria-pressed")).toBe("true");
+    expect(root.byClass("miro-canvas-thread__note")[0]!.textContent).toContain("Unlock to reply");
+    expect(form.hidden).toBe(true);
+    expect(root.byLabel("Resolve").disabled).toBe(true);
+    expect(root.byLabel("Delete comment").disabled).toBe(true);
+    expect(root.byLabel("Comment color").disabled).toBe(true);
+    expect(root.byLabel("Edit author name")).toBeUndefined();
+    expect(root.byLabel("Delete reply")).toBeUndefined();
+    root.byLabel("Reply").value = "Blocked";
+    form.fire("submit");
+    root.byLabel("Resolve").fire("click");
+    root.byLabel("Delete comment").fire("click");
+    root.byLabel("Comment color").value = "#123456";
+    root.byLabel("Comment color").fire("change");
+    expect(calls).toHaveLength(1);
+
+    root.byLabel("Unlock comment").fire("click");
+    expect(calls.at(-1)).toEqual(["appearance", "l1", "local", { locked: false }]);
+    card.show(LOCAL, { editable: true });
+    expect(root.getAttribute("data-comment-locked")).toBe("false");
+    expect(form.hidden).toBe(false);
+    expect(root.byLabel("Resolve").disabled).toBe(false);
+    expect(root.byLabel("Edit author name")).toBeDefined();
+    expect(root.byLabel("Delete reply")).toBeDefined();
   });
 
   it("opens beside its pin and stays inside the board", () => {

@@ -1130,7 +1130,14 @@
   gap: 2px;
   padding-bottom: 4px;
   border-bottom: 1px solid var(--miro-canvas-toolbar-border);
+  justify-content: flex-start;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
 }
+.miro-canvas-tools .miro-canvas-tools__drawing::-webkit-scrollbar,
+.miro-canvas-tools .miro-canvas-tools__connectors::-webkit-scrollbar { display: none; }
 
 /* Seven directly available connector types fit in the same row as drawing.
    Keep the palette size; give the width slider the remaining space. */
@@ -1142,6 +1149,7 @@
 .miro-canvas-tools__connectors .miro-canvas-tools__size,
 .miro-canvas-tools__drawing .miro-canvas-tools__size {
   flex: 1;
+  min-width: 0;
 }
 .miro-canvas-tools .miro-canvas-tools__size .miro-canvas-toolbar__range {
   flex: 1;
@@ -1160,7 +1168,7 @@
 }
 
 .miro-canvas-tools__size {
-  gap: 8px;
+  gap: 4px;
 }
 
 .miro-canvas-tools__size .miro-canvas-toolbar__range {
@@ -1169,7 +1177,8 @@
 }
 
 .miro-canvas-tools .miro-canvas-tools__number {
-  width: 4.5em;
+  width: 3.5em;
+  min-width: 3.5em;
 }
 
 /* A sample of the size: a dot of the line in its colour, or the eraser's ring.
@@ -1178,8 +1187,8 @@
   display: grid;
   flex: none;
   place-items: center;
-  width: 30px;
-  height: 30px;
+  width: 24px;
+  height: 24px;
 }
 
 .miro-canvas-tools__preview::before {
@@ -1675,12 +1684,17 @@
 }
 
 /* Creation palettes use the same circular swatch for presets and custom ink. */
+.miro-canvas-tools .miro-canvas-toolbar__button--swatch {
+  width: 20px;
+  min-width: 20px;
+  height: 20px;
+}
 .miro-canvas-tools .miro-canvas-tools__swatches input.miro-canvas-toolbar__swatch {
-  width: 22px;
-  min-width: 22px;
-  max-width: 22px;
-  flex: 0 0 22px;
-  height: 22px;
+  width: 20px;
+  min-width: 20px;
+  max-width: 20px;
+  flex: 0 0 20px;
+  height: 20px;
   border-radius: 50%;
 }
 
@@ -1739,6 +1753,16 @@
 .miro-canvas-handles__frame[data-miro-canvas-resizable="true"] {
   outline: 1px dashed var(--interactive-accent);
   outline-offset: 0;
+}
+
+/* For an unrotated native node the host already supplies the visible border.
+   Keep our grips, but do not paint a second border on top of its selection. */
+.miro-canvas-root:has(.canvas-selection) .miro-canvas-handles__frame[data-miro-canvas-resizable="true"][data-miro-canvas-turned="false"] {
+  outline: none;
+}
+
+.miro-canvas-root:has(.canvas-selection) .miro-canvas-handles[data-miro-canvas-resizing] .miro-canvas-handles__frame[data-miro-canvas-resizable="true"] {
+  outline: 1px dashed var(--interactive-accent);
 }
 
 .miro-canvas-root .canvas-node-interaction-layer .canvas-node-resizer {
@@ -1866,6 +1890,47 @@
 
 .miro-board-connectors { position:absolute; inset:0; width:100%; height:100%; overflow:visible; pointer-events:none; z-index:5; }
 .miro-board-connector-hit { pointer-events:stroke; cursor:move; }
+.miro-board-connector-label {
+  fill: var(--text-normal);
+  stroke: var(--background-primary);
+  stroke-width: 4px;
+  paint-order: stroke fill;
+  font: 13px var(--font-interface);
+  pointer-events: auto;
+  cursor: grab;
+  user-select: none;
+}
+.miro-board-connector-label-editor {
+  position: absolute;
+  z-index: 120;
+  min-width: 120px;
+  max-width: 300px;
+  transform: translate(-50%, -50%);
+}
+.miro-canvas-native-edge-labels {
+  position: absolute;
+  inset: 0;
+  z-index: 8;
+  pointer-events: none;
+}
+.miro-canvas-native-edge-label {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  padding: 2px 4px;
+  color: var(--text-normal);
+  background: var(--background-primary);
+  border: 0;
+  border-radius: 3px;
+  pointer-events: auto;
+  cursor: grab;
+}
+.miro-canvas-native-edge-label-editor {
+  position: absolute;
+  z-index: 2;
+  transform: translate(-50%, -50%);
+  min-width: 120px;
+  pointer-events: auto;
+}
 .miro-board-connector-grip { fill:var(--background-primary); stroke:var(--interactive-accent); stroke-width:2px; pointer-events:all; cursor:crosshair; }
 .miro-board-connector-tools { position:absolute; top:12px; left:50%; transform:translateX(-50%); z-index:30; display:flex; gap:4px; padding:6px; background:var(--background-primary); border:1px solid var(--background-modifier-border); border-radius:8px; }
 .miro-board-connector-tools[hidden] { display:none; }
@@ -2757,6 +2822,21 @@
   border-color: var(--background-modifier-border);
 }
 
+.miro-canvas-comment-marker[data-comment-locked="true"]::before {
+  position: absolute;
+  bottom: -6px;
+  left: -6px;
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  color: var(--text-normal);
+  font-size: 11px;
+  content: "🔒";
+  background: var(--background-primary);
+  border-radius: 50%;
+}
+
 .miro-canvas-comment-marker[data-comment-count]:not([data-comment-count="1"])::after {
   position: absolute;
   top: -6px;
@@ -2795,9 +2875,10 @@
   display: none !important;
 }
 
-/* Native Canvas knows only its own selected nodes/edges. A mixed selection uses
-   the frame covering those elements and plugin connectors together. */
-.miro-canvas-mixed-selection .canvas-selection {
+/* Keep native Canvas's visible selection for native-only groups. Its own box
+   can never include independent connectors, so only those groups need our
+   visible shared outline. The transparent frame still offers a full-area drag. */
+.miro-canvas-mixed-selection--independent .canvas-selection {
   visibility: hidden;
 }
 
@@ -2805,8 +2886,35 @@
   position: absolute;
   z-index: 9;
   box-sizing: border-box;
+  border: 0;
+  pointer-events: auto;
+  cursor: move;
+}
+
+.miro-canvas-mixed-selection--independent .miro-canvas-mixed-selection-frame {
   border: 1px solid var(--interactive-accent);
+}
+
+/* One lightweight live marquee owns the gesture for native and plugin items. */
+.miro-canvas-rectangle-marquee {
+  position: absolute;
+  z-index: 10;
+  box-sizing: border-box;
+  border: 1px solid var(--interactive-accent);
+  background: color-mix(in srgb, var(--interactive-accent) 9%, transparent);
   pointer-events: none;
+}
+
+.miro-canvas-rectangle-marquee[hidden] {
+  display: none;
+}
+
+[data-miro-rectangle-selecting="true"] .canvas-selection {
+  visibility: hidden;
+}
+
+[data-miro-rectangle-selecting="true"] .miro-canvas-mixed-selection-frame {
+  display: none;
 }
 
 .miro-canvas-mixed-selection-frame > div {
@@ -2832,6 +2940,11 @@
 }
 .miro-canvas-mixed-selection-frame__left { left: -5px; }
 .miro-canvas-mixed-selection-frame__right { right: -5px; }
+
+.miro-canvas-comment-marker[data-comment-selected="true"] {
+  outline: 2px solid var(--interactive-accent);
+  outline-offset: 3px;
+}
 
 .miro-canvas-thread__header {
   display: flex;
@@ -2982,6 +3095,11 @@
   gap: 4px;
   padding: 8px 8px 8px 14px;
   border-top: 1px solid var(--background-modifier-border);
+}
+
+.miro-canvas-thread[data-comment-locked="true"] .miro-canvas-thread__icon[aria-label="Unlock comment"] {
+  color: var(--interactive-accent);
+  background: var(--background-modifier-hover);
 }
 
 .miro-canvas-thread__author-input {

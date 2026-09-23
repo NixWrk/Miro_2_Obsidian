@@ -31,8 +31,9 @@ import {
 } from "./canvas-adapter";
 import { CANVAS_SHAPE_KINDS, createCanvasAuthoring, type CanvasAuthoring, type ConnectorSide } from "./canvas-authoring";
 import { boardConnectors, connectorEndCap, connectorRoutes, restyleBoardConnector, type BoardConnector } from "./board-connectors";
-import { translateBoardSelection, routeIntersectsBox } from "./board-selection";
+import { commentSelectionId, selectedComment, translateBoardSelection, routeEndsInBox, pointInSelectionBox, rectIntersectsBox, type SelectedRouteEnds } from "./board-selection";
 import { ConnectorLayer } from "./connector-layer";
+import { NativeEdgeLabels, type NativeEdgeLabel } from "./native-edge-labels";
 import {
 	MAX_WAYPOINTS, gripNear, moveElbowSegment, placeWaypoint, planRoute, removeWaypoint, routeBends, routeHandles, routePath, simplifyCorners,
 	type PlannedRoute, type RouteEnd,
@@ -641,6 +642,8 @@ function keyIsPrintable(key: string): boolean {
 /** A single active Canvas runtime and its user-facing M1 controls. */
 export class M1CanvasSession {
 	private connectorLayer?: ConnectorLayer;
+	private nativeEdgeLabels?: NativeEdgeLabels;
+	private activeNativeRouteDragId?: string;
 	private connectorColor?: string;
 	private connectorHeadSize?: number;
 	private connectorWidth = 2;
@@ -650,9 +653,10 @@ export class M1CanvasSession {
 	private liveGeometryDirty = false;
 	public resetTools(): void {
 		this.rectangleSelectionEnd?.();
+		this.selectedRouteEnds.clear();
 		this.selectionMoveEnd?.();
 		this.toolGesture?.end();this.panGestureEnd?.();this.linePlacing=undefined;
-		this.cancelHandleRotation();this.connectorLayer?.reset();this.callNative("deselectAll");
+		this.cancelHandleRotation();this.connectorLayer?.reset();this.callNative("deselectAll");this.selectedCommentKeys.clear();
 		this.closeCommentThread();this.quickTools?.closePanels();this.armTool("select");this.refresh();
 	}
 	public migrateLines(): void {
@@ -665,7 +669,7 @@ export class M1CanvasSession {
 	private refreshBoardConnectors(): void {
 		if (!this.root || typeof this.root.ownerDocument?.createElementNS !== "function" || typeof this.root.append !== "function") return;
 		this.connectorLayer ??= new ConnectorLayer(this.root, {
-			document: () => this.currentRawDocument,
+			document: () => this.commentMovePreview ?? this.selectionMovePreview ?? this.currentRawDocument,
 			geometry: () => this.landingGeometry().geometry,
 			screen: p => { const at = this.viewportPoint(p) ?? p; const box = boundingRect(this.root); return {x:at.x-(box?.left??0),y:at.y-(box?.top??0)}; },
 			board: p => this.boardPoint(p),
@@ -677,8 +681,60 @@ export class M1CanvasSession {
 			removeSelection: () => this.deleteBoardSelection(),
 			moveSelection: event => this.startSelectionMove(event),
 			selectionChanged: () => this.refresh(),
+			defaultLabelT: () => this.settings.connectorLabelPosition,
 		});
 		this.connectorLayer.render();
+	}
+	/** Edit the label of the one selected line: a board connector's, or a native edge's. */
+	private editSelectedConnectorLabel(): void {
+		if (this.connectorLayer?.editSelectedLabel() === true) return;
+		const id = this.selectedIds.length === 1 ? this.selectedIds[0] : undefined;
+		if (id !== undefined) this.nativeEdgeLabels?.edit(id);
+	}
+	private updateNativeEdgeLabels(): void {
+		// Persistence tests and some headless hosts expose a canvas root
+		// without a DOM document; labels are only a visual enhancement.
+		if(!this.root?.ownerDocument)return;
+		this.nativeEdgeLabels??=new NativeEdgeLabels(this.root,{
+			editable:id=>this.editAllowed("edit-text",[id]),
+			move:(id,t)=>{
+				this.authoring??=createCanvasAuthoring(this.view);
+				const result=this.authoring.updateElementStyles([{id,connector:{labelT:t}}]);
+				if(!result.ok)this.options.onNotice?.(firstProblem(result.diagnostics)??"Edge label could not be moved.");
+				this.refresh();
+			},
+			edit:(id,label)=>{
+				this.authoring??=createCanvasAuthoring(this.view);
+				const result=this.authoring.updateEdgeLabel(id,label);
+				if(!result.ok)this.options.onNotice?.(firstProblem(result.diagnostics)??"Edge label could not be edited.");
+				this.refresh();
+			},
+		});
+		const raw=this.currentRawDocument,edges=readRuntime(raw,"edges");
+		const byId=new Map((Array.isArray(edges)?edges:[]).filter(isRecord).map(edge=>[readRuntime(edge,"id"),edge]));
+		const geometry=this.landingGeometry().geometry;
+		const items:NativeEdgeLabel[]=[];
+		for(const edge of this.adapter.getEdges()??[]){
+			const id=readCanvasElementId(edge),rawEdge=id===undefined?undefined:byId.get(id);
+			if(!id||!rawEdge)continue;
+			const value=readRuntime(rawEdge,"label"),label=typeof value==="string"?value:"";
+			const override=readRuntime(readRuntime(readRuntime(raw,"miroCanvas"),"localOverrides"),id);
+			const connector=readRuntime(override,"connector");
+			const labelT=readRuntime(connector,"labelT");
+			const dom=readCanvasElementDom(edge)??readRuntime(edge,"edgeEl");
+			const query=readRuntime(dom,"querySelector");
+			const found=typeof query==="function"?Reflect.apply(query,dom,[".canvas-edge-label,.canvas-edge-label-wrapper"]):undefined;
+			const native=[readRuntime(edge,"labelEl"),readRuntime(edge,"textEl"),found]
+				.find(value=>isElement(value)&&isObject(readRuntime(value,"style")));
+			const labelElement=(typeof HTMLElement!=="undefined"&&native instanceof HTMLElement)
+				|| (typeof SVGElement!=="undefined"&&native instanceof SVGElement)?native as HTMLElement|SVGElement:undefined;
+			const route=geometry.edges?.[id];
+			const points=(route?.points??(route?.start&&route.end?[route.start,route.end]:[]))
+				.map(point=>this.viewportPoint(point)).filter((point):point is {x:number;y:number}=>point!==undefined);
+			if(points.length<2)continue;
+			items.push({id,text:label,points,t:typeof labelT==="number"&&labelT>=0&&labelT<=1?labelT:this.settings.connectorLabelPosition,native:labelElement});
+		}
+		this.nativeEdgeLabels.update(items);
 	}
 	private writeBoardConnectors(items: BoardConnector[], remove: string[] = [], expected?: BoardConnector): boolean {
 		this.currentRawDocument = this.adapter.getDocument();
@@ -752,9 +808,11 @@ export class M1CanvasSession {
 	private nativeReadonlyWarningShown = false;
 	private currentMetadata: MiroCanvasMetadata | undefined;
 	private currentRawDocument: unknown;
+	private commentMovePreview: Record<string, unknown> | undefined;
 	private appearance: AppearanceState = normalizeAppearanceState(undefined);
 	private policy: InteractionPolicy = createInteractionPolicy(undefined);
 	private selectedIds: readonly string[] = [];
+	private selectedCommentKeys = new Set<string>();
 	private scene: CanvasScene = { nodes: [], edges: [] };
 	private minimap: MinimapModel | undefined;
 	private transientDiagnostics: string[] = [];
@@ -859,9 +917,10 @@ export class M1CanvasSession {
 				: undefined;
 		const renderDocument = options.document ?? ownerDocument(this.root);
 		this.sourceRenderer = renderDocument === undefined ? undefined : new SourceRenderer({
-			getDocument: () => this.selectionMovePreview ?? this.adapter.getDocument(),
+			getDocument: () => this.commentMovePreview ?? this.selectionMovePreview ?? this.adapter.getDocument(),
 			getNodes: () => this.adapter.getNodes(),
 			getEdges: () => this.adapter.getEdges(),
+			getSelectionMovePreviewIds: () => this.selectionMovePreview === undefined ? undefined : this.selectionMoveIds,
 			getRotationPreview: () => this.rotationPreview,
 			onDeckAction: (deckId, action) => this.runDeckAction(deckId, action),
 		}, renderDocument);
@@ -891,6 +950,7 @@ export class M1CanvasSession {
 		this.toolbar = new SelectionToolbar({
 			onAppearance: (action) => this.applyAppearance(action),
 			onStyle: (patch) => this.applyElementStyle(patch),
+			onEditConnectorLabel: () => {this.editSelectedConnectorLabel();},
 			onDelete: () => this.deleteBoardSelection(),
 			onLock: (locked) => (locked ? this.lockSelection() : this.unlockSelection()),
 			onOpenLink: () => this.openSelectedLink(),
@@ -908,12 +968,15 @@ export class M1CanvasSession {
 			onResize: (rect, commit) => this.applyHandleResize(rect, commit),
 			onCancelResize: () => this.cancelHandleResize(),
 			previewRoute: (edgeId, grip, point) => this.previewReshape(edgeId, grip, point),
+			onCancelRoutePreview: edgeId => {this.activeNativeRouteDragId=undefined;this.nativeEdgeLabels?.clearPreview(edgeId);this.updateNativeEdgeLabels();},
 			onReshape: (edgeId, grip, point) => this.reshapeConnector(edgeId, grip, point),
 			onStraighten: (edgeId, grip) => this.straightenConnector(edgeId, grip),
 		}, { document: controlDocument });
 		this.commentMarkers = controlDocument === undefined ? undefined : new CommentMarkers({
 			onOpenThread: (threadId, origin) => this.openCommentThread(threadId, origin),
 			onMoveThread: (threadId, origin, point) => this.moveCommentThread(threadId, origin, point),
+			onPreviewThreadMove: (threadId, origin, point) => this.previewCommentMove(threadId, origin, point),
+			onCancelThreadMove: () => this.cancelCommentMove(),
 		}, { document: controlDocument });
 		this.quickTools = controlDocument === undefined ? undefined : new QuickTools({
 			onArm: (tool) => this.armTool(tool),
@@ -1149,6 +1212,11 @@ export class M1CanvasSession {
 		if (shaped === undefined || origin === undefined) return undefined;
 		const { plan, bends } = shaped;
 		const route = planRoute(plan.ends.from, plan.ends.to, plan.route, bends, { imported: plan.imported });
+		if(this.activeNativeRouteDragId!==edgeId){
+			this.activeNativeRouteDragId=edgeId;
+			this.updateNativeEdgeLabels();
+		}
+		this.nativeEdgeLabels?.preview(edgeId,route.points.flatMap(item=>{const at=this.viewportPoint(item);return at?[at]:[];}));
 		return route.points.flatMap((item) => {
 			const at = this.viewportPoint(item);
 			return at === undefined ? [] : [{ x: at.x - origin.left, y: at.y - origin.top }];
@@ -1228,6 +1296,8 @@ export class M1CanvasSession {
 	}
 
 	private reshapeConnector(edgeId: string, grip: RouteGrip, point: { readonly x: number; readonly y: number }): void {
+		this.activeNativeRouteDragId=undefined;
+		this.nativeEdgeLabels?.clearPreview(edgeId);
 		// The release that ends a drag must not also click the board clear.
 		this.swallowClickUntil = Date.now() + 400;
 		const shaped = this.reshapedBends(edgeId, grip, point);
@@ -1321,7 +1391,7 @@ export class M1CanvasSession {
 
 	/** Node boxes, silhouettes and routes of the current document, measured once per document. */
 	private landingGeometry(): { readonly geometry: AnchorGeometry; readonly scene: SourceScene } {
-		const document = this.currentRawDocument;
+		const document = this.commentMovePreview ?? this.currentRawDocument;
 		const preview = this.rotationPreview;
 		if (preview) return {geometry: buildCanvasAnchorGeometry(document, {[preview.id]: {rotation: preview.rotation}}), scene: buildSourceScene(document)};
 		let cache = this.landingCache;
@@ -2028,6 +2098,7 @@ export class M1CanvasSession {
 			diagnostics.push(diagnostic);
 		}
 		this.refreshBoardConnectors();
+		this.updateNativeEdgeLabels();
 		this.updateMixedSelectionFrame();
 		const markerModel = this.updateCommentMarkers();
 		for (const diagnostic of markerModel?.diagnostics ?? []) {
@@ -2120,7 +2191,7 @@ export class M1CanvasSession {
 		return [...names];
 	}
 
-	private commentThreads(): ReturnType<typeof listCommentThreads> {
+	public commentThreads(): ReturnType<typeof listCommentThreads> {
 		const document = this.currentRawDocument;
 		let cache = this.commentThreadCache;
 		if (cache === undefined || cache.document !== document) {
@@ -2143,6 +2214,7 @@ export class M1CanvasSession {
 	private updateCommentMarkers(): ReturnType<CommentMarkers["update"]> | undefined {
 		const model = this.commentMarkers?.update({
 			threads: this.commentThreads(),
+			selectedKeys: this.selectedCommentKeys,
 			includeResolved: true,
 			geometry: this.landingGeometry().geometry,
 			boardToViewport: (point) => this.viewport.boardToScreen(point) ?? point,
@@ -2170,12 +2242,13 @@ export class M1CanvasSession {
 		if (this.root === undefined || document === undefined) return undefined;
 		if (this.commentCard === undefined) {
 			const card = new CommentThreadCard(document, {
-				onReply: (id, text, name) => this.mutateComment("reply-comment", (draft) => addReply(draft, id, text, { author: {name: name?.trim() || this.commentAuthor().name} })),
-				onRenameAuthor: (id, messageId, name, origin) => this.mutateComment("rename-comment-author", draft => renameCommentDisplayAuthor(draft, origin ?? "local", id, messageId, name)),
-				onResolve: (id, resolved) => this.mutateComment("resolve-comment", (draft) => setCommentResolved(draft, id, resolved)),
+				onReply: (id, text, name) => {if(!this.commentLocked(id,"local"))this.mutateComment("reply-comment", (draft) => addReply(draft, id, text, { author: {name: name?.trim() || this.commentAuthor().name} }));},
+				onRenameAuthor: (id, messageId, name, origin) => {if(!this.commentLocked(id,origin??"local"))this.mutateComment("rename-comment-author", draft => renameCommentDisplayAuthor(draft, origin ?? "local", id, messageId, name));},
+				onResolve: (id, resolved) => {if(!this.commentLocked(id,"local"))this.mutateComment("resolve-comment", (draft) => setCommentResolved(draft, id, resolved));},
 				onDelete: (id) => {if(!this.commentLocked(id,"local"))this.mutateComment("delete-comment", draft => deleteLocalComment(draft,id));},
 				onDeleteReply: (id, replyId) => {if(!this.commentLocked(id,"local"))this.mutateComment("delete-comment-reply",draft => deleteLocalReply(draft,id,replyId));},
 				onAppearance: (id, origin, patch) => this.setCommentAppearance(id, origin, patch),
+				onPreviewColor: (id, origin, color) => this.commentMarkers?.previewColor(id, origin, color),
 				onHideImported: (id) => {
 					if(this.commentLocked(id,"imported"))return;
 					this.writeMetadata("hide-imported-comment", draft => {
@@ -2258,6 +2331,7 @@ export class M1CanvasSession {
 	 */
 	private followViewport(): void {
 		this.connectorLayer?.render();
+		this.updateNativeEdgeLabels();
 		this.updateMixedSelectionFrame();
 		if (this.disposed) {
 			return;
@@ -2284,12 +2358,13 @@ export class M1CanvasSession {
 		}
 	}
 
-	private commentLocked(id: string, origin: CommentOrigin): boolean {
+	public commentLocked(id: string, origin: CommentOrigin): boolean {
 		return this.commentThreads().some(thread => thread.id === id && thread.origin === origin && thread.locked === true);
 	}
 
 	private setCommentAppearance(id: string, origin: CommentOrigin, patch: {color?: string; locked?: boolean}): void {
 		if (this.appearance.settings.reviewMode || !this.commentThreads().some(thread => thread.id === id && thread.origin === origin)) return;
+		if (this.commentLocked(id, origin) && (patch.locked !== false || patch.color !== undefined)) return;
 		if (patch.color !== undefined && !/^#[0-9a-f]{6}$/i.test(patch.color)) return;
 		this.writeMetadata("comment-appearance", draft => {
 			const map: Record<string, unknown> = isRecord(draft.commentDecorations) ? {...draft.commentDecorations} : {};
@@ -2300,39 +2375,111 @@ export class M1CanvasSession {
 		this.refresh();
 	}
 	private rectangleSelectionEnd?:()=>void;
+	private selectedRouteEnds=new Map<string,SelectedRouteEnds>();
 	private attachRectangleSelection(): void {
 		const root=this.root,view=root?.ownerDocument?.defaultView;if(!root||!view)return;
+		// A press on the shared frame must be claimed before native Canvas sees a
+		// press on empty board space and drops its part of the selection.
+		const frameDown=(event:PointerEvent)=>{
+			if(!root.contains(event.target as Node))return;
+			if(this.closestTarget(event,".miro-canvas-mixed-selection-frame")){this.startSelectionMove(event);return;}
+			const marker=event.target instanceof Element ? event.target.closest(".miro-canvas-comment-marker") : null;
+			if(marker){
+				const key=`${marker.getAttribute("data-comment-origin")}:${marker.getAttribute("data-comment-id")}`;
+				if(this.selectedCommentKeys.has(key))this.startSelectionMove(event);
+			}
+		};
+		root.ownerDocument.addEventListener("pointerdown",frameDown,true);
 		const down=(event:PointerEvent)=>{
+			if(event.defaultPrevented)return;
+			if(event.button===0&&!event.shiftKey&&this.selectedCommentKeys.size){
+				const id=this.eventElementId(event.target);
+				const marker=event.target instanceof Element ? event.target.closest(".miro-canvas-comment-marker") : null;
+				const key=marker?`${marker.getAttribute("data-comment-origin")}:${marker.getAttribute("data-comment-id")}`:undefined;
+				if((id&&!this.selectedIds.includes(id))||(key&&!this.selectedCommentKeys.has(key)))this.selectedCommentKeys.clear();
+			}
 			if(this.connectorLayer?.selection().length && this.closestTarget(event,".canvas-selection") && !this.closestTarget(event,".canvas-node-resizer")) {
 				if(this.startSelectionMove(event))return;
 			}
 			if(event.button!==0||this.armedTool!=="select"||this.isSpacePanHeld()||this.inControls(event)
 				||matchesPointer(this.settings.panBinding,event)||matchesPointer(this.settings.lassoBinding,event)
-				||this.closestTarget(event,".canvas-node,.canvas-edge,.canvas-selection,.miro-board-connector-hit,.miro-board-connector-grip,input,textarea,[contenteditable=true]"))return;
-			const first=this.boardPoint({x:event.clientX,y:event.clientY});if(!first)return;
+				||this.closestTarget(event,".canvas-node,.canvas-edge,.canvas-selection,.miro-canvas-mixed-selection-frame,.miro-board-connector-hit,.miro-board-connector-grip,.miro-board-connector-label,.miro-canvas-native-edge-label,input,textarea,[contenteditable=true]"))return;
+			const first={x:event.clientX,y:event.clientY};
 			this.rectangleSelectionEnd?.();
-			const original=[...(this.connectorLayer?.selection()??[])],base=event.shiftKey?original:[];
-			let dragged=false,active=true;
-			const update=(e:PointerEvent)=>{
+			// Own the gesture once. Letting Canvas also see this press creates a
+			// second marquee with a different set of selectable element types.
+			event.preventDefault();event.stopImmediatePropagation();
+			let dragged=false;
+			const bounds=boundingRect(root);
+			const marquee=root.ownerDocument.createElement("div");
+			marquee.className="miro-canvas-rectangle-marquee";
+			marquee.hidden=true;root.appendChild(marquee);
+			root.setAttribute("data-miro-rectangle-selecting","true");
+			const move=(e:PointerEvent)=>{
 				if(e.pointerId!==event.pointerId)return;
 				dragged ||= Math.hypot(e.clientX-event.clientX,e.clientY-event.clientY)>3;
-				if(!dragged)return;
-				const last=this.boardPoint({x:e.clientX,y:e.clientY});if(!last)return;
-				const geometry=buildCanvasAnchorGeometry(this.adapter.getDocument());
-				const ids=boardConnectors(this.currentRawDocument).filter(c=>{
-					const route=geometry.edges?.[c.id];return route && routeIntersectsBox(route.points??(route.start&&route.end?[route.start,route.end]:[]),first,last);
-				}).map(c=>c.id);
-				this.connectorLayer?.select([...new Set([...base,...ids])]);
+				if(!dragged||!bounds)return;
+				marquee.hidden=false;
+				marquee.style.left=`${Math.min(event.clientX,e.clientX)-bounds.left}px`;
+				marquee.style.top=`${Math.min(event.clientY,e.clientY)-bounds.top}px`;
+				marquee.style.width=`${Math.abs(e.clientX-event.clientX)}px`;
+				marquee.style.height=`${Math.abs(e.clientY-event.clientY)}px`;
 			};
-			const move=(e:PointerEvent)=>{queueMicrotask(()=>{if(active)update(e);});};
-			const cleanup=()=>{active=false;view.removeEventListener("pointermove",move);view.removeEventListener("pointerup",up);view.removeEventListener("pointercancel",cancel);view.removeEventListener("blur",cancel);this.rectangleSelectionEnd=undefined;};
-			const up=(e:PointerEvent)=>{if(e.pointerId!==event.pointerId)return;cleanup();queueMicrotask(()=>{if(!this.disposed)update(e);});};
-			const cancel=()=>{cleanup();this.connectorLayer?.select(original);};
-			view.addEventListener("pointermove",move);view.addEventListener("pointerup",up);view.addEventListener("pointercancel",cancel);view.addEventListener("blur",cancel);
+			const cleanup=()=>{root.removeAttribute("data-miro-rectangle-selecting");marquee.remove();view.removeEventListener("pointermove",move,true);view.removeEventListener("pointerup",up,true);view.removeEventListener("pointercancel",cancel,true);view.removeEventListener("blur",cancel);this.rectangleSelectionEnd=undefined;};
+			const up=(e:PointerEvent)=>{
+				if(e.pointerId!==event.pointerId)return;
+				const wasDragged=dragged || Math.hypot(e.clientX-event.clientX,e.clientY-event.clientY)>3;
+				cleanup();
+				if(!wasDragged){if(!event.shiftKey){this.callNative("deselectAll");this.connectorLayer?.select([]);this.selectedCommentKeys.clear();this.selectedRouteEnds.clear();this.refresh();}return;}
+				const last={x:e.clientX,y:e.clientY};
+				const geometry=buildCanvasAnchorGeometry(this.adapter.getDocument());
+				const groups=new Set(((readRuntime(this.currentRawDocument,"nodes")??[]) as readonly unknown[])
+					.filter(item=>readRuntime(item,"type")==="group").map(item=>readRuntime(item,"id")));
+				const caught:unknown[]=[];
+				const endpointSelection=event.shiftKey?new Map(this.selectedRouteEnds):new Map<string,SelectedRouteEnds>();
+				const catchEnds=(id:string,points:readonly {x:number;y:number}[]):boolean=>{
+					const mask=routeEndsInBox(points,first,last);
+					if(!mask)return false;
+					// Shift-add never turns an already whole-selected edge into a partial one.
+					if(!(event.shiftKey&&this.selectedIds.includes(id)&&!endpointSelection.has(id))){
+						const prior=endpointSelection.get(id);
+						endpointSelection.set(id,prior?{from:prior.from||mask.from,to:prior.to||mask.to,wholeRoute:prior.wholeRoute||mask.wholeRoute}:mask);
+					}
+					return true;
+				};
+				for(const node of this.adapter.getNodes()??[]){
+					const id=readCanvasElementId(node),rect=boundingRect(readCanvasElementDom(node));
+					if(id&&rect&&(groups.has(id)?rectIntersectsBox(rect,first,last,true)
+						:pointInSelectionBox({x:(rect.left+rect.right)/2,y:(rect.top+rect.bottom)/2},first,last)))caught.push(node);
+				}
+				for(const edge of this.adapter.getEdges()??[]){
+					const id=readCanvasElementId(edge),route=id===undefined?undefined:geometry.edges?.[id];
+					const points=(route?.points??(route?.start&&route.end?[route.start,route.end]:[])).map(p=>this.viewportPoint(p)).filter((p):p is {x:number;y:number}=>p!==undefined);
+					if(id&&catchEnds(id,points))caught.push(edge);
+				}
+				const connectorIds=boardConnectors(this.currentRawDocument).filter(c=>{
+					const route=geometry.edges?.[c.id];
+					const points=(route?.points??(route?.start&&route.end?[route.start,route.end]:[])).map(p=>this.viewportPoint(p)).filter((p):p is {x:number;y:number}=>p!==undefined);
+					return catchEnds(c.id,points);
+				}).map(c=>c.id);
+				this.selectedRouteEnds=endpointSelection;
+				if(!event.shiftKey){this.callNative("deselectAll");this.selectedCommentKeys.clear();}
+				for(const item of caught)this.callNative("select",[item]);
+				this.connectorLayer?.select([...new Set([...(event.shiftKey?this.connectorLayer.selection():[]),...connectorIds])]);
+				for(const [key,point] of Object.entries(geometry.comments??{})){
+					const at=this.viewportPoint(point);
+					// The 32 px avatar sits above and to the right of its anchor.
+					if(at&&pointInSelectionBox({x:at.x+16,y:at.y-16},first,last))
+						this.selectedCommentKeys.add(key);
+				}
+				this.refresh();
+			};
+			const cancel=()=>{cleanup();this.followViewport();};
+			view.addEventListener("pointermove",move,true);view.addEventListener("pointerup",up,true);view.addEventListener("pointercancel",cancel,true);view.addEventListener("blur",cancel);
 			this.rectangleSelectionEnd=cancel;
 		};
 		root.addEventListener("pointerdown",down,true);
-		this.disposers.push(()=>{this.rectangleSelectionEnd?.();root.removeEventListener("pointerdown",down,true);});
+		this.disposers.push(()=>{this.rectangleSelectionEnd?.();root.ownerDocument.removeEventListener("pointerdown",frameDown,true);root.removeEventListener("pointerdown",down,true);});
 	}
 	private attachViewportFrames(): void {
 		const view=this.root?.ownerDocument?.defaultView;
@@ -2453,7 +2600,8 @@ export class M1CanvasSession {
 		const mouseDown = (event: MouseEvent): void => {
 			if (!(event.target instanceof Node) || !root.contains(event.target) || this.inControls(event)
 				|| this.isSpacePanHeld() || this.closestTarget(event, "input,textarea,[contenteditable=true],.cm-editor")) return;
-			if ((this.armedTool === "select" && matchesPointer(this.settings.lassoBinding, event))
+			if (root.hasAttribute("data-miro-rectangle-selecting") || this.selectionMoveEnd !== undefined
+				|| (this.armedTool === "select" && matchesPointer(this.settings.lassoBinding, event))
 				|| (this.armedTool === "lasso" && event.button === 0)) {
 				event.preventDefault(); event.stopImmediatePropagation();
 			}
@@ -2907,6 +3055,9 @@ export class M1CanvasSession {
 		show(tip, points);
 		let done = false;
 		const swallow = (dbl: Event): void => {
+			// A later double-click on an interactive overlay is not the
+			// gesture that finished this line.
+			if (this.closestTarget(dbl, ".miro-canvas-native-edge-label,.miro-board-connector-label")) return;
 			dbl.preventDefault();
 			dbl.stopImmediatePropagation();
 		};
@@ -3157,6 +3308,7 @@ export class M1CanvasSession {
 	private selectLassoed(): void {
 		const ring = this.penPoints;
 		this.penPoints = [];
+		this.selectedRouteEnds.clear();
 		this.armedTool = "select";
 		this.updateQuickTools();
 		if (ring.length < 3) return;
@@ -3180,16 +3332,19 @@ export class M1CanvasSession {
 				: pointInLasso(ring, { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 });
 			if (inside) caught.push(node);
 		}
-		// A connector is caught when the ring goes round both its ends.
+		// A long connector must not pull the shared frame far outside the ring.
 		for (const edge of this.adapter.getEdges() ?? []) {
 			const id = readCanvasElementId(edge);
 			const route = id === undefined ? undefined : geometry.edges?.[id];
-			if (route?.start === undefined || route.end === undefined) continue;
-			if (pointInLasso(ring, route.start) && pointInLasso(ring, route.end)) caught.push(edge);
+			const points=route?.points??(route?.start&&route.end?[route.start,route.end]:[]);
+			if (points.length>=2 && points.every(point=>pointInLasso(ring,point))) caught.push(edge);
 		}
 		const connectors=boardConnectors(this.currentRawDocument).filter(c=>{
-			const route=geometry.edges?.[c.id];return route?.start && route.end && pointInLasso(ring,route.start)&&pointInLasso(ring,route.end);
+			const route=geometry.edges?.[c.id],points=route?.points??(route?.start&&route.end?[route.start,route.end]:[]);
+			return points.length>=2&&points.every(point=>pointInLasso(ring,point));
 		});
+		this.selectedCommentKeys=new Set(Object.entries(geometry.comments??{})
+			.filter(([,point])=>pointInLasso(ring,point)).map(([key])=>key));
 		this.callNative("deselectAll");
 		for (const node of caught) this.callNative("select", [node]);
 		this.connectorLayer?.select(connectors.map(c=>c.id));
@@ -3342,7 +3497,8 @@ export class M1CanvasSession {
 	 * whose export is never rewritten, moves the same way a local one does.
 	 */
 	private moveCommentThread(threadId: string, origin: CommentOrigin, point: { readonly x: number; readonly y: number }): void {
-		if (this.commentLocked(threadId, origin)) return;
+		this.commentMovePreview = undefined;
+		if (this.commentLocked(threadId, origin)) { this.refresh(); return; }
 		const board = this.boardPoint(point);
 		if (board === undefined) {
 			this.refresh();
@@ -3507,7 +3663,7 @@ export class M1CanvasSession {
 	private handlesState(editable: boolean): SelectionHandlesState {
 		// Independent connectors own their SVG handles. Never render the native
 		// endpoint editor over them (it also uses a different coordinate origin).
-		if (this.connectorLayer?.selection().length) return { selectedIds: [], rotation: 0, editable, isEdge: false };
+		if (this.connectorLayer?.selection().length || this.selectedCommentKeys.size) return { selectedIds: [], rotation: 0, editable, isEdge: false };
 		const id = this.selectedIds[0];
 		const { geometry, scene } = this.landingGeometry();
 		return {
@@ -3636,6 +3792,7 @@ export class M1CanvasSession {
 			...(independent?{connector:{route:independent.route,startCap:independent.startCap as never,endCap:connectorEndCap(independent) as never,width:independent.width,...(independent.headSize === undefined ? {} : {headSize: independent.headSize}),strokeStyle:independent.strokeStyle??"solid",waypoints:independent.waypoints??[]},colors:{...presentation.colors,edge:independent.color}}:{}),
 			independentSelection: !!this.connectorLayer?.selection().length,
 			independentOnly: this.selectedIds.length>0 && this.selectedIds.every(id=>this.connectorLayer?.selection().includes(id)),
+			canEditConnectorLabel: this.selectedIds.length===1 && kinds.includes("edge"),
 			...(placement === undefined ? {} : { placement }),
 			...(link === undefined ? {} : { link }),
 		};
@@ -4381,18 +4538,25 @@ export class M1CanvasSession {
 		return true;
 	}
 	private selectionMovePreview?: Record<string,unknown>;
+	private selectionMoveIds?: readonly string[];
 	private selectionMoveEnd?: ()=>void;
 	private mixedSelectionFrame?: HTMLElement;
-	/** One visible frame for the native selection and independent connectors. */
+	/** One draggable frame around every multi-item selection, however it was made. */
 	private updateMixedSelectionFrame(): void {
 		const root = this.root;
 		if (!root) return;
+		// The marquee is the only live frame while the button is held.
+		if (root.hasAttribute("data-miro-rectangle-selecting")) return;
 		const connectorIds = this.connectorLayer?.selection() ?? [];
 		const nativeIds = new Set((this.adapter.getSelection() ?? []).flatMap(item => allIds([item])));
-		const mixed = connectorIds.length > 0 && nativeIds.size > 0;
-		if (mixed) root.classList.add("miro-canvas-mixed-selection");
+		const activeEnds=[...this.selectedRouteEnds.keys()].filter(id=>nativeIds.has(id)||connectorIds.includes(id));
+		const framed = new Set([...nativeIds,...connectorIds,...this.selectedCommentKeys]).size > 1
+			|| activeEnds.length>0;
+		if (framed) root.classList.add("miro-canvas-mixed-selection");
 		else root.classList.remove("miro-canvas-mixed-selection");
-		if (!mixed) {this.mixedSelectionFrame?.remove();this.mixedSelectionFrame=undefined;return;}
+		if (framed && (connectorIds.length > 0 || this.selectedCommentKeys.size > 0 || activeEnds.length > 0)) root.classList.add("miro-canvas-mixed-selection--independent");
+		else root.classList.remove("miro-canvas-mixed-selection--independent");
+		if (!framed) {this.mixedSelectionFrame?.remove();this.mixedSelectionFrame=undefined;return;}
 		const box = boundingRect(root);
 		if (!box) return;
 		let left=Infinity,top=Infinity,right=-Infinity,bottom=-Infinity;
@@ -4405,17 +4569,26 @@ export class M1CanvasSession {
 		const geometry=this.landingGeometry().geometry;
 		for(const id of [...nativeIds,...connectorIds]){
 			const route=geometry.edges?.[id];
-			for(const p of route?.points ?? (route?.start&&route.end?[route.start,route.end]:[])){
+			const mask=this.selectedRouteEnds.get(id);
+			const points=mask&&route?[...(mask.from&&route.start?[route.start]:[]),...(mask.to&&route.end?[route.end]:[]),...(mask.wholeRoute?route.points??[]:[])]
+				:route?.points??(route?.start&&route.end?[route.start,route.end]:[]);
+			for(const p of points){
 				const at=this.viewportPoint(p);if(at)add(at.x-box.left,at.y-box.top);
 			}
 		}
-		if(!Number.isFinite(left)||!Number.isFinite(right)||!Number.isFinite(bottom))return;
+		for(const key of this.selectedCommentKeys){
+			const point=geometry.comments?.[key],at=point&&this.viewportPoint(point);
+			if(at){add(at.x-box.left,at.y-box.top-32);add(at.x-box.left+32,at.y-box.top);}
+		}
+		if(!Number.isFinite(left)||!Number.isFinite(right)||!Number.isFinite(bottom)){
+			root.classList.remove("miro-canvas-mixed-selection");
+			this.mixedSelectionFrame?.remove();this.mixedSelectionFrame=undefined;return;
+		}
 		if(!this.mixedSelectionFrame){
 			const frame=root.ownerDocument.createElement("div");frame.className="miro-canvas-mixed-selection-frame";
+			frame.setAttribute("aria-label","Move selected elements");
 			for(const side of ["top","right","bottom","left"]){
 				const grab=root.ownerDocument.createElement("div");grab.className=`miro-canvas-mixed-selection-frame__${side}`;
-				grab.setAttribute("aria-label","Move selected elements");
-				grab.addEventListener("pointerdown",event=>this.startSelectionMove(event));
 				frame.appendChild(grab);
 			}
 			root.appendChild(frame);this.mixedSelectionFrame=frame;
@@ -4426,15 +4599,23 @@ export class M1CanvasSession {
 	}
 	private startSelectionMove(event: PointerEvent): boolean {
 		this.readInteractionState();
-		if(event.button!==0 || event.shiftKey || this.selectedIds.length<2 || this.closestTarget(event,"input,textarea,[contenteditable=true],.cm-editor"))return false;
+		const commentIds=[...this.selectedCommentKeys].map(key=>{
+			const separator=key.indexOf(":");return separator<0?undefined:commentSelectionId(key.slice(0,separator) as CommentOrigin,key.slice(separator+1));
+		}).filter((id):id is string=>id!==undefined);
+		const ids=[...this.selectedIds,...commentIds];
+		if(event.button!==0 || event.shiftKey || !ids.length || ids.length<2&&!this.selectedRouteEnds.has(ids[0]!)
+			|| this.closestTarget(event,"input,textarea,[contenteditable=true],.cm-editor"))return false;
 		const target=this.eventElementId(event.target);
 		if(target && !this.selectedIds.includes(target))return false;
-		const ids=[...this.selectedIds], original=this.adapter.getDocument();
+		const connectorIds=[...(this.connectorLayer?.selection()??[])], original=this.adapter.getDocument();
+		const routeEnds=Object.fromEntries([...this.selectedRouteEnds].filter(([id])=>ids.includes(id)));
 		const first=this.boardPoint({x:event.clientX,y:event.clientY}), view=this.root?.ownerDocument.defaultView;
 		if(!first || !view || !isRecord(original))return false;
 		event.preventDefault();event.stopImmediatePropagation();
+		if([...this.selectedCommentKeys].some(key=>{const separator=key.indexOf(":");return this.commentLocked(key.slice(separator+1),key.slice(0,separator) as CommentOrigin);})){this.options.onNotice?.("A locked comment cannot be moved.");return true;}
 		if(!this.editAllowed("move",ids))return true;
 		this.selectionMoveEnd?.();
+		this.selectionMoveIds=ids;
 		const dom=(this.adapter.getNodes()??[]).filter(n=>ids.includes(readCanvasElementId(n)??"")).map(n=>readCanvasElementDom(n)).filter(isElement);
 		const styles=dom.map(el=>({el,value:el.style.getPropertyValue("translate"),priority:el.style.getPropertyPriority("translate")}));
 		let dx=0,dy=0,changed=false;
@@ -4443,7 +4624,7 @@ export class M1CanvasSession {
 			const at=this.boardPoint({x:e.clientX,y:e.clientY});if(!at)return;
 			dx=at.x-first.x;dy=at.y-first.y;changed ||= Math.hypot(e.clientX-event.clientX,e.clientY-event.clientY)>3;
 			if(!changed)return;
-			this.selectionMovePreview=translateBoardSelection(original,ids,dx,dy);
+			this.selectionMovePreview=translateBoardSelection(original,ids,dx,dy,routeEnds);
 			this.currentRawDocument=this.selectionMovePreview;this.landingCache=undefined;
 			for(const {el} of styles)el.style.setProperty("translate",`${dx}px ${dy}px`);
 			this.liveGeometryDirty=true;this.sourceRenderer?.refresh();this.connectorLayer?.render();this.followViewport();
@@ -4451,16 +4632,34 @@ export class M1CanvasSession {
 		const cleanup=()=>{
 			view.removeEventListener("pointermove",move,true);view.removeEventListener("pointerup",up,true);view.removeEventListener("pointercancel",cancel,true);view.removeEventListener("blur",cancel);
 			for(const {el,value,priority} of styles){if(value)el.style.setProperty("translate",value,priority);else el.style.removeProperty("translate");}
-			this.selectionMovePreview=undefined;this.selectionMoveEnd=undefined;this.landingCache=undefined;
+			this.selectionMovePreview=undefined;this.selectionMoveIds=undefined;this.selectionMoveEnd=undefined;this.landingCache=undefined;
 		};
 		const cancel=()=>{cleanup();this.refresh();};
+		const restoreSelection=()=>{
+			if(this.disposed)return;
+			const nativeIds=ids.filter(id=>!connectorIds.includes(id)&&!selectedComment(id));
+			const selected=(this.adapter.getSelection()??[]).flatMap(item=>allIds([item]));
+			if(selected.length!==nativeIds.length || nativeIds.some(id=>!selected.includes(id))){
+				this.callNative("deselectAll");
+				for(const item of [...(this.adapter.getNodes()??[]),...(this.adapter.getEdges()??[])])
+					if(nativeIds.includes(readCanvasElementId(item)??""))this.callNative("select",[item]);
+			}
+			const retained=this.connectorLayer?.selection()??[];
+			if(retained.length!==connectorIds.length || connectorIds.some(id=>!retained.includes(id)))this.connectorLayer?.select(connectorIds);
+			this.refresh();
+		};
 		const up=(e:PointerEvent)=>{
 			if(e.pointerId!==event.pointerId)return;move(e);cleanup();
 			if(changed){
 				this.authoring??=createCanvasAuthoring(this.view);
-				const result=this.authoring.moveSelection(ids,dx,dy,original);
+				const result=this.authoring.moveSelection(ids,dx,dy,original,routeEnds);
 				if(!result.ok)this.options.onNotice?.("Selection move was refused because the board changed or an item is locked.");
-				else for(const node of this.adapter.getNodes()??[])if(ids.includes(readCanvasElementId(node)??""))this.callNative("select",[node]);
+				else {
+					restoreSelection();
+					// Native Canvas may finish its own pointer-up after this capture
+					// listener; restore once more after that event dispatch.
+					queueMicrotask(restoreSelection);
+				}
 			}
 			this.refresh();
 		};
@@ -4475,6 +4674,25 @@ export class M1CanvasSession {
 		if(result.ok){this.connectorLayer?.reset();this.callNative("deselectAll");}
 		else this.options.onNotice?.(firstProblem(result.diagnostics)??"Delete was refused.");
 		this.refresh();
+	}
+
+	private previewCommentMove(threadId: string, origin: CommentOrigin, point: { readonly x: number; readonly y: number }): void {
+		if (this.commentLocked(threadId, origin)) return;
+		const board = this.boardPoint(point), document = this.adapter.getDocument();
+		if (!board || !isRecord(document)) return;
+		const metadata = isRecord(document.miroCanvas) ? document.miroCanvas : {};
+		const places = isRecord(metadata.commentPlaces) ? metadata.commentPlaces : {};
+		this.commentMovePreview = { ...document, miroCanvas: { ...metadata,
+			commentPlaces: { ...places, [commentPlaceKey(origin, threadId)]: { type: "free", x: board.x, y: board.y } } } };
+		this.connectorLayer?.render();
+		this.sourceRenderer?.refresh();
+	}
+
+	private cancelCommentMove(): void {
+		if (!this.commentMovePreview) return;
+		this.commentMovePreview = undefined;
+		this.connectorLayer?.render();
+		this.sourceRenderer?.refresh();
 	}
 
 	/** Deleting a pin preserves its connections as free endpoints in the same undo step. */
@@ -5559,6 +5777,7 @@ export class M1CanvasSession {
 			});
 		}
 		listen("dblclick", (event) => {
+			if(this.closestTarget(event,".miro-canvas-native-edge-label,.miro-board-connector-label"))return;
 			const id = this.eventElementId(eventTarget(event));
 			this.blockIfNeeded(event, id === undefined ? "create" : "edit-text", id === undefined ? [] : this.eventIds(event));
 		});
@@ -5631,6 +5850,7 @@ export class M1CanvasSession {
 		this.slideShow?.stop();
 		this.controls.dispose();
 		this.connectorLayer?.dispose();
+		this.nativeEdgeLabels?.dispose();
 		this.toolbar.dispose();
 		this.handles.dispose();
 		this.commentMarkers?.destroy();

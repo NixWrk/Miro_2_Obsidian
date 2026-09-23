@@ -20,6 +20,12 @@ describe("plugin settings", () => {
       .toMatchObject({ connectorAttachNodes: false, connectorAllowFree: true, connectorAttachConnectors: true });
     expect(normalizeSettings({ connectorAllowFree: "true", connectorAttachConnectors: 1 }).connectorAllowFree).toBe(false);
   });
+  it("starts connector labels at the route midpoint and bounds the preference",()=>{
+    expect(DEFAULT_SETTINGS.connectorLabelPosition).toBe(0.5);
+    expect(normalizeSettings({connectorLabelPosition:0.75}).connectorLabelPosition).toBe(0.75);
+    expect(normalizeSettings({connectorLabelPosition:2}).connectorLabelPosition).toBe(1);
+    expect(normalizeSettings({connectorLabelPosition:-1}).connectorLabelPosition).toBe(0);
+  });
   it("falls back to the defaults for anything that is not a settings object", () => {
     for (const value of [undefined, null, 0, "settings", [], () => undefined]) {
       expect(normalizeSettings(value)).toEqual(DEFAULT_SETTINGS);

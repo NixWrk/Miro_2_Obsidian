@@ -78,6 +78,8 @@ export interface SelectionToolbarStyle {
 export interface SelectionToolbarState extends SelectionToolbarStyle {
   readonly independentSelection?: boolean;
   readonly independentOnly?: boolean;
+  /** Exactly one independently drawn line/arrow can receive a label here. */
+  readonly canEditConnectorLabel?: boolean;
   readonly selectedIds: readonly string[];
   readonly kinds: readonly SelectionKind[];
   /** False in review mode or on a locked selection; the lock toggle stays live. */
@@ -101,6 +103,7 @@ export type SelectionStylePatch = SelectionToolbarStyle;
 
 export interface SelectionToolbarActions {
   readonly onDelete?: () => void;
+  readonly onEditConnectorLabel?: () => void;
   readonly onAppearance: (action: AppearanceAction) => void;
   readonly onStyle: (patch: SelectionStylePatch) => void;
   readonly onLock: (locked: boolean) => void;
@@ -393,6 +396,7 @@ interface ToolbarRefs {
   readonly verticalAlignments: readonly HTMLButtonElement[];
   readonly lineHeight: HTMLInputElement;
   readonly edgeGroup: HTMLElement;
+  readonly editConnectorLabel: HTMLButtonElement;
   readonly startCap: Popover;
   readonly endCap: Popover;
   readonly startCaps: readonly HTMLButtonElement[];
@@ -589,6 +593,8 @@ export class SelectionToolbar {
 
     // A connector: its two ends and the kind of line between them.
     const edgeGroup = append(bar, make(document, "span", "miro-canvas-toolbar__group"));
+    const editConnectorLabel = append(edgeGroup, makeButton(document, "Add or edit line label"));
+    this.icon(editConnectorLabel, "text", "T");
     const startCap = this.makePopover(edgeGroup, "Line start", "miro-canvas-toolbar__button--cap");
     const swapEnds = append(edgeGroup, makeButton(document, "Swap line ends"));
     this.icon(swapEnds, "arrow-left-right", "⇄");
@@ -679,7 +685,7 @@ export class SelectionToolbar {
       bar, shape, shapeOptions,
       textGroup, font, fontOptions, fontSize, fontSizeDown, fontSizeUp,
       format, formats, align, alignments, verticalAlignments, lineHeight,
-      edgeGroup, startCap, endCap, startCaps, endCaps, swapEnds, line, routes, strokes, lineWidth, lineWidthValue, headSize,
+      edgeGroup, editConnectorLabel, startCap, endCap, startCaps, endCaps, swapEnds, line, routes, strokes, lineWidth, lineWidthValue, headSize,
       colors, borderStyles, borderWidth, borderWidthValue,
       lock, deleteSelection, openLink, nativeSlot, status,
     };
@@ -688,6 +694,7 @@ export class SelectionToolbar {
   }
 
   private wire(refs: ToolbarRefs): void {
+    this.listen(refs.editConnectorLabel, "click", () => this.actions.onEditConnectorLabel?.());
     const valueOf = (option: HTMLElement): string => option.getAttribute("data-value") ?? "";
     for (const item of SHAPE_CATALOG) {
       this.listen(refs.shapeOptions[item.kind]!, "click", () => {
@@ -848,6 +855,7 @@ export class SelectionToolbar {
     // no text of its own: the text row belongs to nodes that show text.
     refs.textGroup.hidden = !state.kinds.some((kind) => kind !== "edge" && kind !== "media");
     refs.edgeGroup.hidden = !hasEdge;
+    refs.editConnectorLabel.hidden = state.canEditConnectorLabel !== true;
     for (const { slot, forEdge } of COLOR_SLOTS) {
       refs.colors[slot]!.popover.host.hidden = forEdge ? !hasEdge : !hasNode;
     }
@@ -954,7 +962,7 @@ export class SelectionToolbar {
       ...Object.values(refs.shapeOptions),
       ...refs.fontOptions, refs.fontSize, refs.fontSizeDown, refs.fontSizeUp,
       ...Object.values(refs.formats), ...refs.alignments, ...refs.verticalAlignments, refs.lineHeight,
-      ...refs.startCaps, ...refs.endCaps, refs.swapEnds, ...refs.routes, ...refs.strokes, refs.lineWidth, refs.headSize,
+      refs.editConnectorLabel, ...refs.startCaps, ...refs.endCaps, refs.swapEnds, ...refs.routes, ...refs.strokes, refs.lineWidth, refs.headSize,
       ...Object.values(refs.colors).flatMap((color) => [color.input, color.clear, color.reset]),
       ...refs.borderStyles, refs.borderWidth,
     ];

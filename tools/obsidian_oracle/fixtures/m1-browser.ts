@@ -128,8 +128,16 @@ function makeEdge(data: Record<string, unknown>, previous?: RuntimeElement): Run
   edgeEl.className = "canvas-edge";
   edgeEl.dataset.edgeId = id;
   if (!edgeEl.isConnected) root.append(edgeEl);
+  let labelEl = previous?.labelEl;
+  if (typeof source.label === "string" && source.label) {
+    labelEl ??= document.createElement("div");
+    labelEl.className = "canvas-edge-label";
+    labelEl.textContent = source.label;
+    if (!labelEl.isConnected) edgeEl.append(labelEl);
+  } else { labelEl?.remove(); labelEl = undefined; }
   const element = previous ?? ({} as RuntimeElement);
   Object.assign(element, source, { edgeEl, getData: () => clone(source) });
+  if (labelEl) element.labelEl = labelEl; else delete element.labelEl;
   return element;
 }
 

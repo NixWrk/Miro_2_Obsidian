@@ -73,6 +73,22 @@ adds Web-SDK-only items. Keep both `field_sources` (availability) and
 
 ## Definition of done
 
+- Plugin interaction invariant: during drag, resize, or rotation of a node,
+  frame, attachment, comment, connector, or mixed selection, every attached
+  native edge and plugin connector (including connector-to-connector chains)
+  must follow the same preview geometry before pointer release. Never mix an
+  uncommitted projected document with stale native runtime positions. Do not
+  persist preview frames. Add focused tests that inspect paths before release
+  and after commit/cancel, including group selections and non-default zoom.
+- Plugin selection invariant: one pointer gesture has one visible marquee.
+  Rectangle/lasso selection must include native nodes and edges, independent
+  connectors, and comment pins in the same selection bounds. Keep neighboring-
+  node controls in a transparent overlay on the native single-node selection;
+  never add a second visible node outline merely to host those controls.
+  A rectangle captures connector endpoints separately: a crossing body alone
+  selects neither end, and moving a selection must not translate a far end
+  outside the original rectangle. Preview, commit, undo, and repeated drags
+  must use the same captured-end mask for native and independent connectors.
 - Add or update focused tests for changed behavior.
 - Run Ruff, pytest, and `git diff --check`.
 - Run `python -m scripts.run_regression` for conversion, layout, publication, or
