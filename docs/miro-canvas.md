@@ -598,8 +598,9 @@ and covered by automated tests.
   deck and marked board areas as pages.
 - Move the plugin into its own repository tied to miro2obsidian by a shared
   schema and fixtures; offer a guided, illustrated Miro import from first setup
-  and from settings; walk the full user journey on a clean machine
-  (see [ROADMAP](../ROADMAP.md)).
+  and from settings, fetching the exporter on demand and removing it afterwards
+  if the user wishes; walk the full user journey on a clean machine
+  (see [ROADMAP](../ROADMAP.md), including the open delivery decision).
 - Provide a skill or an MCP server so agents can work with miro-canvas boards as
   natively as with Canvas files.
 - Tune settings and layouts for other operating systems, phones and tablets

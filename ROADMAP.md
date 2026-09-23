@@ -69,13 +69,16 @@ trackpad, pen tablet/stylus, touch-screen, and phone/tablet interaction.
   files across or within boards are stored once and referenced from every
   node, with a manifest mapping hashes to vault paths so later imports reuse
   what the vault already has.
-- [ ] Plugin onboarding for Miro imports: on first setup the plugin asks
-  whether to import from Miro; if so it shows a clear, illustrated,
-  step-by-step guide and automates every step it safely can (open the
-  converter with the vault and target folder filled in, open the finished
-  board). A button in the plugin settings starts the same flow later. The
-  plugin guides the user to install the converter rather than downloading or
-  running programs itself.
+- [ ] Plugin onboarding for Miro imports: a plugin-only user needs none of the
+  Miro export code, so on first setup the plugin asks whether to import from
+  Miro; if so the exporter is fetched on demand, set up automatically, guides
+  the user through every step with a clear, illustrated guide, and is removed
+  afterwards if the user wishes. A button in the plugin settings repeats the
+  flow whenever needed. Open decision: the Obsidian Community directory forbids
+  plugins that "install or update themselves or their dependencies", so the
+  delivery must be chosen to stay listed (a separate importer plugin installed
+  through Obsidian itself, a companion app the user confirms, or distribution
+  outside the directory).
 - [ ] Walk the full user journey on a clean machine - install, first setup,
   Miro app, export, conversion, opening and editing the board - and fix every
   problem found.
