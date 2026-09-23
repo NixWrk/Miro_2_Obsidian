@@ -39,6 +39,7 @@ import {
   type ConnectorRoute,
   type ConnectorStroke,
 } from "./connector-style";
+import { LAYER_ACTIONS, LAYER_MENU_ICON, LAYER_MENU_LABEL, type LayerDirection } from "./layer-order";
 import {
   SHAPE_CATALOG,
   shapeCatalogEntry,
@@ -57,6 +58,8 @@ import {
 import { BAR_TOOLTIP_DELAY, PICTURE_TOOLTIP_DELAY } from "./tooltips";
 
 export type SelectionKind = "shape" | "text" | "sticky" | "edge" | "frame" | "media";
+/** The kinds a layer command can act on: only cards have a stacking order. */
+const CARD_KINDS: ReadonlySet<SelectionKind> = new Set(["shape", "text", "sticky", "media"]);
 export type BorderStyle = "solid" | "dashed" | "dotted" | "none";
 export type { ShapeKind };
 
@@ -109,6 +112,8 @@ export interface SelectionToolbarActions {
   readonly onLock: (locked: boolean) => void;
   /** Opens the selected link outside the board. */
   readonly onOpenLink?: () => void;
+  /** Moves every card in the selection one layer command's worth. */
+  readonly onLayer?: (direction: LayerDirection) => void;
 }
 
 export interface SelectionToolbarOptions {
@@ -412,6 +417,8 @@ interface ToolbarRefs {
   readonly borderStyles: readonly HTMLButtonElement[];
   readonly borderWidth: HTMLInputElement;
   readonly borderWidthValue: HTMLElement;
+  readonly layer: Popover;
+  readonly layerOptions: readonly HTMLButtonElement[];
   readonly lock: HTMLButtonElement;
   readonly deleteSelection: HTMLButtonElement;
   readonly openLink: HTMLButtonElement;
@@ -669,6 +676,19 @@ export class SelectionToolbar {
     const openLink = append(bar, makeButton(document, "Open link", "miro-canvas-toolbar__button--open-link"));
     this.icon(openLink, "external-link", "↗");
     openLink.hidden = true;
+
+    // A card's place among the others sharing its area.
+    const layer = this.makePopover(bar, LAYER_MENU_LABEL, "miro-canvas-toolbar__button--layer");
+    this.icon(layer.button, LAYER_MENU_ICON, "≡");
+    const layerRow = this.block(layer.panel, undefined, "miro-canvas-toolbar__pictures miro-canvas-toolbar__pictures--layer");
+    const layerOptions = LAYER_ACTIONS.map(({ direction, label, icon }) => {
+      // A command, not a choice that stays pressed.
+      const option = append(layerRow, makeButton(document, label));
+      option.setAttribute("data-value", direction);
+      this.icon(option, icon, label.charAt(0));
+      return option;
+    });
+
     const lock = append(bar, makeButton(document, "Lock selection", "miro-canvas-toolbar__button--lock"));
     lock.setAttribute("aria-pressed", "false");
     const nativeSlot = append(bar, make(document, "span", "miro-canvas-toolbar__native"));
@@ -687,6 +707,7 @@ export class SelectionToolbar {
       format, formats, align, alignments, verticalAlignments, lineHeight,
       edgeGroup, editConnectorLabel, startCap, endCap, startCaps, endCaps, swapEnds, line, routes, strokes, lineWidth, lineWidthValue, headSize,
       colors, borderStyles, borderWidth, borderWidthValue,
+      layer, layerOptions,
       lock, deleteSelection, openLink, nativeSlot, status,
     };
     this.wire(refs);
@@ -786,6 +807,9 @@ export class SelectionToolbar {
     this.listen(refs.openLink, "click", () => {
       if (this.state?.link !== undefined) this.actions.onOpenLink?.();
     });
+    for (const option of refs.layerOptions) {
+      this.listen(option, "click", () => this.layer(valueOf(option) as LayerDirection));
+    }
     this.listen(this.element, "keydown", (event) => {
       if ((event as KeyboardEvent).key === "Escape") this.closePopovers();
     });
@@ -822,6 +846,13 @@ export class SelectionToolbar {
   private style(patch: SelectionStylePatch): void {
     if (this.state?.editable !== true) return;
     this.actions.onStyle(patch);
+  }
+
+  /** A layer command closes its popover once chosen, unlike the style pickers. */
+  private layer(direction: LayerDirection): void {
+    if (this.state?.editable !== true) return;
+    this.actions.onLayer?.(direction);
+    this.closePopovers();
   }
 
   public update(state: SelectionToolbarState): void {
@@ -927,6 +958,9 @@ export class SelectionToolbar {
     refs.lock.disabled = state.reviewMode;
     refs.openLink.hidden = state.link === undefined || this.actions.onOpenLink === undefined;
     refs.openLink.setAttribute("aria-label", state.link === undefined ? "Open link" : `Open link\n${state.link}`);
+    // A frame or a connector alone has no layer to move; a control that does
+    // not apply is removed, not disabled.
+    refs.layer.host.hidden = this.actions.onLayer === undefined || !state.kinds.some((kind) => CARD_KINDS.has(kind));
     for (const control of this.controls(refs)) {
       control.disabled = !state.editable;
     }
@@ -966,7 +1000,7 @@ export class SelectionToolbar {
       ...Object.values(refs.formats), ...refs.alignments, ...refs.verticalAlignments, refs.lineHeight,
       refs.editConnectorLabel, ...refs.startCaps, ...refs.endCaps, refs.swapEnds, ...refs.routes, ...refs.strokes, refs.lineWidth, refs.headSize,
       ...Object.values(refs.colors).flatMap((color) => [color.input, color.clear, color.reset]),
-      ...refs.borderStyles, refs.borderWidth,
+      ...refs.borderStyles, refs.borderWidth, ...refs.layerOptions,
     ];
   }
 

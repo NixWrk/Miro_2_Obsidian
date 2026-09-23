@@ -649,6 +649,13 @@ def main() -> int:
                   const nativeFrame=b.root.querySelector('.miro-canvas-mixed-selection-frame');
                   if(!nativeFrame || getComputedStyle(nativeFrame).pointerEvents!=='auto')
                     throw Error('Marquee-selected native items need a draggable frame interior');
+                  let selectionMenus=0;const nativeMenu=b.runtime.onSelectionContextMenu;
+                  b.runtime.onSelectionContextMenu=()=>{selectionMenus+=1;};
+                  const menuEvent=new MouseEvent('contextmenu',{button:2,bubbles:true,cancelable:true});
+                  nativeFrame.dispatchEvent(menuEvent);
+                  b.runtime.onSelectionContextMenu=nativeMenu;
+                  if(selectionMenus!==1||!menuEvent.defaultPrevented)
+                    throw Error('A right click on the shared frame must open the native selection menu');
                   const nativeBox=b.root.appendChild(document.createElement('div'));
                   nativeBox.className='canvas-selection';
                   if(b.root.classList.contains('miro-canvas-mixed-selection--independent')

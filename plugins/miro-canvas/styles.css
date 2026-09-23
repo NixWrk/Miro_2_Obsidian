@@ -3218,3 +3218,10 @@
   border-color: transparent !important;
   box-shadow: none !important;
 }
+
+/* After a layer change the selected card is shown on its own layer: native
+   Canvas lifts a selected card above all others, which would hide the change.
+   Only a rule marked important outranks the z-index native Canvas writes inline. */
+.canvas-node.miro-canvas-layer-shown {
+  z-index: var(--miro-canvas-layer) !important;
+}

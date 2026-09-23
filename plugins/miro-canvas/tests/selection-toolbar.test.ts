@@ -214,8 +214,8 @@ describe("selection toolbar", () => {
     const { root } = build();
     const bar = root.children.find((child) => child.className.includes("__bar"))!;
     // Shape, the text group, the connector group, the colour group, the link
-    // opener, the lock and the native menu's slot.
-    expect(bar.children.length).toBeLessThanOrEqual(7);
+    // opener, the layer menu, the lock and the native menu's slot.
+    expect(bar.children.length).toBeLessThanOrEqual(8);
     for (const panel of descendants(root).filter((item) => item.className.includes("__panel"))) {
       expect(panel.hidden).toBe(true);
     }
@@ -566,6 +566,69 @@ describe("selection toolbar", () => {
     expect(opened).toEqual([1]);
     // A link has no text of its own to format.
     expect(shown(byLabel(root, "Font"))).toBe(false);
+  });
+
+  it("shows the layer menu only when onLayer is given and a card is selected", () => {
+    const withoutHandler = build({ kinds: ["shape"] });
+    expect(shown(byLabel(withoutHandler.root, "Layer"))).toBe(false);
+
+    const layers: string[] = [];
+    const toolbar = new SelectionToolbar({
+      onAppearance: () => undefined,
+      onStyle: () => undefined,
+      onLock: () => undefined,
+      onLayer: (direction) => { layers.push(direction); },
+    }, { document: new FakeDocument() as unknown as Document });
+    const root = toolbar.element as unknown as FakeElement;
+    const state: SelectionToolbarState = {
+      selectedIds: ["e1"], kinds: ["edge"], editable: true, locked: false, reviewMode: false,
+      typography: TYPOGRAPHY, colors: {}, palette: [], recentColors: [], placement: { x: 0, y: 0 },
+    };
+    toolbar.update(state);
+    // A line or a frame alone has no layer to move.
+    expect(shown(byLabel(root, "Layer"))).toBe(false);
+    toolbar.update({ ...state, kinds: ["frame"] });
+    expect(shown(byLabel(root, "Layer"))).toBe(false);
+    toolbar.update({ ...state, kinds: ["edge", "shape"] });
+    expect(shown(byLabel(root, "Layer"))).toBe(true);
+  });
+
+  it("moves a card with a layer command and closes the popover afterward", () => {
+    const layers: string[] = [];
+    const toolbar = new SelectionToolbar({
+      onAppearance: () => undefined,
+      onStyle: () => undefined,
+      onLock: () => undefined,
+      onLayer: (direction) => { layers.push(direction); },
+    }, { document: new FakeDocument() as unknown as Document });
+    const root = toolbar.element as unknown as FakeElement;
+    toolbar.update({
+      selectedIds: ["n1"], kinds: ["shape"], editable: true, locked: false, reviewMode: false,
+      typography: TYPOGRAPHY, colors: {}, palette: [], recentColors: [], placement: { x: 0, y: 0 },
+    });
+    byLabel(root, "Layer").dispatch("click");
+    expect(panelOf(root, "Layer").hidden).toBe(false);
+    choice(root, "Layer", "forward").dispatch("click");
+    expect(layers).toEqual(["forward"]);
+    expect(panelOf(root, "Layer").hidden).toBe(true);
+  });
+
+  it("disables the layer buttons on a selection that cannot be edited", () => {
+    const toolbar = new SelectionToolbar({
+      onAppearance: () => undefined,
+      onStyle: () => undefined,
+      onLock: () => undefined,
+      onLayer: () => undefined,
+    }, { document: new FakeDocument() as unknown as Document });
+    const root = toolbar.element as unknown as FakeElement;
+    toolbar.update({
+      selectedIds: ["n1"], kinds: ["shape"], editable: false, locked: true, reviewMode: false,
+      blockedReason: "This selection is locked.",
+      typography: TYPOGRAPHY, colors: {}, palette: [], recentColors: [], placement: { x: 0, y: 0 },
+    });
+    for (const value of ["front", "forward", "backward", "back"]) {
+      expect(choice(root, "Layer", value).disabled).toBe(true);
+    }
   });
 
   it("removes its listeners on dispose", () => {

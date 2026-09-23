@@ -30,6 +30,7 @@ import {
 	type CanvasScene,
 } from "./canvas-adapter";
 import { CANVAS_SHAPE_KINDS, createCanvasAuthoring, type CanvasAuthoring, type ConnectorSide } from "./canvas-authoring";
+import type { LayerDirection } from "./layer-order";
 import {
 	boardConnectors, connectorEndCap, fitsNativeEdge, heldByNode, nativeEdgeOf, readBoardConnector,
 	restyleBoardConnector, translateConnector, type BoardConnector,
@@ -1246,6 +1247,8 @@ export class M1CanvasSession {
 	private authoring: CanvasAuthoring | undefined;
 	private interactionBlock: string | undefined;
 	private rotationPreview: { readonly id: string; readonly rotation: number } | undefined;
+	/** The one selected card shown on its own layer after a layer change, and the selection it belongs to. */
+	private shownLayer: { readonly id: string; readonly selection: string; readonly element?: HTMLElement } | undefined;
 	private rotationGestureTarget: string | undefined;
 	/** What the last rotation gesture actually did, for the selection dump. */
 	private lastRotationAttempt = "none";
@@ -1382,6 +1385,7 @@ export class M1CanvasSession {
 			onEditConnectorLabel: () => {this.editSelectedConnectorLabel();},
 			onDelete: () => this.deleteBoardSelection(),
 			onLock: (locked) => (locked ? this.lockSelection() : this.unlockSelection()),
+			onLayer: (direction) => this.changeLayer(direction),
 			onOpenLink: () => this.openSelectedLink(),
 		}, {
 			...(controlDocument === undefined ? {} : { document: controlDocument }),
@@ -2389,6 +2393,99 @@ export class M1CanvasSession {
 		this.applyInteraction({ type: "set-locks", elementIds: this.selectedIds, locked: false });
 	}
 
+	/**
+	 * The cards among the given elements: only cards have layers.  Frames lie
+	 * under everything, larger under smaller, as native Canvas stacks them;
+	 * lines and arrows have no layers at all.
+	 */
+	public layeredCards(ids: readonly string[] = this.selectedIds): string[] {
+		const wanted = new Set(ids);
+		const cards: string[] = [];
+		const nodes = readRuntime(this.currentRawDocument, "nodes");
+		if (!Array.isArray(nodes)) return cards;
+		for (const node of nodes) {
+			const id = readRuntime(node, "id");
+			if (typeof id !== "string" || !wanted.has(id)) continue;
+			if (readRuntime(node, "type") === "group") continue;
+			cards.push(id);
+		}
+		return cards;
+	}
+
+	/**
+	 * Put cards higher or lower among the cards, keeping their order among
+	 * themselves, as one step of history.  A single card stays selected and
+	 * is shown on its new layer, not on top where native Canvas lifts a
+	 * selected card, so the change can be seen.
+	 */
+	public changeLayer(direction: LayerDirection, ids: readonly string[] = this.selectedIds): void {
+		this.readInteractionState();
+		const cards = this.layeredCards(ids);
+		if (cards.length === 0) {
+			this.options.onNotice?.("Only cards have layers: select a card.");
+			return;
+		}
+		if (!this.editAllowed("edit", cards)) {
+			this.refresh();
+			return;
+		}
+		this.authoring ??= createCanvasAuthoring(this.view);
+		const result = this.authoring.changeZOrder({ ids: cards, direction });
+		if (!result.ok) {
+			this.options.onNotice?.(firstProblem(result.diagnostics) ?? "The layer order was not changed.");
+			this.refresh();
+			return;
+		}
+		this.refresh();
+		this.showLayerOfSelection();
+	}
+
+	/**
+	 * Show the one selected card on its own layer until the selection
+	 * changes.  Native Canvas draws a selected card above all the others; a
+	 * card just sent back would otherwise look as if nothing had happened.
+	 */
+	private showLayerOfSelection(): void {
+		this.hideShownLayer();
+		const id = this.selectedIds.length === 1 ? this.selectedIds[0] : undefined;
+		if (id === undefined || this.layeredCards([id]).length === 0) return;
+		this.shownLayer = { id, selection: id };
+		this.updateShownLayer();
+	}
+
+	/** Keep the shown layer in step with the card's own; drop it once the selection changes. */
+	private updateShownLayer(): void {
+		const shown = this.shownLayer;
+		if (shown === undefined) return;
+		if (this.selectedIds.join("\u0000") !== shown.selection) {
+			this.hideShownLayer();
+			return;
+		}
+		const node = (this.adapter.getNodes() ?? []).find((item) => readCanvasElementId(item) === shown.id);
+		const element = readRuntime(node, "nodeEl");
+		const zIndex = readRuntime(node, "zIndex");
+		if (!isElement(element) || typeof zIndex !== "number") {
+			this.hideShownLayer();
+			return;
+		}
+		// Native Canvas may have built the card again since.
+		if (shown.element !== undefined && shown.element !== element) {
+			shown.element.classList.remove("miro-canvas-layer-shown");
+			shown.element.style.removeProperty("--miro-canvas-layer");
+		}
+		this.shownLayer = { ...shown, element };
+		element.classList.add("miro-canvas-layer-shown");
+		element.style.setProperty("--miro-canvas-layer", String(zIndex));
+	}
+
+	private hideShownLayer(): void {
+		const element = this.shownLayer?.element;
+		this.shownLayer = undefined;
+		if (element === undefined) return;
+		element.classList.remove("miro-canvas-layer-shown");
+		element.style.removeProperty("--miro-canvas-layer");
+	}
+
 	public toggleAttachmentNames(): void {
 		this.applyAttachment({ type: "set-global", visible: this.appearance.settings.showAttachmentNames === false });
 	}
@@ -2552,6 +2649,7 @@ export class M1CanvasSession {
 		}
 		const selection = this.adapter.getSelection();
 		this.selectedIds = [...new Set([...(selection === undefined ? [] : allIds(selection)), ...this.ownSelection(this.currentRawDocument)])];
+		this.updateShownLayer();
 		this.scene = this.adapter.getScene() ?? sceneFromDocument(this.currentRawDocument) ?? { nodes: [], edges: [] };
 		// The board's own connectors show on the minimap as edges do.
 		const routes = this.landingGeometry().geometry.edges ?? {};
@@ -5138,6 +5236,17 @@ export class M1CanvasSession {
 				event.stopImmediatePropagation();
 				return;
 			}
+			// The shared frame stands where native Canvas's own selection box
+			// would, so a right click on it opens the selection menu as that box does.
+			if (this.closestTarget(event, ".miro-canvas-mixed-selection-frame")) {
+				const canvas = this.nativeCanvas();
+				const openMenu = readRuntime(canvas, "onSelectionContextMenu");
+				if (typeof openMenu !== "function") return;
+				Reflect.apply(openMenu, canvas, [event]);
+				event.preventDefault();
+				event.stopImmediatePropagation();
+				return;
+			}
 			// Native Canvas has a menu for its cards and edges; the board's own
 			// connectors, which it knows nothing of, get the same actions here.
 			if (this.options.onConnectorMenu === undefined || !this.closestTarget(event, ".miro-board-connector, .miro-canvas-connector-labels")) return;
@@ -6509,6 +6618,24 @@ export class M1CanvasSession {
 			}
 			return data;
 		});
+		// Moving cards keeps their layers, as in Miro.  Native Canvas lifts every
+		// card it starts dragging above all the others, which would quietly undo
+		// the order set by hand; the lift happens as the drag starts, so the
+		// layers are put back as soon as it has.
+		this.guardNativeMethod(canvas, "handleSelectionDrag", (original, receiver, args) => {
+			const layers = new Map<unknown, unknown>();
+			for (const node of this.adapter.getNodes() ?? []) {
+				layers.set(node, readRuntime(node, "zIndex"));
+			}
+			const result = Reflect.apply(original, receiver, args);
+			for (const [node, zIndex] of layers) {
+				if (typeof zIndex !== "number" || readRuntime(node, "zIndex") === zIndex) continue;
+				Reflect.set(node as object, "zIndex", zIndex);
+				const render = readRuntime(node, "renderZIndex");
+				if (typeof render === "function") Reflect.apply(render, node, []);
+			}
+			return result;
+		});
 		for (const key of ["removeNode", "removeEdge", "removeSelection", "deleteSelection"]) {
 			this.guardNativeMethod(canvas, key, (original, receiver, args) => {
 				this.readInteractionState();
@@ -6793,6 +6920,7 @@ export class M1CanvasSession {
 		this.commentMarkers?.destroy();
 		this.removeMixedSelectionFrame();
 		this.root?.classList.remove("miro-canvas-mixed-selection");
+		this.hideShownLayer();
 		this.commentCard?.destroy();
 		this.authoring?.dispose();
 		this.authoring = undefined;

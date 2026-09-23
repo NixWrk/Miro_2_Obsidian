@@ -1,4 +1,4 @@
-import { Menu, Modal, Notice, Plugin, TFile, setIcon, type WorkspaceLeaf } from "obsidian";
+import { Menu, Modal, Notice, Plugin, TFile, setIcon, type Events, type WorkspaceLeaf } from "obsidian";
 
 import {
   inspectAdvancedCanvas,
@@ -24,8 +24,29 @@ import {
 } from "./settings";
 import { MiroCanvasSettingTab } from "./settings-tab";
 import { setAuthorColors } from "./comment-thread";
+import { LAYER_ACTIONS } from "./layer-order";
 
 const NATIVE_CANVAS_VIEW_TYPE = "canvas";
+const LAYER_MENU_SECTION = "miro-canvas-layer";
+
+/**
+ * Put a section of ours just before a menu's "danger" section, so deleting
+ * stays the last thing a native Canvas menu offers.  A menu orders its
+ * sections as it first meets them, which would put ours after it.
+ */
+function placeBeforeDanger(menu: Menu, section: string): void {
+  const items = (menu as unknown as { items?: unknown }).items;
+  const addSections = (menu as unknown as { addSections?: unknown }).addSections;
+  if (!Array.isArray(items) || typeof addSections !== "function") return;
+  const order: string[] = [];
+  for (const item of items) {
+    const name = (item as { section?: unknown } | null)?.section;
+    if (typeof name === "string" && name !== "" && name !== section && !order.includes(name)) order.push(name);
+  }
+  const danger = order.indexOf("danger");
+  order.splice(danger < 0 ? order.length : danger, 0, section);
+  Reflect.apply(addSections, menu, [order]);
+}
 
 function isNativeCanvasView(view: unknown): boolean {
   if (view === null || (typeof view !== "object" && typeof view !== "function")) {
@@ -169,6 +190,36 @@ export default class MiroCanvasPlugin extends Plugin {
       name: "Miro Canvas: Unlock selection",
       checkCallback: (checking) => this.runM1Command(checking, (session) => session.unlockSelection()),
     });
+    // Only cards have layers, so the commands are offered only with a card
+    // selected.  No default hotkeys: Obsidian's editor uses the bracket keys,
+    // and a board's keys are the user's to assign.
+    for (const action of LAYER_ACTIONS) {
+      this.addCommand({
+        id: `layer-${action.direction}`,
+        name: `Miro Canvas: ${action.label}`,
+        checkCallback: (checking) => {
+          const session = this.activeM1Session();
+          if (session === null || session.layeredCards().length === 0) {
+            return false;
+          }
+          if (!checking) {
+            session.changeLayer(action.direction);
+          }
+          return true;
+        },
+      });
+    }
+    // Native Canvas's own menus for a card and for a selection offer the
+    // layer order as well; a frame's or a line's menu does not, as neither
+    // has a layer.  Obsidian's typings do not name the Canvas menu events.
+    const workspaceEvents: Events = this.app.workspace;
+    this.registerEvent(workspaceEvents.on("canvas:node-menu", (menu: unknown, node: unknown) => {
+      const id = (node as { id?: unknown } | null)?.id;
+      if (typeof id === "string") this.addLayerItems(menu, [id]);
+    }));
+    this.registerEvent(workspaceEvents.on("canvas:selection-menu", (menu: unknown) => {
+      this.addLayerItems(menu);
+    }));
     // Registered without default hotkeys so Obsidian's own editor can bind
     // them and nothing is taken from the user or another plugin.
     for (const command of NAVIGATION_COMMANDS) {
@@ -364,6 +415,22 @@ export default class MiroCanvasPlugin extends Plugin {
     return this.m1Session !== null && view === this.currentCanvasView
       ? this.m1Session
       : null;
+  }
+
+  /** The four layer actions in a native Canvas menu, when what it is for holds a card. */
+  private addLayerItems(menu: unknown, ids?: readonly string[]): void {
+    const session = this.activeM1Session();
+    if (session === null || !(menu instanceof Menu)) return;
+    session.refresh();
+    if (session.layeredCards(ids).length === 0) return;
+    for (const action of LAYER_ACTIONS) {
+      menu.addItem((item) => item
+        .setTitle(action.label)
+        .setIcon(action.icon)
+        .setSection(LAYER_MENU_SECTION)
+        .onClick(() => session.changeLayer(action.direction, ids)));
+    }
+    placeBeforeDanger(menu, LAYER_MENU_SECTION);
   }
 
   private runM1Command(checking: boolean, callback: (session: M1CanvasSession) => void): boolean {
