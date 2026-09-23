@@ -53,5 +53,36 @@ provenance. Release hardening must cover Windows, macOS, and Linux or
 representative VMs; multiple viewport sizes and pixel ratios; and mouse,
 trackpad, pen tablet/stylus, touch-screen, and phone/tablet interaction.
 
+## Future (set 2026-09-23)
+
+### Converter and plugin as two products
+
+- [ ] Move `miro-canvas` into its own repository while keeping it tied to
+  miro2obsidian through a shared, versioned data contract: miro2obsidian owns
+  the `miroSource`/`miroCanvas` JSON Schema and publishes compatibility
+  fixtures with each release; the plugin pins a schema version and runs those
+  fixtures in its CI. Neither repository vendors the other's code.
+- [ ] The converter keeps working without the plugin: its own simple,
+  beginner-friendly GUI exports raw JSON, native Canvas, Advanced Canvas and
+  miro-canvas boards, and never requires any of them.
+- [ ] Deduplicate attachments by content hash (SHA-256): identical images and
+  files across or within boards are stored once and referenced from every
+  node, with a manifest mapping hashes to vault paths so later imports reuse
+  what the vault already has.
+- [ ] Plugin onboarding for Miro imports: on first setup the plugin asks
+  whether to import from Miro; if so it shows a clear, illustrated,
+  step-by-step guide and automates every step it safely can (open the
+  converter with the vault and target folder filled in, open the finished
+  board). A button in the plugin settings starts the same flow later. The
+  plugin guides the user to install the converter rather than downloading or
+  running programs itself.
+- [ ] Walk the full user journey on a clean machine - install, first setup,
+  Miro app, export, conversion, opening and editing the board - and fix every
+  problem found.
+- [ ] Give agents first-class access to the miro-canvas format through a skill
+  or an MCP server: read, validate and edit boards (nodes, connectors,
+  comments, overrides) as safely as native Canvas files, through the same
+  transactions the plugin uses.
+
 Completed work is recorded in Git history and the regression suite rather than
 duplicated here.

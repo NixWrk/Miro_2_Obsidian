@@ -586,6 +586,25 @@ and covered by automated tests.
 - [x] Add bounded provenance and source-limitation inspection without default
   board clutter or raw source values in DOM.
 
+### Future: product tasks (set 2026-09-23)
+
+- Choose the settings and interface language automatically from Obsidian's own
+  language, falling back to English; ship English and Russian first.
+- Offer an optional onboarding board on first setup (and from settings) that
+  shows every tool on real items.
+- Write a visual guide to the plugin's features and the order of its settings,
+  with screenshots, for users and for the release page.
+- Finish PDF/PPTX export (draft on branch `wip/board-export`): slides as a
+  deck and marked board areas as pages.
+- Move the plugin into its own repository tied to miro2obsidian by a shared
+  schema and fixtures; offer a guided, illustrated Miro import from first setup
+  and from settings; walk the full user journey on a clean machine
+  (see [ROADMAP](../ROADMAP.md)).
+- Provide a skill or an MCP server so agents can work with miro-canvas boards as
+  natively as with Canvas files.
+- Tune settings and layouts for other operating systems, phones and tablets
+  (see M5 below).
+
 ### Future: ecosystem migration
 
 - Add explicit, non-destructive import adapters for common local plugin formats,
