@@ -17,6 +17,7 @@ import {
 	type AppearanceState,
 	type DisplayTheme,
 } from "./appearance";
+import { EXPORT_TEXT } from "./board-export";
 import type { SourceInspection } from "./source-inspector";
 import { BAR_TOOLTIP_DELAY } from "./tooltips";
 
@@ -68,6 +69,8 @@ export interface M1ControlsActions {
 	readonly openSourceInspector?: () => void;
 	/** Open this plugin's page in Obsidian's settings. */
 	readonly openSettings?: () => void;
+	/** Set up an export of the board to PDF or PowerPoint. */
+	readonly openExport?: () => void;
 }
 
 export interface M1ControlsOptions {
@@ -353,6 +356,11 @@ export class M1Controls {
 			return button;
 		});
 		this.separator(board.panel);
+		if (this.actions.openExport !== undefined) {
+			const openExport = this.actions.openExport;
+			this.item(board.panel, "file-output", "⇩", EXPORT_TEXT.boardMenuLabel, { run: () => this.close(() => openExport()) });
+			this.separator(board.panel);
+		}
 		const review = this.item(board.panel, "eye", "◉", "Review mode", {
 			toggle: true,
 			run: () => this.actions.onInteraction({ type: "set-review-mode", enabled: this.lastState?.reviewMode !== true }),

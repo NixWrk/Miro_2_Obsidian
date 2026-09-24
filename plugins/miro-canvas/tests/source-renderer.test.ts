@@ -538,14 +538,16 @@ describe("presentations, groups and ink", () => {
     const bar = created.find((element) => element.classes.has("miro-source-deck-bar"))!;
     expect(bar.parentNode?.parentNode).toBe(deck);
     const buttons = created.filter((element) => element.classes.has("miro-source-deck-button"));
-    expect(buttons.map((button) => button.getAttribute("aria-label"))).toEqual(["Present slides", "Show all slides"]);
+    expect(buttons.map((button) => button.getAttribute("aria-label")))
+      .toEqual(["Present slides", "Show all slides", "Export slides as PDF or PowerPoint"]);
     const stopped: string[] = [];
     const fire = (button: Element, type: string) => handlers.get(button)?.get(type)?.({ type, stopPropagation: () => stopped.push(type) });
     fire(buttons[0]!, "pointerdown");
     fire(buttons[0]!, "click");
     fire(buttons[1]!, "click");
-    expect(stopped).toEqual(["pointerdown", "click", "click"]);
-    expect(actions).toEqual(["deck:present", "deck:fit"]);
+    fire(buttons[2]!, "click");
+    expect(stopped).toEqual(["pointerdown", "click", "click", "click"]);
+    expect(actions).toEqual(["deck:present", "deck:fit", "deck:export"]);
     renderer.dispose();
     expect(deck.classes.has("miro-source-deck")).toBe(false);
     expect(deck.children).toHaveLength(1);

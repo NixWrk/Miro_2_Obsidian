@@ -57,9 +57,10 @@ trackpad, pen tablet/stylus, touch-screen, and phone/tablet interaction.
 
 The work below is done in this order; each phase builds on the ones before it.
 
-0. **Finish what is started.** PDF/PPTX export of boards (draft on branch
-   `wip/board-export`). Manual layer order in the main interface (done
-   2026-09-24): bring to front, bring forward, send backward and send to back
+0. **Finish what is started (done 2026-09-24).** PDF/PPTX export of boards:
+   pages marked on the board or a presentation's slides, photographed as native
+   Canvas's image export does and packed into PDF or PowerPoint. Manual layer
+   order in the main interface: bring to front, bring forward, send backward and send to back
    for cards, from the selection toolbar, native Canvas's card and selection
    menus and commands, for one card or a whole selection.
 1. **Foundations.** A formal, versioned schema of `miroSource` and

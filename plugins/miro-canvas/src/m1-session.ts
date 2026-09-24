@@ -140,6 +140,12 @@ import {
 	CANVAS_CLIPBOARD_TYPE, CLIPBOARD_TYPE, clipboardText, linkedFilePaths, planPaste, readCanvasClipboard, readClipboardRecord,
 	type ClipboardItem,
 } from "./board-clipboard";
+import {
+	DEFAULT_EXPORT_STATE, MAX_EXPORT_PAGES, exportRecord, pageAround, paperRatio, paperSize, readExportState, reshapePage,
+	type ExportPageRecord, type ExportRect, type ExportState,
+} from "./export-pages";
+import { EXPORT_TEXT, ExportOverlay, ExportPanel, capturePages, electronRemote, type ExportKind } from "./board-export";
+import { makePdf, makePptx } from "./export-files";
 
 export interface M1SessionOptions {
 	readonly document?: Document;
@@ -262,6 +268,27 @@ function readRuntime(value: unknown, key: PropertyKey): unknown {
 /** The key a moved comment's place is kept under: its origin and id, which alone may repeat. */
 function commentPlaceKey(origin: CommentOrigin, id: string): string {
 	return `${origin}:${id}`;
+}
+
+/**
+ * Offer to save an exported file where the person chooses, as Obsidian's own
+ * image export does; the path it went to, or undefined when they declined.
+ */
+async function saveExportFile(view: Window | null | undefined, name: string, kind: ExportKind, bytes: Uint8Array): Promise<string | undefined> {
+	const remote = electronRemote(view) as unknown as {
+		dialog?: { showSaveDialog(options: unknown): Promise<{ canceled: boolean; filePath?: string }> };
+	} | undefined;
+	const host = view as (Window & { require?: (name: string) => unknown }) | null | undefined;
+	const fs = host?.require?.("original-fs") as { promises?: { writeFile(path: string, data: Uint8Array): Promise<void> } } | undefined;
+	if (remote?.dialog === undefined || fs?.promises === undefined) throw new Error(EXPORT_TEXT.unavailable);
+	const choice = await remote.dialog.showSaveDialog({
+		defaultPath: name,
+		filters: [kind === "pdf" ? { name: "PDF", extensions: ["pdf"] } : { name: "PowerPoint", extensions: ["pptx"] }],
+		properties: ["showOverwriteConfirmation"],
+	});
+	if (choice.canceled || choice.filePath === undefined || choice.filePath === "") return undefined;
+	await fs.promises.writeFile(choice.filePath, bytes);
+	return choice.filePath;
 }
 
 /** A node or connector id as native Canvas makes one: sixteen hex digits. */
@@ -1277,6 +1304,16 @@ export class M1CanvasSession {
 	private readonly quickTools: QuickTools | undefined;
 	private armedTool: QuickTool = "select";
 	private toolShape = "rectangle";
+	/** An export being set up or run: its panel, the pages over the board, and where it stands. */
+	private exporting: {
+		readonly mode: "board" | "slides";
+		readonly title: string;
+		state: ExportState;
+		readonly panel: ExportPanel;
+		readonly overlay: ExportOverlay;
+		busy?: string;
+		stop: boolean;
+	} | undefined;
 	/** Where the pointer last was over the board, and when: a paste lands there. */
 	private lastPointer: { readonly x: number; readonly y: number; readonly at: number } | undefined;
 	private panGestureEnd: (() => void) | undefined;
@@ -1372,6 +1409,7 @@ export class M1CanvasSession {
 			onNavigation: (action) => this.applyNavigation(action),
 			openCommandModal: () => this.openCommandModal(),
 			openSourceInspector: () => this.openSourceInspector(),
+			openExport: () => this.openExport(),
 			...(options.onOpenSettings === undefined ? {} : { openSettings: options.onOpenSettings }),
 		};
 		const controlDocument = options.document ?? ownerDocument(this.root);
@@ -2787,6 +2825,7 @@ export class M1CanvasSession {
 		}
 		this.lastToolbarState = toolbarState;
 		this.handles.update(this.handlesState(toolbarState.editable));
+		this.updateExportOverlay();
 		this.retargetFollow();
 	}
 
@@ -2987,6 +3026,7 @@ export class M1CanvasSession {
 		}
 		this.handles.update(this.handlesState(previous?.editable ?? false));
 		this.updateCommentMarkers();
+		this.updateExportOverlay();
 		const size = clientSize(this.root), viewport = this.displayViewport();
 		const signature = `${this.lastSceneSignature}|${this.viewportSignature(viewport, size)}`;
 		// Mid-drag, the minimap follows the cards a few times a second: redrawn
@@ -4667,10 +4707,14 @@ export class M1CanvasSession {
 		this.refresh();
 	}
 
-	/** A presentation's bar: show its slides one by one, or all of them at once. */
+	/** A presentation's bar: show its slides one by one, or all of them at once, or export them. */
 	private runDeckAction(deckId: string, action: DeckAction): void {
 		if (this.root === undefined || this.disposed) return;
 		const slides = buildSourceScene(this.currentRawDocument).items.get(deckId)?.structured?.deck?.slides ?? [];
+		if (action === "export") {
+			this.openExport(deckId);
+			return;
+		}
 		if (action === "fit") {
 			const rect = this.nodeRect(deckId);
 			if (rect !== undefined) this.showRect(rect);
@@ -4683,6 +4727,234 @@ export class M1CanvasSession {
 			...(this.options.setIcon === undefined ? {} : { setIcon: this.options.setIcon }),
 		});
 		this.slideShow.start(slides);
+	}
+
+	/**
+	 * Set up an export: of the board, through pages laid over it and kept
+	 * with it, or of a presentation, whose slides are its pages.  The pages
+	 * are never nodes, so nothing on the board moves or changes.
+	 */
+	public openExport(deckId?: string): void {
+		const root = this.root;
+		const document = root?.ownerDocument;
+		if (root === undefined || document === undefined || this.disposed) return;
+		this.closeExport();
+		let state: ExportState;
+		let title: string;
+		if (deckId !== undefined) {
+			const deck = buildSourceScene(this.currentRawDocument).items.get(deckId)?.structured?.deck;
+			const pages = (deck?.slides ?? []).flatMap((id, index): ExportPageRecord[] => {
+				const rect = this.nodeRect(id);
+				const name = readRuntime(((readRuntime(this.currentRawDocument, "nodes") ?? []) as readonly unknown[])
+					.find((node) => readRuntime(node, "id") === id), "label");
+				return rect === undefined ? [] : [{ id, ...rect, name: typeof name === "string" && name !== "" ? name : EXPORT_TEXT.slideFallback(index + 1) }];
+			});
+			state = { ...DEFAULT_EXPORT_STATE, format: "free", pages };
+			title = EXPORT_TEXT.slidesTitle(deck?.title ?? EXPORT_TEXT.slidesFallbackTitle);
+		} else {
+			state = readExportState(readRuntime(readRuntime(this.currentRawDocument, "miroCanvas"), "export"));
+			title = EXPORT_TEXT.boardTitle;
+			// A first export starts with a page around what is selected, or what is
+			// in view; nothing is written until the person changes or exports it.
+			if (state.pages.length === 0) state = { ...state, pages: [this.newExportPage(state, 1)] };
+		}
+		const panel = new ExportPanel(document, {
+			onFormat: (format, orientation) => this.changeExport((current) => {
+				const ratio = paperRatio(format, orientation);
+				return { ...current, format, orientation, pages: current.pages.map((page) => ({ ...page, ...reshapePage(page, ratio) })) };
+			}),
+			onQuality: (quality) => this.changeExport((current) => ({ ...current, quality })),
+			onAddPage: () => this.changeExport((current) => ({ ...current, pages: [...current.pages, this.newExportPage(current, current.pages.length + 1)] })),
+			onAddFramePages: () => this.changeExport((current) => {
+				const ratio = paperRatio(current.format, current.orientation);
+				const frames = ((readRuntime(this.currentRawDocument, "nodes") ?? []) as readonly unknown[])
+					.filter((node) => readRuntime(node, "type") === "group")
+					.flatMap((node, index): ExportPageRecord[] => {
+						const id = readRuntime(node, "id");
+						const rect = typeof id === "string" ? this.nodeRect(id) : undefined;
+						const label = readRuntime(node, "label");
+						return rect === undefined ? [] : [{
+							id: newCanvasId(), ...pageAround(rect, ratio, 24),
+							name: typeof label === "string" && label !== "" ? label : EXPORT_TEXT.frameFallback(index + 1),
+						}];
+					});
+				if (frames.length === 0) this.options.onNotice?.(EXPORT_TEXT.noFrames);
+				return { ...current, pages: [...current.pages, ...frames].slice(0, MAX_EXPORT_PAGES) };
+			}),
+			onRemovePage: (id) => this.changeExport((current) => ({ ...current, pages: current.pages.filter((page) => page.id !== id) })),
+			onMovePage: (id, step) => this.changeExport((current) => {
+				const pages = [...current.pages];
+				const index = pages.findIndex((page) => page.id === id);
+				const target = index + step;
+				if (index < 0 || target < 0 || target >= pages.length) return current;
+				[pages[index], pages[target]] = [pages[target]!, pages[index]!];
+				return { ...current, pages };
+			}),
+			onShowPage: (id) => {
+				const page = this.exporting?.state.pages.find((item) => item.id === id);
+				if (page !== undefined) this.showRect(page);
+			},
+			onExport: (kind) => void this.runExport(kind),
+			onClose: () => this.closeExport(),
+		});
+		const overlay = new ExportOverlay(document, (id, rect, commit) => this.movePageOnScreen(id, rect, commit), () => {
+			const current = this.exporting?.state;
+			return current === undefined ? undefined : paperRatio(current.format, current.orientation);
+		});
+		root.appendChild(overlay.element);
+		document.body.appendChild(panel.element);
+		this.exporting = { mode: deckId === undefined ? "board" : "slides", title, state, panel, overlay, stop: false };
+		this.renderExport();
+	}
+
+	private closeExport(): void {
+		const exporting = this.exporting;
+		if (exporting === undefined) return;
+		exporting.stop = true;
+		exporting.panel.dispose();
+		exporting.overlay.dispose();
+		this.exporting = undefined;
+	}
+
+	/** A new page of the board's paper: around the selection, or the middle of the view. */
+	private newExportPage(state: ExportState, number: number): ExportPageRecord {
+		const ratio = paperRatio(state.format, state.orientation);
+		const rects = this.selectedIds.map((id) => this.nodeRect(id)).filter((rect): rect is SlideRect => rect !== undefined);
+		let area: ExportRect | undefined;
+		if (rects.length > 0) {
+			const left = Math.min(...rects.map((rect) => rect.x)), top = Math.min(...rects.map((rect) => rect.y));
+			const right = Math.max(...rects.map((rect) => rect.x + rect.width)), bottom = Math.max(...rects.map((rect) => rect.y + rect.height));
+			area = pageAround({ x: left, y: top, width: right - left, height: bottom - top }, ratio, 24);
+		} else if (this.root !== undefined) {
+			const rect = boundingRect(this.root);
+			const across = rect === undefined ? 0 : (rect.right - rect.left) * 0.2, down = rect === undefined ? 0 : (rect.bottom - rect.top) * 0.2;
+			const a = rect === undefined ? undefined : this.boardPoint({ x: rect.left + across, y: rect.top + down });
+			const b = rect === undefined ? undefined : this.boardPoint({ x: rect.right - across, y: rect.bottom - down });
+			if (a !== undefined && b !== undefined) area = pageAround({ x: a.x, y: a.y, width: b.x - a.x, height: b.y - a.y }, ratio);
+		}
+		return { id: newCanvasId(), ...(area ?? pageAround({ x: 0, y: 0, width: 800, height: 600 }, ratio)), name: EXPORT_TEXT.pageFallback(number) };
+	}
+
+	/** Change the export, show it, and keep a board's pages with the board. */
+	private changeExport(change: (state: ExportState) => ExportState): void {
+		const exporting = this.exporting;
+		if (exporting === undefined || exporting.busy !== undefined) return;
+		exporting.state = change(exporting.state);
+		if (exporting.mode === "board") this.saveExport();
+		this.renderExport();
+	}
+
+	private saveExport(): void {
+		const exporting = this.exporting;
+		if (exporting === undefined || exporting.mode !== "board") return;
+		this.writeMetadata("set-export-pages", (draft) => {
+			draft.export = exportRecord(exporting.state);
+			return draft;
+		});
+	}
+
+	/** A page dragged or resized on screen: previewed as it moves, kept once let go. */
+	private movePageOnScreen(id: string, rect: { left: number; top: number; width: number; height: number }, commit: boolean): void {
+		const exporting = this.exporting;
+		const origin = this.exportOrigin();
+		if (exporting === undefined || origin === undefined || exporting.mode !== "board") return;
+		const a = this.boardPoint({ x: origin.left + rect.left, y: origin.top + rect.top });
+		const b = this.boardPoint({ x: origin.left + rect.left + rect.width, y: origin.top + rect.top + rect.height });
+		if (a === undefined || b === undefined || !commit) return;
+		this.changeExport((current) => ({
+			...current,
+			pages: current.pages.map((page) => page.id === id ? { ...page, x: a.x, y: a.y, width: b.x - a.x, height: b.y - a.y } : page),
+		}));
+	}
+
+	private renderExport(): void {
+		const exporting = this.exporting;
+		if (exporting === undefined) return;
+		const view = ownerDocument(this.root)?.defaultView;
+		exporting.panel.update({
+			mode: exporting.mode,
+			title: exporting.title,
+			state: exporting.state,
+			...(exporting.busy === undefined ? {} : { busy: exporting.busy }),
+			...(electronRemote(view) === undefined ? { unavailable: EXPORT_TEXT.unavailable } : {}),
+		});
+		this.updateExportOverlay();
+	}
+
+	/**
+	 * Where the pages' layer starts on screen.  It covers the board's root,
+	 * so the root's own box is its origin - not the selection handles', which
+	 * shrink to nothing while nothing is selected.
+	 */
+	private exportOrigin(): { readonly left: number; readonly top: number } | undefined {
+		return boundingRect(this.root);
+	}
+
+	/** The pages over the board, where the view now shows them. */
+	private updateExportOverlay(): void {
+		const exporting = this.exporting;
+		const origin = this.exportOrigin();
+		if (exporting === undefined || origin === undefined) return;
+		const pages = exporting.state.pages.flatMap((page, index) => {
+			const a = this.viewportPoint({ x: page.x, y: page.y });
+			const b = this.viewportPoint({ x: page.x + page.width, y: page.y + page.height });
+			return a === undefined || b === undefined ? [] : [{
+				id: page.id, label: `${index + 1}${page.name === undefined ? "" : ` · ${page.name}`}`,
+				left: a.x - origin.left, top: a.y - origin.top, width: b.x - a.x, height: b.y - a.y,
+			}];
+		});
+		exporting.overlay.update(pages, exporting.mode === "board" && exporting.busy === undefined);
+	}
+
+	/** Photograph the pages, pack them into the file asked for, and offer to save it. */
+	private async runExport(kind: ExportKind): Promise<void> {
+		const exporting = this.exporting;
+		const canvas = this.nativeCanvas();
+		const view = ownerDocument(this.root)?.defaultView;
+		if (exporting === undefined || canvas === undefined || exporting.busy !== undefined) return;
+		const pages = exporting.state.pages;
+		if (pages.length === 0) return;
+		const file = readRuntime(this.view, "file");
+		const base = typeof readRuntime(file, "basename") === "string" ? readRuntime(file, "basename") as string : "Board";
+		exporting.stop = false;
+		exporting.busy = EXPORT_TEXT.capturing;
+		this.renderExport();
+		// Nothing of the plugin belongs in the pictures: its own panel and page
+		// overlay step aside, and so do the plugin's own selections.
+		exporting.panel.element.hidden = true;
+		exporting.overlay.element.hidden = true;
+		this.callNative("deselectAll");
+		this.selectedCommentKeys.clear();
+		this.connectorLayer?.select([]);
+		try {
+			const pictures = await capturePages(canvas as never, pages, exporting.state.quality, (done, total) => {
+				if (this.exporting !== exporting || exporting.stop) return false;
+				exporting.busy = EXPORT_TEXT.capturingProgress(done, total);
+				this.renderExport();
+				return true;
+			});
+			exporting.busy = kind === "pdf" ? EXPORT_TEXT.writingPdf : EXPORT_TEXT.writingPptx;
+			this.renderExport();
+			const sheets = pages.map((page, index) => {
+				const size = paperSize(exporting.state.format, exporting.state.orientation, page);
+				const picture = pictures[index]!;
+				return {
+					width: size.width, height: size.height, image: picture.jpeg, pixelWidth: picture.width, pixelHeight: picture.height,
+					...(page.name === undefined ? {} : { title: page.name }),
+				};
+			});
+			const bytes = kind === "pdf" ? makePdf(sheets, { title: base }) : makePptx(sheets, { title: base });
+			const saved = await saveExportFile(view, `${base}.${kind}`, kind, bytes);
+			if (saved !== undefined) this.options.onNotice?.(EXPORT_TEXT.exportedTo(saved));
+		} catch (error) {
+			this.options.onNotice?.(error instanceof Error ? error.message : EXPORT_TEXT.exportFailed);
+		} finally {
+			exporting.busy = undefined;
+			exporting.panel.element.hidden = false;
+			exporting.overlay.element.hidden = false;
+			if (this.exporting === exporting) this.renderExport();
+			this.refresh();
+		}
 	}
 
 	private selectionKinds(): readonly SelectionKind[] {
@@ -6912,6 +7184,7 @@ export class M1CanvasSession {
 		this.disposed = true;
 		this.selectionMoveEnd?.();
 		this.slideShow?.stop();
+		this.closeExport();
 		this.controls.dispose();
 		this.connectorLayer?.dispose();
 		this.connectorLabels?.dispose();

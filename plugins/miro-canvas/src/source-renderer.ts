@@ -13,6 +13,7 @@ import { readCanvasElementId } from "./canvas-elements";
 import { blockArrowOutline, linePoints, planLine } from "./free-line";
 import { buildSourceScene, type SourceItemDescriptor, type SourceScene } from "./source-model";
 import { TOOLTIP_DELAY } from "./tooltips";
+import { EXPORT_TEXT } from "./board-export";
 
 type UnknownRecord = Record<PropertyKey, unknown>;
 
@@ -29,7 +30,7 @@ export interface SourceRendererHost {
   onDeckAction?(deckId: string, action: DeckAction): void;
 }
 
-export type DeckAction = "present" | "fit";
+export type DeckAction = "present" | "fit" | "export";
 
 interface DomElementLike extends UnknownRecord {
   readonly nodeType?: unknown;
@@ -551,6 +552,7 @@ const DECK_ICONS: Readonly<Record<string, string>> = Object.freeze({
   deck: "M3 5.5h18v11H3zM8 20h8M12 16.5V20",
   present: "M8 5.5v13l10.5-6.5z",
   fit: "M14.5 4.5h5v5M19.5 4.5 13.5 10.5M9.5 19.5h-5v-5M4.5 19.5l6-6",
+  export: "M12 4v11M7.5 10.5 12 15l4.5-4.5M5 19.5h14",
 });
 
 function deckIcon(document: Document, name: string): DomElementLike | undefined {
@@ -592,7 +594,7 @@ function decorateDeck(
     safeCall(bar, "appendChild", [name]);
   }
   if (onAction !== undefined && deck.slides.length > 0) {
-    for (const [action, label] of [["present", "Present slides"], ["fit", "Show all slides"]] as const) {
+    for (const [action, label] of [["present", "Present slides"], ["fit", "Show all slides"], ["export", EXPORT_TEXT.deckBarLabel]] as const) {
       const button = createElement(document, "button");
       const glyph = deckIcon(document, action);
       if (button === undefined) continue;

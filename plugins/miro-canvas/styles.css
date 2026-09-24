@@ -2705,6 +2705,30 @@
   display: none !important;
 }
 
+/* While a page is being photographed for export, the board is laid over
+   the whole window; nothing of the plugin belongs in the picture.  The
+   list matches PANEL_SELECTOR in m1-session.ts, plus the mixed-selection
+   frame, the export overlay and a presentation's bar of buttons, which
+   PANEL_SELECTOR does not cover. */
+.is-screenshotting :is(
+  .miro-canvas-panel,
+  .miro-canvas-dock,
+  .miro-canvas-thread,
+  .miro-canvas-slideshow,
+  .miro-canvas-toolbar,
+  .miro-canvas-comment-markers,
+  .miro-canvas-handles,
+  .miro-canvas-minimap,
+  .miro-canvas-m2-tools,
+  .miro-canvas-mixed-selection-frame,
+  .miro-canvas-export-pages,
+  .miro-source-deck-bar,
+  .canvas-card-menu,
+  .canvas-menu
+) {
+  display: none !important;
+}
+
 .miro-canvas-slideshow {
   position: absolute;
   bottom: 44px;
@@ -3224,4 +3248,187 @@
    Only a rule marked important outranks the z-index native Canvas writes inline. */
 .canvas-node.miro-canvas-layer-shown {
   z-index: var(--miro-canvas-layer) !important;
+}
+
+/* The export panel: paper, pages, quality and the two ways out.  Mounted
+   on document.body rather than the board's own root, so its fixed
+   position is never clipped by an ancestor that sets a backdrop-filter or
+   a transform. */
+.miro-canvas-export {
+  position: fixed;
+  top: 16px;
+  right: 16px;
+  z-index: 1000;
+  display: grid;
+  gap: 10px;
+  width: min(300px, calc(100vw - 32px));
+  max-height: calc(100vh - 32px);
+  overflow: auto;
+  padding: 12px;
+  color: var(--text-normal);
+  font-size: var(--font-ui-small, 13px);
+  background: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-m, 8px);
+  box-shadow: var(--shadow-l, 0 10px 32px rgb(0 0 0 / 35%));
+}
+
+.miro-canvas-export[hidden] {
+  display: none !important;
+}
+
+.miro-canvas-export__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.miro-canvas-export__title {
+  font-size: var(--font-ui-medium, 15px);
+  font-weight: 600;
+}
+
+.miro-canvas-export__row {
+  display: grid;
+  gap: 4px;
+}
+
+.miro-canvas-export__label {
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller, 12px);
+}
+
+.miro-canvas-export__segments {
+  display: flex;
+  gap: 4px;
+}
+
+.miro-canvas-export__segment {
+  flex: 1;
+  padding: 4px 8px;
+  color: var(--text-normal);
+  background: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s, 4px);
+  box-shadow: none;
+  font-size: inherit;
+}
+
+.miro-canvas-export__segment[aria-pressed="true"] {
+  color: var(--text-on-accent);
+  background: var(--interactive-accent);
+  border-color: var(--interactive-accent);
+}
+
+.miro-canvas-export__pages {
+  display: grid;
+  gap: 4px;
+  max-height: 220px;
+  overflow: auto;
+}
+
+.miro-canvas-export__empty {
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller, 12px);
+}
+
+.miro-canvas-export__page {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.miro-canvas-export__page-name {
+  flex: 1;
+  padding: 4px 6px;
+  overflow: hidden;
+  color: var(--text-normal);
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+}
+
+.miro-canvas-export__page-name:hover {
+  background: var(--background-modifier-hover);
+}
+
+.miro-canvas-export__page-action {
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  color: var(--icon-color);
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+}
+
+.miro-canvas-export__actions {
+  display: flex;
+  gap: 6px;
+}
+
+.miro-canvas-export__out {
+  margin-top: 4px;
+}
+
+.miro-canvas-export__out button {
+  flex: 1;
+}
+
+.miro-canvas-export__status {
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller, 12px);
+}
+
+/* The pages drawn over the board: dashed so they read as a plan rather
+   than a card, letting every press but their own tab and corner through
+   to the board underneath. */
+.miro-canvas-export-pages {
+  position: absolute;
+  inset: 0;
+  z-index: 98;
+  pointer-events: none;
+}
+
+.miro-canvas-export-pages[hidden] {
+  display: none !important;
+}
+
+.miro-canvas-export-page {
+  position: absolute;
+  outline: 2px dashed var(--interactive-accent);
+  outline-offset: -1px;
+}
+
+.miro-canvas-export-page__tab {
+  position: absolute;
+  top: -22px;
+  left: -1px;
+  max-width: 100%;
+  padding: 2px 6px;
+  overflow: hidden;
+  color: var(--text-on-accent);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  background: var(--interactive-accent);
+  border-radius: var(--radius-s, 4px) var(--radius-s, 4px) 0 0;
+  font-size: var(--font-ui-smaller, 12px);
+  cursor: move;
+  pointer-events: auto;
+}
+
+.miro-canvas-export-page__corner {
+  position: absolute;
+  right: -6px;
+  bottom: -6px;
+  width: 12px;
+  height: 12px;
+  background: var(--interactive-accent);
+  border-radius: 50%;
+  cursor: nwse-resize;
+  pointer-events: auto;
 }

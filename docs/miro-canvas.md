@@ -521,6 +521,29 @@ new layer until the selection changes.
 - Offer board-wide and selection-filtered comment views.
 - Do not claim that local comments synchronize with Miro.
 
+### Export to PDF and PowerPoint (done 2026-09-24)
+
+The board menu's **Export to PDF or PowerPoint** marks pages on the board:
+rectangles of one paper size (A4, A3, Letter, 16:9, 4:3 or free, landscape or
+portrait), moved by their tab and resized by their corner, kept in
+`miroCanvas.export` and never turned into nodes, so no item moves or changes.
+**Add page** puts one around the selection or in the middle of the view; **A
+page per frame** adds one around each frame. Opening the panel writes nothing;
+the pages are saved once changed. A presentation's bar has its own export
+button, whose pages are its slides, each at its own size (nothing saved). Each
+page is photographed the way Obsidian's own **Export as image** does it - the
+board laid over the window, a window-sized tile at a time - at 2000 or 3000
+pixels across, and packed into a PDF (one page per sheet) or a PowerPoint deck
+(one picture per slide, named after the page). A small window over Obsidian
+shows progress and can stop the export. The plugin's own controls, the page
+outlines and the selection stay out of the pictures, and the view returns to
+where it was. Exporting needs Obsidian on a computer.
+
+A board written by another tool (the converter writes an edge's default
+arrow and fractional geometry) now accepts metadata writes at once: native
+Canvas leaving out a default or rounding a position is treated as keeping the
+board, not as a change.
+
 ## Source-limited data
 
 Some Miro families remain incomplete because neither REST nor Web SDK exposes
@@ -605,7 +628,7 @@ and covered by automated tests.
 
 The agreed order of this work - finish PDF/PPTX export and bring manual layer
 order (to front, forward, backward, to back) into the selection toolbar and
-menu (done, see Geometry and layers); foundations (schema,
+menu (both done); foundations (schema,
 translations, agent skill); the converter as a product of its own; delivery and
 the Miro import guide; onboarding board and visual guide; testing with people;
 ecosystem - is recorded in the [ROADMAP](../ROADMAP.md) plan. The exporter stays
@@ -618,8 +641,8 @@ miro2obsidian skill or MCP server; the plugin never installs it by itself.
   shows every tool on real items.
 - Write a visual guide to the plugin's features and the order of its settings,
   with screenshots, for users and for the release page.
-- Finish PDF/PPTX export (draft on branch `wip/board-export`): slides as a
-  deck and marked board areas as pages.
+- PDF/PPTX export: slides as a deck and marked board areas as pages (done
+  2026-09-24, see Export to PDF and PowerPoint).
 - Move the plugin into its own repository tied to miro2obsidian by a shared
   schema and fixtures; offer a guided, illustrated Miro import from first setup
   and from settings, offering the exporter for download or an agent to set it

@@ -99,6 +99,7 @@ function build(options: { withSettings?: boolean; setIcon?: (element: HTMLElemen
     onNavigation: (action) => { calls.navigation.push(action); },
     openCommandModal: () => { calls.opened.push("commands"); },
     openSourceInspector: () => { calls.opened.push("source"); },
+    openExport: () => { calls.opened.push("export"); },
     ...(options.withSettings === false ? {} : { openSettings: () => { calls.opened.push("settings"); } }),
   };
   const document = new FakeDocument();
@@ -214,6 +215,14 @@ describe("corner dock", () => {
     }
     expect(calls.opened).toEqual(["commands", "source", "settings"]);
     expect(() => row(build({ withSettings: false }).root, "Plugin settings")).toThrow();
+  });
+
+  it("offers exporting to PDF or PowerPoint from the board menu", () => {
+    const { root, calls } = build();
+    byLabel(root, "Board settings").dispatch("click");
+    row(root, "Export to PDF or PowerPoint").dispatch("click");
+    expect(menu(root, "board").hidden).toBe(true);
+    expect(calls.opened).toEqual(["export"]);
   });
 
   it("shows a warning badge only when there is something to report", () => {
