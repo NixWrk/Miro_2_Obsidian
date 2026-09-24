@@ -1,9 +1,10 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  EXPORT_TEXT, ExportOverlay, ExportPanel, planCapture, type ExportPanelActions, type ExportPanelState, type OverlayPage,
+  ExportOverlay, ExportPanel, planCapture, type ExportPanelActions, type ExportPanelState, type OverlayPage,
 } from "../src/board-export";
 import { DEFAULT_EXPORT_STATE, type ExportState } from "../src/export-pages";
+import { words } from "../src/i18n";
 
 describe("planCapture", () => {
   it("plans a page that fits the window in one tile", () => {
@@ -192,42 +193,42 @@ describe("ExportPanel", () => {
 
   it("offers to add a page or one per frame, only for a board", () => {
     const { root, calls } = buildPanel();
-    byLabel(root, EXPORT_TEXT.addPageHint).dispatch("click");
-    byLabel(root, EXPORT_TEXT.addFramePagesHint).dispatch("click");
+    byLabel(root, words().export.addPageHint).dispatch("click");
+    byLabel(root, words().export.addFramePagesHint).dispatch("click");
     expect(calls.addPage).toHaveLength(1);
     expect(calls.addFramePages).toHaveLength(1);
     const { root: slidesRoot, calls: slidesCalls } = buildPanel({ mode: "slides", title: "Export slides" });
-    expect(() => byLabel(slidesRoot, EXPORT_TEXT.addPageHint)).toThrow();
+    expect(() => byLabel(slidesRoot, words().export.addPageHint)).toThrow();
     // A slide can still be shown, but never moved or removed.
-    expect(() => byLabel(slidesRoot, EXPORT_TEXT.removePage)).toThrow();
+    expect(() => byLabel(slidesRoot, words().export.removePage)).toThrow();
     pageRow(slidesRoot, 0).children[0]!.dispatch("click");
     expect(slidesCalls.showPage[0]).toBe("p1");
   });
 
   it("disables page and export actions while busy, and export while unavailable or empty", () => {
     const { root } = buildPanel({ busy: "Taking pictures: 0 of 1" });
-    expect(byLabelAll(root, EXPORT_TEXT.later).every((item) => item.disabled)).toBe(true);
-    expect(byLabel(root, EXPORT_TEXT.exportPdf).disabled).toBe(true);
+    expect(byLabelAll(root, words().export.later).every((item) => item.disabled)).toBe(true);
+    expect(byLabel(root, words().export.exportPdf).disabled).toBe(true);
     expect(texts(root, "miro-canvas-export__status")).toEqual(["Taking pictures: 0 of 1"]);
-    const { root: unavailableRoot } = buildPanel({ unavailable: EXPORT_TEXT.unavailable });
-    expect(byLabel(unavailableRoot, EXPORT_TEXT.exportPdf).disabled).toBe(true);
+    const { root: unavailableRoot } = buildPanel({ unavailable: words().export.unavailable });
+    expect(byLabel(unavailableRoot, words().export.exportPdf).disabled).toBe(true);
     const { root: emptyRoot } = buildPanel({ state: { ...STATE, pages: [] } });
-    expect(byLabel(emptyRoot, EXPORT_TEXT.exportPdf).disabled).toBe(true);
-    expect(texts(emptyRoot, "miro-canvas-export__empty")).toEqual([EXPORT_TEXT.noPages]);
+    expect(byLabel(emptyRoot, words().export.exportPdf).disabled).toBe(true);
+    expect(texts(emptyRoot, "miro-canvas-export__empty")).toEqual([words().export.noPages]);
   });
 
   it("changes paper format, orientation and quality", () => {
     const { root, calls } = buildPanel();
-    byLabel(root, EXPORT_TEXT.portrait).dispatch("click");
-    byLabel(root, EXPORT_TEXT.highHint).dispatch("click");
+    byLabel(root, words().export.portrait).dispatch("click");
+    byLabel(root, words().export.highHint).dispatch("click");
     expect(calls.format[0]).toEqual(["a4", "portrait"]);
     expect(calls.quality[0]).toBe("high");
   });
 
   it("runs pdf or pptx export and closes from its own buttons", () => {
     const { root, calls } = buildPanel();
-    byLabel(root, EXPORT_TEXT.exportPptx).dispatch("click");
-    byLabel(root, EXPORT_TEXT.close).dispatch("click");
+    byLabel(root, words().export.exportPptx).dispatch("click");
+    byLabel(root, words().export.close).dispatch("click");
     expect(calls.exportKind).toEqual(["pptx"]);
     expect(calls.close).toHaveLength(1);
   });

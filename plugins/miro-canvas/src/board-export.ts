@@ -18,61 +18,10 @@ import {
   PAPER_FORMATS, PAPER_LABELS, captureTiles, exportPixels, type ExportPageRecord, type ExportQuality, type ExportRect,
   type ExportState, type PaperFormat, type PaperOrientation,
 } from "./export-pages";
+import { words } from "./i18n";
 
 export type ExportKind = "pdf" | "pptx";
 
-/**
- * Every string this feature shows a person, in one place, the way
- * `LAYER_ACTIONS` in `layer-order.ts` keeps its labels together.
- * Translations are a later phase; for now this is the one place English
- * wording lives.
- */
-export const EXPORT_TEXT = Object.freeze({
-  dialogLabel: "Export",
-  close: "Close",
-  paperLabel: "Paper",
-  landscape: "Landscape",
-  portrait: "Portrait",
-  pagesLabel: "Pages",
-  slidesLabel: "Slides",
-  noPages: "No pages yet: add one, or one for each frame.",
-  showPage: "Show on the board",
-  earlier: "Earlier",
-  later: "Later",
-  removePage: "Remove page",
-  addPage: "Add page",
-  addPageHint: "Add a page in the middle of the view",
-  addFramePages: "A page per frame",
-  addFramePagesHint: "Add a page around each frame",
-  noFrames: "This board has no frames.",
-  qualityLabel: "Quality",
-  standard: "Standard",
-  high: "High",
-  standardHint: "Pages 2000 pixels across",
-  highHint: "Pages 3000 pixels across",
-  exportPdf: "Export PDF",
-  exportPptx: "Export PowerPoint",
-  unavailable: "Exporting needs Obsidian on a computer.",
-  boardMenuLabel: "Export to PDF or PowerPoint",
-  deckBarLabel: "Export slides as PDF or PowerPoint",
-  boardTitle: "Export board",
-  slidesTitle: (name: string) => `Export ${name}`,
-  slidesFallbackTitle: "slides",
-  pageFallback: (number: number) => `Page ${number}`,
-  frameFallback: (number: number) => `Frame ${number}`,
-  slideFallback: (number: number) => `Slide ${number}`,
-  progressTitle: "Exporting",
-  stop: "Stop",
-  capturing: "Taking pictures of the pages…",
-  capturingProgress: (done: number, total: number) => `Taking pictures: ${done} of ${total}`,
-  writingPdf: "Writing the PDF…",
-  writingPptx: "Writing the presentation…",
-  exportedTo: (path: string) => `Exported to ${path}`,
-  exportStopped: "Export stopped.",
-  exportFailed: "The export failed.",
-  pageNotDrawn: "The page could not be drawn.",
-  pageNotEncoded: "The page could not be encoded.",
-} as const);
 
 export interface ExportPanelState {
   /** A board's own pages, or a presentation's slides, which set their own size. */
@@ -106,7 +55,7 @@ export class ExportPanel {
     this.element = document.createElement("div");
     this.element.className = "miro-canvas-export";
     this.element.setAttribute("role", "dialog");
-    this.element.setAttribute("aria-label", EXPORT_TEXT.dialogLabel);
+    this.element.setAttribute("aria-label", words().export.dialogLabel);
   }
 
   public update(view: ExportPanelState): void {
@@ -115,12 +64,12 @@ export class ExportPanel {
     while (root.firstChild !== null) root.removeChild(root.firstChild);
     const header = this.add(root, "div", "miro-canvas-export__header");
     this.add(header, "div", "miro-canvas-export__title", view.title);
-    const close = this.button(header, "×", EXPORT_TEXT.close, "miro-canvas-export__close clickable-icon");
+    const close = this.button(header, "×", words().export.close, "miro-canvas-export__close clickable-icon");
     this.on(close, "click", () => this.actions.onClose());
     const busy = view.busy !== undefined;
 
     if (view.mode === "board") {
-      const paper = this.row(root, EXPORT_TEXT.paperLabel);
+      const paper = this.row(root, words().export.paperLabel);
       const format = this.add(paper, "select", "dropdown") as HTMLSelectElement;
       for (const value of PAPER_FORMATS) {
         const option = this.add(format, "option", "", PAPER_LABELS[value]) as HTMLOptionElement;
@@ -131,7 +80,7 @@ export class ExportPanel {
       this.on(format, "change", () => this.actions.onFormat(format.value as PaperFormat, view.state.orientation));
       if (view.state.format !== "free") {
         const turns = this.add(paper, "div", "miro-canvas-export__segments");
-        for (const [value, label] of [["landscape", EXPORT_TEXT.landscape], ["portrait", EXPORT_TEXT.portrait]] as const) {
+        for (const [value, label] of [["landscape", words().export.landscape], ["portrait", words().export.portrait]] as const) {
           const choice = this.button(turns, label, label, "miro-canvas-export__segment");
           choice.setAttribute("aria-pressed", String(view.state.orientation === value));
           choice.disabled = busy;
@@ -141,38 +90,38 @@ export class ExportPanel {
     }
 
     const pages = this.add(root, "div", "miro-canvas-export__pages");
-    this.add(pages, "div", "miro-canvas-export__label", view.mode === "slides" ? EXPORT_TEXT.slidesLabel : EXPORT_TEXT.pagesLabel);
+    this.add(pages, "div", "miro-canvas-export__label", view.mode === "slides" ? words().export.slidesLabel : words().export.pagesLabel);
     if (view.state.pages.length === 0) {
-      this.add(pages, "div", "miro-canvas-export__empty", EXPORT_TEXT.noPages);
+      this.add(pages, "div", "miro-canvas-export__empty", words().export.noPages);
     }
     view.state.pages.forEach((page, index) => {
       const item = this.add(pages, "div", "miro-canvas-export__page");
-      const name = this.button(item, `${index + 1}. ${page.name ?? EXPORT_TEXT.pageFallback(index + 1)}`, EXPORT_TEXT.showPage, "miro-canvas-export__page-name");
+      const name = this.button(item, `${index + 1}. ${page.name ?? words().export.pageFallback(index + 1)}`, words().export.showPage, "miro-canvas-export__page-name");
       this.on(name, "click", () => this.actions.onShowPage(page.id));
       if (view.mode !== "board") return;
-      for (const [glyph, label, step] of [["↑", EXPORT_TEXT.earlier, -1], ["↓", EXPORT_TEXT.later, 1]] as const) {
+      for (const [glyph, label, step] of [["↑", words().export.earlier, -1], ["↓", words().export.later, 1]] as const) {
         const move = this.button(item, glyph, label, "miro-canvas-export__page-action clickable-icon");
         move.disabled = busy || (step === -1 ? index === 0 : index === view.state.pages.length - 1);
         this.on(move, "click", () => this.actions.onMovePage(page.id, step));
       }
-      const remove = this.button(item, "✕", EXPORT_TEXT.removePage, "miro-canvas-export__page-action clickable-icon");
+      const remove = this.button(item, "✕", words().export.removePage, "miro-canvas-export__page-action clickable-icon");
       remove.disabled = busy;
       this.on(remove, "click", () => this.actions.onRemovePage(page.id));
     });
     if (view.mode === "board") {
       const adding = this.add(pages, "div", "miro-canvas-export__actions");
-      const add = this.button(adding, EXPORT_TEXT.addPage, EXPORT_TEXT.addPageHint);
+      const add = this.button(adding, words().export.addPage, words().export.addPageHint);
       add.disabled = busy;
       this.on(add, "click", () => this.actions.onAddPage());
-      const frames = this.button(adding, EXPORT_TEXT.addFramePages, EXPORT_TEXT.addFramePagesHint);
+      const frames = this.button(adding, words().export.addFramePages, words().export.addFramePagesHint);
       frames.disabled = busy;
       this.on(frames, "click", () => this.actions.onAddFramePages());
     }
 
-    const quality = this.row(root, EXPORT_TEXT.qualityLabel);
+    const quality = this.row(root, words().export.qualityLabel);
     const levels = this.add(quality, "div", "miro-canvas-export__segments");
     for (const [value, label, hint] of [
-      ["standard", EXPORT_TEXT.standard, EXPORT_TEXT.standardHint], ["high", EXPORT_TEXT.high, EXPORT_TEXT.highHint],
+      ["standard", words().export.standard, words().export.standardHint], ["high", words().export.high, words().export.highHint],
     ] as const) {
       const choice = this.button(levels, label, hint, "miro-canvas-export__segment");
       choice.setAttribute("aria-pressed", String(view.state.quality === value));
@@ -181,7 +130,7 @@ export class ExportPanel {
     }
 
     const out = this.add(root, "div", "miro-canvas-export__actions miro-canvas-export__out");
-    for (const [kind, label] of [["pdf", EXPORT_TEXT.exportPdf], ["pptx", EXPORT_TEXT.exportPptx]] as const) {
+    for (const [kind, label] of [["pdf", words().export.exportPdf], ["pptx", words().export.exportPptx]] as const) {
       const run = this.button(out, label, label, kind === "pdf" ? "mod-cta" : "");
       run.disabled = busy || view.unavailable !== undefined || view.state.pages.length === 0;
       this.on(run, "click", () => this.actions.onExport(kind));
@@ -462,16 +411,16 @@ function openProgressWindow(view: Window): ProgressWindow | undefined {
   const popup = view.open("about:blank", "_blank", `popup,x=${x},y=${y},width=${width},height=${height}`);
   if (popup === null) return undefined;
   const doc = popup.document;
-  doc.title = EXPORT_TEXT.progressTitle;
+  doc.title = words().export.progressTitle;
   Object.assign(doc.documentElement.style, { colorScheme: "light dark" });
   Object.assign(doc.body.style, {
     margin: "0", height: "100vh", display: "flex", alignItems: "center", justifyContent: "center", gap: "16px", font: "13px sans-serif",
   });
   const status = doc.body.appendChild(doc.createElement("div"));
-  status.textContent = EXPORT_TEXT.capturing;
+  status.textContent = words().export.capturing;
   const stop = doc.body.appendChild(doc.createElement("button"));
   stop.type = "button";
-  stop.textContent = EXPORT_TEXT.stop;
+  stop.textContent = words().export.stop;
   Object.assign(stop.style, { padding: "4px 14px" });
   let halted = false;
   stop.addEventListener("click", () => { halted = true; });
@@ -504,7 +453,7 @@ export async function capturePages(
   const wrapper = canvas.wrapperEl;
   const view = wrapper.ownerDocument.defaultView;
   const remote = electronRemote(view);
-  if (view === null || remote === undefined) throw new Error(EXPORT_TEXT.unavailable);
+  if (view === null || remote === undefined) throw new Error(words().export.unavailable);
   const contents = remote.getCurrentWebContents();
   const zoomFactor = 1.2 ** contents.getZoomLevel();
   const saved = { x: canvas.x, y: canvas.y, zoom: canvas.zoom, parent: wrapper.parentElement, next: wrapper.nextSibling };
@@ -535,10 +484,10 @@ export async function capturePages(
       sheet.width = pixels.width;
       sheet.height = pixels.height;
       const context = sheet.getContext("2d");
-      if (context === null) throw new Error(EXPORT_TEXT.pageNotDrawn);
+      if (context === null) throw new Error(words().export.pageNotDrawn);
       for (const { center, zoom, draw } of tiles) {
-        popup?.setStatus(EXPORT_TEXT.capturingProgress(done, total));
-        if (popup?.stopped() === true || !progress(done, total)) throw new Error(EXPORT_TEXT.exportStopped);
+        popup?.setStatus(words().export.capturingProgress(done, total));
+        if (popup?.stopped() === true || !progress(done, total)) throw new Error(words().export.exportStopped);
         canvas.x = canvas.tx = center.x;
         canvas.y = canvas.ty = center.y;
         canvas.zoom = canvas.tZoom = zoom;
@@ -556,7 +505,7 @@ export async function capturePages(
       }
       results.push({ jpeg: await jpegOf(sheet), width: pixels.width, height: pixels.height });
     }
-    popup?.setStatus(EXPORT_TEXT.capturingProgress(total, total));
+    popup?.setStatus(words().export.capturingProgress(total, total));
     progress(total, total);
   } finally {
     popup?.close();
@@ -587,7 +536,7 @@ function jpegOf(sheet: HTMLCanvasElement): Promise<Uint8Array> {
   return new Promise((resolve, reject) => {
     sheet.toBlob((blob) => {
       if (blob === null) {
-        reject(new Error(EXPORT_TEXT.pageNotEncoded));
+        reject(new Error(words().export.pageNotEncoded));
         return;
       }
       blob.arrayBuffer().then((buffer) => resolve(new Uint8Array(buffer)), reject);

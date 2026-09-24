@@ -13,7 +13,7 @@ import { readCanvasElementId } from "./canvas-elements";
 import { blockArrowOutline, linePoints, planLine } from "./free-line";
 import { buildSourceScene, type SourceItemDescriptor, type SourceScene } from "./source-model";
 import { TOOLTIP_DELAY } from "./tooltips";
-import { EXPORT_TEXT } from "./board-export";
+import { words } from "./i18n";
 
 type UnknownRecord = Record<PropertyKey, unknown>;
 
@@ -588,13 +588,13 @@ function decorateDeck(
     if (icon !== undefined) safeCall(name, "appendChild", [icon]);
     const title = createElement(document, "span");
     if (title !== undefined) {
-      setOwnedElementText(title, deck.title ?? "Slides");
+      setOwnedElementText(title, deck.title ?? words().deck.untitled);
       safeCall(name, "appendChild", [title]);
     }
     safeCall(bar, "appendChild", [name]);
   }
   if (onAction !== undefined && deck.slides.length > 0) {
-    for (const [action, label] of [["present", "Present slides"], ["fit", "Show all slides"], ["export", EXPORT_TEXT.deckBarLabel]] as const) {
+    for (const [action, label] of [["present", words().deck.present], ["fit", words().deck.fit], ["export", words().export.deckBarLabel]] as const) {
       const button = createElement(document, "button");
       const glyph = deckIcon(document, action);
       if (button === undefined) continue;

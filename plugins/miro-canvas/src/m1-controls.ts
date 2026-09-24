@@ -17,7 +17,7 @@ import {
 	type AppearanceState,
 	type DisplayTheme,
 } from "./appearance";
-import { EXPORT_TEXT } from "./board-export";
+import { words } from "./i18n";
 import type { SourceInspection } from "./source-inspector";
 import { BAR_TOOLTIP_DELAY } from "./tooltips";
 
@@ -358,7 +358,7 @@ export class M1Controls {
 		this.separator(board.panel);
 		if (this.actions.openExport !== undefined) {
 			const openExport = this.actions.openExport;
-			this.item(board.panel, "file-output", "⇩", EXPORT_TEXT.boardMenuLabel, { run: () => this.close(() => openExport()) });
+			this.item(board.panel, "file-output", "⇩", words().export.boardMenuLabel, { run: () => this.close(() => openExport()) });
 			this.separator(board.panel);
 		}
 		const review = this.item(board.panel, "eye", "◉", "Review mode", {

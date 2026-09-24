@@ -1,3 +1,4 @@
+import * as obsidian from "obsidian";
 import { Menu, Modal, Notice, Plugin, TFile, setIcon, type Events, type WorkspaceLeaf } from "obsidian";
 
 import {
@@ -24,9 +25,30 @@ import {
 } from "./settings";
 import { MiroCanvasSettingTab } from "./settings-tab";
 import { setAuthorColors } from "./comment-thread";
-import { LAYER_ACTIONS } from "./layer-order";
+import { layerActions } from "./layer-order";
+import { localeFor, setLocale } from "./i18n";
 
 const NATIVE_CANVAS_VIEW_TYPE = "canvas";
+
+/**
+ * The language Obsidian shows itself in.  `getLanguage` arrived in Obsidian
+ * 1.8; before it, Obsidian kept its choice in local storage.
+ */
+function obsidianLanguage(): string | null {
+  const getLanguage = (obsidian as { getLanguage?: () => string }).getLanguage;
+  if (typeof getLanguage === "function") {
+    try {
+      return getLanguage();
+    } catch {
+      // Fall back to where older Obsidian kept its choice.
+    }
+  }
+  try {
+    return window.localStorage.getItem("language");
+  } catch {
+    return null;
+  }
+}
 const LAYER_MENU_SECTION = "miro-canvas-layer";
 
 /**
@@ -81,6 +103,8 @@ export default class MiroCanvasPlugin extends Plugin {
   public canvasSettings: MiroCanvasSettings = DEFAULT_SETTINGS;
 
   override async onload(): Promise<void> {
+    // Every word below, command names included, is in Obsidian's own language.
+    setLocale(localeFor(obsidianLanguage()));
     // eslint-disable-next-line @typescript-eslint/no-this-alias -- the tab host reads settings lazily.
     const self = this;
     this.shellDisposed = false;
@@ -193,7 +217,7 @@ export default class MiroCanvasPlugin extends Plugin {
     // Only cards have layers, so the commands are offered only with a card
     // selected.  No default hotkeys: Obsidian's editor uses the bracket keys,
     // and a board's keys are the user's to assign.
-    for (const action of LAYER_ACTIONS) {
+    for (const action of layerActions()) {
       this.addCommand({
         id: `layer-${action.direction}`,
         name: `Miro Canvas: ${action.label}`,
@@ -423,7 +447,7 @@ export default class MiroCanvasPlugin extends Plugin {
     if (session === null || !(menu instanceof Menu)) return;
     session.refresh();
     if (session.layeredCards(ids).length === 0) return;
-    for (const action of LAYER_ACTIONS) {
+    for (const action of layerActions()) {
       menu.addItem((item) => item
         .setTitle(action.label)
         .setIcon(action.icon)

@@ -144,8 +144,9 @@ import {
 	DEFAULT_EXPORT_STATE, MAX_EXPORT_PAGES, exportRecord, pageAround, paperRatio, paperSize, readExportState, reshapePage,
 	type ExportPageRecord, type ExportRect, type ExportState,
 } from "./export-pages";
-import { EXPORT_TEXT, ExportOverlay, ExportPanel, capturePages, electronRemote, type ExportKind } from "./board-export";
+import { ExportOverlay, ExportPanel, capturePages, electronRemote, type ExportKind } from "./board-export";
 import { makePdf, makePptx } from "./export-files";
+import { words } from "./i18n";
 
 export interface M1SessionOptions {
 	readonly document?: Document;
@@ -280,7 +281,7 @@ async function saveExportFile(view: Window | null | undefined, name: string, kin
 	} | undefined;
 	const host = view as (Window & { require?: (name: string) => unknown }) | null | undefined;
 	const fs = host?.require?.("original-fs") as { promises?: { writeFile(path: string, data: Uint8Array): Promise<void> } } | undefined;
-	if (remote?.dialog === undefined || fs?.promises === undefined) throw new Error(EXPORT_TEXT.unavailable);
+	if (remote?.dialog === undefined || fs?.promises === undefined) throw new Error(words().export.unavailable);
 	const choice = await remote.dialog.showSaveDialog({
 		defaultPath: name,
 		filters: [kind === "pdf" ? { name: "PDF", extensions: ["pdf"] } : { name: "PowerPoint", extensions: ["pptx"] }],
@@ -2458,7 +2459,7 @@ export class M1CanvasSession {
 		this.readInteractionState();
 		const cards = this.layeredCards(ids);
 		if (cards.length === 0) {
-			this.options.onNotice?.("Only cards have layers: select a card.");
+			this.options.onNotice?.(words().layer.onlyCards);
 			return;
 		}
 		if (!this.editAllowed("edit", cards)) {
@@ -2468,7 +2469,7 @@ export class M1CanvasSession {
 		this.authoring ??= createCanvasAuthoring(this.view);
 		const result = this.authoring.changeZOrder({ ids: cards, direction });
 		if (!result.ok) {
-			this.options.onNotice?.(firstProblem(result.diagnostics) ?? "The layer order was not changed.");
+			this.options.onNotice?.(firstProblem(result.diagnostics) ?? words().layer.notChanged);
 		}
 		this.refresh();
 	}
@@ -4734,13 +4735,13 @@ export class M1CanvasSession {
 				const rect = this.nodeRect(id);
 				const name = readRuntime(((readRuntime(this.currentRawDocument, "nodes") ?? []) as readonly unknown[])
 					.find((node) => readRuntime(node, "id") === id), "label");
-				return rect === undefined ? [] : [{ id, ...rect, name: typeof name === "string" && name !== "" ? name : EXPORT_TEXT.slideFallback(index + 1) }];
+				return rect === undefined ? [] : [{ id, ...rect, name: typeof name === "string" && name !== "" ? name : words().export.slideFallback(index + 1) }];
 			});
 			state = { ...DEFAULT_EXPORT_STATE, format: "free", pages };
-			title = EXPORT_TEXT.slidesTitle(deck?.title ?? EXPORT_TEXT.slidesFallbackTitle);
+			title = words().export.slidesTitle(deck?.title ?? words().export.slidesFallbackTitle);
 		} else {
 			state = readExportState(readRuntime(readRuntime(this.currentRawDocument, "miroCanvas"), "export"));
-			title = EXPORT_TEXT.boardTitle;
+			title = words().export.boardTitle;
 			// A first export starts with a page around what is selected, or what is
 			// in view; nothing is written until the person changes or exports it.
 			if (state.pages.length === 0) state = { ...state, pages: [this.newExportPage(state, 1)] };
@@ -4762,10 +4763,10 @@ export class M1CanvasSession {
 						const label = readRuntime(node, "label");
 						return rect === undefined ? [] : [{
 							id: newCanvasId(), ...pageAround(rect, ratio, 24),
-							name: typeof label === "string" && label !== "" ? label : EXPORT_TEXT.frameFallback(index + 1),
+							name: typeof label === "string" && label !== "" ? label : words().export.frameFallback(index + 1),
 						}];
 					});
-				if (frames.length === 0) this.options.onNotice?.(EXPORT_TEXT.noFrames);
+				if (frames.length === 0) this.options.onNotice?.(words().export.noFrames);
 				return { ...current, pages: [...current.pages, ...frames].slice(0, MAX_EXPORT_PAGES) };
 			}),
 			onRemovePage: (id) => this.changeExport((current) => ({ ...current, pages: current.pages.filter((page) => page.id !== id) })),
@@ -4819,7 +4820,7 @@ export class M1CanvasSession {
 			const b = rect === undefined ? undefined : this.boardPoint({ x: rect.right - across, y: rect.bottom - down });
 			if (a !== undefined && b !== undefined) area = pageAround({ x: a.x, y: a.y, width: b.x - a.x, height: b.y - a.y }, ratio);
 		}
-		return { id: newCanvasId(), ...(area ?? pageAround({ x: 0, y: 0, width: 800, height: 600 }, ratio)), name: EXPORT_TEXT.pageFallback(number) };
+		return { id: newCanvasId(), ...(area ?? pageAround({ x: 0, y: 0, width: 800, height: 600 }, ratio)), name: words().export.pageFallback(number) };
 	}
 
 	/** Change the export, show it, and keep a board's pages with the board. */
@@ -4863,7 +4864,7 @@ export class M1CanvasSession {
 			title: exporting.title,
 			state: exporting.state,
 			...(exporting.busy === undefined ? {} : { busy: exporting.busy }),
-			...(electronRemote(view) === undefined ? { unavailable: EXPORT_TEXT.unavailable } : {}),
+			...(electronRemote(view) === undefined ? { unavailable: words().export.unavailable } : {}),
 		});
 		this.updateExportOverlay();
 	}
@@ -4904,7 +4905,7 @@ export class M1CanvasSession {
 		const file = readRuntime(this.view, "file");
 		const base = typeof readRuntime(file, "basename") === "string" ? readRuntime(file, "basename") as string : "Board";
 		exporting.stop = false;
-		exporting.busy = EXPORT_TEXT.capturing;
+		exporting.busy = words().export.capturing;
 		this.renderExport();
 		// Nothing of the plugin belongs in the pictures: its own panel and page
 		// overlay step aside, and so do the plugin's own selections.
@@ -4916,11 +4917,11 @@ export class M1CanvasSession {
 		try {
 			const pictures = await capturePages(canvas as never, pages, exporting.state.quality, (done, total) => {
 				if (this.exporting !== exporting || exporting.stop) return false;
-				exporting.busy = EXPORT_TEXT.capturingProgress(done, total);
+				exporting.busy = words().export.capturingProgress(done, total);
 				this.renderExport();
 				return true;
 			});
-			exporting.busy = kind === "pdf" ? EXPORT_TEXT.writingPdf : EXPORT_TEXT.writingPptx;
+			exporting.busy = kind === "pdf" ? words().export.writingPdf : words().export.writingPptx;
 			this.renderExport();
 			const sheets = pages.map((page, index) => {
 				const size = paperSize(exporting.state.format, exporting.state.orientation, page);
@@ -4932,9 +4933,9 @@ export class M1CanvasSession {
 			});
 			const bytes = kind === "pdf" ? makePdf(sheets, { title: base }) : makePptx(sheets, { title: base });
 			const saved = await saveExportFile(view, `${base}.${kind}`, kind, bytes);
-			if (saved !== undefined) this.options.onNotice?.(EXPORT_TEXT.exportedTo(saved));
+			if (saved !== undefined) this.options.onNotice?.(words().export.exportedTo(saved));
 		} catch (error) {
-			this.options.onNotice?.(error instanceof Error ? error.message : EXPORT_TEXT.exportFailed);
+			this.options.onNotice?.(error instanceof Error ? error.message : words().export.exportFailed);
 		} finally {
 			exporting.busy = undefined;
 			exporting.panel.element.hidden = false;

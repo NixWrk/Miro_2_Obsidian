@@ -39,7 +39,8 @@ import {
   type ConnectorRoute,
   type ConnectorStroke,
 } from "./connector-style";
-import { LAYER_ACTIONS, LAYER_MENU_ICON, LAYER_MENU_LABEL, type LayerDirection } from "./layer-order";
+import { LAYER_MENU_ICON, layerActions, type LayerDirection } from "./layer-order";
+import { words } from "./i18n";
 import {
   SHAPE_CATALOG,
   shapeCatalogEntry,
@@ -678,10 +679,10 @@ export class SelectionToolbar {
     openLink.hidden = true;
 
     // A card's place among the others sharing its area.
-    const layer = this.makePopover(bar, LAYER_MENU_LABEL, "miro-canvas-toolbar__button--layer");
+    const layer = this.makePopover(bar, words().layer.menu, "miro-canvas-toolbar__button--layer");
     this.icon(layer.button, LAYER_MENU_ICON, "≡");
     const layerRow = this.block(layer.panel, undefined, "miro-canvas-toolbar__pictures miro-canvas-toolbar__pictures--layer");
-    const layerOptions = LAYER_ACTIONS.map(({ direction, label, icon }) => {
+    const layerOptions = layerActions().map(({ direction, label, icon }) => {
       // A command, not a choice that stays pressed.
       const option = append(layerRow, makeButton(document, label));
       option.setAttribute("data-value", direction);

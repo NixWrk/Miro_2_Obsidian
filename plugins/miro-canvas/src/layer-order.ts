@@ -11,22 +11,25 @@
  * back into the card slots of the document's node array.
  */
 
+import { words } from "./i18n";
+
 /** One selected card can be sent to the front or back, or past its nearest overlap. */
 export type LayerDirection = "front" | "forward" | "backward" | "back";
 
 /** The four layer commands, in the order they are offered in the interface. */
-export const LAYER_ACTIONS: readonly {
-	readonly direction: LayerDirection;
-	readonly label: string;
-	readonly icon: string;
-}[] = Object.freeze([
-	Object.freeze({ direction: "front", label: "Bring to front", icon: "bring-to-front" }),
-	Object.freeze({ direction: "forward", label: "Bring forward", icon: "arrow-up" }),
-	Object.freeze({ direction: "backward", label: "Send backward", icon: "arrow-down" }),
-	Object.freeze({ direction: "back", label: "Send to back", icon: "send-to-back" }),
+const LAYER_DIRECTIONS: readonly { readonly direction: LayerDirection; readonly icon: string }[] = Object.freeze([
+	Object.freeze({ direction: "front", icon: "bring-to-front" }),
+	Object.freeze({ direction: "forward", icon: "arrow-up" }),
+	Object.freeze({ direction: "backward", icon: "arrow-down" }),
+	Object.freeze({ direction: "back", icon: "send-to-back" }),
 ]);
 
-export const LAYER_MENU_LABEL = "Layer";
+/** The four layer commands with their names in the language in use. */
+export function layerActions(): readonly { readonly direction: LayerDirection; readonly label: string; readonly icon: string }[] {
+	const names = words().layer;
+	return LAYER_DIRECTIONS.map(({ direction, icon }) => ({ direction, icon, label: names[direction] }));
+}
+
 export const LAYER_MENU_ICON = "layers-2";
 
 /** A card's box, read from the document; only cards have one of these. */
