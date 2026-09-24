@@ -647,7 +647,9 @@ in Python and is offered as a per-OS build or set up by an agent through a
 miro2obsidian skill or MCP server; the plugin never installs it by itself.
 
 - Choose the settings and interface language automatically from Obsidian's own
-  language, falling back to English; ship English and Russian first.
+  language, falling back to English; English and Russian (done 2026-09-24: every
+  word in `src/locales/`, the Russian table must have exactly the English keys,
+  a test finds untranslated entries; maintainers' diagnostics stay English).
 - Offer an optional onboarding board on first setup (and from settings) that
   shows every tool on real items.
 - Write a visual guide to the plugin's features and the order of its settings,
@@ -660,7 +662,8 @@ miro2obsidian skill or MCP server; the plugin never installs it by itself.
   up, and letting the user remove it afterwards; walk the full user journey on a
   clean machine (see [ROADMAP](../ROADMAP.md)).
 - Provide a skill or an MCP server so agents can work with miro-canvas boards as
-  natively as with Canvas files.
+  natively as with Canvas files (the light skill is done:
+  `.agents/skills/miro-canvas-format`; the MCP server comes in phase 6).
 - Tune settings and layouts for other operating systems, phones and tablets
   (see M5 below).
 

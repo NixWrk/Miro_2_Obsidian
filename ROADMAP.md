@@ -63,14 +63,18 @@ The work below is done in this order; each phase builds on the ones before it.
    order in the main interface: bring to front, bring forward, send backward and send to back
    for cards, from the selection toolbar, native Canvas's card and selection
    menus and commands, for one card or a whole selection.
-1. **Foundations.** A formal, versioned schema of `miroSource` and
-   `miroCanvas` with compatibility fixtures; the plugin's translation system
-   with English and Russian, its language taken from Obsidian's own; a light
-   agent skill that describes the format and validates boards against the
-   schema.
-2. **The converter as a product of its own.** Attachment deduplication by
-   SHA-256; export to raw JSON, native Canvas, Advanced Canvas and miro-canvas;
-   a simple GUI; Python builds for Windows, then macOS and Linux.
+1. **Foundations (done 2026-09-24).** A formal, versioned schema of
+   `miroSource` and `miroCanvas` with compatibility fixtures
+   (`miro2obsidian/schemas/v1`, `python -m miro2obsidian.validate`); the
+   plugin's translation system with English and Russian, its language taken
+   from Obsidian's own; a light agent skill that describes the format and
+   validates boards against the schema (`.agents/skills/miro-canvas-format`).
+2. **The converter as a product of its own (done 2026-09-24).** Attachment
+   deduplication by SHA-256; export to raw JSON, native Canvas, Advanced Canvas
+   and miro-canvas from the CLI and the GUI; builds for Windows, macOS and Linux
+   (the Windows build is checked; the macOS and Linux builds await the Build
+   workflow's first run, and the builds do not yet carry the Web SDK server for
+   the maximum export).
 3. **Delivery and the import guide.** The plugin in its own repository tied to
    miro2obsidian by the schema and fixtures; the first-setup question "Import
    from Miro?" with an illustrated step-by-step guide and a settings button to
