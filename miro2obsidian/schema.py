@@ -1,10 +1,11 @@
 """Load and apply this project's board / miroSource / miroCanvas JSON Schemas.
 
 The schemas live under ``miro2obsidian/schemas/v<version>/``, shipped with the
-package, and are
-the contract shared with the plugin (`plugins/miro-canvas/src/metadata.ts`):
+package. They are the contract shared with the miro-canvas plugin
+(https://github.com/NixWrk/Obsidian-Plugin---Miro-Canvas), which keeps a pinned
+copy of them and runs their example boards through its own metadata reader:
 this module never redefines what a valid board or a valid `miroCanvas` looks
-like, it only reads the same schema files the plugin's tests check against.
+like, it only reads the same schema files.
 
 No network access is used to resolve `$ref`.  Every schema a board might
 reference is registered up front in a local `referencing.Registry`.

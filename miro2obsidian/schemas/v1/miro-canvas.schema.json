@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://raw.githubusercontent.com/NixWrk/Miro_2_Obsidian/main/miro2obsidian/schemas/v1/miro-canvas.schema.json",
   "title": "miroCanvas v1",
-  "description": "The plugin's own versioned metadata, kept under the root Canvas document's `miroCanvas` key. Mirrors plugins/miro-canvas/src/metadata.ts's validateMiroCanvasMetadata: unknown fields at every level are forward-compatible and never make an otherwise well-formed document invalid, so every object below keeps additionalProperties true unless the validator itself rejects the extra shape.",
+  "description": "The plugin's own versioned metadata, kept under the root Canvas document's `miroCanvas` key. Mirrors the miro-canvas plugin's validateMiroCanvasMetadata (src/metadata.ts in NixWrk/Obsidian-Plugin---Miro-Canvas): unknown fields at every level are forward-compatible and never make an otherwise well-formed document invalid, so every object below keeps additionalProperties true unless the validator itself rejects the extra shape.",
   "type": "object",
   "required": ["schemaVersion"],
   "properties": {

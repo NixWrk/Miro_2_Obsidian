@@ -63,4 +63,4 @@ changing committed fixture baselines.
 The renderer is intentionally limited to regression diagnostics such as an
 empty Canvas, bad coordinates, collapsed nodes, missing text, incorrect sizes,
 or broken connections. Final visual decisions belong to the
-[real-Obsidian oracle](../obsidian_oracle/README.md).
+real Obsidian (the [miro-canvas plugin](https://github.com/NixWrk/Obsidian-Plugin---Miro-Canvas) keeps the scripts for testing in a real vault).

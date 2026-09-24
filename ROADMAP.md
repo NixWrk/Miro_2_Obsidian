@@ -38,20 +38,11 @@ items focus on packaging, onboarding, and richer offline Canvas editing.
 
 ## miro-canvas
 
-The offline editing and display plan lives in
-[`docs/miro-canvas.md`](docs/miro-canvas.md). Its first milestone is a separate
-Obsidian plugin that preserves native Canvas files and remains compatible with
-Advanced Canvas. Planned capabilities include a clickable minimap, richer
-text, comments, themes, shapes, colors, connectors, attachment labels, and
-editing protection. Mind-map editing will evaluate the MIT-licensed
-[`obsidian-enhancing-mindmap`](https://github.com/MarkMindCkm/obsidian-enhancing-mindmap)
-as an implementation reference; the closed-source `obsidian-markmind` is a UX
-reference only. Future migration work will add explicit, non-destructive
-adapters from Excalidraw, mind-map plugins, and other common local formats into
-native Canvas plus `miroCanvas` metadata while preserving source files and
-provenance. Release hardening must cover Windows, macOS, and Linux or
-representative VMs; multiple viewport sizes and pixel ratios; and mouse,
-trackpad, pen tablet/stylus, touch-screen, and phone/tablet interaction.
+The Obsidian plugin that draws the Miro look from boards in the `miro-canvas`
+format lives in [its own repository](https://github.com/NixWrk/Obsidian-Plugin---Miro-Canvas) since 2026-09-24, with its design
+notes (`docs/miro-canvas.md`), its task list and its history. The two are tied
+by the versioned board schema in `miro2obsidian/schemas`: the plugin pins a
+copy and runs its example boards. The plan below still covers both products.
 
 ## Plan (agreed 2026-09-23)
 

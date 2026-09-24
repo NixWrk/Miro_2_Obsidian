@@ -35,37 +35,9 @@ suite. It is currently a Windows-focused pre-release tested with Python 3.13.
 The known historical Miro OAuth credential has been revoked and is absent from
 the release tree. See [`SECURITY.md`](SECURITY.md) for the current handling policy.
 
-This project does not synchronize changes back to Miro. The separate offline
-[`miro-canvas`](docs/miro-canvas.md) Obsidian plugin has a repository-level M0
-foundation under [`plugins/miro-canvas/`](plugins/miro-canvas/): a native Canvas
-adapter, an optional Advanced Canvas adapter, versioned schema validation and
-in-memory migrations, an explicit metadata writer with a guarded atomic
-compare-and-swap (CAS) bridge, and a deterministic four-profile compatibility
-matrix with a project-local test vault. The plugin is not production-ready.
-The current development build adds independent line/arrow connectors, an
-explicit undoable legacy-line migration, persistent connector tool settings,
-desktop clipboard hotkeys and a rebindable Escape reset command. See the
-[connector checkpoint and compatibility limits](docs/miro-canvas.md#connector-development-checkpoint).
-The real-Obsidian gate is still open: native Ctrl+Z/redo behavior and visual or
-interaction verification in the real application have not been claimed. The
-current development checkpoint adds M1 controls (navigation, minimap,
-typography, themes, colors, locks, attachment titles) and M2 UI for six local
-shapes, comment threads, connector endpoints and native document navigation.
-Graph edits preserve source/unknown metadata and use native undo/redo.
-Native zoom currently stays within 6.25%–200%. M3 adds local/source rotation,
-layer ordering, rotated anchors, and reversible source-backed decoration for
-Miro shapes, text, sticky notes, connectors, frames, and media. M4 has started
-with bounded, inert code-block projection and code-card styling that leaves
-native Canvas text editable. Proven `app_card` field collections also receive
-reversible source-backed card styling while their content remains native text.
-Preview metadata overlays keep native links clickable, and ordinary cards show
-bounded chips resolved from non-visual source tag definitions.
-Proven `mindmap_node` trees keep native Canvas text and hierarchy edges while
-the plugin adds reversible root/branch styling; legacy `mindmap` stays explicit
-as source-limited.
-A read-only source inspector shows bounded type counts, completeness flags,
-provenance counts, diagnostics, and unknown field paths without putting raw
-source values into the DOM.
+This project does not synchronize changes back to Miro. The
+[miro-canvas](https://github.com/NixWrk/Obsidian-Plugin---Miro-Canvas) Obsidian plugin, which draws the Miro look from boards
+written in the `miro-canvas` format, lives in its own repository.
 
 ## Data flow
 
@@ -127,45 +99,6 @@ python -m playwright install chromium
 Build the programs yourself with `python -m PyInstaller release/miro2obsidian.spec`
 (results in `dist/`); the Build workflow does the same on Windows, macOS and
 Linux and publishes them when a `v<version>` tag is pushed.
-
-### Develop the `miro-canvas` plugin
-
-From the repository root:
-
-```powershell
-cd plugins\miro-canvas
-npm ci
-npm run typecheck
-npm test
-npm run build
-```
-
-Build and deploy the local runtime to the guarded M0 test vault from the
-repository root:
-
-```powershell
-cd plugins\miro-canvas
-npm ci
-npm run typecheck
-npm test
-npm run build
-cd ..\..
-python tools\obsidian_oracle\setup_m0_vault.py
-python tools\obsidian_oracle\check_environment.py
-```
-
-`setup_m0_vault.py` creates the project-local `_obsidian_oracle_vault`, stages
-all four offline fixtures, and atomically installs the built `manifest.json`,
-`main.js`, and `styles.css` for `miro-canvas`. It does not install the optional
-Advanced Canvas runtime. See the [M0 runbook](docs/miro-canvas.md) for the
-profile activation/check commands and the real-Obsidian gate.
-
-If Obsidian reports **vault not found**, first select **Open folder as vault**
-and choose the exact absolute `_obsidian_oracle_vault` path printed by setup
-(not its `MIRO2OBSIDIAN` subfolder). Check registration with
-`python -m tools.obsidian_oracle.open_local_vault`; after registration, use
-`python -m tools.obsidian_oracle.open_local_vault --profile both --open`.
-Creating the folder alone does not register it in Obsidian.
 
 ### Coding agents
 
@@ -239,7 +172,7 @@ Both the CLI and the GUI write one of four formats, chosen with `--format`
   plugin, with the richest styling.
 - `native-canvas`: plain [JSON Canvas 1.0](https://jsoncanvas.org/spec/1.0/),
   no plugin required. Text becomes Markdown; no HTML is left in the file.
-- `miro-canvas`: for the [`miro-canvas`](docs/miro-canvas.md) Obsidian plugin,
+- `miro-canvas`: for the [`miro-canvas`](https://github.com/NixWrk/Obsidian-Plugin---Miro-Canvas) Obsidian plugin,
   which draws the Miro look (fonts, colors, shapes, frames) from the
   preserved source data.
 - `raw-json`: writes no Canvas at all, only the canonical Miro export JSON.
@@ -367,7 +300,7 @@ node tests\websdk_capture_completeness_smoke.js tools\miro_websdk_exporter\expor
 ```
 
 The browser renderer is a fast diagnostic harness. Real Obsidian remains the
-visual source of truth; see [`tools/obsidian_oracle`](tools/obsidian_oracle/README.md).
+visual source of truth: open the converted board in a vault.
 
 ## Repository layout
 
@@ -379,10 +312,9 @@ visual source of truth; see [`tools/obsidian_oracle`](tools/obsidian_oracle/READ
 | `tests/` | Unit tests and minimized regression fixtures |
 | `tools/miro_websdk_exporter/` | Buildless whole-board Web SDK exporter |
 | `tools/canvas_render/` | Fast diagnostic Canvas renderer |
-| `tools/obsidian_oracle/` | Real-Obsidian staging and screenshot checks |
 | `tools/obsidian_plugins/` | Small local plugins used by the validation workflow |
 | `docs/` | Setup, capability evidence, runbooks, product plans, and display limitations |
-| `ROADMAP.md` | Remaining public-release, onboarding, conversion, and plugin work |
+| `ROADMAP.md` | Remaining public-release, onboarding and conversion work |
 
 Local boards, exports, vaults, credentials, browser output, and caches are
 excluded by `.gitignore`.
@@ -395,7 +327,7 @@ excluded by `.gitignore`.
 - [Miro versus Canvas display gaps](docs/MIRO_VS_CANVAS_DISPLAY_GAPS.md)
 - [Miro API and item capability matrix](docs/MIRO_CAPABILITIES.md)
 - [Source-expansion runbook](docs/SOURCE_EXPANSION.md)
-- [`miro-canvas` offline plugin plan](docs/miro-canvas.md)
+- [`miro-canvas` Obsidian plugin](https://github.com/NixWrk/Obsidian-Plugin---Miro-Canvas)
 - [Roadmap](ROADMAP.md)
 - [Fixture format](tests/fixtures/README.md)
 - [Contributing](CONTRIBUTING.md)

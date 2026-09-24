@@ -15,7 +15,6 @@ from typing import Any
 REPO_ROOT = Path(__file__).resolve().parents[1]
 CONVERTER_DIR = REPO_ROOT / "Json_2_Canvas"
 RENDER_DIR = REPO_ROOT / "tools" / "canvas_render"
-ORACLE_DIR = REPO_ROOT / "tools" / "obsidian_oracle"
 DEFAULT_SAMPLE_ROOT = REPO_ROOT / "work"
 DEFAULT_OUT_DIR = RENDER_DIR / ".out" / "local_samples"
 

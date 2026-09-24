@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://raw.githubusercontent.com/NixWrk/Miro_2_Obsidian/main/miro2obsidian/schemas/v1/miro-source.schema.json",
   "title": "miroSource v1",
-  "description": "The immutable import snapshot kept under the root Canvas document's `miroSource` key, as the plugin reads it (see plugins/miro-canvas/src/source-model.ts) and as the converter writes it (Json_2_Canvas/Converter.py's _source_canvas_metadata). This is evidence copied from Miro's export, not a contract the plugin or converter is free to reshape, so canonical fields are typed loosely: the plugin never depends on more than 'items are present and each has an id and a type', and the converter never depends on the shape of anything under this key at all.",
+  "description": "The immutable import snapshot kept under the root Canvas document's `miroSource` key, as the plugin reads it (see src/source-model.ts in NixWrk/Obsidian-Plugin---Miro-Canvas) and as the converter writes it (Json_2_Canvas/Converter.py's _source_canvas_metadata). This is evidence copied from Miro's export, not a contract the plugin or converter is free to reshape, so canonical fields are typed loosely: the plugin never depends on more than 'items are present and each has an id and a type', and the converter never depends on the shape of anything under this key at all.",
   "type": "object",
   "properties": {
     "schema_version": {

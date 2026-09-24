@@ -12,15 +12,14 @@ translation is not yet available.
 - [Russian beginner setup](MIRO_APP_SETUP.ru.md)
 - [Miro Web SDK exporter](../tools/miro_websdk_exporter/README.md)
 - [Canvas render harness](../tools/canvas_render/README.md)
-- [Real-Obsidian oracle](../tools/obsidian_oracle/README.md)
 - [Regression fixture format](../tests/fixtures/README.md)
 
 ## Product and compatibility
 
 - [Measured Miro versus Canvas display gaps](MIRO_VS_CANVAS_DISPLAY_GAPS.md)
 - [Russian display-gap report](MIRO_VS_CANVAS_DISPLAY_GAPS.ru.md)
-- [`miro-canvas` architecture and implementation plan](miro-canvas.md)
-- [Full Russian `miro-canvas` specification](miro-canvas.ru.md)
+- [`miro-canvas` Obsidian plugin](https://github.com/NixWrk/Obsidian-Plugin---Miro-Canvas) - its own repository, with its
+  design notes and task list
 
 ## Maintainer evidence
 

@@ -33,26 +33,9 @@ Pipeline работает и покрыт автоматическими тес�
 
 Исторический ключ Miro отозван и отсутствует в release tree.
 
-Обратной синхронизации с Miro нет. Для отдельного офлайн-плагина Obsidian
-[`miro-canvas`](docs/miro-canvas.ru.md) в каталоге
-[`plugins/miro-canvas/`](plugins/miro-canvas/) готов repository-level фундамент
-M0: native Canvas adapter, optional Advanced Canvas adapter, версионированная
-проверка schema и in-memory migrations, explicit metadata writer с защищённым
-atomic compare-and-swap (CAS) bridge, а также детерминированная матрица из
-четырёх профилей и project-local test vault. Плагин пока не production-ready.
-Текущая сборка добавляет независимые линии/стрелки, явное отменяемое
-преобразование старых линий, постоянную панель соединителей, desktop-сочетания
-буфера и переназначаемый сброс по Escape. См.
-[состояние доработки и ограничения](docs/miro-canvas.ru.md#текущая-доработка-соединителей).
-Real-Obsidian gate остаётся открытым: поведение native Ctrl+Z/redo и визуальная
-или интерактивная проверка в настоящем приложении пока не заявляются. Текущий
-этап разработки добавляет интерфейс M1 (навигация, minimap, типографика, темы,
-цвета, блокировки, названия вложений) и UI M2: шесть локальных фигур,
-комментарии, концы стрелок и навигацию по документам средствами Obsidian.
-Изменения графа сохраняют source/неизвестные метаданные и используют native undo/redo.
-Native zoom пока ограничен диапазоном 6,25%–200%. M3 добавляет local/source
-rotation, порядок слоёв, повёрнутые anchors и обратимые source-backed renderers
-для фигур, текста, sticky notes, connectors, frames и media.
+Обратной синхронизации с Miro нет. Плагин Obsidian
+[miro-canvas](https://github.com/NixWrk/Obsidian-Plugin---Miro-Canvas), который рисует вид Miro по доскам в формате
+`miro-canvas`, живёт в своём репозитории.
 
 ## Схема данных
 
@@ -103,46 +86,6 @@ python -m playwright install chromium
 Собрать программы самому: `python -m PyInstaller release/miro2obsidian.spec`
 (результат в `dist/`); workflow Build делает то же под Windows, macOS и Linux и
 публикует сборки, когда в репозиторий приходит тег `v<версия>`.
-
-### Разработка плагина `miro-canvas`
-
-Из корня репозитория:
-
-```powershell
-cd plugins\miro-canvas
-npm ci
-npm run typecheck
-npm test
-npm run build
-```
-
-Собрать и развернуть локальный runtime в защищённый M0 test vault можно из
-корня репозитория:
-
-```powershell
-cd plugins\miro-canvas
-npm ci
-npm run typecheck
-npm test
-npm run build
-cd ..\..
-python tools\obsidian_oracle\setup_m0_vault.py
-python tools\obsidian_oracle\check_environment.py
-```
-
-`setup_m0_vault.py` создаёт project-local `_obsidian_oracle_vault`, раскладывает
-все четыре offline fixtures и атомарно устанавливает собранные
-`manifest.json`, `main.js` и `styles.css` для `miro-canvas`. Runtime
-необязательного Advanced Canvas он не устанавливает. Команды активации и
-проверки профилей, а также real-Obsidian gate описаны в [M0 runbook](docs/miro-canvas.ru.md).
-
-Если Obsidian сообщает **vault not found**, сначала выберите **Открыть папку как
-хранилище** и укажите абсолютный путь `_obsidian_oracle_vault`, который вывел
-setup, а не вложенную папку `MIRO2OBSIDIAN`. Проверка регистрации:
-`python -m tools.obsidian_oracle.open_local_vault`. После регистрации открыть
-доску можно командой
-`python -m tools.obsidian_oracle.open_local_vault --profile both --open`.
-Создание папки само по себе не регистрирует хранилище в Obsidian.
 
 ### LLM-агенты
 
@@ -219,7 +162,7 @@ GUI разделяет четыре сценария:
   [Advanced Canvas](https://github.com/Developer-Mike/obsidian-advanced-canvas), с самым богатым оформлением.
 - `native-canvas`: обычный [JSON Canvas 1.0](https://jsoncanvas.org/spec/1.0/),
   без плагинов. Текст становится Markdown; HTML в файле не остаётся.
-- `miro-canvas`: для плагина [`miro-canvas`](docs/miro-canvas.ru.md), который
+- `miro-canvas`: для плагина [`miro-canvas`](https://github.com/NixWrk/Obsidian-Plugin---Miro-Canvas), который
   рисует внешний вид Miro (шрифты, цвета, формы, фреймы) по сохранённым
   исходным данным.
 - `raw-json`: Canvas не создаётся вовсе, сохраняется только канонический
@@ -348,7 +291,7 @@ node tests\websdk_capture_completeness_smoke.js tools\miro_websdk_exporter\expor
 ```
 
 Web-renderer служит быстрой диагностикой. Источником истины для визуального
-результата остаётся настоящий Obsidian; см. [`tools/obsidian_oracle`](tools/obsidian_oracle/README.md).
+результата остаётся настоящий Obsidian: откройте сконвертированную доску в хранилище.
 
 ## Документация
 
@@ -358,7 +301,7 @@ Web-renderer служит быстрой диагностикой. Источн�
 - [Отличия Miro и Canvas](docs/MIRO_VS_CANVAS_DISPLAY_GAPS.ru.md)
 - [Матрица возможностей Miro](docs/MIRO_CAPABILITIES.md)
 - [Source-expansion runbook](docs/SOURCE_EXPANSION.md)
-- [Полный план `miro-canvas`](docs/miro-canvas.ru.md)
+- [Плагин Obsidian `miro-canvas`](https://github.com/NixWrk/Obsidian-Plugin---Miro-Canvas)
 - [Roadmap](ROADMAP.md)
 - [Формат fixtures](tests/fixtures/README.md)
 - [Contributing](CONTRIBUTING.md)
