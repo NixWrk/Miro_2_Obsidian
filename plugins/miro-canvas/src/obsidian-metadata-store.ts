@@ -1,4 +1,5 @@
 import type { MetadataDocumentStore } from "./metadata-writer";
+import { nativeOmits, nativeRounds } from "./native-graph";
 
 /**
  * The native Canvas root-data bridge is intentionally smaller than the general
@@ -323,8 +324,14 @@ function graphDrift(observed: Record<string, unknown>, written: Record<string, u
 			const actualItem = byId.get(id);
 			if (actualItem === undefined) return `${key} ${id} missing after save`;
 			for (const field of Object.keys(wantedItem)) {
-				if (!hasOwn(actualItem, field)) return `${key} ${id} lost ${field}`;
-				if (!equalJson(actualItem[field], wantedItem[field])) return `${key} ${id} changed ${field}`;
+				if (!hasOwn(actualItem, field)) {
+					// Native Canvas leaves a default out: that is keeping it.
+					if (nativeOmits(key, field, wantedItem[field])) continue;
+					return `${key} ${id} lost ${field}`;
+				}
+				if (equalJson(actualItem[field], wantedItem[field])) continue;
+				if (nativeRounds(key, field, wantedItem[field], actualItem[field])) continue;
+				return `${key} ${id} changed ${field}`;
 			}
 			for (const field of Object.keys(actualItem)) {
 				if (hasOwn(wantedItem, field)) continue;

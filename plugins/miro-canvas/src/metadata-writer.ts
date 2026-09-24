@@ -5,6 +5,7 @@ import {
 	type MiroCanvasMetadata,
 	type MiroCanvasMetadataParseOptions,
 } from "./metadata";
+import { nativeOmits, nativeRounds } from "./native-graph";
 
 /**
  * The persistence boundary is deliberately injected instead of being
@@ -343,7 +344,7 @@ function snapshotDocument(value: unknown): Snapshot {
 	};
 }
 
-/** Every written graph value survives; a host may only materialize extra defaults. */
+/** Every written graph value survives, as native Canvas stores it; a host may only materialize extra defaults. */
 function graphIsUnchanged(observed: Record<string, unknown>, written: Record<string, unknown>): boolean {
 	for (const key of ["nodes", "edges"] as const) {
 		const actual = observed[key];
@@ -354,7 +355,14 @@ function graphIsUnchanged(observed: Record<string, unknown>, written: Record<str
 			const wantedItem = wanted[index];
 			if (!isRecord(actualItem) || !isRecord(wantedItem)) return false;
 			for (const field of Object.keys(wantedItem)) {
-				if (!hasOwn(actualItem, field) || !structurallyEqual(actualItem[field], wantedItem[field])) return false;
+				if (!hasOwn(actualItem, field)) {
+					// Native Canvas leaves a default out: that is keeping it.
+					if (nativeOmits(key, field, wantedItem[field])) continue;
+					return false;
+				}
+				if (structurallyEqual(actualItem[field], wantedItem[field])) continue;
+				if (nativeRounds(key, field, wantedItem[field], actualItem[field])) continue;
+				return false;
 			}
 		}
 	}

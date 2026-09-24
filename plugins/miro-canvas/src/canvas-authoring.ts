@@ -28,6 +28,7 @@ import { migrateLineNodes, boardConnectors, readBoardConnector, type BoardConnec
 import { readLocalItem, type LocalItem } from "./local-items";
 import { listCommentThreads } from "./local-comments";
 import { reorderCards, type LayerCard, type LayerDirection } from "./layer-order";
+import { nativeOmits, nativeRounds } from "./native-graph";
 import { isSafeColor, normalizeColor } from "./appearance";
 import {
 	LOCAL_SHAPE_KINDS, CONNECTOR_CAPS, CONNECTOR_ROUTES, CONNECTOR_STROKES,
@@ -762,28 +763,14 @@ function nativeDefaultAllowed(kind: "nodes" | "edges", key: string, value: unkno
 }
 
 /**
- * Requested values native Canvas stores as "not set" and so leaves out of
- * getData().  Obsidian writes an edge end only when it differs from the
- * default - nothing at the start, an arrow at the end - and a colour or label
- * only when one is set.  A field carrying exactly that default comes back
- * missing, and that is the host keeping it, not losing it.
+ * Whether native Canvas kept a requested field as it stores such values: a
+ * field carrying the host's own default comes back missing, and node
+ * geometry comes back rounded - that is the host keeping it, not losing it.
  */
-const NATIVE_OMITTED_DEFAULTS: Readonly<Record<"nodes" | "edges", Readonly<Record<string, unknown>>>> = {
-	nodes: { color: "" },
-	edges: { fromEnd: "none", toEnd: "arrow", color: "", label: "" },
-};
-
-/** Native Canvas rounds node geometry to whole pixels as it stores it. */
-const NATIVE_ROUNDED_GEOMETRY = new Set(["x", "y", "width", "height"]);
-
 function nativeKeepsRequested(kind: "nodes" | "edges", key: string, observed: ReadResult, requested: unknown): boolean {
-	if (!observed.ok) {
-		const omitted = NATIVE_OMITTED_DEFAULTS[kind];
-		return hasOwn(omitted, key) && omitted[key] === requested;
-	}
+	if (!observed.ok) return nativeOmits(kind, key, requested);
 	if (structurallyEqual(observed.value, requested)) return true;
-	return kind === "nodes" && NATIVE_ROUNDED_GEOMETRY.has(key)
-		&& isFiniteNumber(requested) && observed.value === Math.round(requested);
+	return nativeRounds(kind, key, requested, observed.value);
 }
 
 /**

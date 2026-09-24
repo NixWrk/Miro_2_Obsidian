@@ -315,3 +315,51 @@ describe("a host that reorders the graph while saving", () => {
     expect(store.describeLastCommitFailure?.()).toContain("missing after save");
   });
 });
+
+describe("a board written by another tool", () => {
+  // The converter writes an edge's default arrow and fractional geometry;
+  // native Canvas saves neither, which is the host keeping the board.
+  function convertedRuntime(normalize: (data: Record<string, any>) => Record<string, any>) {
+    const initial = {
+      nodes: [{ id: "a", type: "text", text: "a", x: 10.4, y: 0, width: 100, height: 60 }, { id: "b", type: "text", text: "b", x: 200, y: 0, width: 100, height: 60 }],
+      edges: [{ id: "e", fromNode: "a", fromSide: "right", toNode: "b", toSide: "left", fromEnd: "none", toEnd: "arrow", label: "" }],
+    };
+    return {
+      data: JSON.parse(JSON.stringify(initial)) as Record<string, unknown>,
+      requestSave: vi.fn(function (this: { data: Record<string, any> }) {
+        this.data = normalize(JSON.parse(JSON.stringify(this.data)));
+      }),
+    };
+  }
+  const asNative = (data: Record<string, any>) => {
+    for (const node of data.nodes) node.x = Math.round(node.x);
+    for (const edge of data.edges) {
+      if (edge.fromEnd === "none") delete edge.fromEnd;
+      if (edge.toEnd === "arrow") delete edge.toEnd;
+      if (edge.label === "") delete edge.label;
+    }
+    return data;
+  };
+
+  it("accepts a metadata write that native Canvas saves in its own habits", () => {
+    const runtime = convertedRuntime(asNative);
+    const writer = new MetadataWriter(readyStore(runtime).store!);
+    const result = writer.write("probe", (draft) => {
+      draft.localOverrides = { a: { rotation: 5 } };
+    });
+    expect(result.status).toBe("applied");
+    expect(runtime.data).toHaveProperty("miroCanvas.localOverrides.a.rotation", 5);
+  });
+
+  it("still refuses a save that lost an edge end that was not the default", () => {
+    const runtime = convertedRuntime((data) => {
+      for (const edge of data.edges) delete edge.fromEnd;
+      return data;
+    });
+    (runtime.data.edges as Record<string, unknown>[])[0]!.fromEnd = "arrow";
+    const store = readyStore(runtime).store!;
+    const before = store.readDocument() as Record<string, unknown>;
+    expect(store.commitDocument({ ...before, miroCanvas: { schemaVersion: 1 } }, before)).toBe(false);
+    expect(store.describeLastCommitFailure?.()).toContain("lost fromEnd");
+  });
+});
