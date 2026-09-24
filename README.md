@@ -188,7 +188,17 @@ against the versioned schema (`python -m miro2obsidian.validate`):
 powershell -ExecutionPolicy Bypass -File scripts\install_agent_skill.ps1 -Name miro-canvas-format
 ```
 
-Add `-Agent claude` to install either skill for Claude Code instead of Codex.
+A third skill, `miro2obsidian-import`, lets an agent walk a person through the
+whole import - getting the program, creating their own Miro app, exporting,
+converting to the format they use and checking the result - without ever
+handling their credentials:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\install_agent_skill.ps1 -Name miro2obsidian-import
+```
+
+Add `-Agent claude` to install any of the skills for Claude Code instead of
+Codex. Ready-made builds check boards with `miro2obsidian validate <file>`.
 
 ## Quick start
 

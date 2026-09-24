@@ -165,8 +165,17 @@ powershell -ExecutionPolicy Bypass -File scripts\install_agent_skill.ps1
 powershell -ExecutionPolicy Bypass -File scripts\install_agent_skill.ps1 -Name miro-canvas-format
 ```
 
-С ключом `-Agent claude` любой из двух skills ставится для Claude Code вместо
-Codex.
+Третий skill, `miro2obsidian-import`, позволяет агенту провести человека через
+весь импорт - получить программу, создать своё приложение Miro, выгрузить доску,
+сконвертировать её в нужный формат и проверить результат, - ни разу не касаясь
+его ключей:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\install_agent_skill.ps1 -Name miro2obsidian-import
+```
+
+С ключом `-Agent claude` любой из skills ставится для Claude Code вместо Codex.
+Готовые сборки проверяют доски командой `miro2obsidian validate <файл>`.
 
 ## Быстрый старт
 

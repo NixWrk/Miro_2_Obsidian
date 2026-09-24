@@ -1,0 +1,4 @@
+interface:
+  display_name: "Import Miro boards into Obsidian"
+  short_description: "Guide a person from a Miro board to an Obsidian Canvas"
+  default_prompt: "Use $miro2obsidian-import to help me bring my Miro board into my Obsidian vault."
