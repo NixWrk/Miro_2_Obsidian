@@ -66,10 +66,11 @@ The work below is done in this order; each phase builds on the ones before it.
    (the Windows build is checked; the macOS and Linux builds await the Build
    workflow's first run, and the builds do not yet carry the Web SDK server for
    the maximum export).
-3. **Delivery and the import guide.** The plugin in its own repository tied to
-   miro2obsidian by the schema and fixtures; the first-setup question "Import
-   from Miro?" with an illustrated step-by-step guide and a settings button to
-   repeat it.
+3. **Delivery and the import guide (done 2026-09-24).** The plugin in
+   [its own repository](https://github.com/NixWrk/Obsidian-Plugin---Miro-Canvas)
+   tied to miro2obsidian by the schema and fixtures; the first-setup question
+   "Import from Miro?" with a six-step guide and a settings button to repeat
+   it; the `miro2obsidian-import` agent skill.
 4. **Getting to know the plugin.** An optional onboarding board, then a visual
    guide to features and setup order in both languages, illustrated from that
    board.
