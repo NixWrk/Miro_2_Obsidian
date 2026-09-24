@@ -1,17 +1,21 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 
 import { authorColor, setAuthorColors } from "../src/comment-thread";
+import { setLocale } from "../src/i18n";
 import {
   DEFAULT_COMMENT_AUTHOR,
   DEFAULT_SETTINGS,
   commentAuthorName,
   obsidianAccountName,
-  NAVIGATION_COMMANDS,
+  navigationCommands,
+  pointerBindingLabel,
   SETTING_BOUNDS,
   normalizeSettings,
   panDelta,
   wheelZooms,
 } from "../src/settings";
+
+afterEach(() => setLocale("en"));
 
 describe("plugin settings", () => {
   it("attaches to nodes and allows free ends by default; chaining lines is an opt-in", () => {
@@ -130,12 +134,27 @@ describe("plugin settings", () => {
   });
 
   it("declares navigation commands with unique ids and no default hotkeys", () => {
-    const ids = NAVIGATION_COMMANDS.map((command) => command.id);
+    const commands = navigationCommands();
+    const ids = commands.map((command) => command.id);
     expect(new Set(ids).size).toBe(ids.length);
-    for (const command of NAVIGATION_COMMANDS) {
+    for (const command of commands) {
       expect(command.id.startsWith("m1-")).toBe(true);
       expect(command.name.length).toBeGreaterThan(0);
       expect(command).not.toHaveProperty("hotkeys");
     }
+  });
+
+  it("reads navigation command names lazily, in the language set when they are built", () => {
+    setLocale("ru");
+    expect(navigationCommands().find((command) => command.id === "m1-zoom-in")?.name).toBe("Приблизить");
+    setLocale("en");
+    expect(navigationCommands().find((command) => command.id === "m1-zoom-in")?.name).toBe("Zoom in");
+  });
+
+  it("names each pointer chord, in the language in use", () => {
+    expect(pointerBindingLabel("none")).toBe("None");
+    expect(pointerBindingLabel("alt+left")).toBe("Alt + left button");
+    setLocale("ru");
+    expect(pointerBindingLabel("alt+left")).toBe("Alt + левая кнопка");
   });
 });

@@ -8,6 +8,7 @@
  * rejected, because a bad preference must never stop a board from opening.
  */
 
+import { words } from "./i18n";
 import { POINTER_BINDINGS, type PointerBinding } from "./pointer-bindings";
 export type WheelZoomModifier = "none" | "ctrl" | "shift" | "alt";
 
@@ -232,19 +233,43 @@ export interface NavigationCommandDefinition {
   readonly name: string;
 }
 
+/** The ids of `navigationCommands()`, paired with the table key of each name. */
+const NAVIGATION_COMMAND_IDS: ReadonlyArray<{
+  readonly id: string;
+  readonly key: keyof ReturnType<typeof words>["commands"]["navigation"];
+}> = Object.freeze([
+  { id: "m1-zoom-in", key: "zoomIn" },
+  { id: "m1-zoom-out", key: "zoomOut" },
+  { id: "m1-zoom-reset", key: "zoomReset" },
+  { id: "m1-zoom-fit", key: "zoomFit" },
+  { id: "m1-toggle-minimap", key: "toggleMinimap" },
+  { id: "m1-pan-left", key: "panLeft" },
+  { id: "m1-pan-right", key: "panRight" },
+  { id: "m1-pan-up", key: "panUp" },
+  { id: "m1-pan-down", key: "panDown" },
+]);
+
 /**
  * Commands are registered so Obsidian's own hotkey editor can bind them; the
  * plugin deliberately ships no default bindings to avoid taking keys from the
- * user or another plugin.
+ * user or another plugin.  Read at registration time, after `setLocale` has
+ * run, so the names come out in Obsidian's own language.
  */
-export const NAVIGATION_COMMANDS: readonly NavigationCommandDefinition[] = Object.freeze([
-  { id: "m1-zoom-in", name: "Zoom in" },
-  { id: "m1-zoom-out", name: "Zoom out" },
-  { id: "m1-zoom-reset", name: "Reset zoom to 100%" },
-  { id: "m1-zoom-fit", name: "Fit board to viewport" },
-  { id: "m1-toggle-minimap", name: "Show or hide the minimap" },
-  { id: "m1-pan-left", name: "Pan left" },
-  { id: "m1-pan-right", name: "Pan right" },
-  { id: "m1-pan-up", name: "Pan up" },
-  { id: "m1-pan-down", name: "Pan down" },
-]);
+export function navigationCommands(): readonly NavigationCommandDefinition[] {
+  const names = words().commands.navigation;
+  return NAVIGATION_COMMAND_IDS.map(({ id, key }) => ({ id, name: names[key] }));
+}
+
+/** The name shown for one pointer chord, in the language in use. */
+export function pointerBindingLabel(binding: PointerBinding): string {
+  const labels = words().settings.pointerBindings;
+  switch (binding) {
+    case "none": return labels.none;
+    case "right": return labels.right;
+    case "alt+left": return labels.altLeft;
+    case "shift+left": return labels.shiftLeft;
+    case "ctrl+left": return labels.ctrlLeft;
+    case "ctrl+shift+left": return labels.ctrlShiftLeft;
+    case "alt+right": return labels.altRight;
+  }
+}

@@ -1,6 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 
 import { APPEARANCE_ACTIONS, normalizeAppearanceState } from "../src/appearance";
+import { setLocale } from "../src/i18n";
 import { M1Controls, type M1ControlsActions, type M1ControlsState, type M1NavigationAction } from "../src/m1-controls";
 
 class FakeElement {
@@ -113,7 +114,16 @@ function build(options: { withSettings?: boolean; setIcon?: (element: HTMLElemen
   return { controls, root, document, calls, update };
 }
 
+afterEach(() => setLocale("en"));
+
 describe("corner dock", () => {
+  it("reads its labels lazily, in the language set when the dock is built", () => {
+    setLocale("ru");
+    const { root } = build();
+    expect(byLabel(root, "Отменить")).toBeDefined();
+    expect(byLabel(root, "Вид и масштаб").textContent).toBe("50%");
+  });
+
   it("is one element holding the map, the menus and one row of controls", () => {
     const { controls, root } = build();
     expect(controls.minimapElement).toBe(controls.element);

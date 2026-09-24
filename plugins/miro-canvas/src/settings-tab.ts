@@ -9,11 +9,13 @@
 import { PluginSettingTab, Setting, type App, type Plugin } from "obsidian";
 
 import { authorColor } from "./comment-thread";
+import { words } from "./i18n";
 import { POINTER_BINDINGS, type PointerBinding } from "./pointer-bindings";
 import {
   DEFAULT_COMMENT_AUTHOR,
   SETTING_BOUNDS,
   WHEEL_ZOOM_MODIFIERS,
+  pointerBindingLabel,
   type MiroCanvasSettings,
   type WheelZoomModifier,
 } from "./settings";
@@ -38,25 +40,26 @@ export class MiroCanvasSettingTab extends PluginSettingTab {
   public override display(): void {
     const { containerEl } = this;
     containerEl.empty();
+    const labels = words().settings;
 
-    new Setting(containerEl).setName("Navigation").setHeading();
+    new Setting(containerEl).setName(labels.navigationHeading).setHeading();
 
-    this.slider(containerEl, "Zoom step", "How much one zoom step changes the scale.",
+    this.slider(containerEl, labels.zoomStepName, labels.zoomStepDesc,
       "zoomStep", (value) => `${Math.round((value - 1) * 100)}%`);
 
     new Setting(containerEl)
-      .setName("Zoom towards the pointer")
-      .setDesc("Off zooms towards the center of the view instead.")
+      .setName(labels.zoomToCursorName)
+      .setDesc(labels.zoomToCursorDesc)
       .addToggle((toggle) => toggle
         .setValue(this.host.settings.zoomToCursor)
         .onChange((value) => void this.host.saveSettings({ zoomToCursor: value })));
 
     new Setting(containerEl)
-      .setName("Wheel zoom modifier")
-      .setDesc("Which key the wheel needs before it zooms instead of scrolling.")
+      .setName(labels.wheelModifierName)
+      .setDesc(labels.wheelModifierDesc)
       .addDropdown((dropdown) => {
         for (const modifier of WHEEL_ZOOM_MODIFIERS) {
-          dropdown.addOption(modifier, modifier === "none" ? "No modifier" : modifier.toUpperCase());
+          dropdown.addOption(modifier, modifier === "none" ? labels.noModifier : modifier.toUpperCase());
         }
         dropdown
           .setValue(this.host.settings.wheelZoomModifier)
@@ -64,76 +67,70 @@ export class MiroCanvasSettingTab extends PluginSettingTab {
       });
 
     new Setting(containerEl)
-      .setName("Invert wheel zoom direction")
+      .setName(labels.invertWheelName)
       .addToggle((toggle) => toggle
         .setValue(this.host.settings.invertWheelZoom)
         .onChange((value) => void this.host.saveSettings({ invertWheelZoom: value })));
 
-    this.slider(containerEl, "Minimum zoom", "The smallest scale the board may be shown at.",
+    this.slider(containerEl, labels.minZoomName, labels.minZoomDesc,
       "minZoom", (value) => `${Math.round(value * 100)}%`);
-    this.slider(containerEl, "Maximum zoom", "The largest scale the board may be shown at.",
+    this.slider(containerEl, labels.maxZoomName, labels.maxZoomDesc,
       "maxZoom", (value) => `${Math.round(value * 100)}%`);
 
-    new Setting(containerEl).setName("Panning").setHeading();
+    new Setting(containerEl).setName(labels.panningHeading).setHeading();
 
-    this.slider(containerEl, "Pan step", "Board distance moved by one keyboard pan command.",
+    this.slider(containerEl, labels.panStepName, labels.panStepDesc,
       "panStep", (value) => `${value} px`);
-    this.slider(containerEl, "Fast pan multiplier", "Applied while Shift is held.",
+    this.slider(containerEl, labels.fastPanName, labels.fastPanDesc,
       "fastPanMultiplier", (value) => `${value}×`);
 
-    new Setting(containerEl).setName("Connectors").setHeading();
+    new Setting(containerEl).setName(labels.connectorsHeading).setHeading();
     // Where an end of a line or an arrow may be put down.  Existing
     // connections keep their ends whatever is chosen here.
     for (const [key, title, description] of [
-      ["connectorAttachNodes", "Attach to nodes and comments",
-        "An end put down on a card, a frame, a picture or a comment pin holds on to it."],
-      ["connectorAllowFree", "Allow unattached ends on the canvas",
-        "An end put down on empty board stays there, so lines and arrows can be drawn anywhere."],
-      ["connectorAttachConnectors", "Attach to other lines and arrows (experimental)",
-        "An end put down on another line holds on to a point along it. Experimental: such chains are new and may still behave unexpectedly."],
+      ["connectorAttachNodes", labels.attachNodesName, labels.attachNodesDesc],
+      ["connectorAllowFree", labels.allowFreeName, labels.allowFreeDesc],
+      ["connectorAttachConnectors", labels.attachConnectorsName, labels.attachConnectorsDesc],
     ] as const) {
       new Setting(containerEl).setName(title)
         .setDesc(description)
         .addToggle((toggle) => toggle.setValue(this.host.settings[key])
           .onChange((value) => void this.host.saveSettings({ [key]: value })));
     }
-    new Setting(containerEl).setName("Lasso gesture")
-      .setDesc("Use lasso while Select is active. Middle-button and Space panning remain available; a right-button binding replaces the context menu for that gesture.")
+    new Setting(containerEl).setName(labels.lassoGestureName)
+      .setDesc(labels.lassoGestureDesc)
       .addDropdown(dropdown => {
-        for (const chord of POINTER_BINDINGS) dropdown.addOption(chord, chord);
+        for (const chord of POINTER_BINDINGS) dropdown.addOption(chord, pointerBindingLabel(chord));
         dropdown.setValue(this.host.settings.lassoBinding).onChange(value => void this.host.saveSettings({ lassoBinding: value as PointerBinding }));
       });
-    for (const [key, title] of [["showLassoTool", "Show lasso button"], ["showConnectorTool", "Show lines and arrows button"]] as const) {
+    for (const [key, title] of [["showLassoTool", labels.showLassoName], ["showConnectorTool", labels.showConnectorName]] as const) {
       new Setting(containerEl).setName(title).addToggle(toggle => toggle.setValue(this.host.settings[key])
         .onChange(value => void this.host.saveSettings({ [key]: value })));
     }
     for (const [key, title, description] of [
-      ["panBinding", "Additional pan gesture", "While Select is active. Lasso wins if both bindings match; middle-button and Space panning remain available."],
-      ["lineBinding", "Line gesture", "While Lines and arrows is active: draw a line without an arrowhead using this gesture."],
+      ["panBinding", labels.panGestureName, labels.panGestureDesc],
+      ["lineBinding", labels.lineGestureName, labels.lineGestureDesc],
     ] as const) {
       new Setting(containerEl).setName(title).setDesc(description).addDropdown(dropdown => {
-        for (const chord of POINTER_BINDINGS) dropdown.addOption(chord, chord);
+        for (const chord of POINTER_BINDINGS) dropdown.addOption(chord, pointerBindingLabel(chord));
         dropdown.setValue(this.host.settings[key]).onChange(value => void this.host.saveSettings({ [key]: value as PointerBinding }));
       });
     }
 
-    this.slider(containerEl, "Magnet distance",
-      "Screen-pixel distance for attachment to an enabled target. Away from targets, a free end is allowed only when enabled; otherwise placement is cancelled.",
+    this.slider(containerEl, labels.magnetName, labels.magnetDesc,
       "connectorMagnet", (value) => `${value} px`);
-    this.slider(containerEl, "Key point snap distance",
-      "How close a connector end has to come to a node's standard connection point, in screen pixels, to snap onto it.",
+    this.slider(containerEl, labels.snapName, labels.snapDesc,
       "connectorSnap", (value) => `${value} px`);
-    this.slider(containerEl, "Default connector label position",
-      "New labels start here along a line or arrow. Drag an individual label to reposition it.",
+    this.slider(containerEl, labels.labelPositionName, labels.labelPositionDesc,
       "connectorLabelPosition", (value) => `${Math.round(value * 100)}%`);
 
-    new Setting(containerEl).setName("Keyboard").setHeading();
+    new Setting(containerEl).setName(labels.keyboardHeading).setHeading();
 
     new Setting(containerEl)
-      .setName("Keyboard shortcuts")
-      .setDesc("Assign commands in Settings → Hotkeys, filtered by \"Miro Canvas\". Escape on the board resets tools and selection; the Reset tools and selection command has no default hotkey and can be bound there. Canvas tools also use letter shortcuts while the canvas has focus; text editors keep their keys.")
+      .setName(labels.shortcutsName)
+      .setDesc(labels.shortcutsDesc(words().commands.resetTools))
       .addButton((button) => button
-        .setButtonText("Open hotkeys")
+        .setButtonText(labels.openHotkeys)
         .onClick(() => {
           const setting = (this.app as unknown as {
             setting?: { open?: () => void; openTabById?: (id: string) => void };
@@ -143,19 +140,19 @@ export class MiroCanvasSettingTab extends PluginSettingTab {
         }));
 
     new Setting(containerEl)
-      .setName("Interface")
-      .setDesc("Board theme, review mode and attachment names belong to each board, snapping to Obsidian's Canvas; change them from the corner dock.")
+      .setName(labels.interfaceName)
+      .setDesc(labels.interfaceDesc)
       .setHeading();
 
     new Setting(containerEl)
-      .setName("Show the minimap by default")
+      .setName(labels.minimapDefaultName)
       .addToggle((toggle) => toggle
         .setValue(this.host.settings.minimapVisible)
         .onChange((value) => void this.host.saveSettings({ minimapVisible: value })));
 
     new Setting(containerEl)
-      .setName("Selection toolbar")
-      .setDesc("The formatting toolbar that floats above the selected element.")
+      .setName(labels.toolbarName)
+      .setDesc(labels.toolbarDesc)
       .addToggle((toggle) => toggle
         .setValue(this.host.settings.selectionToolbarEnabled)
         .onChange((value) => void this.host.saveSettings({ selectionToolbarEnabled: value })));
@@ -163,8 +160,8 @@ export class MiroCanvasSettingTab extends PluginSettingTab {
     this.comments(containerEl);
 
     new Setting(containerEl)
-      .setName("Developer diagnostics")
-      .setDesc("For developers: a warning badge in the corner dock lists what the plugin could not do as asked.")
+      .setName(labels.developerDiagnosticsName)
+      .setDesc(labels.developerDiagnosticsDesc)
       .addToggle((toggle) => toggle
         .setValue(this.host.settings.developerDiagnostics)
         .onChange((value) => void this.host.saveSettings({ developerDiagnostics: value })));
@@ -172,13 +169,14 @@ export class MiroCanvasSettingTab extends PluginSettingTab {
 
   /** Who signs the comments written here, and the colour each author's pins wear. */
   private comments(containerEl: HTMLElement): void {
-    new Setting(containerEl).setName("Comments").setHeading();
+    const labels = words().settings;
+    new Setting(containerEl).setName(labels.commentsHeading).setHeading();
     const account = this.host.accountName?.();
     new Setting(containerEl)
-      .setName("Your name")
+      .setName(labels.yourNameName)
       .setDesc(account === undefined
-        ? "Signs the comments you write. Empty signs them \"Local user\"; signed in to an Obsidian account, it takes the account's name."
-        : `Signs the comments you write. Empty uses your Obsidian account's name, ${account}.`)
+        ? labels.yourNameDescDefault(DEFAULT_COMMENT_AUTHOR)
+        : labels.yourNameDescAccount(account))
       .addText((text) => text
         .setPlaceholder(account ?? DEFAULT_COMMENT_AUTHOR)
         .setValue(this.host.settings.commentAuthor)
@@ -187,19 +185,19 @@ export class MiroCanvasSettingTab extends PluginSettingTab {
     const authors = [...new Set([...(this.host.commentAuthors?.() ?? []), ...Object.keys(colors)])]
       .sort((a, b) => a.localeCompare(b));
     if (authors.length === 0) {
-      new Setting(containerEl).setName("Author colours").setDesc("Open a board with comments to choose the colour of each author's pins.");
+      new Setting(containerEl).setName(labels.authorColorsName).setDesc(labels.authorColorsDesc);
       return;
     }
     for (const author of authors) {
       new Setting(containerEl)
         .setName(author)
-        .setDesc(colors[author] === undefined ? "Pin and avatar colour, made up from the name." : "Pin and avatar colour, chosen here.")
+        .setDesc(colors[author] === undefined ? labels.colorMadeUp : labels.colorChosen)
         .addColorPicker((picker) => picker
           .setValue(colors[author] ?? authorColor(author))
           .onChange((value) => void this.host.saveSettings({ commentAuthorColors: { ...this.host.settings.commentAuthorColors, [author]: value } })))
         .addExtraButton((button) => button
           .setIcon("rotate-ccw")
-          .setTooltip("Back to the colour made up from the name")
+          .setTooltip(labels.resetColorTooltip)
           .setDisabled(colors[author] === undefined)
           .onClick(() => {
             const { [author]: _dropped, ...rest } = this.host.settings.commentAuthorColors;
@@ -218,14 +216,15 @@ export class MiroCanvasSettingTab extends PluginSettingTab {
     const bound = SETTING_BOUNDS[key];
     const setting = new Setting(container).setName(name).setDesc(description);
     const value = this.host.settings[key];
+    const currently = words().settings.currently;
     setting.addSlider((slider) => slider
       .setLimits(bound.min, bound.max, bound.step)
       .setValue(value)
       .setDynamicTooltip()
       .onChange((next) => {
-        setting.setDesc(`${description} Currently ${format(next)}.`);
+        setting.setDesc(`${description} ${currently(format(next))}`);
         void this.host.saveSettings({ [key]: next } as Partial<MiroCanvasSettings>);
       }));
-    setting.setDesc(`${description} Currently ${format(value)}.`);
+    setting.setDesc(`${description} ${currently(format(value))}`);
   }
 }

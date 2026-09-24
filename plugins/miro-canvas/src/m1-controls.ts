@@ -102,11 +102,20 @@ interface ControlRefs {
 	readonly status: HTMLElement;
 }
 
-const THEMES: readonly { readonly value: DisplayTheme; readonly icon: string; readonly glyph: string; readonly label: string }[] = [
-	{ value: "system", icon: "monitor", glyph: "◐", label: "System" },
-	{ value: "light", icon: "sun", glyph: "☀", label: "Light" },
-	{ value: "dark", icon: "moon", glyph: "☾", label: "Dark" },
+const THEME_ICONS: readonly { readonly value: DisplayTheme; readonly icon: string; readonly glyph: string }[] = [
+	{ value: "system", icon: "monitor", glyph: "◐" },
+	{ value: "light", icon: "sun", glyph: "☀" },
+	{ value: "dark", icon: "moon", glyph: "☾" },
 ];
+
+/** The three theme options with their names in the language in use. */
+function themes(): readonly { readonly value: DisplayTheme; readonly icon: string; readonly glyph: string; readonly label: string }[] {
+	const names = words().dock;
+	const labelOf: Readonly<Record<DisplayTheme, string>> = {
+		system: names.themeSystem, light: names.themeLight, dark: names.themeDark,
+	};
+	return THEME_ICONS.map(({ value, icon, glyph }) => ({ value, icon, glyph, label: labelOf[value] }));
+}
 
 function hasDocument(value: unknown): value is Document {
 	return value !== null && typeof value === "object"
@@ -198,7 +207,7 @@ export class M1Controls {
 		}
 		const root = makeElement(this.document, "aside", options.className ?? "miro-canvas-dock");
 		root.setAttribute("data-miro-canvas-panel", "true");
-		root.setAttribute("aria-label", options.title ?? "Miro Canvas view");
+		root.setAttribute("aria-label", options.title ?? words().dock.ariaLabel);
 		this.element = root;
 		this.minimapElement = root;
 		this.refs = this.build(root);
@@ -261,7 +270,7 @@ export class M1Controls {
 		const document = this.document!;
 		const panel = append(root, makeElement(document, "div", `miro-canvas-dock__menu miro-canvas-dock__menu--${name}`));
 		panel.setAttribute("role", "menu");
-		panel.setAttribute("aria-label", `${title} menu`);
+		panel.setAttribute("aria-label", words().dock.menuAriaLabel(title));
 		panel.hidden = true;
 		button.setAttribute("aria-haspopup", "menu");
 		button.setAttribute("aria-expanded", "false");
@@ -293,57 +302,58 @@ export class M1Controls {
 
 	private build(root: HTMLElement): ControlRefs {
 		const document = this.document!;
+		const dock = words().dock;
 		const map = append(root, makeElement(document, "div", "miro-canvas-dock__map"));
 		const minimapCanvas = makeElement(document, "canvas", "miro-canvas-panel__minimap-canvas");
 		minimapCanvas.width = 240;
 		minimapCanvas.height = 160;
 		minimapCanvas.tabIndex = 0;
 		minimapCanvas.setAttribute("role", "img");
-		minimapCanvas.setAttribute("aria-label", "Canvas minimap; use arrow keys to pan");
+		minimapCanvas.setAttribute("aria-label", dock.minimapAriaLabel);
 		append(map, minimapCanvas);
 
 		const bar = makeElement(document, "div", "miro-canvas-dock__bar");
 		bar.setAttribute("role", "toolbar");
-		bar.setAttribute("aria-label", "Canvas navigation");
+		bar.setAttribute("aria-label", dock.bar);
 		const history = append(bar, makeElement(document, "span", "miro-canvas-dock__group"));
-		const undo = this.iconButton(history, "undo-2", "↶", "Undo");
-		const redo = this.iconButton(history, "redo-2", "↷", "Redo");
+		const undo = this.iconButton(history, "undo-2", "↶", dock.undo);
+		const redo = this.iconButton(history, "redo-2", "↷", dock.redo);
 		this.listen(undo, "click", () => this.actions.onNavigation("undo"));
 		this.listen(redo, "click", () => this.actions.onNavigation("redo"));
 		const mapGroup = append(bar, makeElement(document, "span", "miro-canvas-dock__group"));
-		const minimapToggle = this.iconButton(mapGroup, "map", "▦", "Show minimap");
+		const minimapToggle = this.iconButton(mapGroup, "map", "▦", dock.showMinimap);
 		minimapToggle.setAttribute("aria-pressed", "false");
 		this.listen(minimapToggle, "click", () => this.actions.onNavigation("toggle-minimap"));
 		const zoomGroup = append(bar, makeElement(document, "span", "miro-canvas-dock__group"));
-		const zoomOut = this.iconButton(zoomGroup, "minus", "−", "Zoom out");
-		const zoomLabel = append(zoomGroup, makeButton(document, "100%", "View and zoom", "miro-canvas-dock__button miro-canvas-dock__zoom"));
-		const zoomIn = this.iconButton(zoomGroup, "plus", "+", "Zoom in");
+		const zoomOut = this.iconButton(zoomGroup, "minus", "−", dock.zoomOut);
+		const zoomLabel = append(zoomGroup, makeButton(document, "100%", dock.viewAndZoom, "miro-canvas-dock__button miro-canvas-dock__zoom"));
+		const zoomIn = this.iconButton(zoomGroup, "plus", "+", dock.zoomIn);
 		this.listen(zoomOut, "click", () => this.actions.onNavigation("zoom-out"));
 		this.listen(zoomIn, "click", () => this.actions.onNavigation("zoom-in"));
 		const boardGroup = append(bar, makeElement(document, "span", "miro-canvas-dock__group"));
-		const boardButton = this.iconButton(boardGroup, "settings-2", "⚙", "Board settings");
-		const diagnosticsButton = this.iconButton(boardGroup, "triangle-alert", "!", "Diagnostics", "miro-canvas-dock__diagnostics");
+		const boardButton = this.iconButton(boardGroup, "settings-2", "⚙", dock.boardSettings);
+		const diagnosticsButton = this.iconButton(boardGroup, "triangle-alert", "!", dock.diagnostics, "miro-canvas-dock__diagnostics");
 		const diagnosticsCount = append(diagnosticsButton, makeElement(document, "span", "miro-canvas-dock__badge"));
 		const status = append(boardGroup, makeElement(document, "span", "miro-canvas-dock__status"));
 		status.setAttribute("role", "status");
 
 		// View: how the board is shown and snapped.
-		const view = this.menu(root, "view", zoomLabel, "View");
-		this.item(view.panel, "scan", "⤢", "Fit to screen", { run: () => this.run("zoom-fit") });
-		this.item(view.panel, "zoom-out", "−", "Zoom to 50%", { run: () => this.run("zoom-50") });
-		this.item(view.panel, "search", "○", "Zoom to 100%", { run: () => this.run("zoom-reset") });
-		this.item(view.panel, "zoom-in", "+", "Zoom to 200%", { run: () => this.run("zoom-200") });
+		const view = this.menu(root, "view", zoomLabel, dock.viewMenu);
+		this.item(view.panel, "scan", "⤢", dock.fitToScreen, { run: () => this.run("zoom-fit") });
+		this.item(view.panel, "zoom-out", "−", dock.zoomTo50, { run: () => this.run("zoom-50") });
+		this.item(view.panel, "search", "○", dock.zoomTo100, { run: () => this.run("zoom-reset") });
+		this.item(view.panel, "zoom-in", "+", dock.zoomTo200, { run: () => this.run("zoom-200") });
 		this.separator(view.panel);
-		const minimapSwitch = this.item(view.panel, "map", "▦", "Minimap", { toggle: true, run: () => this.actions.onNavigation("toggle-minimap") });
-		const snapGrid = this.item(view.panel, "grid", "#", "Snap to grid", { toggle: true, run: () => this.actions.onNavigation("toggle-snap-grid") });
-		const snapObjects = this.item(view.panel, "magnet", "⊓", "Snap to objects", { toggle: true, run: () => this.actions.onNavigation("toggle-snap-objects") });
+		const minimapSwitch = this.item(view.panel, "map", "▦", dock.minimap, { toggle: true, run: () => this.actions.onNavigation("toggle-minimap") });
+		const snapGrid = this.item(view.panel, "grid", "#", dock.snapToGrid, { toggle: true, run: () => this.actions.onNavigation("toggle-snap-grid") });
+		const snapObjects = this.item(view.panel, "magnet", "⊓", dock.snapToObjects, { toggle: true, run: () => this.actions.onNavigation("toggle-snap-objects") });
 
 		// Board: how this board looks and behaves, and the way to everything else.
-		const board = this.menu(root, "board", boardButton, "Board settings");
-		append(board.panel, makeElement(document, "div", "miro-canvas-dock__heading", "Board theme"));
+		const board = this.menu(root, "board", boardButton, dock.boardSettings);
+		append(board.panel, makeElement(document, "div", "miro-canvas-dock__heading", dock.boardTheme));
 		const themeRow = append(board.panel, makeElement(document, "div", "miro-canvas-dock__segments"));
-		const themes = THEMES.map(({ value, icon, glyph, label }) => {
-			const button = append(themeRow, makeButton(document, "", `${label} theme`, "miro-canvas-dock__segment"));
+		const themeButtons = themes().map(({ value, icon, glyph, label }) => {
+			const button = append(themeRow, makeButton(document, "", dock.themeTitle(label), "miro-canvas-dock__segment"));
 			button.setAttribute("data-value", value);
 			button.setAttribute("aria-pressed", "false");
 			const mark = append(button, makeElement(document, "span", "miro-canvas-dock__item-icon"));
@@ -361,15 +371,15 @@ export class M1Controls {
 			this.item(board.panel, "file-output", "⇩", words().export.boardMenuLabel, { run: () => this.close(() => openExport()) });
 			this.separator(board.panel);
 		}
-		const review = this.item(board.panel, "eye", "◉", "Review mode", {
+		const review = this.item(board.panel, "eye", "◉", dock.reviewMode, {
 			toggle: true,
 			run: () => this.actions.onInteraction({ type: "set-review-mode", enabled: this.lastState?.reviewMode !== true }),
 		});
-		const attachments = this.item(board.panel, "paperclip", "⌘", "Attachment names", {
+		const attachments = this.item(board.panel, "paperclip", "⌘", dock.attachmentNames, {
 			toggle: true,
 			run: () => this.actions.onAttachment({ type: "set-global", visible: this.lastState?.showAttachmentNames === false }),
 		});
-		const selectionNames = this.item(board.panel, "text-cursor-input", "T", "Name on selected attachment", {
+		const selectionNames = this.item(board.panel, "text-cursor-input", "T", dock.nameOnSelection, {
 			toggle: true,
 			run: () => this.actions.onAttachment({
 				type: "set-selection",
@@ -378,17 +388,17 @@ export class M1Controls {
 			}),
 		});
 		this.separator(board.panel);
-		this.item(board.panel, "command", "⌘", "Commands", { run: () => this.close(() => this.actions.openCommandModal()) });
+		this.item(board.panel, "command", "⌘", dock.commands, { run: () => this.close(() => this.actions.openCommandModal()) });
 		if (this.actions.openSourceInspector !== undefined) {
-			this.item(board.panel, "file-search", "?", "Source & provenance", { run: () => this.close(() => this.actions.openSourceInspector?.()) });
+			this.item(board.panel, "file-search", "?", dock.sourceProvenance, { run: () => this.close(() => this.actions.openSourceInspector?.()) });
 		}
 		if (this.actions.openSettings !== undefined) {
-			this.item(board.panel, "settings", "⚙", "Plugin settings", { run: () => this.close(() => this.actions.openSettings?.()) });
+			this.item(board.panel, "settings", "⚙", dock.pluginSettings, { run: () => this.close(() => this.actions.openSettings?.()) });
 		}
 
-		const diagnostics = this.menu(root, "diagnostics", diagnosticsButton, "Diagnostics");
-		append(diagnostics.panel, makeElement(document, "div", "miro-canvas-dock__heading", "Diagnostics"));
-		const diagnosticsList = append(diagnostics.panel, makeElement(document, "div", "miro-canvas-panel__diagnostics"));
+		const diagnosticsMenu = this.menu(root, "diagnostics", diagnosticsButton, dock.diagnostics);
+		append(diagnosticsMenu.panel, makeElement(document, "div", "miro-canvas-dock__heading", dock.diagnostics));
+		const diagnosticsList = append(diagnosticsMenu.panel, makeElement(document, "div", "miro-canvas-panel__diagnostics"));
 		diagnosticsList.setAttribute("role", "log");
 
 		// The bar goes last so the menus open over the map, above the bar.
@@ -412,11 +422,11 @@ export class M1Controls {
 			bar,
 			minimapToggle,
 			zoomLabel,
-			menus: { view, board, diagnostics },
+			menus: { view, board, diagnostics: diagnosticsMenu },
 			switches: {
 				minimap: minimapSwitch, snapGrid, snapObjects, review, attachments, selectionNames,
 			},
-			themes,
+			themes: themeButtons,
 			diagnosticsCount,
 			diagnosticsList,
 			status,
@@ -441,6 +451,7 @@ export class M1Controls {
 			return;
 		}
 		const refs = this.refs;
+		const dock = words().dock;
 		this.element.setAttribute("data-miro-canvas-has-selection", state.selectedIds.length > 0 ? "true" : "false");
 		const check = (row: HTMLButtonElement, on: boolean | undefined): void => {
 			row.setAttribute("aria-checked", on === true ? "true" : "false");
@@ -449,7 +460,7 @@ export class M1Controls {
 		refs.map.hidden = !state.minimapVisible;
 		this.element.setAttribute("data-miro-canvas-minimap", state.minimapVisible ? "visible" : "hidden");
 		refs.minimapToggle.setAttribute("aria-pressed", state.minimapVisible ? "true" : "false");
-		refs.minimapToggle.setAttribute("aria-label", state.minimapVisible ? "Hide minimap" : "Show minimap");
+		refs.minimapToggle.setAttribute("aria-label", state.minimapVisible ? dock.hideMinimap : dock.showMinimap);
 		check(refs.switches.minimap, state.minimapVisible);
 		check(refs.switches.snapGrid, state.snapToGrid);
 		check(refs.switches.snapObjects, state.snapToObjects);
@@ -469,8 +480,8 @@ export class M1Controls {
 			refs.menus.diagnostics.button.setAttribute("aria-expanded", "false");
 		}
 		setText(refs.diagnosticsCount, state.diagnostics.length);
-		refs.menus.diagnostics.button.setAttribute("aria-label", `${state.diagnostics.length} diagnostic(s)`);
-		setText(refs.status, state.reviewMode ? "Review" : "");
+		refs.menus.diagnostics.button.setAttribute("aria-label", dock.diagnosticsCount(state.diagnostics.length));
+		setText(refs.status, state.reviewMode ? dock.reviewStatus : "");
 		refs.status.hidden = !state.reviewMode;
 		const diagnosticsKey = state.diagnostics.join("\u0000");
 		if (diagnosticsKey !== this.lastDiagnosticsKey) {
@@ -509,14 +520,15 @@ export class M1Controls {
 		if (!hasDocument(this.document) || host === undefined) {
 			return;
 		}
+		const dock = words().dock;
 		const modal = makeElement(this.document, "div", "miro-canvas-command-modal");
 		modal.setAttribute("role", "dialog");
 		modal.setAttribute("aria-modal", "true");
-		modal.setAttribute("aria-label", "Miro Canvas commands");
+		modal.setAttribute("aria-label", dock.commandsModalLabel);
 		const dialog = append(modal, makeElement(this.document, "div", "miro-canvas-command-modal__dialog"));
-		const heading = append(dialog, makeElement(this.document, "h2", "miro-canvas-command-modal__title", "Miro Canvas commands"));
+		const heading = append(dialog, makeElement(this.document, "h2", "miro-canvas-command-modal__title", dock.commandsModalLabel));
 		heading.tabIndex = -1;
-		const close = makeButton(this.document, "Close", "Close commands", "miro-canvas-command-modal__close");
+		const close = makeButton(this.document, dock.close, dock.closeCommandsTitle, "miro-canvas-command-modal__close");
 		append(dialog, close);
 		this.listenModal(close, "click", () => this.closeCommandModal());
 		const list = append(dialog, makeElement(this.document, "div", "miro-canvas-command-modal__list"));
@@ -555,14 +567,15 @@ export class M1Controls {
 		this.closeMenus();
 		const host = this.modalHost();
 		if (!hasDocument(this.document) || host === undefined) return;
+		const dock = words().dock;
 		const modal = makeElement(this.document, "div", "miro-canvas-command-modal miro-canvas-source-inspector");
 		modal.setAttribute("role", "dialog");
 		modal.setAttribute("aria-modal", "true");
-		modal.setAttribute("aria-label", "Miro source and provenance inspector");
+		modal.setAttribute("aria-label", dock.sourceInspectorLabel);
 		const dialog = append(modal, makeElement(this.document, "div", "miro-canvas-command-modal__dialog miro-canvas-source-inspector__dialog"));
-		const heading = append(dialog, makeElement(this.document, "h2", "miro-canvas-command-modal__title", "Source & provenance"));
+		const heading = append(dialog, makeElement(this.document, "h2", "miro-canvas-command-modal__title", dock.sourceProvenance));
 		heading.tabIndex = -1;
-		const close = makeButton(this.document, "Close", "Close source inspector", "miro-canvas-command-modal__close");
+		const close = makeButton(this.document, dock.close, dock.closeSourceInspectorTitle, "miro-canvas-command-modal__close");
 		append(dialog, close);
 		this.listenModal(close, "click", () => this.closeCommandModal());
 		const body = append(dialog, makeElement(this.document, "div", "miro-canvas-source-inspector__body"));
@@ -581,51 +594,51 @@ export class M1Controls {
 		};
 		const addCounts = (section: HTMLElement, values: readonly { readonly label: string; readonly count: number }[]): void => {
 			const list = append(section, makeElement(this.document!, "ul", "miro-canvas-source-inspector__list"));
-			if (values.length === 0) append(list, makeElement(this.document!, "li", undefined, "None"));
+			if (values.length === 0) append(list, makeElement(this.document!, "li", undefined, dock.none));
 			for (const value of values) append(list, makeElement(this.document!, "li", undefined, `${value.label}: ${value.count}`));
 		};
 
-		const overview = addSection("Source snapshot");
+		const overview = addSection(dock.sourceSnapshot);
 		addRows(overview, [
-			["Status", inspection.status], ["Items", inspection.counts.items], ["Connectors", inspection.counts.connectors],
-			["Comments", inspection.counts.comments], ["Assets", inspection.counts.assets], ["Tags", inspection.counts.tags],
+			[dock.status, inspection.status], [dock.items, inspection.counts.items], [dock.connectors, inspection.counts.connectors],
+			[dock.comments, inspection.counts.comments], [dock.assets, inspection.counts.assets], [dock.tags, inspection.counts.tags],
 		]);
 		addCounts(overview, inspection.typeCounts);
 
 		if (inspection.selected.canvasItems > 0) {
-			const selected = addSection("Selection");
+			const selected = addSection(dock.selectionSection);
 			addRows(selected, [
-				["Canvas items", inspection.selected.canvasItems], ["Matched source items", inspection.selected.matchedSourceItems],
-				["With provenance", inspection.selected.itemsWithProvenance],
+				[dock.canvasItems, inspection.selected.canvasItems], [dock.matchedSourceItems, inspection.selected.matchedSourceItems],
+				[dock.withProvenance, inspection.selected.itemsWithProvenance],
 			]);
 			addCounts(selected, inspection.selected.typeCounts);
 		}
 
-		const provenance = addSection("Provenance");
+		const provenance = addSection(dock.provenance);
 		addRows(provenance, [
-			["Items with provenance", inspection.provenance.itemsWithProvenance],
-			["Available field sources", inspection.provenance.fieldSourceEntries],
-			["Selected field sources", inspection.provenance.selectedFieldSourceEntries],
-			["Original source copies", inspection.provenance.originalSourceCopies],
+			[dock.itemsWithProvenance, inspection.provenance.itemsWithProvenance],
+			[dock.availableFieldSources, inspection.provenance.fieldSourceEntries],
+			[dock.selectedFieldSources, inspection.provenance.selectedFieldSourceEntries],
+			[dock.originalSourceCopies, inspection.provenance.originalSourceCopies],
 		]);
 
-		const completeness = addSection("Completeness & limitations");
+		const completeness = addSection(dock.completeness);
 		const completenessList = append(completeness, makeElement(this.document, "ul", "miro-canvas-source-inspector__list"));
 		for (const flag of inspection.completeness) {
 			const item = append(completenessList, makeElement(this.document, "li", undefined, `${flag.path}: ${flag.state}`));
 			item.dataset.state = flag.state;
 		}
-		addRows(completeness, [["Declared limitations", inspection.declaredLimitationCount]]);
+		addRows(completeness, [[dock.declaredLimitations, inspection.declaredLimitationCount]]);
 
-		const diagnostics = addSection("Source diagnostics");
-		addCounts(diagnostics, inspection.diagnosticCounts);
+		const sourceDiagnostics = addSection(dock.sourceDiagnostics);
+		addCounts(sourceDiagnostics, inspection.diagnosticCounts);
 
-		const unknown = addSection("Unknown metadata fields");
+		const unknown = addSection(dock.unknownFields);
 		const unknownList = append(unknown, makeElement(this.document, "ul", "miro-canvas-source-inspector__list miro-canvas-source-inspector__unknown"));
-		if (inspection.unknownFields.length === 0) append(unknownList, makeElement(this.document, "li", undefined, "None"));
+		if (inspection.unknownFields.length === 0) append(unknownList, makeElement(this.document, "li", undefined, dock.none));
 		for (const field of inspection.unknownFields) append(unknownList, makeElement(this.document, "li", undefined, `${field.path}: ${field.type}`));
 		append(body, makeElement(this.document, "p", "miro-canvas-source-inspector__note",
-			inspection.truncated ? "Read-only summary; bounded limits were reached." : "Read-only summary; source values remain in the Canvas file."));
+			inspection.truncated ? dock.noteTruncated : dock.noteComplete));
 
 		this.listenModal(modal, "click", (event) => { if (event.target === modal) this.closeCommandModal(); });
 		this.listenModal(modal, "keydown", (event) => {

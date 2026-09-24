@@ -9,7 +9,7 @@ import { RU } from "../src/locales/ru";
  * Anything else equal to the English is a string someone forgot to
  * translate.
  */
-const SAME_IN_RUSSIAN = new Set(["commands.prefix"]);
+const SAME_IN_RUSSIAN = new Set<string>();
 
 type Table = { readonly [key: string]: unknown };
 

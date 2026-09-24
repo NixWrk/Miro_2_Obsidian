@@ -17,7 +17,7 @@ import { M2CanvasTools, type InitialCommentTarget } from "./m2-tools";
 import { createObsidianDocumentHost } from "./obsidian-document-host";
 import {
   DEFAULT_SETTINGS,
-  NAVIGATION_COMMANDS,
+  navigationCommands,
   normalizeSettings,
   obsidianAccountName,
   type MiroCanvasSettings,
@@ -26,7 +26,7 @@ import {
 import { MiroCanvasSettingTab } from "./settings-tab";
 import { setAuthorColors } from "./comment-thread";
 import { layerActions } from "./layer-order";
-import { localeFor, setLocale } from "./i18n";
+import { localeFor, setLocale, words } from "./i18n";
 
 const NATIVE_CANVAS_VIEW_TYPE = "canvas";
 
@@ -126,7 +126,7 @@ export default class MiroCanvasPlugin extends Plugin {
     statusBarItem.addClass("miro-canvas-status");
     statusBarItem.setAttribute(
       "aria-label",
-      "Miro Canvas plugin status"
+      words().shell.statusAriaLabel
     );
     this.statusBarItem = statusBarItem;
     // Register cleanup as soon as the shell owns a DOM element. This also
@@ -135,13 +135,13 @@ export default class MiroCanvasPlugin extends Plugin {
 
     this.addCommand({
       id: "show-status",
-      name: "Show plugin status",
+      name: words().commands.showStatus,
       callback: () => this.showStatus(),
     });
 
     this.addCommand({
       id: "initialize-metadata",
-      name: "Initialize board metadata",
+      name: words().commands.initializeMetadata,
       checkCallback: (checking) => {
         const writer = this.ensureMetadataWriter();
         if (!writer) {
@@ -162,7 +162,7 @@ export default class MiroCanvasPlugin extends Plugin {
     // its safe viewport controller.
     this.addCommand({
       id: "m1-commands",
-      name: "Open Miro Canvas controls",
+      name: words().commands.openControls,
       checkCallback: (checking) => {
         const session = this.activeM1Session();
         if (!session) {
@@ -176,42 +176,42 @@ export default class MiroCanvasPlugin extends Plugin {
     });
     this.addCommand({
       id: "local-tools",
-      name: "Local shapes, comments, anchors and documents",
+      name: words().commands.localTools,
       checkCallback: (checking) => this.runM1Command(checking, (session) => this.openLocalTools(session)),
     });
     this.addCommand({
       id: "source-provenance-inspector",
-      name: "Miro Canvas: Open source and provenance inspector",
+      name: words().commands.sourceInspector,
       checkCallback: (checking) => this.runM1Command(checking, (session) => session.openSourceInspector()),
     });
     this.addCommand({
       id: "m1-theme-system",
-      name: "Miro Canvas: Use system board theme",
+      name: words().commands.themeSystem,
       checkCallback: (checking) => this.runM1Command(checking, (session) => session.setTheme("system")),
     });
     this.addCommand({
       id: "m1-theme-light",
-      name: "Miro Canvas: Use light board theme",
+      name: words().commands.themeLight,
       checkCallback: (checking) => this.runM1Command(checking, (session) => session.setTheme("light")),
     });
     this.addCommand({
       id: "m1-theme-dark",
-      name: "Miro Canvas: Use dark board theme",
+      name: words().commands.themeDark,
       checkCallback: (checking) => this.runM1Command(checking, (session) => session.setTheme("dark")),
     });
     this.addCommand({
       id: "m1-toggle-review-mode",
-      name: "Miro Canvas: Toggle review mode",
+      name: words().commands.toggleReviewMode,
       checkCallback: (checking) => this.runM1Command(checking, (session) => session.toggleReviewMode()),
     });
     this.addCommand({
       id: "m1-lock-selection",
-      name: "Miro Canvas: Lock selection",
+      name: words().commands.lockSelection,
       checkCallback: (checking) => this.runM1Command(checking, (session) => session.lockSelection()),
     });
     this.addCommand({
       id: "m1-unlock-selection",
-      name: "Miro Canvas: Unlock selection",
+      name: words().commands.unlockSelection,
       checkCallback: (checking) => this.runM1Command(checking, (session) => session.unlockSelection()),
     });
     // Only cards have layers, so the commands are offered only with a card
@@ -220,7 +220,7 @@ export default class MiroCanvasPlugin extends Plugin {
     for (const action of layerActions()) {
       this.addCommand({
         id: `layer-${action.direction}`,
-        name: `Miro Canvas: ${action.label}`,
+        name: action.label,
         checkCallback: (checking) => {
           const session = this.activeM1Session();
           if (session === null || session.layeredCards().length === 0) {
@@ -246,10 +246,10 @@ export default class MiroCanvasPlugin extends Plugin {
     }));
     // Registered without default hotkeys so Obsidian's own editor can bind
     // them and nothing is taken from the user or another plugin.
-    for (const command of NAVIGATION_COMMANDS) {
+    for (const command of navigationCommands()) {
       this.addCommand({
         id: command.id,
-        name: `Miro Canvas: ${command.name}`,
+        name: command.name,
         checkCallback: (checking) => this.runM1Command(checking, (session) => {
           const direction = command.id.startsWith("m1-pan-")
             ? command.id.slice("m1-pan-".length) as PanDirection
@@ -266,7 +266,7 @@ export default class MiroCanvasPlugin extends Plugin {
 
     this.addCommand({
       id: "m1-describe-selection",
-      name: "Miro Canvas: Describe the selected element",
+      name: words().commands.describeSelection,
       checkCallback: (checking) => this.runM1Command(checking, (session) => {
         const description = session.describeSelection();
         // A notice can be copied out of, which a panel line cannot.
@@ -276,12 +276,12 @@ export default class MiroCanvasPlugin extends Plugin {
     });
     this.addCommand({
       id: "migrate-line-nodes",
-      name: "Miro Canvas: Convert legacy line nodes to connectors",
+      name: words().commands.migrateLines,
       checkCallback: checking => this.runM1Command(checking, session => session.migrateLines()),
     });
     this.addCommand({
       id: "reset-tools",
-      name: "Miro Canvas: Reset tools and selection",
+      name: words().commands.resetTools,
       // No default hotkey: Obsidian would take Escape from every card being
       // written, every label and every field.  The board resets on Escape itself.
       checkCallback: checking => this.runM1Command(checking,session=>session.resetTools()),
@@ -289,32 +289,32 @@ export default class MiroCanvasPlugin extends Plugin {
 
     this.addCommand({
       id: "m1-toggle-attachment-names",
-      name: "Miro Canvas: Toggle attachment names",
+      name: words().commands.toggleAttachmentNames,
       checkCallback: (checking) => this.runM1Command(checking, (session) => session.toggleAttachmentNames()),
     });
     this.addCommand({
       id: "m1-zoom-in",
-      name: "Miro Canvas: Zoom in",
+      name: words().commands.zoomIn,
       checkCallback: (checking) => this.runM1Command(checking, (session) => session.navigate("zoom-in")),
     });
     this.addCommand({
       id: "m1-zoom-out",
-      name: "Miro Canvas: Zoom out",
+      name: words().commands.zoomOut,
       checkCallback: (checking) => this.runM1Command(checking, (session) => session.navigate("zoom-out")),
     });
     this.addCommand({
       id: "m1-zoom-reset",
-      name: "Miro Canvas: Reset zoom",
+      name: words().commands.zoomReset,
       checkCallback: (checking) => this.runM1Command(checking, (session) => session.navigate("zoom-reset")),
     });
     this.addCommand({
       id: "m1-fit-board",
-      name: "Miro Canvas: Fit board",
+      name: words().commands.fitBoard,
       checkCallback: (checking) => this.runM1Command(checking, (session) => session.navigate("zoom-fit")),
     });
     this.addCommand({
       id: "m1-toggle-minimap",
-      name: "Miro Canvas: Toggle minimap",
+      name: words().commands.toggleMinimap,
       checkCallback: (checking) => this.runM1Command(checking, (session) => session.navigate("toggle-minimap")),
     });
 
@@ -379,10 +379,15 @@ export default class MiroCanvasPlugin extends Plugin {
       onConnectorMenu: (event, run) => {
         // The clipboard and danger sections of native Canvas's selection menu.
         const menu = new Menu();
-        for (const [action, title, icon] of [["cut", "Cut", "lucide-scissors"], ["copy", "Copy", "lucide-copy"], ["paste", "Paste", "lucide-clipboard-check"]] as const) {
+        const connectorMenuLabels = words().shell.connectorMenu;
+        for (const [action, title, icon] of [
+          ["cut", connectorMenuLabels.cut, "lucide-scissors"],
+          ["copy", connectorMenuLabels.copy, "lucide-copy"],
+          ["paste", connectorMenuLabels.paste, "lucide-clipboard-check"],
+        ] as const) {
           menu.addItem((item) => item.setTitle(title).setIcon(icon).setSection("clipboard").onClick(() => run(action)));
         }
-        menu.addItem((item) => item.setTitle("Delete").setIcon("lucide-trash-2").setSection("danger").onClick(() => run("delete")));
+        menu.addItem((item) => item.setTitle(connectorMenuLabels.delete).setIcon("lucide-trash-2").setSection("danger").onClick(() => run("delete")));
         menu.showAtMouseEvent(event);
       },
       onOpenCommentThread: (threadId, origin) => {
@@ -479,7 +484,7 @@ export default class MiroCanvasPlugin extends Plugin {
     // else: the shape, anchor, connector and layer tools have no part in it.
     const commentsOnly = initialComment !== undefined;
     if (commentsOnly) modal.modalEl.classList.add("miro-canvas-local-tools-modal--comments");
-    modal.setTitle(commentsOnly ? "Comments" : "Miro Canvas · Local tools");
+    modal.setTitle(commentsOnly ? words().shell.commentsModalTitle : words().shell.localToolsTitle);
     const tools = new M2CanvasTools(session, createObsidianDocumentHost(
       this.app, (message) => new Notice(message), (value): value is TFile => value instanceof TFile,
     ), modal.contentEl.ownerDocument, initialComment);
@@ -549,18 +554,18 @@ export default class MiroCanvasPlugin extends Plugin {
     const advancedStatus = this.advancedInspection?.status ?? "not-probed";
     const inspection = this.canvasInspection;
     if (!inspection) {
-      new Notice(`Miro Canvas is loaded offline; native Canvas is inactive. Advanced Canvas: ${advancedStatus}.`);
+      new Notice(words().shell.offlineNotice(advancedStatus));
       return;
     }
 
     const diagnosticCount = inspection.diagnostics.length
       + (this.metadataStoreProbe?.diagnostics.length ?? 0);
     const diagnosticSuffix = diagnosticCount > 0
-      ? ` ${diagnosticCount} diagnostic(s) reported.`
+      ? ` ${words().shell.diagnosticsReported(diagnosticCount)}`
       : "";
     const persistenceStatus = this.metadataStoreProbe?.status ?? "unavailable";
     new Notice(
-      `Miro Canvas is loaded offline; adapter ${inspection.adapter.status}, metadata ${inspection.metadata.status}, persistence ${persistenceStatus}. Advanced Canvas: ${advancedStatus}.${diagnosticSuffix}`,
+      words().shell.statusNotice(inspection.adapter.status, inspection.metadata.status, persistenceStatus, advancedStatus) + diagnosticSuffix,
     );
   }
 
@@ -571,16 +576,18 @@ export default class MiroCanvasPlugin extends Plugin {
     }
 
     if (result.status === "applied") {
-      new Notice(`Miro Canvas: ${result.action} applied.`);
+      new Notice(words().shell.actionApplied(result.action));
       return;
     }
     if (result.status === "noop") {
-      new Notice(`Miro Canvas: ${result.action} made no changes.`);
+      new Notice(words().shell.actionNoop(result.action));
       return;
     }
 
-    const reason = result.diagnostics[0]?.message ?? "The metadata transaction was rejected.";
-    new Notice(`Miro Canvas: ${reason}`);
+    // A diagnostic's own message stays in English, as diagnostics for
+    // maintainers do; only the fallback sentence is translated.
+    const reason = result.diagnostics[0]?.message ?? words().shell.transactionRejected;
+    new Notice(words().shell.actionRejected(reason));
   }
 
   private disposeShell(): void {
