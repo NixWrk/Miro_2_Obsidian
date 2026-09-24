@@ -1,0 +1,77 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/NixWrk/Miro_2_Obsidian/main/miro2obsidian/schemas/v1/board.schema.json",
+  "title": "Board v1",
+  "description": "A whole .canvas document: JSON Canvas 1.0 (https://jsoncanvas.org/spec/1.0/) plus this project's two extension keys, miroSource and miroCanvas. Extra node, edge, and root fields are allowed, since Advanced Canvas and other community plugins add their own.",
+  "type": "object",
+  "properties": {
+    "nodes": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/node" }
+    },
+    "edges": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/edge" }
+    },
+    "miroSource": { "$ref": "https://raw.githubusercontent.com/NixWrk/Miro_2_Obsidian/main/miro2obsidian/schemas/v1/miro-source.schema.json" },
+    "miroCanvas": { "$ref": "https://raw.githubusercontent.com/NixWrk/Miro_2_Obsidian/main/miro2obsidian/schemas/v1/miro-canvas.schema.json" },
+    "metadata": {
+      "description": "Native Canvas's own file metadata (version, frontmatter). Not part of this project's contract.",
+      "type": "object",
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": true,
+  "$defs": {
+    "node": {
+      "type": "object",
+      "required": ["id", "type", "x", "y", "width", "height"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "type": { "enum": ["text", "file", "link", "group"] },
+        "x": { "type": "number" },
+        "y": { "type": "number" },
+        "width": { "type": "number" },
+        "height": { "type": "number" },
+        "color": { "type": "string" },
+        "text": { "type": "string" },
+        "file": { "type": "string" },
+        "url": { "type": "string" },
+        "label": { "type": "string" },
+        "background": { "type": "string" },
+        "backgroundStyle": { "enum": ["cover", "ratio", "repeat"] }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "type": { "const": "text" } }, "required": ["type"] },
+          "then": { "required": ["text"] }
+        },
+        {
+          "if": { "properties": { "type": { "const": "file" } }, "required": ["type"] },
+          "then": { "required": ["file"] }
+        },
+        {
+          "if": { "properties": { "type": { "const": "link" } }, "required": ["type"] },
+          "then": { "required": ["url"] }
+        }
+      ],
+      "additionalProperties": true
+    },
+    "edge": {
+      "type": "object",
+      "required": ["id", "fromNode", "toNode"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "fromNode": { "type": "string", "minLength": 1 },
+        "toNode": { "type": "string", "minLength": 1 },
+        "fromSide": { "enum": ["top", "right", "bottom", "left"] },
+        "toSide": { "enum": ["top", "right", "bottom", "left"] },
+        "fromEnd": { "enum": ["none", "arrow"] },
+        "toEnd": { "enum": ["none", "arrow"] },
+        "color": { "type": "string" },
+        "label": { "type": "string" }
+      },
+      "additionalProperties": true
+    }
+  }
+}

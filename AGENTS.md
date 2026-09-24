@@ -31,6 +31,9 @@ powershell -ExecutionPolicy Bypass -File scripts/bootstrap_windows.ps1
 # Full structural and visual regression
 .\.venv\Scripts\python.exe -m scripts.run_regression
 
+# Check a board against the versioned schema (miro2obsidian/schemas/v1)
+.\.venv\Scripts\python.exe -m miro2obsidian.validate <file.canvas>
+
 # User entry points after installation
 .\.venv\Scripts\miro2obsidian.exe --help
 .\.venv\Scripts\miro2obsidian-gui.exe

@@ -1,0 +1,560 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/NixWrk/Miro_2_Obsidian/main/miro2obsidian/schemas/v1/miro-canvas.schema.json",
+  "title": "miroCanvas v1",
+  "description": "The plugin's own versioned metadata, kept under the root Canvas document's `miroCanvas` key. Mirrors plugins/miro-canvas/src/metadata.ts's validateMiroCanvasMetadata: unknown fields at every level are forward-compatible and never make an otherwise well-formed document invalid, so every object below keeps additionalProperties true unless the validator itself rejects the extra shape.",
+  "type": "object",
+  "required": ["schemaVersion"],
+  "properties": {
+    "schemaVersion": {
+      "description": "Only version 1 is understood by this contract. A different integer is read by the plugin as 'unsupported', not 'invalid', but either way the document cannot be treated as today's v1 shape.",
+      "const": 1
+    },
+    "settings": { "$ref": "#/$defs/settings" },
+    "transform": { "$ref": "#/$defs/transform" },
+    "bindings": {
+      "description": "Canvas node id to the source item it shows.",
+      "type": "object",
+      "additionalProperties": { "$ref": "#/$defs/binding" }
+    },
+    "zOrder": {
+      "description": "Front-to-back (or back-to-front) draw order, by node id. No id repeats.",
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "uniqueItems": true
+    },
+    "decks": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/deck" }
+    },
+    "localOverrides": {
+      "description": "Canvas node id to the plugin's own presentation of it.",
+      "type": "object",
+      "additionalProperties": { "$ref": "#/$defs/localOverride" }
+    },
+    "localComments": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/localComment" }
+    },
+    "freeAnchors": {
+      "description": "Named anchors kept independent of any one node, edge, or comment.",
+      "type": "object",
+      "additionalProperties": { "$ref": "#/$defs/freeAnchorEntry" }
+    },
+    "export": { "$ref": "#/$defs/exportState" },
+    "commentPlaces": {
+      "description": "Where a comment pin was moved to, by \"origin:id\". Always a fully-typed anchor.",
+      "type": "object",
+      "additionalProperties": { "$ref": "#/$defs/typedAnchor" }
+    },
+    "commentAuthorNames": {
+      "description": "Per-thread, per-message author aliases: thread id to message id to display name.",
+      "type": "object",
+      "maxProperties": 10000,
+      "additionalProperties": {
+        "type": "object",
+        "maxProperties": 1000,
+        "additionalProperties": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[^\\u0000-\\u001f\\u007f]*$"
+        }
+      }
+    },
+    "commentDecorations": {
+      "description": "Per-comment appearance: color and lock state, by \"origin:id\".",
+      "type": "object",
+      "maxProperties": 10000,
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "color": { "type": "string", "pattern": "^#[0-9a-fA-F]{6}$" },
+          "locked": { "type": "boolean" }
+        },
+        "additionalProperties": true
+      }
+    },
+    "hiddenImportedComments": {
+      "description": "Imported comment ids the plugin hides from the board.",
+      "type": "array",
+      "items": { "type": "string", "minLength": 1, "maxLength": 512 }
+    },
+    "connectors": {
+      "description": "Independent lines and arrows a native Canvas edge cannot represent, keyed by their own id.",
+      "type": "object",
+      "additionalProperties": { "$ref": "#/$defs/boardConnector" }
+    },
+    "connectorMigrationArchive": {
+      "description": "Exact pre-migration node/override pairs for lines once drawn as nodes. Opaque archive; never read back by the validator.",
+      "type": "object",
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": true,
+  "$defs": {
+    "hexColor": {
+      "type": "string",
+      "pattern": "^#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?$"
+    },
+    "hexColorOrNull": {
+      "oneOf": [
+        { "$ref": "#/$defs/hexColor" },
+        { "type": "null" }
+      ]
+    },
+    "paletteEntry": {
+      "oneOf": [
+        { "$ref": "#/$defs/hexColor" },
+        {
+          "type": "object",
+          "required": ["color"],
+          "properties": {
+            "color": { "$ref": "#/$defs/hexColor" },
+            "id": { "type": "string" },
+            "label": { "type": "string" },
+            "source": { "enum": ["miro", "obsidian", "custom"] }
+          },
+          "additionalProperties": true
+        }
+      ]
+    },
+    "settings": {
+      "type": "object",
+      "properties": {
+        "displayTheme": { "enum": ["system", "light", "dark"] },
+        "reviewMode": { "type": "boolean" },
+        "showAttachmentNames": { "type": "boolean" },
+        "minimapVisible": { "type": "boolean" },
+        "palette": {
+          "type": "array",
+          "maxItems": 128,
+          "items": { "$ref": "#/$defs/paletteEntry" }
+        },
+        "recentColors": {
+          "type": "array",
+          "maxItems": 12,
+          "items": { "$ref": "#/$defs/hexColor" }
+        }
+      },
+      "additionalProperties": true
+    },
+    "transform": {
+      "type": "object",
+      "required": ["scale", "offsetX", "offsetY"],
+      "properties": {
+        "scale": { "type": "number", "exclusiveMinimum": 0 },
+        "offsetX": { "type": "number" },
+        "offsetY": { "type": "number" }
+      },
+      "additionalProperties": true
+    },
+    "binding": {
+      "type": "object",
+      "required": ["sourceId", "role"],
+      "properties": {
+        "sourceId": { "type": "string", "minLength": 1 },
+        "role": { "type": "string", "minLength": 1 }
+      },
+      "additionalProperties": true
+    },
+    "slide": {
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "sourceId": { "type": "string", "minLength": 1 },
+        "nodeId": { "type": "string", "minLength": 1 },
+        "syntheticLayout": { "type": "boolean" }
+      },
+      "additionalProperties": true
+    },
+    "deck": {
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "sourceId": { "type": "string", "minLength": 1 },
+        "startNode": { "type": "string", "minLength": 1 },
+        "syntheticLayout": { "type": "boolean" },
+        "slides": { "type": "array", "items": { "$ref": "#/$defs/slide" } }
+      },
+      "additionalProperties": true
+    },
+    "typographyFormat": {
+      "oneOf": [
+        { "type": "string" },
+        {
+          "type": "object",
+          "properties": {
+            "bold": { "type": "boolean" },
+            "italic": { "type": "boolean" },
+            "underline": { "type": "boolean" },
+            "strike": { "type": "boolean" },
+            "strikethrough": { "type": "boolean" }
+          },
+          "additionalProperties": true
+        }
+      ]
+    },
+    "textAlignEnum": { "enum": ["left", "center", "right", "justify", "start", "end", "centre"] },
+    "typography": {
+      "type": "object",
+      "properties": {
+        "fontFamily": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "fontSize": { "type": "number", "minimum": 6, "maximum": 256 },
+        "format": { "$ref": "#/$defs/typographyFormat" },
+        "alignment": { "$ref": "#/$defs/textAlignEnum" },
+        "fontWeight": {
+          "oneOf": [
+            { "const": "normal" },
+            { "const": "bold" },
+            { "type": "integer", "minimum": 100, "maximum": 900, "multipleOf": 100 }
+          ]
+        },
+        "fontStyle": { "enum": ["normal", "italic"] },
+        "textDecoration": {
+          "enum": ["none", "underline", "line-through", "underline line-through", "line-through underline"]
+        },
+        "textAlign": { "$ref": "#/$defs/textAlignEnum" },
+        "lineHeight": { "type": "number", "minimum": 0.5, "maximum": 4 },
+        "verticalAlign": { "enum": ["top", "center", "middle", "bottom"] }
+      },
+      "additionalProperties": true
+    },
+    "colors": {
+      "type": "object",
+      "properties": {
+        "text": { "$ref": "#/$defs/hexColorOrNull" },
+        "fill": { "$ref": "#/$defs/hexColorOrNull" },
+        "border": { "$ref": "#/$defs/hexColorOrNull" },
+        "edge": { "$ref": "#/$defs/hexColorOrNull" },
+        "highlight": { "$ref": "#/$defs/hexColorOrNull" }
+      },
+      "additionalProperties": true
+    },
+    "stickyColorToken": {
+      "enum": [
+        "light_yellow", "yellow", "orange", "red", "light_pink", "pink", "light_blue", "violet",
+        "blue", "dark_blue", "cyan", "dark_green", "light_green", "green", "gray", "black", "white"
+      ]
+    },
+    "localStroke": {
+      "type": "object",
+      "required": ["color", "width", "box", "points"],
+      "properties": {
+        "color": { "type": "string", "pattern": "^#[0-9a-fA-F]{6}$" },
+        "width": { "type": "number", "exclusiveMinimum": 0, "maximum": 1000 },
+        "opacity": { "type": "number", "exclusiveMinimum": 0, "maximum": 1 },
+        "box": {
+          "type": "object",
+          "required": ["width", "height"],
+          "properties": {
+            "width": { "type": "number", "exclusiveMinimum": 0, "maximum": 100000 },
+            "height": { "type": "number", "exclusiveMinimum": 0, "maximum": 100000 }
+          },
+          "additionalProperties": true
+        },
+        "points": {
+          "type": "array",
+          "minItems": 4,
+          "maxItems": 8192,
+          "items": { "type": "number" }
+        },
+        "breaks": {
+          "type": "array",
+          "items": { "type": "integer", "exclusiveMinimum": 0 }
+        }
+      },
+      "additionalProperties": true
+    },
+    "localLine": {
+      "type": "object",
+      "required": ["route", "color", "width", "box", "points"],
+      "properties": {
+        "route": { "enum": ["straight", "elbowed", "curved"] },
+        "color": { "type": "string", "pattern": "^#[0-9a-fA-F]{6}$" },
+        "width": { "type": "number", "exclusiveMinimum": 0, "maximum": 100 },
+        "headSize": { "type": "number", "minimum": 1, "maximum": 1000 },
+        "strokeStyle": { "enum": ["dashed", "dotted"] },
+        "startCap": { "type": "string", "pattern": "^[a-z_]{1,32}$" },
+        "endCap": { "type": "string", "pattern": "^[a-z_]{1,32}$" },
+        "block": { "const": true },
+        "box": {
+          "type": "object",
+          "required": ["width", "height"],
+          "properties": {
+            "width": { "type": "number", "exclusiveMinimum": 0, "maximum": 100000 },
+            "height": { "type": "number", "exclusiveMinimum": 0, "maximum": 100000 }
+          },
+          "additionalProperties": true
+        },
+        "points": {
+          "type": "array",
+          "minItems": 4,
+          "maxItems": 132,
+          "items": { "type": "number" }
+        }
+      },
+      "additionalProperties": true
+    },
+    "localItem": {
+      "type": "object",
+      "required": ["type"],
+      "properties": {
+        "type": { "enum": ["text", "sticky_note", "code", "frame", "table", "drawing", "line"] },
+        "color": { "$ref": "#/$defs/stickyColorToken" },
+        "title": { "type": "string", "maxLength": 256 },
+        "stroke": { "$ref": "#/$defs/localStroke" },
+        "line": { "$ref": "#/$defs/localLine" }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "type": { "const": "drawing" } }, "required": ["type"] },
+          "then": { "required": ["stroke"] },
+          "else": { "not": { "required": ["stroke"] } }
+        },
+        {
+          "if": { "properties": { "type": { "const": "line" } }, "required": ["type"] },
+          "then": { "required": ["line"] },
+          "else": { "not": { "required": ["line"] } }
+        }
+      ],
+      "additionalProperties": true
+    },
+    "localOverride": {
+      "type": "object",
+      "properties": {
+        "typography": { "$ref": "#/$defs/typography" },
+        "colors": { "$ref": "#/$defs/colors" },
+        "locked": { "type": "boolean" },
+        "showAttachmentName": { "type": "boolean" },
+        "rotation": { "type": "number" },
+        "item": { "$ref": "#/$defs/localItem" },
+        "shape": {
+          "description": "The Miro shape a card is drawn as (rectangle, ellipse, a flowchart shape...); without the plugin it is a plain card. Not checked by the plugin's metadata validator; the renderer ignores what it does not know.",
+          "type": "object",
+          "properties": {
+            "kind": { "type": "string", "minLength": 1 },
+            "fallback": { "type": "string" }
+          },
+          "additionalProperties": true
+        },
+        "borderStyle": { "enum": ["solid", "dashed", "dotted", "none"] },
+        "borderWidth": { "type": "number", "minimum": 0 },
+        "connector": {
+          "description": "How a native edge is drawn beyond native Canvas: route, stroke, caps, width, label position and bends. Not checked by the plugin's metadata validator; values it does not know are ignored.",
+          "type": "object",
+          "properties": {
+            "route": { "enum": ["straight", "elbowed", "curved"] },
+            "strokeStyle": { "enum": ["solid", "dashed", "dotted"] },
+            "startCap": { "type": "string" },
+            "endCap": { "type": "string" },
+            "width": { "type": "number", "minimum": 0 },
+            "headSize": { "type": "number", "minimum": 0 },
+            "labelT": { "type": "number", "minimum": 0, "maximum": 1 },
+            "color": { "type": ["string", "null"] },
+            "block": { "type": "boolean" },
+            "waypoints": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["x", "y"],
+                "properties": { "x": { "type": "number" }, "y": { "type": "number" } }
+              }
+            }
+          },
+          "additionalProperties": true
+        },
+        "connectorAnchors": {
+          "description": "Where a native edge's ends really hold: a point on a card, on another line, or free on the board. Native Canvas only knows the card side each end leaves from.",
+          "type": "object",
+          "properties": {
+            "from": { "type": "object" },
+            "to": { "type": "object" }
+          },
+          "additionalProperties": true
+        }
+      },
+      "additionalProperties": true
+    },
+    "typedAnchor": {
+      "description": "An anchor whose `type` is present. Mirrors anchors.ts's normalizeAnchor exactly: only one of these five shapes is accepted.",
+      "type": "object",
+      "required": ["type"],
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["type", "x", "y"],
+          "properties": {
+            "type": { "const": "free" },
+            "x": { "type": "number" },
+            "y": { "type": "number" }
+          },
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "required": ["type", "nodeId", "u", "v"],
+          "properties": {
+            "type": { "enum": ["node", "image"] },
+            "nodeId": { "type": "string", "minLength": 1, "maxLength": 256 },
+            "u": { "type": "number", "minimum": 0, "maximum": 1 },
+            "v": { "type": "number", "minimum": 0, "maximum": 1 }
+          },
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "required": ["type", "edgeId", "t"],
+          "properties": {
+            "type": { "const": "edge" },
+            "edgeId": { "type": "string", "minLength": 1, "maxLength": 256 },
+            "t": { "type": "number", "minimum": 0, "maximum": 1 }
+          },
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "required": ["type", "commentId", "origin"],
+          "properties": {
+            "type": { "const": "comment" },
+            "commentId": { "type": "string", "minLength": 1, "maxLength": 256 },
+            "origin": { "enum": ["local", "imported"] }
+          },
+          "additionalProperties": true
+        }
+      ]
+    },
+    "anchorLenientXY": {
+      "description": "A comment anchor. M0 allowed a bare {x, y} free point with no `type`; a typed anchor is validated in full.",
+      "oneOf": [
+        { "$ref": "#/$defs/typedAnchor" },
+        {
+          "type": "object",
+          "not": { "required": ["type"] },
+          "properties": {
+            "x": { "type": "number" },
+            "y": { "type": "number" }
+          },
+          "additionalProperties": true
+        }
+      ]
+    },
+    "freeAnchorEntry": {
+      "description": "A freeAnchors[id] entry. M0 allowed bare {x, y, u, v} with no `type`; a typed anchor is validated in full.",
+      "oneOf": [
+        { "$ref": "#/$defs/typedAnchor" },
+        {
+          "type": "object",
+          "not": { "required": ["type"] },
+          "properties": {
+            "x": { "type": "number" },
+            "y": { "type": "number" },
+            "u": { "type": "number" },
+            "v": { "type": "number" }
+          },
+          "additionalProperties": true
+        }
+      ]
+    },
+    "commentReply": {
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "text": { "type": "string" },
+        "body": { "type": "string" },
+        "content": { "type": "string" },
+        "origin": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" },
+        "immutable": { "type": "boolean" },
+        "author": { "type": "object", "additionalProperties": true }
+      },
+      "additionalProperties": true
+    },
+    "localComment": {
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "sourceId": { "type": "string" },
+        "text": { "type": "string" },
+        "body": { "type": "string" },
+        "content": { "type": "string" },
+        "origin": { "type": "string" },
+        "resolved": { "type": "boolean" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" },
+        "resolvedAt": { "oneOf": [{ "type": "string" }, { "type": "null" }] },
+        "immutable": { "type": "boolean" },
+        "author": { "type": "object", "additionalProperties": true },
+        "anchor": { "$ref": "#/$defs/anchorLenientXY" },
+        "replies": { "type": "array", "items": { "$ref": "#/$defs/commentReply" } }
+      },
+      "additionalProperties": true
+    },
+    "exportPage": {
+      "type": "object",
+      "required": ["id", "x", "y", "width", "height"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "x": { "type": "number", "minimum": -1000000, "maximum": 1000000 },
+        "y": { "type": "number", "minimum": -1000000, "maximum": 1000000 },
+        "width": { "type": "number", "exclusiveMinimum": 0, "maximum": 1000000 },
+        "height": { "type": "number", "exclusiveMinimum": 0, "maximum": 1000000 },
+        "name": { "type": "string", "maxLength": 256 }
+      },
+      "additionalProperties": true
+    },
+    "exportState": {
+      "type": "object",
+      "properties": {
+        "format": { "enum": ["a4", "a3", "letter", "16:9", "4:3", "free"] },
+        "orientation": { "enum": ["landscape", "portrait"] },
+        "quality": { "enum": ["standard", "high"] },
+        "pages": {
+          "type": "array",
+          "maxItems": 200,
+          "items": { "$ref": "#/$defs/exportPage" }
+        }
+      },
+      "additionalProperties": true
+    },
+    "connectorCap": {
+      "enum": [
+        "none", "stealth", "rounded_stealth", "arrow", "filled_triangle", "triangle", "filled_diamond",
+        "diamond", "filled_oval", "oval", "erd_one", "erd_many", "erd_one_or_many", "erd_only_one",
+        "erd_zero_or_many", "erd_zero_or_one", "circle", "filled_circle", "er_one", "er_many", "er_one_or_many"
+      ]
+    },
+    "boardConnector": {
+      "description": "An independent line or arrow. Mirrors board-connectors.ts's readBoardConnector.",
+      "type": "object",
+      "required": ["id", "from", "to", "route", "color", "width", "startCap", "endCap"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 512 },
+        "from": { "$ref": "#/$defs/typedAnchor" },
+        "to": { "$ref": "#/$defs/typedAnchor" },
+        "route": { "enum": ["straight", "elbowed", "curved"] },
+        "color": { "type": "string", "pattern": "^#[0-9a-fA-F]{6}$" },
+        "width": { "type": "number", "exclusiveMinimum": 0, "maximum": 1000 },
+        "headSize": { "type": "number", "minimum": 1, "maximum": 1000 },
+        "label": { "type": "string", "maxLength": 1024 },
+        "labelT": { "type": "number", "minimum": 0, "maximum": 1 },
+        "startCap": { "$ref": "#/$defs/connectorCap" },
+        "endCap": { "$ref": "#/$defs/connectorCap" },
+        "strokeStyle": { "enum": ["solid", "dashed", "dotted"] },
+        "block": { "const": true },
+        "waypoints": {
+          "type": "array",
+          "maxItems": 64,
+          "items": {
+            "type": "object",
+            "required": ["x", "y"],
+            "properties": { "x": { "type": "number" }, "y": { "type": "number" } },
+            "additionalProperties": true
+          }
+        }
+      },
+      "additionalProperties": true
+    }
+  }
+}

@@ -270,6 +270,14 @@ const METADATA_FIELDS = new Set([
   "connectorMigrationArchive",
 ]);
 
+/**
+ * The root `miroCanvas` fields this version of the plugin knows about.  Kept
+ * in sync with `miro2obsidian/schemas/v1/miro-canvas.schema.json`'s declared properties by
+ * `tests/schema-fixtures.test.ts`, so the schema and this validator cannot
+ * silently drift apart.
+ */
+export const KNOWN_METADATA_FIELDS: ReadonlySet<string> = METADATA_FIELDS;
+
 const TRANSFORM_FIELDS = new Set(["scale", "offsetX", "offsetY"]);
 const BINDING_FIELDS = new Set(["sourceId", "role"]);
 const DECK_FIELDS = new Set(["id", "sourceId", "startNode", "syntheticLayout", "slides"]);

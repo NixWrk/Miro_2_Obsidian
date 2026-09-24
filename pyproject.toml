@@ -12,6 +12,7 @@ license = "MIT"
 dependencies = [
     "customtkinter==6.0.0",
     "requests==2.34.2",
+    "jsonschema==4.23.0",
 ]
 
 [project.scripts]
@@ -20,6 +21,11 @@ miro2obsidian-gui = "Miro_2_Obsidian_GUI:main"
 
 [tool.setuptools]
 py-modules = ["Miro_2_Obsidian_GUI"]
+
+[tool.setuptools.package-data]
+# The board schema and its compatibility fixtures are the contract the
+# plugin pins; they ship with the package.
+miro2obsidian = ["schemas/v1/*.json", "schemas/v1/fixtures/*.json", "schemas/v1/fixtures/*/*.canvas"]
 
 [tool.setuptools.packages.find]
 include = [

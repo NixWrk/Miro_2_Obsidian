@@ -1,0 +1,18 @@
+{
+	"nodes":[
+		{"id":"a","type":"text","text":"a","x":0,"y":0,"width":10,"height":10}
+	],
+	"edges":[],
+	"miroCanvas":{
+		"schemaVersion":1,
+		"export":{
+			"format":"a4",
+			"orientation":"landscape",
+			"quality":"standard",
+			"pages":[
+				{"id":"page-1","x":0,"y":0,"width":100,"height":100},
+				{"x":0,"y":0,"width":-5,"height":50}
+			]
+		}
+	}
+}

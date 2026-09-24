@@ -1,0 +1,12 @@
+{
+	"nodes":[
+		{"id":"a","type":"text","text":"a","x":0,"y":0,"width":10,"height":10}
+	],
+	"edges":[],
+	"miroCanvas":{
+		"schemaVersion":1,
+		"localOverrides":{
+			"a":{"rotation":"45deg"}
+		}
+	}
+}

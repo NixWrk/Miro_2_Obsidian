@@ -404,6 +404,17 @@ Rules:
 - Migrate metadata versions in memory and write only after explicit user action.
 - Typography controls must not inject inline HTML styles into text content.
 
+**Versioned schema (v1, 2026-09-24).** The contract is written down as JSON
+Schema (draft 2020-12) in `miro2obsidian/schemas/v1/`: `board.schema.json` (a
+whole `.canvas` file: JSON Canvas 1.0 plus the two extension keys),
+`miro-source.schema.json` and `miro-canvas.schema.json`. miro2obsidian owns
+them and ships them with the package; `fixtures/` holds small valid and invalid
+boards with a manifest of what each check must say about them. The Python tests
+and the plugin's tests both run those fixtures, and the plugin's list of known
+`miroCanvas` fields must equal the schema's, so neither side can drift. Extra
+fields are allowed wherever the plugin keeps fields from newer versions. Check
+a board with `python -m miro2obsidian.validate <file.canvas>`.
+
 ## Rendering requirements
 
 ### Geometry and layers

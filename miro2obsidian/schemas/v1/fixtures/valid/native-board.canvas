@@ -1,0 +1,6 @@
+{
+	"nodes":[
+		{"id":"note-1","type":"text","text":"Minimal native Canvas fixture","x":0,"y":0,"width":360,"height":140}
+	],
+	"edges":[]
+}

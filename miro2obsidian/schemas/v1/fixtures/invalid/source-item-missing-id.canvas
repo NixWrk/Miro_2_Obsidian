@@ -1,0 +1,11 @@
+{
+	"nodes":[
+		{"id":"n1","type":"text","text":"x","x":0,"y":0,"width":10,"height":10}
+	],
+	"edges":[],
+	"miroSource":{
+		"items":[
+			{"type":"sticky_note"}
+		]
+	}
+}

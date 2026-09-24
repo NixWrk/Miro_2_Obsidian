@@ -1,0 +1,122 @@
+{
+  "description": "What each fixture under valid/ and invalid/ is meant to exercise, and what the three checks (board.schema.json, miro-source.schema.json, and the plugin's validateMiroCanvasMetadata / miro-canvas.schema.json) must say about it. 'not_applicable' means the fixture has no miroSource or no miroCanvas key at all, so that check does not apply.",
+  "fixtures": [
+    {
+      "id": "native-board",
+      "path": "valid/native-board.canvas",
+      "description": "An ordinary Canvas file with neither miroSource nor miroCanvas: the plugin off, or a board that never went through it.",
+      "board_schema": "valid",
+      "miro_source_schema": "not_applicable",
+      "miro_canvas_schema": "not_applicable",
+      "miro_canvas_validator": null
+    },
+    {
+      "id": "converter-board",
+      "path": "valid/converter-board.canvas",
+      "description": "A converter-produced board whose miroSource is the canonical REST/Web SDK merge root (scripts/merge_miro_sources.py): schema_version, source_surface, export_scope, exporter_version, exported_at, merged_at, board, items, comments, source_metadata, provenance, and completeness all present. No miroCanvas: the converter never writes plugin metadata.",
+      "board_schema": "valid",
+      "miro_source_schema": "valid",
+      "miro_canvas_schema": "not_applicable",
+      "miro_canvas_validator": null
+    },
+    {
+      "id": "plugin-authored-board",
+      "path": "valid/plugin-authored-board.canvas",
+      "description": "Every miroCanvas field in active use today, in one small board: bindings, zOrder, a deck with one slide, a localOverride with item/rotation/typography/colors, a localComment with a reply, freeAnchors, export pages, an independent connector, commentPlaces, commentAuthorNames, commentDecorations, and hiddenImportedComments. miroSource carries the one bound source item.",
+      "board_schema": "valid",
+      "miro_source_schema": "valid",
+      "miro_canvas_schema": "valid",
+      "miro_canvas_validator": { "valid": true, "status": "valid" }
+    },
+    {
+      "id": "future-fields-board",
+      "path": "valid/future-fields-board.canvas",
+      "description": "Unknown fields at the board root, the miroCanvas root, settings, a binding, and a localOverride, all beside otherwise well-formed v1 metadata. Forward-compatible: none of them may make the document invalid.",
+      "board_schema": "valid",
+      "miro_source_schema": "not_applicable",
+      "miro_canvas_schema": "valid",
+      "miro_canvas_validator": { "valid": true, "status": "valid" }
+    },
+    {
+      "id": "wrong-schema-version",
+      "path": "invalid/wrong-schema-version.canvas",
+      "description": "An otherwise well-formed v1 shape with schemaVersion 2. The plugin reports this metadata version as unsupported rather than invalid, but it is still not today's v1 shape and both schemas must reject it.",
+      "board_schema": "invalid",
+      "miro_source_schema": "not_applicable",
+      "miro_canvas_schema": "invalid",
+      "miro_canvas_validator": { "valid": false, "status": "unsupported" }
+    },
+    {
+      "id": "duplicate-zorder",
+      "path": "invalid/duplicate-zorder.canvas",
+      "description": "zOrder repeats an id (\"a\" appears twice), which the layer order can never actually express.",
+      "board_schema": "invalid",
+      "miro_source_schema": "not_applicable",
+      "miro_canvas_schema": "invalid",
+      "miro_canvas_validator": { "valid": false, "status": "invalid" }
+    },
+    {
+      "id": "binding-missing-sourceid",
+      "path": "invalid/binding-missing-sourceid.canvas",
+      "description": "A binding with a role but no sourceId, so it cannot name the source item it stands for.",
+      "board_schema": "invalid",
+      "miro_source_schema": "not_applicable",
+      "miro_canvas_schema": "invalid",
+      "miro_canvas_validator": { "valid": false, "status": "invalid" }
+    },
+    {
+      "id": "non-numeric-rotation",
+      "path": "invalid/non-numeric-rotation.canvas",
+      "description": "A localOverride rotation given as the string \"45deg\" instead of a number of degrees.",
+      "board_schema": "invalid",
+      "miro_source_schema": "not_applicable",
+      "miro_canvas_schema": "invalid",
+      "miro_canvas_validator": { "valid": false, "status": "invalid" }
+    },
+    {
+      "id": "malformed-export-page",
+      "path": "invalid/malformed-export-page.canvas",
+      "description": "Two declared export pages; the second has no id and a negative width, so the plugin's reader silently drops it and the page count no longer matches what was declared.",
+      "board_schema": "invalid",
+      "miro_source_schema": "not_applicable",
+      "miro_canvas_schema": "invalid",
+      "miro_canvas_validator": { "valid": false, "status": "invalid" }
+    },
+    {
+      "id": "malformed-connector",
+      "path": "invalid/malformed-connector.canvas",
+      "description": "An independent connector with route \"zigzag\", which is not one of straight, elbowed, or curved.",
+      "board_schema": "invalid",
+      "miro_source_schema": "not_applicable",
+      "miro_canvas_schema": "invalid",
+      "miro_canvas_validator": { "valid": false, "status": "invalid" }
+    },
+    {
+      "id": "source-item-missing-id",
+      "path": "invalid/source-item-missing-id.canvas",
+      "description": "A miroSource.items entry with no id, so nothing on the board could ever bind to it.",
+      "board_schema": "invalid",
+      "miro_source_schema": "invalid",
+      "miro_canvas_schema": "not_applicable",
+      "miro_canvas_validator": null
+    },
+    {
+      "id": "node-missing-geometry",
+      "path": "invalid/node-missing-geometry.canvas",
+      "description": "A text node with no x, y, width, or height: JSON Canvas 1.0 requires all four.",
+      "board_schema": "invalid",
+      "miro_source_schema": "not_applicable",
+      "miro_canvas_schema": "not_applicable",
+      "miro_canvas_validator": null
+    },
+    {
+      "id": "edge-bad-side",
+      "path": "invalid/edge-bad-side.canvas",
+      "description": "An edge whose fromSide is \"north\", not one of JSON Canvas 1.0's top, right, bottom, or left.",
+      "board_schema": "invalid",
+      "miro_source_schema": "not_applicable",
+      "miro_canvas_schema": "not_applicable",
+      "miro_canvas_validator": null
+    }
+  ]
+}

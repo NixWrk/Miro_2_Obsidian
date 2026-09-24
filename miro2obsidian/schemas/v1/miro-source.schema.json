@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/NixWrk/Miro_2_Obsidian/main/miro2obsidian/schemas/v1/miro-source.schema.json",
+  "title": "miroSource v1",
+  "description": "The immutable import snapshot kept under the root Canvas document's `miroSource` key, as the plugin reads it (see plugins/miro-canvas/src/source-model.ts) and as the converter writes it (Json_2_Canvas/Converter.py's _source_canvas_metadata). This is evidence copied from Miro's export, not a contract the plugin or converter is free to reshape, so canonical fields are typed loosely: the plugin never depends on more than 'items are present and each has an id and a type', and the converter never depends on the shape of anything under this key at all.",
+  "type": "object",
+  "properties": {
+    "schema_version": {
+      "description": "The canonical merge schema version (scripts/merge_miro_sources.py), when this snapshot came from a REST/Web SDK merge.",
+      "type": "integer"
+    },
+    "source": {
+      "description": "The legacy wrapper _source_canvas_metadata writes when the canonical export root was neither an object nor a list."
+    },
+    "items": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/sourceItem" }
+    },
+    "connectors": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/sourceItem" }
+    },
+    "comments": {
+      "type": "array",
+      "items": { "type": "object" }
+    },
+    "zOrder": {
+      "type": "array",
+      "items": { "type": "string" },
+      "uniqueItems": true
+    },
+    "source_surface": { "description": "Loosely typed canonical field: how the export was captured (e.g. \"canonical\")." },
+    "export_scope": { "description": "Loosely typed canonical field: what the export covers (e.g. \"board\")." },
+    "exporter_version": { "description": "Loosely typed canonical field: the exporter's own version string." },
+    "exported_at": { "description": "Loosely typed canonical field: when Miro's data was captured." },
+    "merged_at": { "description": "Loosely typed canonical field: when the REST/Web SDK union was produced." },
+    "board": { "description": "Loosely typed canonical field: board identity as Miro reports it." },
+    "source_metadata": { "description": "Loosely typed canonical field: per-surface (rest/web_sdk) raw metadata." },
+    "provenance": { "description": "Loosely typed canonical field: how items were merged and from where." },
+    "completeness": { "description": "Loosely typed canonical field: what the capture is known to be missing." }
+  },
+  "additionalProperties": true,
+  "$defs": {
+    "sourceItem": {
+      "type": "object",
+      "required": ["id", "type"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "type": { "type": "string" }
+      },
+      "additionalProperties": true
+    }
+  }
+}

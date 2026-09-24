@@ -1,0 +1,21 @@
+{
+	"nodes":[
+		{"id":"a","type":"text","text":"a","x":0,"y":0,"width":10,"height":10}
+	],
+	"edges":[],
+	"miroCanvas":{
+		"schemaVersion":1,
+		"connectors":{
+			"conn-1":{
+				"id":"conn-1",
+				"from":{"type":"free","x":0,"y":0},
+				"to":{"type":"free","x":10,"y":10},
+				"route":"zigzag",
+				"color":"#e6e6e6",
+				"width":2,
+				"startCap":"none",
+				"endCap":"none"
+			}
+		}
+	}
+}

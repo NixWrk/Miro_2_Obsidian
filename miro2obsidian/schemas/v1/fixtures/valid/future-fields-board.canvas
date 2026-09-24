@@ -1,0 +1,18 @@
+{
+	"nodes":[
+		{"id":"n1","type":"text","text":"future","x":0,"y":0,"width":100,"height":50,"futureNodeField":"keep-node"}
+	],
+	"edges":[],
+	"miroCanvas":{
+		"schemaVersion":1,
+		"futureRootField":{"sentinel":"keep-root"},
+		"settings":{"displayTheme":"system","futureSettingField":"keep-setting"},
+		"bindings":{
+			"n1":{"sourceId":"src-1","role":"item","futureBindingField":"keep-binding"}
+		},
+		"localOverrides":{
+			"n1":{"rotation":0,"futureOverrideField":"keep-override"}
+		}
+	},
+	"futureRootLevelField":{"sentinel":"keep-board-root"}
+}

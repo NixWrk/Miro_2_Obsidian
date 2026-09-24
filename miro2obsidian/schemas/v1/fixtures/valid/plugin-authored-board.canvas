@@ -1,0 +1,107 @@
+{
+	"nodes":[
+		{"id":"card-1","type":"text","text":"Source-backed card","x":0,"y":0,"width":280,"height":150},
+		{"id":"sticky-1","type":"text","text":"## Local sticky note","x":320,"y":0,"width":200,"height":200},
+		{"id":"frame-1","type":"group","x":0,"y":220,"width":640,"height":400,"label":"Frame"},
+		{"id":"deck-slide-1","type":"text","text":"Slide 1","x":700,"y":220,"width":640,"height":400}
+	],
+	"edges":[
+		{"id":"edge-1","fromNode":"card-1","toNode":"sticky-1","fromSide":"right","toSide":"left"}
+	],
+	"miroCanvas":{
+		"schemaVersion":1,
+		"settings":{
+			"displayTheme":"dark",
+			"reviewMode":false,
+			"showAttachmentNames":true,
+			"minimapVisible":true,
+			"palette":["#1E1E1E"],
+			"recentColors":["#FFFFFF"]
+		},
+		"transform":{"scale":1,"offsetX":0,"offsetY":0},
+		"bindings":{
+			"card-1":{"sourceId":"miro-item-1","role":"item"}
+		},
+		"zOrder":["card-1","sticky-1","frame-1","deck-slide-1"],
+		"decks":[
+			{
+				"id":"deck-1",
+				"sourceId":"miro-deck-1",
+				"startNode":"deck-slide-1",
+				"syntheticLayout":false,
+				"slides":[
+					{"id":"slide-1","sourceId":"miro-slide-1","nodeId":"deck-slide-1","syntheticLayout":false}
+				]
+			}
+		],
+		"localOverrides":{
+			"sticky-1":{
+				"item":{"type":"sticky_note","color":"yellow","title":"Note"},
+				"rotation":12.5,
+				"typography":{
+					"fontFamily":"Inter",
+					"fontSize":16,
+					"format":{"bold":true,"italic":false,"underline":false,"strike":false},
+					"alignment":"left",
+					"lineHeight":1.2,
+					"verticalAlign":"top"
+				},
+				"colors":{"text":"#1E1E1E","fill":"#FFF7A1","border":"#FFE86D","edge":"#1E1E1E"},
+				"locked":false,
+				"showAttachmentName":true
+			}
+		},
+		"localComments":[
+			{
+				"id":"comment-1",
+				"text":"Check this",
+				"origin":"local",
+				"resolved":false,
+				"createdAt":"2026-09-01T00:00:00.000Z",
+				"anchor":{"type":"node","nodeId":"card-1","u":0.5,"v":0.5},
+				"replies":[
+					{"id":"reply-1","text":"Looks fine","origin":"local","createdAt":"2026-09-01T00:05:00.000Z"}
+				]
+			}
+		],
+		"freeAnchors":{
+			"anchor-1":{"id":"anchor-1","type":"free","x":10,"y":20}
+		},
+		"export":{
+			"format":"a4",
+			"orientation":"landscape",
+			"quality":"standard",
+			"pages":[
+				{"id":"page-1","x":0,"y":0,"width":400,"height":300,"name":"Page 1"}
+			]
+		},
+		"connectors":{
+			"conn-1":{
+				"id":"conn-1",
+				"from":{"type":"free","x":-40,"y":420},
+				"to":{"type":"node","nodeId":"frame-1","u":0.5,"v":0},
+				"route":"straight",
+				"color":"#e6e6e6",
+				"width":2,
+				"startCap":"none",
+				"endCap":"stealth"
+			}
+		},
+		"commentPlaces":{
+			"local:comment-1":{"type":"node","nodeId":"card-1","u":0.5,"v":0.5}
+		},
+		"commentAuthorNames":{
+			"comment-1":{"message-1":"Local user"}
+		},
+		"commentDecorations":{
+			"comment-1":{"color":"#36085e","locked":false}
+		},
+		"hiddenImportedComments":["imported-comment-1"]
+	},
+	"miroSource":{
+		"items":[
+			{"id":"miro-item-1","type":"sticky_note"}
+		],
+		"zOrder":["miro-item-1"]
+	}
+}

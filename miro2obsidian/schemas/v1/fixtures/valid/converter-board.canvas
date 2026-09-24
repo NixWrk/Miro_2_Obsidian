@@ -1,0 +1,31 @@
+{
+	"nodes":[
+		{"id":"note-1","type":"text","text":"Hello from Miro","x":0,"y":0,"width":240,"height":80}
+	],
+	"edges":[],
+	"miroSource":{
+		"schema_version":1,
+		"source_surface":"canonical",
+		"export_scope":"board",
+		"exporter_version":"1.0.0",
+		"exported_at":"2026-09-01T12:00:00+00:00",
+		"merged_at":"2026-09-01T12:00:05+00:00",
+		"board":{"id":"board-1","name":"Fixture board"},
+		"items":[
+			{"id":"note-1","type":"text","data":{"content":"Hello from Miro"}}
+		],
+		"comments":[],
+		"source_metadata":{"rest":{},"web_sdk":{}},
+		"provenance":{
+			"merge_strategy":"rest_canonical_with_web_sdk_missing_field_enrichment",
+			"board_id":"board-1"
+		},
+		"completeness":{
+			"complete":true,
+			"capture_complete":true,
+			"board_complete":true,
+			"coverage_basis":"rest_and_web_sdk",
+			"known_limitations":[]
+		}
+	}
+}
