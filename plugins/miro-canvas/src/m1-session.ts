@@ -1274,8 +1274,8 @@ export class M1CanvasSession {
 	private authoring: CanvasAuthoring | undefined;
 	private interactionBlock: string | undefined;
 	private rotationPreview: { readonly id: string; readonly rotation: number } | undefined;
-	/** The one selected card shown on its own layer after a layer change, and the selection it belongs to. */
-	private shownLayer: { readonly id: string; readonly selection: string; readonly element?: HTMLElement } | undefined;
+	/** The one selected card kept on its own layer, which native Canvas would lift to the top. */
+	private shownLayer: { readonly id: string; readonly element: HTMLElement } | undefined;
 	private rotationGestureTarget: string | undefined;
 	/** What the last rotation gesture actually did, for the selection dump. */
 	private lastRotationAttempt = "none";
@@ -2452,9 +2452,7 @@ export class M1CanvasSession {
 
 	/**
 	 * Put cards higher or lower among the cards, keeping their order among
-	 * themselves, as one step of history.  A single card stays selected and
-	 * is shown on its new layer, not on top where native Canvas lifts a
-	 * selected card, so the change can be seen.
+	 * themselves, as one step of history.
 	 */
 	public changeLayer(direction: LayerDirection, ids: readonly string[] = this.selectedIds): void {
 		this.readInteractionState();
@@ -2471,47 +2469,29 @@ export class M1CanvasSession {
 		const result = this.authoring.changeZOrder({ ids: cards, direction });
 		if (!result.ok) {
 			this.options.onNotice?.(firstProblem(result.diagnostics) ?? "The layer order was not changed.");
-			this.refresh();
-			return;
 		}
 		this.refresh();
-		this.showLayerOfSelection();
 	}
 
 	/**
-	 * Show the one selected card on its own layer until the selection
-	 * changes.  Native Canvas draws a selected card above all the others; a
-	 * card just sent back would otherwise look as if nothing had happened.
+	 * A selected card stays on its own layer, as in Miro.  Native Canvas draws
+	 * a lone selected card above all the others, so a card just sent back, or
+	 * one clicked where it peeks out from under another, would seem to jump to
+	 * the top.  Frames are never lifted, and several selected cards neither.
 	 */
-	private showLayerOfSelection(): void {
-		this.hideShownLayer();
-		const id = this.selectedIds.length === 1 ? this.selectedIds[0] : undefined;
-		if (id === undefined || this.layeredCards([id]).length === 0) return;
-		this.shownLayer = { id, selection: id };
-		this.updateShownLayer();
-	}
-
-	/** Keep the shown layer in step with the card's own; drop it once the selection changes. */
 	private updateShownLayer(): void {
-		const shown = this.shownLayer;
-		if (shown === undefined) return;
-		if (this.selectedIds.join("\u0000") !== shown.selection) {
-			this.hideShownLayer();
-			return;
-		}
-		const node = (this.adapter.getNodes() ?? []).find((item) => readCanvasElementId(item) === shown.id);
+		const id = this.selectedIds.length === 1 ? this.selectedIds[0] : undefined;
+		const node = id === undefined ? undefined : this.nativeNode(id);
 		const element = readRuntime(node, "nodeEl");
 		const zIndex = readRuntime(node, "zIndex");
-		if (!isElement(element) || typeof zIndex !== "number") {
+		const isCard = node !== undefined && readCanvasElementType(node) !== "group";
+		if (id === undefined || !isCard || !isElement(element) || typeof zIndex !== "number") {
 			this.hideShownLayer();
 			return;
 		}
-		// Native Canvas may have built the card again since.
-		if (shown.element !== undefined && shown.element !== element) {
-			shown.element.classList.remove("miro-canvas-layer-shown");
-			shown.element.style.removeProperty("--miro-canvas-layer");
-		}
-		this.shownLayer = { ...shown, element };
+		// Another card, or the same card built again by native Canvas.
+		if (this.shownLayer !== undefined && this.shownLayer.element !== element) this.hideShownLayer();
+		this.shownLayer = { id, element };
 		element.classList.add("miro-canvas-layer-shown");
 		element.style.setProperty("--miro-canvas-layer", String(zIndex));
 	}
@@ -2522,6 +2502,13 @@ export class M1CanvasSession {
 		if (element === undefined) return;
 		element.classList.remove("miro-canvas-layer-shown");
 		element.style.removeProperty("--miro-canvas-layer");
+	}
+
+	/** A native node by its id, without walking every node of a large board. */
+	private nativeNode(id: string): unknown {
+		const nodes = readRuntime(this.nativeCanvas(), "nodes");
+		if (nodes instanceof Map) return nodes.get(id);
+		return (this.adapter.getNodes() ?? []).find((item) => readCanvasElementId(item) === id);
 	}
 
 	public toggleAttachmentNames(): void {

@@ -142,7 +142,7 @@ function fixture() {
 }
 
 describe("M1 session layer order", () => {
-	it("moves a card to the back as one history step and shows it there while selected", () => {
+	it("moves a card to the back as one history step", () => {
 		const { canvas, session, nodes, selection, order, history } = fixture();
 		expect(order()).toEqual(["frame", "a", "b"]);
 		selection.add(nodes.get("b")!);
@@ -151,15 +151,28 @@ describe("M1 session layer order", () => {
 		session.changeLayer("back");
 		expect(order()).toEqual(["frame", "b", "a"]);
 		expect(history.length).toBe(steps + 1);
-		const shown = nodes.get("b")!.nodeEl;
-		expect(shown.classes.has("miro-canvas-layer-shown")).toBe(true);
-		expect(shown.properties.get("--miro-canvas-layer")).toBe(String(nodes.get("b")!.zIndex));
-		// Once the selection changes, native Canvas draws the selection again.
-		selection.clear();
-		session.refresh();
-		expect(shown.classes.has("miro-canvas-layer-shown")).toBe(false);
 		canvas.undo();
 		expect(order()).toEqual(["frame", "a", "b"]);
+	});
+
+	it("keeps a lone selected card on its own layer, as Miro does", () => {
+		const { session, nodes, selection } = fixture();
+		const card = nodes.get("a")!;
+		selection.add(card);
+		session.refresh();
+		expect(card.nodeEl.classes.has("miro-canvas-layer-shown")).toBe(true);
+		expect(card.nodeEl.properties.get("--miro-canvas-layer")).toBe(String(card.zIndex));
+		// After a layer change the card is shown where it now lies.
+		session.changeLayer("front");
+		expect(card.nodeEl.properties.get("--miro-canvas-layer")).toBe(String(card.zIndex));
+		// Two cards, or none, are left as native Canvas draws them.
+		selection.add(nodes.get("b")!);
+		session.refresh();
+		expect(card.nodeEl.classes.has("miro-canvas-layer-shown")).toBe(false);
+		selection.clear();
+		selection.add(nodes.get("frame")!);
+		session.refresh();
+		expect(nodes.get("frame")!.nodeEl.classes.has("miro-canvas-layer-shown")).toBe(false);
 	});
 
 	it("offers no layer to a frame and says so", () => {

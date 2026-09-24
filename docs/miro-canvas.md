@@ -426,10 +426,10 @@ cards' order among themselves; each is one undo step. Forward and backward move
 a card past the nearest card that overlaps it; with no overlap nothing changes.
 The order is the order of nodes in the `.canvas` file, so the board looks the
 same without the plugin; a `miroCanvas.zOrder` the board already has is kept in
-step, and none is created. Moving a card keeps its layer, as in Miro (native
-Canvas would lift it to the top). A selected card is still drawn on top, as
-native Canvas does, except right after a layer change, when it is shown on its
-new layer until the selection changes.
+step, and none is created. Moving a card keeps its layer, and selecting it
+does not lift it either, as in Miro (native Canvas lifts a dragged card, and
+draws a lone selected card, above all others). Where a card in front covers a
+selected card, it also covers that card's outline and resize handles.
 
 ### Camera and minimap
 
