@@ -201,6 +201,32 @@ GUI разделяет четыре сценария:
 - **Miro URL list**: экспорт ссылок из Markdown или JSON.
 - **Existing JSON**: локальная конвертация без обращения к Miro.
 
+### Выбор формата вывода
+
+И CLI, и GUI пишут один из четырёх форматов, который выбирается флагом
+`--format` (CLI) или пунктом Format (GUI):
+
+- `advanced-canvas` (по умолчанию): сегодняшний Canvas для плагина
+  [Advanced Canvas](https://github.com/Developer-Mike/obsidian-advanced-canvas), с самым богатым оформлением.
+- `native-canvas`: обычный [JSON Canvas 1.0](https://jsoncanvas.org/spec/1.0/),
+  без плагинов. Текст становится Markdown; HTML в файле не остаётся.
+- `miro-canvas`: для плагина [`miro-canvas`](docs/miro-canvas.ru.md), который
+  рисует внешний вид Miro (шрифты, цвета, формы, фреймы) по сохранённым
+  исходным данным.
+- `raw-json`: Canvas не создаётся вовсе, сохраняется только канонический
+  JSON-экспорт Miro. Имеет смысл только при экспорте из Miro; у
+  `--existing-json` входные данные уже являются этим JSON, поэтому такой
+  формат отклоняется с понятной ошибкой.
+
+```powershell
+miro2obsidian `
+  --existing-json `
+  --source-json path\to\board.json `
+  --vault-root path\to\ObsidianVault `
+  --target-dir path\to\ObsidianVault\CanvasFolder `
+  --format native-canvas
+```
+
 ### Максимально полный экспорт
 
 [Инструкция для начинающих](docs/MIRO_APP_SETUP.ru.md) объясняет каждый экран

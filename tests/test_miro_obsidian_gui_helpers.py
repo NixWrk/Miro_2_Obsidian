@@ -229,6 +229,7 @@ class MiroObsidianGuiHelperTests(unittest.TestCase):
             scale=None,
             theme="dark",
             text_style_mode="miro",
+            output_format="advanced-canvas",
             allow_missing_assets=False,
             prefer_experimental=False,
             install_obsidian_plugins=False,

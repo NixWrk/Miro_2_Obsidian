@@ -220,6 +220,31 @@ The GUI supports four explicit workflows:
 - **Miro URL list**: export board URLs from a Markdown or JSON file.
 - **Existing JSON**: convert a local canonical JSON without contacting Miro.
 
+### Choose an output format
+
+Both the CLI and the GUI write one of four formats, chosen with `--format`
+(CLI) or the Format menu (GUI):
+
+- `advanced-canvas` (default): today's Canvas for the [Advanced Canvas](https://github.com/Developer-Mike/obsidian-advanced-canvas)
+  plugin, with the richest styling.
+- `native-canvas`: plain [JSON Canvas 1.0](https://jsoncanvas.org/spec/1.0/),
+  no plugin required. Text becomes Markdown; no HTML is left in the file.
+- `miro-canvas`: for the [`miro-canvas`](docs/miro-canvas.md) Obsidian plugin,
+  which draws the Miro look (fonts, colors, shapes, frames) from the
+  preserved source data.
+- `raw-json`: writes no Canvas at all, only the canonical Miro export JSON.
+  Only meaningful when exporting from Miro; `--existing-json` already has
+  that JSON as its input and rejects this format with a clear error.
+
+```powershell
+miro2obsidian `
+  --existing-json `
+  --source-json path\to\board.json `
+  --vault-root path\to\ObsidianVault `
+  --target-dir path\to\ObsidianVault\CanvasFolder `
+  --format native-canvas
+```
+
 ### Export maximum public-API data
 
 The [beginner setup guide](docs/MIRO_APP_SETUP.md) explains every Miro screen,

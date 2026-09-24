@@ -18,6 +18,13 @@ CONVERTER_DIR = REPO_ROOT / "Json_2_Canvas"
 DEFAULT_EXPORT_ROOT = Path.home() / "Documents" / "Miro 2 Obsidian"
 BOARD_LIST_ENV = "MIRO_BOARD_LIST"
 
+from Json_2_Canvas.output_formats import (  # noqa: E402
+    ADVANCED_CANVAS,
+    MIRO_CANVAS,
+    NATIVE_CANVAS,
+    OUTPUT_FORMATS,
+    RAW_JSON,
+)
 from Json_2_Canvas.Scale_engine import ViewProfile  # noqa: E402
 from Miro_2_Json.miro_downloader import get_boards  # noqa: E402
 from scripts.miro_oauth_token import authorize_and_get_token, callback_recovery_hint, config_from_env  # noqa: E402
@@ -104,9 +111,19 @@ class ConversionOptions:
     scale: float | None
     theme: str
     text_style_mode: str
+    output_format: str
     allow_missing_assets: bool
     prefer_experimental: bool
     install_obsidian_plugins: bool
+
+
+#: One line under the Format menu saying what the selected format is for.
+FORMAT_HINTS = {
+    ADVANCED_CANVAS: "For the Advanced Canvas plugin: today's default, richest styling.",
+    NATIVE_CANVAS: "Plain Obsidian, no plugin required: Markdown text, no HTML.",
+    MIRO_CANVAS: "For the miro-canvas plugin: draws the Miro look from the source board.",
+    RAW_JSON: "Just the Miro data: no Canvas file, only the exported JSON.",
+}
 
 
 def _name_from_payload(value: object) -> str:
@@ -323,6 +340,23 @@ class MiroPipelineApp(ctk.CTk):
             pady=(0, 8),
         )
 
+        ctk.CTkLabel(options, text="Format").grid(row=2, column=0, sticky="e", padx=8, pady=(0, 8))
+        self.output_format = ctk.CTkOptionMenu(
+            options, values=list(OUTPUT_FORMATS), command=self.on_format_changed
+        )
+        self.output_format.set(ADVANCED_CANVAS)
+        self.output_format.grid(row=2, column=1, sticky="we", padx=8, pady=(0, 8))
+
+        self.format_hint = ctk.CTkLabel(
+            options,
+            text=FORMAT_HINTS[ADVANCED_CANVAS],
+            text_color="gray60",
+            anchor="w",
+        )
+        self.format_hint.grid(
+            row=2, column=2, columnspan=6, sticky="we", padx=8, pady=(0, 8)
+        )
+
         self.run_button = ctk.CTkButton(self, text="Run pipeline", height=40, command=self.run_pipeline)
         self.run_button.grid(row=6, column=3, sticky="e", padx=10, pady=(10, 8))
 
@@ -472,6 +506,9 @@ class MiroPipelineApp(ctk.CTk):
         value = value.strip().replace(",", ".")
         return None if not value else float(value)
 
+    def on_format_changed(self, format_value: str) -> None:
+        self.format_hint.configure(text=FORMAT_HINTS.get(format_value, ""))
+
     def on_install_plugins_changed(self) -> None:
         if self.install_obsidian_plugins.get():
             self.scale_mode.set("readable")
@@ -540,6 +577,7 @@ class MiroPipelineApp(ctk.CTk):
             min_font_px=min_font_px,
             theme=options.theme,
             text_style_mode=options.text_style_mode,
+            output_format=options.output_format,
             allow_missing_assets=options.allow_missing_assets,
             prefer_experimental=options.prefer_experimental,
             install_obsidian_plugins=options.install_obsidian_plugins,
@@ -568,6 +606,7 @@ class MiroPipelineApp(ctk.CTk):
                 scale=self._parse_float_or_none(self.scale.get()),
                 theme=self.theme.get(),
                 text_style_mode=self.text_style_mode.get(),
+                output_format=self.output_format.get(),
                 allow_missing_assets=self.allow_missing_assets.get(),
                 prefer_experimental=not self.stable_items.get(),
                 install_obsidian_plugins=self.install_obsidian_plugins.get(),
@@ -602,6 +641,7 @@ class MiroPipelineApp(ctk.CTk):
                         theme=options.theme,
                         text_style_mode=options.text_style_mode,
                         allow_incomplete_source=options.allow_missing_assets,
+                        output_format=options.output_format,
                         install_obsidian_plugins=options.install_obsidian_plugins,
                         attachment_dir=attachment_dir,
                         logger=self._log,

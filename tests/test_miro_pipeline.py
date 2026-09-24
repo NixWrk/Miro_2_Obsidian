@@ -568,6 +568,103 @@ class MiroPipelineTests(unittest.TestCase):
             self.assertFalse(result.completeness["verified"])
             self.assertTrue(any("WARNING" in message for message in result.messages))
 
+    def test_existing_json_pipeline_default_format_writes_todays_advanced_canvas(
+        self,
+    ) -> None:
+        # No mocked convert_miro_to_canvas here: this exercises the real
+        # Converter.py path so a byte-for-byte-unchanged default is actually
+        # verified, not just assumed from the mocked call args.
+        items = [
+            {"id": "text-1", "type": "text", "data": {"content": "<p>Hello <strong>native</strong></p>"}}
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source_json = root / "board.json"
+            source_json.write_text(
+                json.dumps(verified_existing_source(items)), encoding="utf-8"
+            )
+            vault_root = root / "vault"
+            vault_root.mkdir()
+            target_dir = vault_root / "MIRO2OBSIDIAN"
+
+            result = run_existing_json_pipeline(
+                source_json=source_json,
+                target_dir=target_dir,
+                vault_root=vault_root,
+                scale=1.0,
+            )
+
+            canvas = json.loads(Path(result.canvas_path).read_text(encoding="utf-8"))
+
+        self.assertEqual(result.output_kind, "canvas")
+        self.assertIn("<div", canvas["nodes"][0]["text"])
+        self.assertIn("miroSource", canvas)
+
+    def test_existing_json_pipeline_native_canvas_rewrites_html_to_markdown(
+        self,
+    ) -> None:
+        items = [
+            {"id": "text-1", "type": "text", "data": {"content": "<p>Hello <strong>native</strong></p>"}}
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source_json = root / "board.json"
+            source_json.write_text(
+                json.dumps(verified_existing_source(items)), encoding="utf-8"
+            )
+            vault_root = root / "vault"
+            vault_root.mkdir()
+            target_dir = vault_root / "MIRO2OBSIDIAN"
+
+            result = run_existing_json_pipeline(
+                source_json=source_json,
+                target_dir=target_dir,
+                vault_root=vault_root,
+                scale=1.0,
+                output_format="native-canvas",
+            )
+
+            canvas = json.loads(Path(result.canvas_path).read_text(encoding="utf-8"))
+
+        self.assertEqual(set(canvas.keys()), {"nodes", "edges"})
+        text = canvas["nodes"][0]["text"]
+        self.assertNotIn("<", text)
+        self.assertIn("**native**", text)
+
+    def test_existing_json_pipeline_miro_canvas_keeps_miro_source(self) -> None:
+        items = [{"id": "text-1", "type": "text", "data": {"content": "Hello"}}]
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source_json = root / "board.json"
+            source_json.write_text(
+                json.dumps(verified_existing_source(items)), encoding="utf-8"
+            )
+            vault_root = root / "vault"
+            vault_root.mkdir()
+            target_dir = vault_root / "MIRO2OBSIDIAN"
+
+            result = run_existing_json_pipeline(
+                source_json=source_json,
+                target_dir=target_dir,
+                vault_root=vault_root,
+                scale=1.0,
+                output_format="miro-canvas",
+            )
+
+            canvas = json.loads(Path(result.canvas_path).read_text(encoding="utf-8"))
+
+        self.assertIn("miroSource", canvas)
+        self.assertEqual(canvas["miroCanvas"], {"schemaVersion": 1})
+
+    def test_existing_json_pipeline_rejects_raw_json_format(self) -> None:
+        with self.assertRaisesRegex(ValueError, "raw-json"):
+            run_existing_json_pipeline(
+                source_json=Path("does-not-matter.json"),
+                target_dir=Path("target"),
+                vault_root=Path("vault"),
+                output_format="raw-json",
+            )
+
     def test_cli_existing_json_skips_miro_auth_and_rest_export(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -704,6 +801,182 @@ class MiroPipelineTests(unittest.TestCase):
         self.assertEqual(result, 0)
         self.assertEqual(rest.call_args.kwargs["websdk_json"], websdk_json)
 
+    def test_cli_format_defaults_to_advanced_canvas(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source_json = root / "board.json"
+            target_dir = root / "target"
+            vault_root = root / "vault"
+            attachment_dir = vault_root / "Files" / "Attachments"
+            expected = application.PipelineResult(
+                source_json=source_json,
+                canvas_path=target_dir / "board.canvas",
+                item_count=0,
+                asset_stats={},
+                scale=1.0,
+                scale_context={"scale_source": "explicit"},
+                messages=[],
+            )
+            argv = [
+                "miro2obsidian.application.py",
+                "--existing-json",
+                "--source-json",
+                str(source_json),
+                "--target-dir",
+                str(target_dir),
+                "--vault-root",
+                str(vault_root),
+                "--scale",
+                "1",
+            ]
+            with (
+                patch.object(sys, "argv", argv),
+                patch(
+                    "scripts.miro_pipeline.resolve_attachment_dir", return_value=attachment_dir
+                ),
+                patch(
+                    "miro2obsidian.application.run_existing_json_pipeline",
+                    return_value=expected,
+                ) as existing,
+            ):
+                result = miro_pipeline.main()
+
+        self.assertEqual(result, 0)
+        self.assertEqual(existing.call_args.kwargs["output_format"], "advanced-canvas")
+
+    def test_cli_forwards_format_to_existing_json_pipeline(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source_json = root / "board.json"
+            target_dir = root / "target"
+            vault_root = root / "vault"
+            attachment_dir = vault_root / "Files" / "Attachments"
+            expected = application.PipelineResult(
+                source_json=source_json,
+                canvas_path=target_dir / "board.canvas",
+                item_count=0,
+                asset_stats={},
+                scale=1.0,
+                scale_context={"scale_source": "explicit"},
+                messages=[],
+            )
+            argv = [
+                "miro2obsidian.application.py",
+                "--existing-json",
+                "--source-json",
+                str(source_json),
+                "--target-dir",
+                str(target_dir),
+                "--vault-root",
+                str(vault_root),
+                "--scale",
+                "1",
+                "--format",
+                "native-canvas",
+            ]
+            with (
+                patch.object(sys, "argv", argv),
+                patch(
+                    "scripts.miro_pipeline.resolve_attachment_dir", return_value=attachment_dir
+                ),
+                patch(
+                    "miro2obsidian.application.run_existing_json_pipeline",
+                    return_value=expected,
+                ) as existing,
+            ):
+                result = miro_pipeline.main()
+
+        self.assertEqual(result, 0)
+        self.assertEqual(existing.call_args.kwargs["output_format"], "native-canvas")
+
+    def test_cli_rejects_raw_json_format_with_existing_json(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source_json = root / "board.json"
+            target_dir = root / "target"
+            vault_root = root / "vault"
+            attachment_dir = vault_root / "Files" / "Attachments"
+            argv = [
+                "miro2obsidian.application.py",
+                "--existing-json",
+                "--source-json",
+                str(source_json),
+                "--target-dir",
+                str(target_dir),
+                "--vault-root",
+                str(vault_root),
+                "--format",
+                "raw-json",
+            ]
+            with (
+                patch.object(sys, "argv", argv),
+                patch(
+                    "scripts.miro_pipeline.resolve_attachment_dir", return_value=attachment_dir
+                ),
+                patch("miro2obsidian.application.run_existing_json_pipeline") as existing,
+            ):
+                with self.assertRaises(SystemExit):
+                    miro_pipeline.main()
+
+        existing.assert_not_called()
+
+    def test_cli_format_argument_rejects_unknown_value(self) -> None:
+        argv = [
+            "miro2obsidian.application.py",
+            "--existing-json",
+            "--source-json",
+            "board.json",
+            "--target-dir",
+            "target",
+            "--vault-root",
+            "vault",
+            "--format",
+            "bogus-format",
+        ]
+        with patch.object(sys, "argv", argv):
+            with self.assertRaises(SystemExit):
+                miro_pipeline.main()
+
+    def test_cli_forwards_format_to_rest_pipeline(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source_json = root / "board.json"
+            expected = application.PipelineResult(
+                source_json=source_json,
+                canvas_path=root / "board.canvas",
+                item_count=1,
+                asset_stats={},
+                scale=1.0,
+                scale_context={},
+                messages=[],
+            )
+            argv = [
+                "miro2obsidian.application.py",
+                "--board-id",
+                "board-1",
+                "--source-json",
+                str(source_json),
+                "--target-dir",
+                str(root / "target"),
+                "--vault-root",
+                str(root / "vault"),
+                "--format",
+                "raw-json",
+            ]
+            with (
+                patch.object(sys, "argv", argv),
+                patch("scripts.miro_pipeline.resolve_attachment_dir", return_value=None),
+                patch("scripts.miro_pipeline.resolve_token_from_args", return_value="token-1"),
+                patch(
+                    "miro2obsidian.application.run_rest_experimental_pipeline",
+                    return_value=expected,
+                ) as rest,
+            ):
+                result = miro_pipeline.main()
+
+        self.assertEqual(result, 0)
+        self.assertEqual(rest.call_args.kwargs["output_format"], "raw-json")
+
     def test_cli_returns_nonzero_for_explicitly_degraded_result(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -719,6 +992,7 @@ class MiroPipelineTests(unittest.TestCase):
                 min_font_px=8,
                 theme="dark",
                 text_style_mode="miro",
+                output_format="advanced-canvas",
                 allow_missing_assets=True,
                 allow_incomplete_source=False,
                 stable_items=False,

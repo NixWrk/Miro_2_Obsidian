@@ -4,6 +4,13 @@ import argparse
 import json
 from pathlib import Path
 
+from Json_2_Canvas.output_formats import (
+    ADVANCED_CANVAS,
+    MIRO_CANVAS,
+    NATIVE_CANVAS,
+    OUTPUT_FORMATS,
+    RAW_JSON,
+)
 from Json_2_Canvas.Scale_engine import DEFAULT_FIT_MARGIN, ViewProfile
 from miro2obsidian import application
 from scripts.miro_oauth_token import (
@@ -73,6 +80,20 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--text-style-mode", choices=["miro", "obsidian"], default="miro"
     )
+    parser.add_argument(
+        "--format",
+        dest="output_format",
+        choices=list(OUTPUT_FORMATS),
+        default=ADVANCED_CANVAS,
+        help=(
+            "What to write: "
+            f"{ADVANCED_CANVAS} (default) is today's Canvas for the Advanced Canvas "
+            f"plugin; {NATIVE_CANVAS} is plain JSON Canvas 1.0, no plugin required; "
+            f"{MIRO_CANVAS} is for the miro-canvas Obsidian plugin; {RAW_JSON} writes "
+            "no board at all, just the canonical Miro export JSON "
+            "(not available with --existing-json, whose input already is that JSON)."
+        ),
+    )
     parser.add_argument("--allow-missing-assets", action="store_true")
     parser.add_argument(
         "--allow-incomplete-source",
@@ -125,6 +146,11 @@ def main() -> int:
             )
         if args.stable_items:
             parser.error("--stable-items cannot be combined with --existing-json")
+        if args.output_format == RAW_JSON:
+            parser.error(
+                "--format raw-json cannot be combined with --existing-json; "
+                "the input file is already the raw Miro export JSON"
+            )
         result = application.run_existing_json_pipeline(
             source_json=args.source_json,
             target_dir=args.target_dir,
@@ -135,6 +161,7 @@ def main() -> int:
             theme=args.theme,
             text_style_mode=args.text_style_mode,
             allow_incomplete_source=args.allow_incomplete_source,
+            output_format=args.output_format,
             install_obsidian_plugins=args.install_obsidian_plugins,
             advanced_canvas_source_plugins_dir=args.advanced_canvas_source_plugins_dir,
             advanced_canvas_version=args.advanced_canvas_version,
@@ -164,14 +191,16 @@ def main() -> int:
             allow_missing_assets=args.allow_missing_assets,
             prefer_experimental=not args.stable_items,
             websdk_json=args.websdk_json,
+            output_format=args.output_format,
             install_obsidian_plugins=args.install_obsidian_plugins,
             advanced_canvas_source_plugins_dir=args.advanced_canvas_source_plugins_dir,
             advanced_canvas_version=args.advanced_canvas_version,
             attachment_dir=attachment_dir,
         )
+    output_label = "json" if result.output_kind == "raw_json" else "canvas"
     print(f"items={result.item_count}")
     print(f"source_json={result.source_json}")
-    print(f"canvas={result.canvas_path}")
+    print(f"{output_label}={result.canvas_path}")
     print(f"scale={result.scale:.6f}")
     print("asset_stats=" + json.dumps(result.asset_stats, sort_keys=True))
     for message in result.messages[-8:]:

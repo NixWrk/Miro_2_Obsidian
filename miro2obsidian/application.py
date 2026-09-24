@@ -6,6 +6,13 @@ from pathlib import Path
 from typing import Any, Callable
 
 from Json_2_Canvas.Converter import convert_miro_to_canvas, source_completeness_issues
+from Json_2_Canvas.output_formats import (
+    ADVANCED_CANVAS,
+    RAW_JSON,
+    apply_output_format,
+    normalize_output_format,
+)
+from Json_2_Canvas.publication import write_json_atomic
 from Json_2_Canvas.Scale_engine import OBSIDIAN_FONT_SIZE, ViewProfile, compute_scale_preview
 from scripts.miro_export_bundle import staged_export_path
 from scripts.merge_miro_sources import (
@@ -32,6 +39,11 @@ class PipelineResult:
     scale_context: dict[str, Any]
     messages: list[str]
     completeness: dict[str, Any] = field(default_factory=dict)
+    #: What `canvas_path` actually is: a written Canvas board ("canvas") or,
+    #: for `--format raw-json`, the canonical Miro export JSON ("raw_json").
+    #: Kept separate from the path itself so a raw-json result never pretends
+    #: a Canvas was written.
+    output_kind: str = "canvas"
 
 
 def pipeline_result_is_degraded(result: PipelineResult) -> bool:
@@ -65,6 +77,48 @@ def resolve_scale(
     return _validated_scale(info["scale"]), context
 
 
+def _rewrite_board_format(
+    canvas_path: Path, output_format: str, *, logger: Callable[[str], None]
+) -> None:
+    """Reshape the board Converter.py just wrote into `output_format`.
+
+    Converter.py only knows how to write the advanced-canvas board, so both
+    pipelines always call it first; this rewrites the result in place for the
+    two other board formats. advanced-canvas needs no rewrite - it is
+    byte-for-byte what Converter.py already wrote.
+    """
+    if output_format == ADVANCED_CANVAS:
+        return
+    board = load_json(canvas_path)
+    rewritten = apply_output_format(board, output_format)
+    write_json_atomic(canvas_path, rewritten)
+    logger(f"Rewrote {canvas_path} as {output_format}.")
+
+
+def _install_obsidian_plugins_for_format(
+    *,
+    output_format: str,
+    vault_root: Path,
+    advanced_canvas_source_plugins_dir: Path | None,
+    advanced_canvas_version: str,
+    log: Callable[[str], None],
+) -> None:
+    """Advanced Canvas is only meaningful for the advanced-canvas format."""
+    if output_format != ADVANCED_CANVAS:
+        log(
+            f"Skipping Advanced Canvas plugin install: output_format={output_format} "
+            "does not use it."
+        )
+        return
+    log("Installing/enabling Advanced Canvas and Canvas Zoom Unlock in the selected vault.")
+    setup_obsidian_plugins(
+        vault_root,
+        advanced_source_plugins_dir=advanced_canvas_source_plugins_dir,
+        advanced_version=advanced_canvas_version,
+        logger=log,
+    )
+
+
 def run_rest_experimental_pipeline(
     *,
     board_id: str,
@@ -80,6 +134,7 @@ def run_rest_experimental_pipeline(
     allow_missing_assets: bool = False,
     prefer_experimental: bool = True,
     websdk_json: Path | None = None,
+    output_format: str = ADVANCED_CANVAS,
     install_obsidian_plugins: bool = False,
     advanced_canvas_source_plugins_dir: Path | None = None,
     advanced_canvas_version: str = ADVANCED_CANVAS_VERSION,
@@ -98,6 +153,7 @@ def run_rest_experimental_pipeline(
     vault_root = Path(vault_root)
     attachment_dir = Path(attachment_dir) if attachment_dir else None
     profile = view_profile or ViewProfile(min_font_px=min_font_px)
+    output_format = normalize_output_format(output_format)
     if scale is not None:
         _validated_scale(scale)
     if websdk_json is not None and allow_missing_assets:
@@ -145,14 +201,12 @@ def run_rest_experimental_pipeline(
         log("Canonical REST + Web SDK union is complete.")
 
     if install_obsidian_plugins:
-        log(
-            "Installing/enabling Advanced Canvas and Canvas Zoom Unlock in the selected vault."
-        )
-        setup_obsidian_plugins(
-            vault_root,
-            advanced_source_plugins_dir=advanced_canvas_source_plugins_dir,
-            advanced_version=advanced_canvas_version,
-            logger=log,
+        _install_obsidian_plugins_for_format(
+            output_format=output_format,
+            vault_root=vault_root,
+            advanced_canvas_source_plugins_dir=advanced_canvas_source_plugins_dir,
+            advanced_canvas_version=advanced_canvas_version,
+            log=log,
         )
 
     items = payload["items"]
@@ -161,6 +215,23 @@ def run_rest_experimental_pipeline(
         (completeness.get("assets") or {}).get("requirements")
         or export_info["asset_stats"]
     )
+
+    if output_format == RAW_JSON:
+        log(
+            "Format raw-json: stopping after export/merge; "
+            f"the canonical Miro export at {source_json} is the deliverable."
+        )
+        return PipelineResult(
+            source_json=source_json,
+            canvas_path=source_json,
+            item_count=len(items),
+            asset_stats=asset_stats,
+            scale=1.0,
+            scale_context={"scale_source": "not_applicable"},
+            messages=messages,
+            completeness=completeness,
+            output_kind="raw_json",
+        )
 
     selected_scale, scale_context = resolve_scale(
         source_json,
@@ -184,6 +255,7 @@ def run_rest_experimental_pipeline(
         )
     )
     log(f"Canvas written: {canvas_path}")
+    _rewrite_board_format(canvas_path, output_format, logger=log)
 
     return PipelineResult(
         source_json=source_json,
@@ -194,6 +266,7 @@ def run_rest_experimental_pipeline(
         scale_context=scale_context,
         messages=messages,
         completeness=completeness,
+        output_kind="canvas",
     )
 
 
@@ -259,6 +332,7 @@ def run_existing_json_pipeline(
     theme: str = "dark",
     text_style_mode: str = "miro",
     allow_incomplete_source: bool = False,
+    output_format: str = ADVANCED_CANVAS,
     install_obsidian_plugins: bool = False,
     advanced_canvas_source_plugins_dir: Path | None = None,
     advanced_canvas_version: str = ADVANCED_CANVAS_VERSION,
@@ -277,6 +351,12 @@ def run_existing_json_pipeline(
     vault_root = Path(vault_root)
     attachment_dir = Path(attachment_dir) if attachment_dir else None
     profile = view_profile or ViewProfile(min_font_px=min_font_px)
+    output_format = normalize_output_format(output_format)
+    if output_format == RAW_JSON:
+        raise ValueError(
+            "output_format='raw-json' has no board to write on the existing-JSON "
+            "pipeline: the input file is already the raw Miro export JSON."
+        )
     if scale is not None:
         _validated_scale(scale)
     payload, completeness = inspect_existing_source(source_json)
@@ -293,14 +373,12 @@ def run_existing_json_pipeline(
         )
 
     if install_obsidian_plugins:
-        log(
-            "Installing/enabling Advanced Canvas and Canvas Zoom Unlock in the selected vault."
-        )
-        setup_obsidian_plugins(
-            vault_root,
-            advanced_source_plugins_dir=advanced_canvas_source_plugins_dir,
-            advanced_version=advanced_canvas_version,
-            logger=log,
+        _install_obsidian_plugins_for_format(
+            output_format=output_format,
+            vault_root=vault_root,
+            advanced_canvas_source_plugins_dir=advanced_canvas_source_plugins_dir,
+            advanced_canvas_version=advanced_canvas_version,
+            log=log,
         )
 
     selected_scale, scale_context = resolve_scale(
@@ -323,6 +401,7 @@ def run_existing_json_pipeline(
         )
     )
     log(f"Canvas written: {canvas_path}")
+    _rewrite_board_format(canvas_path, output_format, logger=log)
 
     return PipelineResult(
         source_json=source_json,
@@ -335,6 +414,7 @@ def run_existing_json_pipeline(
         scale_context=scale_context,
         messages=messages,
         completeness=completeness,
+        output_kind="canvas",
     )
 
 
