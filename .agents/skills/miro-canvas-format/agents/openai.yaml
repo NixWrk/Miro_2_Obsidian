@@ -1,0 +1,4 @@
+interface:
+  display_name: "Miro Canvas boards"
+  short_description: "Read, check and safely edit miro-canvas boards"
+  default_prompt: "Use $miro-canvas-format to read, validate or safely edit the Miro Canvas board I point you to."

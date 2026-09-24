@@ -162,6 +162,16 @@ Invoke it as `$maintain-miro-2-obsidian`. The skill covers setup, architecture
 rules, testing, packaging, and publishing recipes. No MCP server is required for
 local repository maintenance.
 
+Agents that read, check or edit the boards themselves - not the repository -
+get a second skill that describes the board format and validates boards
+against the versioned schema (`python -m miro2obsidian.validate`):
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\install_agent_skill.ps1 -Name miro-canvas-format
+```
+
+Add `-Agent claude` to install either skill for Claude Code instead of Codex.
+
 ## Quick start
 
 New to Miro Developer Apps? Start with [Connect your own Miro boards](docs/MIRO_APP_SETUP.md).

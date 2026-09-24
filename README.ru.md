@@ -139,6 +139,17 @@ powershell -ExecutionPolicy Bypass -File scripts\install_agent_skill.ps1
 изменения архитектуры, тестирования, упаковки и публикации. Для локальной работы
 с репозиторием MCP-сервер не требуется.
 
+Агентам, которые читают, проверяют или правят сами доски, а не репозиторий,
+нужен второй skill: он описывает формат доски и проверяет доски по
+версионированной схеме (`python -m miro2obsidian.validate`):
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\install_agent_skill.ps1 -Name miro-canvas-format
+```
+
+С ключом `-Agent claude` любой из двух skills ставится для Claude Code вместо
+Codex.
+
 ## Быстрый старт
 
 Если вы никогда не создавали Miro Developer App, начните с инструкции
