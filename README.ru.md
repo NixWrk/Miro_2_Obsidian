@@ -72,6 +72,20 @@ REST остаётся главным источником для совпада�
 
 ## Установка
 
+### Готовые сборки
+
+Python не нужен: в каждом [выпуске](https://github.com/NixWrk/Miro_2_Obsidian/releases/latest)
+есть сборка для Windows, macOS и Linux с двумя программами — окном
+(`miro2obsidian-gui`, на macOS `Miro 2 Obsidian.app`) и командной строкой
+(`miro2obsidian`). Распакуйте архив и запустите нужную.
+
+Сборки пока без цифровой подписи. В Windows SmartScreen может предупредить при
+первом запуске: выберите **Подробнее → Выполнить в любом случае**. В macOS в
+первый раз откройте приложение правым щелчком → **Открыть**. Ключ `--self-test`
+проверяет, что сборка нашла всё, что поставляется вместе с ней.
+
+### Из исходников
+
 Рабочая среда:
 
 ```powershell
@@ -85,6 +99,10 @@ python -m pip install -e .
 python -m pip install -r requirements-dev.txt
 python -m playwright install chromium
 ```
+
+Собрать программы самому: `python -m PyInstaller release/miro2obsidian.spec`
+(результат в `dist/`); workflow Build делает то же под Windows, macOS и Linux и
+публикует сборки, когда в репозиторий приходит тег `v<версия>`.
 
 ### Разработка плагина `miro-canvas`
 

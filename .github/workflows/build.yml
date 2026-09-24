@@ -1,0 +1,98 @@
+name: Build
+
+# Ready-to-run builds of miro2obsidian for Windows, macOS and Linux: the
+# command-line tool and the desktop window, no Python needed. A tag named
+# v<version> publishes them as a release; a manual run keeps them as
+# workflow artifacts only.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            platform: windows
+          - os: macos-latest
+            platform: macos
+          - os: ubuntu-latest
+            platform: linux
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: requirements.txt
+      - name: Install dependencies
+        run: |
+          python -m pip install -r requirements.txt
+          python -m pip install pyinstaller==6.17.0
+      - name: Build
+        run: python -m PyInstaller release/miro2obsidian.spec --noconfirm
+      # A build that cannot find its own parts fails here, not on a user's
+      # computer. The desktop build has no console, so only its exit code
+      # speaks.
+      - name: Self-test
+        shell: bash
+        run: |
+          suffix=""
+          if [ "$RUNNER_OS" = "Windows" ]; then suffix=".exe"; fi
+          "dist/miro2obsidian$suffix" --self-test
+          "dist/miro2obsidian-gui$suffix" --self-test
+          "dist/miro2obsidian$suffix" --help > /dev/null
+      - name: Package
+        shell: bash
+        run: |
+          name="miro2obsidian-${{ matrix.platform }}"
+          mkdir "$name"
+          cp README.md LICENSE "$name/"
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            cp dist/miro2obsidian.exe dist/miro2obsidian-gui.exe "$name/"
+            7z a "$name.zip" "$name" > /dev/null
+          elif [ "$RUNNER_OS" = "macOS" ]; then
+            cp dist/miro2obsidian "$name/"
+            cp -R "dist/Miro 2 Obsidian.app" "$name/"
+            ditto -c -k --keepParent "$name" "$name.zip"
+          else
+            cp dist/miro2obsidian dist/miro2obsidian-gui "$name/"
+            tar -czf "$name.tar.gz" "$name"
+          fi
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: miro2obsidian-${{ matrix.platform }}
+          path: |
+            miro2obsidian-${{ matrix.platform }}.zip
+            miro2obsidian-${{ matrix.platform }}.tar.gz
+          if-no-files-found: error
+
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          path: artifacts
+          merge-multiple: true
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "$GITHUB_REF_NAME" \
+            --generate-notes \
+            artifacts/*

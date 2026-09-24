@@ -96,6 +96,20 @@ network access.
 
 ## Installation
 
+### Ready-made builds
+
+No Python needed: each [release](https://github.com/NixWrk/Miro_2_Obsidian/releases/latest)
+carries a build for Windows, macOS and Linux with two programs - the desktop
+window (`miro2obsidian-gui`, on macOS `Miro 2 Obsidian.app`) and the command
+line (`miro2obsidian`). Unpack the archive and run one of them.
+
+The builds are not code-signed yet. On Windows, SmartScreen may warn on first
+start: choose **More info → Run anyway**. On macOS, open the app with a
+right-click → **Open** the first time. `--self-test` checks that a build found
+everything it ships with.
+
+### From source
+
 Runtime:
 
 ```powershell
@@ -109,6 +123,10 @@ python -m pip install -e .
 python -m pip install -r requirements-dev.txt
 python -m playwright install chromium
 ```
+
+Build the programs yourself with `python -m PyInstaller release/miro2obsidian.spec`
+(results in `dist/`); the Build workflow does the same on Windows, macOS and
+Linux and publishes them when a `v<version>` tag is pushed.
 
 ### Develop the `miro-canvas` plugin
 
