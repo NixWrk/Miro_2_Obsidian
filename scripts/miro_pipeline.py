@@ -113,6 +113,16 @@ def build_parser() -> argparse.ArgumentParser:
         type=Path,
         help="Override attachment output dir. Defaults to the Obsidian vault Files & Links setting.",
     )
+    parser.add_argument(
+        "--keep-board-attachments",
+        action="store_true",
+        help=(
+            "Do not fold this board's attachments into the shared "
+            "'Miro attachments' store; keep them in the board's own "
+            "<board>_files sidecar as before. Use this when a script or "
+            "workflow downstream still expects that per-board layout."
+        ),
+    )
     add_auth_args(parser)
     return parser
 
@@ -166,6 +176,7 @@ def main() -> int:
             advanced_canvas_source_plugins_dir=args.advanced_canvas_source_plugins_dir,
             advanced_canvas_version=args.advanced_canvas_version,
             attachment_dir=attachment_dir,
+            share_attachments=not args.keep_board_attachments,
         )
     else:
         if not args.board_id:
@@ -196,6 +207,7 @@ def main() -> int:
             advanced_canvas_source_plugins_dir=args.advanced_canvas_source_plugins_dir,
             advanced_canvas_version=args.advanced_canvas_version,
             attachment_dir=attachment_dir,
+            share_attachments=not args.keep_board_attachments,
         )
     output_label = "json" if result.output_kind == "raw_json" else "canvas"
     print(f"items={result.item_count}")
@@ -203,6 +215,11 @@ def main() -> int:
     print(f"{output_label}={result.canvas_path}")
     print(f"scale={result.scale:.6f}")
     print("asset_stats=" + json.dumps(result.asset_stats, sort_keys=True))
+    if result.attachment_share_stats:
+        print(
+            "attachment_share_stats="
+            + json.dumps(result.attachment_share_stats, sort_keys=True)
+        )
     for message in result.messages[-8:]:
         print(f"log={message}")
     if application.pipeline_result_is_degraded(result):

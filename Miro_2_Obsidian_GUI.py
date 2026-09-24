@@ -115,6 +115,7 @@ class ConversionOptions:
     allow_missing_assets: bool
     prefer_experimental: bool
     install_obsidian_plugins: bool
+    share_attachments: bool = True
 
 
 #: One line under the Format menu saying what the selected format is for.
@@ -335,6 +336,21 @@ class MiroPipelineApp(ctk.CTk):
             row=1,
             column=6,
             columnspan=2,
+            sticky="w",
+            padx=8,
+            pady=(0, 8),
+        )
+
+        self.share_attachments = ctk.BooleanVar(value=True)
+        self.share_attachments_checkbox = ctk.CTkCheckBox(
+            options,
+            text="Store identical attachments once",
+            variable=self.share_attachments,
+        )
+        self.share_attachments_checkbox.grid(
+            row=3,
+            column=0,
+            columnspan=4,
             sticky="w",
             padx=8,
             pady=(0, 8),
@@ -582,6 +598,7 @@ class MiroPipelineApp(ctk.CTk):
             prefer_experimental=options.prefer_experimental,
             install_obsidian_plugins=options.install_obsidian_plugins,
             attachment_dir=attachment_dir,
+            share_attachments=options.share_attachments,
             logger=lambda message: self._log(f"{label}: {message}"),
         )
 
@@ -610,6 +627,7 @@ class MiroPipelineApp(ctk.CTk):
                 allow_missing_assets=self.allow_missing_assets.get(),
                 prefer_experimental=not self.stable_items.get(),
                 install_obsidian_plugins=self.install_obsidian_plugins.get(),
+                share_attachments=self.share_attachments.get(),
             )
         except Exception as exc:  # noqa: BLE001
             self._log(f"Pipeline failed: {exc}")
@@ -644,6 +662,7 @@ class MiroPipelineApp(ctk.CTk):
                         output_format=options.output_format,
                         install_obsidian_plugins=options.install_obsidian_plugins,
                         attachment_dir=attachment_dir,
+                        share_attachments=options.share_attachments,
                         logger=self._log,
                     )
                     run_results.append(result)

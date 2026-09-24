@@ -5,7 +5,12 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
 
-from Json_2_Canvas.Converter import convert_miro_to_canvas, source_completeness_issues
+from Json_2_Canvas.attachment_store import share_board_attachments
+from Json_2_Canvas.Converter import (
+    _attachment_destination,
+    convert_miro_to_canvas,
+    source_completeness_issues,
+)
 from Json_2_Canvas.output_formats import (
     ADVANCED_CANVAS,
     RAW_JSON,
@@ -44,6 +49,9 @@ class PipelineResult:
     #: Kept separate from the path itself so a raw-json result never pretends
     #: a Canvas was written.
     output_kind: str = "canvas"
+    #: Counts from folding this board's attachments into the shared store
+    #: (empty when `share_attachments=False` or the output is raw-json).
+    attachment_share_stats: dict[str, int] = field(default_factory=dict)
 
 
 def pipeline_result_is_degraded(result: PipelineResult) -> bool:
@@ -95,6 +103,43 @@ def _rewrite_board_format(
     logger(f"Rewrote {canvas_path} as {output_format}.")
 
 
+def _default_attachment_store_dir(vault_root: Path, attachment_dir: Path | None) -> Path:
+    """Where shared attachments live when nothing overrides it: beside the
+    vault's own attachment setting, or the vault root if there is none."""
+    return (attachment_dir or vault_root) / "Miro attachments"
+
+
+def _share_attachments_for_board(
+    *,
+    canvas_path: Path,
+    source_json: Path,
+    target_dir: Path,
+    vault_root: Path,
+    attachment_dir: Path | None,
+    log: Callable[[str], None],
+) -> dict[str, int]:
+    """Fold this board's freshly-copied sidecar into the shared store.
+
+    `sidecar_dir` is recomputed the same way Converter.py picked it during
+    this conversion, so sharing only ever touches attachments this run just
+    copied in - never another board's files.
+    """
+    sidecar_dir = _attachment_destination(
+        str(source_json),
+        str(target_dir),
+        str(attachment_dir) if attachment_dir else None,
+    )
+    store_dir = _default_attachment_store_dir(vault_root, attachment_dir)
+    log("Sharing identical attachments by content hash.")
+    return share_board_attachments(
+        canvas_path,
+        vault_root,
+        store_dir,
+        sidecar_dir=sidecar_dir,
+        logger=log,
+    )
+
+
 def _install_obsidian_plugins_for_format(
     *,
     output_format: str,
@@ -139,6 +184,7 @@ def run_rest_experimental_pipeline(
     advanced_canvas_source_plugins_dir: Path | None = None,
     advanced_canvas_version: str = ADVANCED_CANVAS_VERSION,
     attachment_dir: Path | None = None,
+    share_attachments: bool = True,
     logger: Callable[[str], None] | None = None,
 ) -> PipelineResult:
     messages: list[str] = []
@@ -256,6 +302,18 @@ def run_rest_experimental_pipeline(
     )
     log(f"Canvas written: {canvas_path}")
     _rewrite_board_format(canvas_path, output_format, logger=log)
+    share_stats = (
+        _share_attachments_for_board(
+            canvas_path=canvas_path,
+            source_json=source_json,
+            target_dir=target_dir,
+            vault_root=vault_root,
+            attachment_dir=attachment_dir,
+            log=log,
+        )
+        if share_attachments
+        else {}
+    )
 
     return PipelineResult(
         source_json=source_json,
@@ -267,6 +325,7 @@ def run_rest_experimental_pipeline(
         messages=messages,
         completeness=completeness,
         output_kind="canvas",
+        attachment_share_stats=share_stats,
     )
 
 
@@ -337,6 +396,7 @@ def run_existing_json_pipeline(
     advanced_canvas_source_plugins_dir: Path | None = None,
     advanced_canvas_version: str = ADVANCED_CANVAS_VERSION,
     attachment_dir: Path | None = None,
+    share_attachments: bool = True,
     logger: Callable[[str], None] | None = None,
 ) -> PipelineResult:
     messages: list[str] = []
@@ -402,6 +462,18 @@ def run_existing_json_pipeline(
     )
     log(f"Canvas written: {canvas_path}")
     _rewrite_board_format(canvas_path, output_format, logger=log)
+    share_stats = (
+        _share_attachments_for_board(
+            canvas_path=canvas_path,
+            source_json=source_json,
+            target_dir=target_dir,
+            vault_root=vault_root,
+            attachment_dir=attachment_dir,
+            log=log,
+        )
+        if share_attachments
+        else {}
+    )
 
     return PipelineResult(
         source_json=source_json,
@@ -415,6 +487,7 @@ def run_existing_json_pipeline(
         messages=messages,
         completeness=completeness,
         output_kind="canvas",
+        attachment_share_stats=share_stats,
     )
 
 

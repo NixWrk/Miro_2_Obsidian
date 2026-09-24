@@ -245,6 +245,25 @@ miro2obsidian `
   --format native-canvas
 ```
 
+### Shared attachments
+
+By default, once a board's Canvas is written, identical attachments (the
+same image or file, byte for byte) are folded into one shared copy instead
+of staying in that board's own `<board>_files` sidecar folder. Two boards
+with the same picture, or a board imported twice, end up pointing at the
+same file rather than each keeping their own copy.
+
+Shared files live in `Miro attachments/` next to the vault's configured
+attachment folder (or at the vault root if there is none), named
+`<original name>-<content hash><extension>`. A manifest at
+`.miro2obsidian/attachments.json` tracks which content hash maps to which
+file; it is rebuilt as needed if a shared file is edited or removed by hand.
+An exported `.html` document stays in its own sidecar, since it may
+reference files beside it by name.
+
+Pass `--keep-board-attachments` (CLI) or clear "Store identical attachments
+once" (GUI) to keep today's per-board sidecar layout instead.
+
 ### Export maximum public-API data
 
 The [beginner setup guide](docs/MIRO_APP_SETUP.md) explains every Miro screen,

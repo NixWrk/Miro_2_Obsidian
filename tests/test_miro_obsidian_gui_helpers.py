@@ -215,6 +215,12 @@ class MiroObsidianGuiHelperTests(unittest.TestCase):
         self.assertIn("Allow incomplete/unverified JSON", source)
         self.assertIn("allow_incomplete_source=options.allow_missing_assets", source)
 
+    def test_gui_wires_share_attachments_checkbox(self) -> None:
+        source = (Path(__file__).resolve().parents[1] / "Miro_2_Obsidian_GUI.py").read_text(encoding="utf-8")
+        self.assertIn("Store identical attachments once", source)
+        self.assertIn("share_attachments=self.share_attachments.get()", source)
+        self.assertIn("share_attachments=options.share_attachments", source)
+
     def test_miro_export_modes_use_canonical_pipeline(self) -> None:
         app = object.__new__(MiroPipelineApp)
         app._token = lambda: "token-1"

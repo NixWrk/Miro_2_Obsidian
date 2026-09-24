@@ -168,6 +168,10 @@ class MiroPipelineTests(unittest.TestCase):
                     "miro2obsidian.application.convert_miro_to_canvas",
                     return_value=str(expected_canvas),
                 ) as convert,
+                patch(
+                    "miro2obsidian.application.share_board_attachments",
+                    return_value={},
+                ) as share,
             ):
                 result = run_rest_experimental_pipeline(
                     board_id="board-1",
@@ -195,6 +199,7 @@ class MiroPipelineTests(unittest.TestCase):
         self.assertEqual(
             convert.call_args.kwargs["attachment_dir"], str(attachment_dir)
         )
+        share.assert_called_once()
         self.assertEqual(result.canvas_path, expected_canvas)
         self.assertEqual(result.item_count, 1)
         self.assertTrue(result.completeness["complete"])
@@ -253,6 +258,10 @@ class MiroPipelineTests(unittest.TestCase):
                     "miro2obsidian.application.convert_miro_to_canvas",
                     return_value=str(root / "board.canvas"),
                 ),
+                patch(
+                    "miro2obsidian.application.share_board_attachments",
+                    return_value={},
+                ) as share,
             ):
                 result = run_rest_experimental_pipeline(
                     board_id="board-1",
@@ -263,6 +272,7 @@ class MiroPipelineTests(unittest.TestCase):
                     websdk_json=websdk_json,
                 )
 
+        share.assert_called_once()
         load.assert_called_once_with(websdk_json)
         merge.assert_called_once_with(
             rest_payload,
@@ -360,6 +370,10 @@ class MiroPipelineTests(unittest.TestCase):
                     "miro2obsidian.application.convert_miro_to_canvas",
                     return_value=str(root / "out.canvas"),
                 ),
+                patch(
+                    "miro2obsidian.application.share_board_attachments",
+                    return_value={},
+                ),
             ):
                 result = run_rest_experimental_pipeline(
                     board_id="board-1",
@@ -390,6 +404,10 @@ class MiroPipelineTests(unittest.TestCase):
                 patch(
                     "miro2obsidian.application.convert_miro_to_canvas",
                     return_value=str(root / "out.canvas"),
+                ),
+                patch(
+                    "miro2obsidian.application.share_board_attachments",
+                    return_value={},
                 ),
             ):
                 run_rest_experimental_pipeline(
@@ -444,6 +462,10 @@ class MiroPipelineTests(unittest.TestCase):
                     "miro2obsidian.application.convert_miro_to_canvas",
                     return_value=str(root / "out.canvas"),
                 ),
+                patch(
+                    "miro2obsidian.application.share_board_attachments",
+                    return_value={},
+                ),
             ):
                 run_rest_experimental_pipeline(
                     board_id="board-1",
@@ -476,6 +498,10 @@ class MiroPipelineTests(unittest.TestCase):
                     "miro2obsidian.application.convert_miro_to_canvas",
                     return_value=str(expected_canvas),
                 ) as convert,
+                patch(
+                    "miro2obsidian.application.share_board_attachments",
+                    return_value={},
+                ) as share,
             ):
                 result = run_existing_json_pipeline(
                     source_json=source_json,
@@ -488,6 +514,7 @@ class MiroPipelineTests(unittest.TestCase):
 
         plugins.assert_called_once()
         convert.assert_called_once()
+        share.assert_called_once()
         self.assertEqual(
             convert.call_args.args[:3],
             (str(source_json), str(root / "target"), str(root / "vault")),
@@ -555,6 +582,10 @@ class MiroPipelineTests(unittest.TestCase):
                     "miro2obsidian.application.convert_miro_to_canvas",
                     return_value=str(expected_canvas),
                 ) as convert,
+                patch(
+                    "miro2obsidian.application.share_board_attachments",
+                    return_value={},
+                ),
             ):
                 result = run_existing_json_pipeline(
                     source_json=source_json,
@@ -655,6 +686,87 @@ class MiroPipelineTests(unittest.TestCase):
 
         self.assertIn("miroSource", canvas)
         self.assertEqual(canvas["miroCanvas"], {"schemaVersion": 1})
+
+    def _write_image_board_source(self, root: Path, name: str, image_bytes: bytes) -> Path:
+        """A verified existing-JSON source with one required image asset,
+        plus the sidecar Converter.py expects to find beside it."""
+        items = [
+            {
+                "id": "img-1",
+                "type": "image",
+                "local_name": "pic.png",
+                "geometry": {"width": 100, "height": 100},
+                "position": {"x": 0, "y": 0},
+                "data": {},
+            }
+        ]
+        source_json = root / f"{name}.json"
+        source_json.write_text(
+            json.dumps(verified_existing_source(items)), encoding="utf-8"
+        )
+        sidecar = root / f"{name}_files"
+        sidecar.mkdir()
+        (sidecar / "pic.png").write_bytes(image_bytes)
+        return source_json
+
+    def test_default_pipeline_shares_identical_attachment_across_two_boards(
+        self,
+    ) -> None:
+        # No mocked convert_miro_to_canvas or share_board_attachments here:
+        # this exercises the real Converter.py and attachment_store.py path
+        # for two boards that carry the same picture.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            vault_root = root / "vault"
+            vault_root.mkdir()
+            source_a = self._write_image_board_source(root, "board_a", b"shared-bytes")
+            source_b = self._write_image_board_source(root, "board_b", b"shared-bytes")
+
+            result_a = run_existing_json_pipeline(
+                source_json=source_a,
+                target_dir=vault_root / "Canvas",
+                vault_root=vault_root,
+                scale=1.0,
+            )
+            result_b = run_existing_json_pipeline(
+                source_json=source_b,
+                target_dir=vault_root / "Canvas",
+                vault_root=vault_root,
+                scale=1.0,
+            )
+
+            canvas_a = json.loads(Path(result_a.canvas_path).read_text(encoding="utf-8"))
+            canvas_b = json.loads(Path(result_b.canvas_path).read_text(encoding="utf-8"))
+
+            file_node_a = next(n for n in canvas_a["nodes"] if n["type"] == "file")
+            file_node_b = next(n for n in canvas_b["nodes"] if n["type"] == "file")
+            self.assertEqual(file_node_a["file"], file_node_b["file"])
+            self.assertIn("Miro attachments", file_node_a["file"])
+            self.assertFalse((vault_root / "Canvas" / "board_a_files").exists())
+            self.assertFalse((vault_root / "Canvas" / "board_b_files").exists())
+            self.assertEqual(result_b.attachment_share_stats["reused_from_manifest"], 1)
+            self.assertEqual(result_b.attachment_share_stats["copied_to_store"], 0)
+
+    def test_keep_board_attachments_leaves_todays_sidecar_layout(self) -> None:
+        # share_attachments=False is what --keep-board-attachments passes
+        # through; this checks it makes attachment_store.py a no-op.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            vault_root = root / "vault"
+            vault_root.mkdir()
+            source = self._write_image_board_source(root, "board", b"kept-bytes")
+
+            result = run_existing_json_pipeline(
+                source_json=source,
+                target_dir=vault_root / "Canvas",
+                vault_root=vault_root,
+                scale=1.0,
+                share_attachments=False,
+            )
+
+            self.assertEqual(result.attachment_share_stats, {})
+            self.assertTrue((vault_root / "Canvas" / "board_files" / "pic.png").is_file())
+            self.assertFalse((vault_root / "Miro attachments").exists())
 
     def test_existing_json_pipeline_rejects_raw_json_format(self) -> None:
         with self.assertRaisesRegex(ValueError, "raw-json"):
@@ -889,6 +1001,93 @@ class MiroPipelineTests(unittest.TestCase):
         self.assertEqual(result, 0)
         self.assertEqual(existing.call_args.kwargs["output_format"], "native-canvas")
 
+    def test_cli_keep_board_attachments_disables_sharing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source_json = root / "board.json"
+            target_dir = root / "target"
+            vault_root = root / "vault"
+            attachment_dir = vault_root / "Files" / "Attachments"
+            expected = application.PipelineResult(
+                source_json=source_json,
+                canvas_path=target_dir / "board.canvas",
+                item_count=0,
+                asset_stats={},
+                scale=1.0,
+                scale_context={"scale_source": "explicit"},
+                messages=[],
+            )
+            argv = [
+                "miro2obsidian.application.py",
+                "--existing-json",
+                "--source-json",
+                str(source_json),
+                "--target-dir",
+                str(target_dir),
+                "--vault-root",
+                str(vault_root),
+                "--scale",
+                "1",
+                "--keep-board-attachments",
+            ]
+            with (
+                patch.object(sys, "argv", argv),
+                patch(
+                    "scripts.miro_pipeline.resolve_attachment_dir", return_value=attachment_dir
+                ),
+                patch(
+                    "miro2obsidian.application.run_existing_json_pipeline",
+                    return_value=expected,
+                ) as existing,
+            ):
+                result = miro_pipeline.main()
+
+        self.assertEqual(result, 0)
+        self.assertFalse(existing.call_args.kwargs["share_attachments"])
+
+    def test_cli_defaults_to_sharing_attachments(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source_json = root / "board.json"
+            target_dir = root / "target"
+            vault_root = root / "vault"
+            attachment_dir = vault_root / "Files" / "Attachments"
+            expected = application.PipelineResult(
+                source_json=source_json,
+                canvas_path=target_dir / "board.canvas",
+                item_count=0,
+                asset_stats={},
+                scale=1.0,
+                scale_context={"scale_source": "explicit"},
+                messages=[],
+            )
+            argv = [
+                "miro2obsidian.application.py",
+                "--existing-json",
+                "--source-json",
+                str(source_json),
+                "--target-dir",
+                str(target_dir),
+                "--vault-root",
+                str(vault_root),
+                "--scale",
+                "1",
+            ]
+            with (
+                patch.object(sys, "argv", argv),
+                patch(
+                    "scripts.miro_pipeline.resolve_attachment_dir", return_value=attachment_dir
+                ),
+                patch(
+                    "miro2obsidian.application.run_existing_json_pipeline",
+                    return_value=expected,
+                ) as existing,
+            ):
+                result = miro_pipeline.main()
+
+        self.assertEqual(result, 0)
+        self.assertTrue(existing.call_args.kwargs["share_attachments"])
+
     def test_cli_rejects_raw_json_format_with_existing_json(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -999,6 +1198,7 @@ class MiroPipelineTests(unittest.TestCase):
                 install_obsidian_plugins=False,
                 advanced_canvas_source_plugins_dir=None,
                 advanced_canvas_version="6.0.1",
+                keep_board_attachments=False,
             )
             parser = Namespace(parse_args=lambda: args)
             degraded = application.PipelineResult(
