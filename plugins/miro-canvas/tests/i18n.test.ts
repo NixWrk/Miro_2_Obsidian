@@ -13,6 +13,9 @@ const SAME_IN_RUSSIAN = new Set<string>([
   "export.paperLabels.a4",
   "export.paperLabels.a3",
   "export.paperLabels.letter",
+  "importGuide.windows",
+  "importGuide.macos",
+  "importGuide.linux",
 ]);
 
 type Table = { readonly [key: string]: unknown };

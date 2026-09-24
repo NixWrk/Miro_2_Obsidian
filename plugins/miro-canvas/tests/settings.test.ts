@@ -12,6 +12,7 @@ import {
   SETTING_BOUNDS,
   normalizeSettings,
   panDelta,
+  shouldAskImportQuestion,
   wheelZooms,
 } from "../src/settings";
 
@@ -149,6 +150,18 @@ describe("plugin settings", () => {
     expect(navigationCommands().find((command) => command.id === "m1-zoom-in")?.name).toBe("Приблизить");
     setLocale("en");
     expect(navigationCommands().find((command) => command.id === "m1-zoom-in")?.name).toBe("Zoom in");
+  });
+
+  it("asks the import question once, until it has been answered or dismissed", () => {
+    expect(DEFAULT_SETTINGS.importQuestionAnswered).toBe(false);
+    expect(shouldAskImportQuestion(DEFAULT_SETTINGS)).toBe(true);
+    // An older stored file predates the setting entirely; it still opens without asking again.
+    expect(normalizeSettings({}).importQuestionAnswered).toBe(false);
+    const answered = normalizeSettings({ importQuestionAnswered: true });
+    expect(answered.importQuestionAnswered).toBe(true);
+    expect(shouldAskImportQuestion(answered)).toBe(false);
+    // A value that is not a boolean keeps the default rather than skipping the question.
+    expect(normalizeSettings({ importQuestionAnswered: "yes" }).importQuestionAnswered).toBe(false);
   });
 
   it("names each pointer chord, in the language in use", () => {

@@ -717,6 +717,58 @@ export const EN = {
 		/** `humanizeToken`'s fallback when a node's own type cannot be turned into a word. */
 		nodeFallback: "Node",
 	},
+	/**
+	 * Bringing a Miro board in: the settings button, the first-run question
+	 * (main.ts) and the guide's six steps (import-guide.ts).  The plugin never
+	 * downloads or runs miro2obsidian itself; every button here only opens a
+	 * link in the browser or copies text.
+	 */
+	importGuide: {
+		settingsHeading: "Import from Miro",
+		openGuideButton: "Open the import guide",
+
+		questionTitle: "Import boards from Miro?",
+		questionBody1: "This plugin works on any Canvas, Miro board or not.",
+		questionBody2: "Bringing a Miro board in takes a small separate program you can remove afterwards.",
+		showMeHow: "Show me how",
+		notNow: "Not now",
+		notNowNote: "The guide stays available in the plugin's settings.",
+
+		guideTitle: "Import boards from Miro",
+
+		step1Title: "Get miro2obsidian",
+		step1Body: "A free program for Windows, macOS and Linux turns a Miro board's export into this format.",
+		downloadFor: (system: string) => `Download for ${system}`,
+		mobileNotice: "miro2obsidian runs on a computer; come back here once a board has been imported.",
+		windows: "Windows",
+		macos: "macOS",
+		linux: "Linux",
+
+		step2Title: "Or let an AI agent do it",
+		step2Body: "Codex or Claude Code can do every step for you with the miro2obsidian-import skill.",
+		promptLabel: "Prompt for an AI coding agent",
+		promptText: (vaultPath: string) =>
+			`Use the miro2obsidian-import skill to help me bring my Miro board into my Obsidian vault at ${vaultPath}, in the miro-canvas format.`,
+		copyPrompt: "Copy prompt",
+		installSkillLink: "How to install the skill",
+
+		step3Title: "Create your own Miro app",
+		step3Body: "A one-time step, about 10 to 20 minutes, with no programming.",
+		openStepByStepGuide: "Open the step-by-step guide",
+
+		step4Title: "Export into this vault",
+		step4Body: "Choose the miro-canvas format and this vault.",
+		copyPath: "Copy path",
+
+		step5Title: "Open the board",
+		step5Body: "The .canvas file appears in the chosen folder; open it here like any other Canvas.",
+
+		step6Title: "Afterwards",
+		step6Body: "The program can be deleted: an imported board does not need it. This guide stays in the plugin's settings.",
+
+		copied: "Copied to the clipboard.",
+		copyFailed: "Could not copy to the clipboard.",
+	},
 };
 
 /**

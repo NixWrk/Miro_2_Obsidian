@@ -27,6 +27,8 @@ export interface SettingsTabHost {
   readonly commentAuthors?: () => readonly string[];
   /** The Obsidian account's name, which signs comments when no name is set. */
   readonly accountName?: () => string | undefined;
+  /** Opens the "Import boards from Miro" guide; the same one the first-run question offers. */
+  readonly openImportGuide: () => void;
 }
 
 export class MiroCanvasSettingTab extends PluginSettingTab {
@@ -158,6 +160,13 @@ export class MiroCanvasSettingTab extends PluginSettingTab {
         .onChange((value) => void this.host.saveSettings({ selectionToolbarEnabled: value })));
 
     this.comments(containerEl);
+
+    const importLabels = words().importGuide;
+    new Setting(containerEl).setName(importLabels.settingsHeading).setHeading();
+    new Setting(containerEl)
+      .addButton((button) => button
+        .setButtonText(importLabels.openGuideButton)
+        .onClick(() => this.host.openImportGuide()));
 
     new Setting(containerEl)
       .setName(labels.developerDiagnosticsName)

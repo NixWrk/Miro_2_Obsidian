@@ -53,6 +53,13 @@ export interface MiroCanvasSettings {
   readonly commentAuthor: string;
   /** The colour each comment author's pins and avatars take, by name, where one was chosen. */
   readonly commentAuthorColors: Readonly<Record<string, string>>;
+  /**
+   * Whether the first-run "Import boards from Miro?" question has been put
+   * to the person, however they answered it or if they simply closed it.
+   * Once true the question is not asked again; the settings tab still opens
+   * the same guide on request.
+   */
+  readonly importQuestionAnswered: boolean;
 }
 
 interface NumberBound {
@@ -102,6 +109,7 @@ export const DEFAULT_SETTINGS: MiroCanvasSettings = Object.freeze({
   developerDiagnostics: false,
   commentAuthor: "",
   commentAuthorColors: Object.freeze({}),
+  importQuestionAnswered: false,
 });
 
 /** The longest name a comment is signed with, and the most authors given colours. */
@@ -197,7 +205,13 @@ export function normalizeSettings(value: unknown): MiroCanvasSettings {
     developerDiagnostics: readBoolean(value, "developerDiagnostics", DEFAULT_SETTINGS.developerDiagnostics),
     commentAuthor: typeof value.commentAuthor === "string" ? value.commentAuthor.trim().slice(0, MAX_AUTHOR_NAME) : DEFAULT_SETTINGS.commentAuthor,
     commentAuthorColors: readAuthorColors(value.commentAuthorColors),
+    importQuestionAnswered: readBoolean(value, "importQuestionAnswered", DEFAULT_SETTINGS.importQuestionAnswered),
   });
+}
+
+/** True while the first-run "Import boards from Miro?" question has not yet been put to the person. */
+export function shouldAskImportQuestion(settings: Pick<MiroCanvasSettings, "importQuestionAnswered">): boolean {
+  return !settings.importQuestionAnswered;
 }
 
 export type PanDirection = "left" | "right" | "up" | "down";

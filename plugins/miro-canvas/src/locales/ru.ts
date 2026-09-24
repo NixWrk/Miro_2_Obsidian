@@ -686,4 +686,50 @@ export const RU: Messages = {
 		fileOption: (name: string, id: string) => `Файл: ${name} — ${id}`,
 		nodeFallback: "Элемент",
 	},
+	importGuide: {
+		settingsHeading: "Импорт из Miro",
+		openGuideButton: "Открыть руководство по импорту",
+
+		questionTitle: "Импортировать доски из Miro?",
+		questionBody1: "Этот плагин работает с любым Canvas, доской из Miro или нет.",
+		questionBody2: "Чтобы перенести доску из Miro, нужна небольшая отдельная программа, которую потом можно удалить.",
+		showMeHow: "Показать как",
+		notNow: "Не сейчас",
+		notNowNote: "Руководство останется доступным в настройках плагина.",
+
+		guideTitle: "Импорт досок из Miro",
+
+		step1Title: "Установите miro2obsidian",
+		step1Body: "Бесплатная программа для Windows, macOS и Linux превращает экспорт доски Miro в этот формат.",
+		downloadFor: (system: string) => `Скачать для ${system}`,
+		mobileNotice: "miro2obsidian работает на компьютере; вернитесь сюда, когда доска будет импортирована.",
+		windows: "Windows",
+		macos: "macOS",
+		linux: "Linux",
+
+		step2Title: "Или доверьте это ИИ-агенту",
+		step2Body: "Codex или Claude Code могут выполнить все шаги за вас с помощью навыка miro2obsidian-import.",
+		promptLabel: "Запрос для ИИ-агента",
+		promptText: (vaultPath: string) =>
+			`Используй навык miro2obsidian-import, чтобы перенести мою доску Miro в моё хранилище Obsidian по пути ${vaultPath}, в формате miro-canvas.`,
+		copyPrompt: "Скопировать запрос",
+		installSkillLink: "Как установить навык",
+
+		step3Title: "Создайте собственное приложение Miro",
+		step3Body: "Разовый шаг, 10–20 минут, без программирования.",
+		openStepByStepGuide: "Открыть подробное руководство",
+
+		step4Title: "Экспортируйте в это хранилище",
+		step4Body: "Выберите формат miro-canvas и это хранилище.",
+		copyPath: "Скопировать путь",
+
+		step5Title: "Откройте доску",
+		step5Body: "Файл .canvas появится в выбранной папке; откройте его здесь, как любой другой Canvas.",
+
+		step6Title: "После этого",
+		step6Body: "Программу можно удалить: импортированной доске она не нужна. Это руководство остаётся в настройках плагина.",
+
+		copied: "Скопировано в буфер обмена.",
+		copyFailed: "Не удалось скопировать в буфер обмена.",
+	},
 };

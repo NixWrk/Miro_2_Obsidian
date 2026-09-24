@@ -1,5 +1,5 @@
 import * as obsidian from "obsidian";
-import { Menu, Modal, Notice, Plugin, TFile, setIcon, type Events, type WorkspaceLeaf } from "obsidian";
+import { Menu, Modal, Notice, Platform, Plugin, TFile, setIcon, type Events, type WorkspaceLeaf } from "obsidian";
 
 import {
   inspectAdvancedCanvas,
@@ -15,11 +15,13 @@ import {
 import { M1CanvasSession } from "./m1-session";
 import { M2CanvasTools, type InitialCommentTarget } from "./m2-tools";
 import { createObsidianDocumentHost } from "./obsidian-document-host";
+import { buildImportGuide, openExternalLink, vaultFolderPath, type ImportGuideActions } from "./import-guide";
 import {
   DEFAULT_SETTINGS,
   navigationCommands,
   normalizeSettings,
   obsidianAccountName,
+  shouldAskImportQuestion,
   type MiroCanvasSettings,
   type PanDirection,
 } from "./settings";
@@ -99,6 +101,7 @@ export default class MiroCanvasPlugin extends Plugin {
   private currentCanvasView: unknown = null;
   private m1Session: M1CanvasSession | null = null;
   private toolsModal: Modal | null = null;
+  private importGuideModal: Modal | null = null;
   private initializationRetry: ReturnType<typeof setTimeout> | null = null;
   public canvasSettings: MiroCanvasSettings = DEFAULT_SETTINGS;
 
@@ -117,6 +120,7 @@ export default class MiroCanvasPlugin extends Plugin {
       saveSettings: (patch) => this.saveCanvasSettings(patch),
       commentAuthors: () => this.m1Session?.commentAuthors() ?? [],
       accountName: () => obsidianAccountName(window.localStorage),
+      openImportGuide: () => this.openImportGuide(),
     }));
     // Advanced Canvas is optional.  Its adapter fails closed, so this probe
     // cannot prevent the native Canvas shell from loading.
@@ -335,6 +339,10 @@ export default class MiroCanvasPlugin extends Plugin {
       }
     }));
     this.handleActiveLeafChange(this.app.workspace.activeLeaf);
+    // Asked once, after Obsidian's own startup has settled; a plugin-only
+    // person can decline it without ever seeing Miro mentioned again outside
+    // the settings tab's own button.
+    this.app.workspace.onLayoutReady(() => this.maybeAskImportQuestion());
   }
 
   override onunload(): void {
@@ -474,6 +482,63 @@ export default class MiroCanvasPlugin extends Plugin {
     return true;
   }
 
+  /** The first-run "Import boards from Miro?" question; never asked twice. */
+  private maybeAskImportQuestion(): void {
+    if (this.shellDisposed || !shouldAskImportQuestion(this.canvasSettings)) return;
+    this.openImportQuestion();
+  }
+
+  private openImportQuestion(): void {
+    const strings = words().importGuide;
+    const modal = new Modal(this.app);
+    modal.modalEl.classList.add("miro-canvas-import-question-modal");
+    modal.setTitle(strings.questionTitle);
+    modal.contentEl.createEl("p", { text: strings.questionBody1 });
+    modal.contentEl.createEl("p", { text: strings.questionBody2 });
+    const buttons = modal.contentEl.createDiv({ cls: "miro-canvas-import-question__buttons" });
+    const showMeHow = buttons.createEl("button", { text: strings.showMeHow, cls: "mod-cta" });
+    showMeHow.addEventListener("click", () => {
+      modal.close();
+      this.openImportGuide();
+    });
+    buttons.createEl("button", { text: strings.notNow }).addEventListener("click", () => modal.close());
+    modal.contentEl.createEl("p", { text: strings.notNowNote, cls: "miro-canvas-import-question__note" });
+    // Both buttons close the modal, and so does the native close control or
+    // Escape; onClose is the one place that records an answer, so the
+    // question is put once regardless of how a person leaves it.
+    modal.onClose = () => void this.saveCanvasSettings({ importQuestionAnswered: true });
+    modal.open();
+  }
+
+  /** The same guide the first-run question and the settings tab's button open. */
+  private openImportGuide(): void {
+    this.importGuideModal?.close();
+    const modal = new Modal(this.app);
+    this.importGuideModal = modal;
+    modal.modalEl.classList.add("miro-canvas-import-guide-modal");
+    modal.setTitle(words().importGuide.guideTitle);
+    const actions: ImportGuideActions = {
+      onOpenLink: (url) => openExternalLink(url),
+      onCopy: (text) => {
+        void navigator.clipboard.writeText(text).then(
+          () => new Notice(words().importGuide.copied),
+          () => new Notice(words().importGuide.copyFailed),
+        );
+      },
+    };
+    const content = buildImportGuide(actions, {
+      document: modal.contentEl.ownerDocument,
+      setIcon: (element, icon) => setIcon(element, icon),
+      platform: Platform,
+      vaultPath: vaultFolderPath(this.app.vault.adapter, this.app.vault.getName()),
+    });
+    modal.contentEl.append(content);
+    modal.onClose = () => {
+      if (this.importGuideModal === modal) this.importGuideModal = null;
+    };
+    modal.open();
+  }
+
   private openLocalTools(session: M1CanvasSession, initialComment?: InitialCommentTarget): void {
     this.toolsModal?.close();
     const modal = new Modal(this.app);
@@ -600,6 +665,8 @@ export default class MiroCanvasPlugin extends Plugin {
     this.initializationRetry = null;
     this.toolsModal?.close();
     this.toolsModal = null;
+    this.importGuideModal?.close();
+    this.importGuideModal = null;
     this.canvasInspection = null;
     this.metadataStoreProbe = null;
     this.metadataWriter = null;

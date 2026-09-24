@@ -657,10 +657,12 @@ miro2obsidian skill or MCP server; the plugin never installs it by itself.
 - PDF/PPTX export: slides as a deck and marked board areas as pages (done
   2026-09-24, see Export to PDF and PowerPoint).
 - Move the plugin into its own repository tied to miro2obsidian by a shared
-  schema and fixtures; offer a guided, illustrated Miro import from first setup
-  and from settings, offering the exporter for download or an agent to set it
-  up, and letting the user remove it afterwards; walk the full user journey on a
-  clean machine (see [ROADMAP](../ROADMAP.md)).
+  schema and fixtures; offer a guided Miro import from first setup and from
+  settings, offering the exporter for download or an agent to set it up, and
+  letting the user remove it afterwards (the import question and its six-step
+  guide are done 2026-09-24; the plugin never goes to the network itself, links
+  open on a press); walk the full user journey on a clean machine (see
+  [ROADMAP](../ROADMAP.md)).
 - Provide a skill or an MCP server so agents can work with miro-canvas boards as
   natively as with Canvas files (the light skill is done:
   `.agents/skills/miro-canvas-format`; the MCP server comes in phase 6).
