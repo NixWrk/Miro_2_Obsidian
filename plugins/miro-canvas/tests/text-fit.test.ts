@@ -1,6 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
+import { setLocale } from "../src/i18n";
 import { codeLineCount, fitFontSize, lineNumbersCss, plainText } from "../src/text-fit";
-import { MIRO_STICKY_COLORS, readableInk, stickyFill } from "../src/miro-palette";
+import { frameColors, miroStickyColors, readableInk, stickyFill } from "../src/miro-palette";
 
 describe("plain text of stored markup", () => {
   it("keeps the words and drops tags, entities and markdown marks", () => {
@@ -56,7 +57,7 @@ describe("fitted font size", () => {
 
 describe("Miro sticky colours", () => {
   it("names every REST sticky colour, gray included", () => {
-    expect(MIRO_STICKY_COLORS.map((entry) => entry.token)).toEqual([
+    expect(miroStickyColors().map((entry) => entry.token)).toEqual([
       "light_yellow", "yellow", "orange", "red", "light_pink", "pink", "light_blue", "violet",
       "blue", "dark_blue", "cyan", "dark_green", "light_green", "green", "gray", "black", "white",
     ]);
@@ -67,9 +68,23 @@ describe("Miro sticky colours", () => {
 
   it("inks a dark note white and every other one near-black", () => {
     expect(readableInk(stickyFill("black")!)).toBe("#ffffff");
-    for (const entry of MIRO_STICKY_COLORS.filter((item) => item.token !== "black")) {
+    for (const entry of miroStickyColors().filter((item) => item.token !== "black")) {
       expect(readableInk(entry.color)).toBe("#1a1a1a");
     }
     expect(readableInk("not a colour")).toBe("#1a1a1a");
+  });
+});
+
+describe("Miro's palettes in Russian", () => {
+  afterEach(() => setLocale("en"));
+
+  it("names sticky and frame fills from the Russian word table", () => {
+    setLocale("ru");
+    const yellow = miroStickyColors().find((entry) => entry.token === "yellow");
+    expect(yellow?.label).toBe("Жёлтый");
+    const lightYellow = miroStickyColors().find((entry) => entry.token === "light_yellow");
+    expect(lightYellow?.label).toBe("Светло-жёлтый");
+    const frameGray = frameColors().find((entry) => entry.token === "frame_gray");
+    expect(frameGray?.label).toBe("Серый");
   });
 });

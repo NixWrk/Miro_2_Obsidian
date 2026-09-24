@@ -1,13 +1,14 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 
+import { setLocale } from "../src/i18n";
 import {
   APPEARANCE_ACTIONS,
   DEFAULT_FONT_SIZE,
-  DEFAULT_PALETTE,
   DEFAULT_TYPOGRAPHY,
   MAX_RECENT_COLORS,
   appearanceReducer,
   createDefaultAppearanceState,
+  defaultPalette,
   normalizeColor,
   normalizeDisplayTheme,
   normalizeFontFamily,
@@ -34,13 +35,13 @@ describe("appearance core", () => {
 
     const state = createDefaultAppearanceState();
     expect(state.settings.displayTheme).toBe("system");
-    expect(state.settings.palette.length).toBe(DEFAULT_PALETTE.length);
+    expect(state.settings.palette.length).toBe(defaultPalette().length);
     // Miro's own colours, Obsidian's theme colours and the six presets native
     // Canvas offers are all reachable without opening the picker.
     for (const id of ["miro-red", "obsidian-blue", "canvas-purple"]) {
-      expect(DEFAULT_PALETTE.some((entry) => entry.id === id)).toBe(true);
+      expect(defaultPalette().some((entry) => entry.id === id)).toBe(true);
     }
-    expect(new Set(DEFAULT_PALETTE.map((entry) => entry.color)).size).toBe(DEFAULT_PALETTE.length);
+    expect(new Set(defaultPalette().map((entry) => entry.color)).size).toBe(defaultPalette().length);
     expect(state.settings.recentColors).toEqual([]);
     expect(Object.isFrozen(state)).toBe(true);
   });
@@ -405,5 +406,16 @@ describe("appearance core", () => {
       futureTypography: { keep: true },
       format: { futureFormat: { keep: true } },
     });
+  });
+});
+
+describe("built-in palette in Russian", () => {
+  afterEach(() => setLocale("en"));
+
+  it("names its swatches from the Russian word table", () => {
+    setLocale("ru");
+    expect(defaultPalette().find((entry) => entry.id === "miro-red")?.label).toBe("Красный");
+    expect(defaultPalette().find((entry) => entry.id === "obsidian-blue")?.label).toBe("Синий Obsidian");
+    expect(defaultPalette().find((entry) => entry.id === "canvas-purple")?.label).toBe("Фиолетовый Canvas");
   });
 });

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { MIRO_STICKY_COLORS } from "../src/miro-palette";
+import { miroStickyColors } from "../src/miro-palette";
 import { LOCAL_ITEM_SIZES, LOCAL_ITEM_TYPES, readLocalItem, readLocalLine, readLocalStroke } from "../src/local-items";
 
 const STROKE = { color: "#1a1a1a", width: 5, box: { width: 40, height: 20 }, points: [0, 0, 20, 10, 40, 20] };
@@ -39,7 +39,7 @@ describe("readLocalItem", () => {
   });
 
   it("keeps every one of Miro's own sticky colour tokens, not just one", () => {
-    for (const { token } of MIRO_STICKY_COLORS) {
+    for (const { token } of miroStickyColors()) {
       expect(readLocalItem({ type: "sticky_note", color: token })).toEqual({ type: "sticky_note", color: token });
     }
   });

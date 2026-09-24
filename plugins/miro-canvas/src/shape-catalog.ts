@@ -10,6 +10,7 @@
  * A flowchart symbol with no basic twin keeps its own entry and name.
  */
 
+import { words } from "./i18n";
 import type { LOCAL_SHAPE_KINDS } from "./source-model";
 
 export type ShapeKind = (typeof LOCAL_SHAPE_KINDS)[number];
@@ -90,7 +91,13 @@ export function shapeCatalogEntry(kind: string | undefined): ShapeCatalogEntry |
   return kind === undefined ? undefined : BY_KIND.get(kind);
 }
 
-/** The hover text of an entry: its name, then its flowchart meaning. */
+/**
+ * The hover text of an entry, in the language in use: its name, then its
+ * flowchart meaning.  `item.name`/`item.meaning` stay in English - they also
+ * back the local-shapes picker in `m2-tools.ts`, not yet translated - so the
+ * words table keeps its own copy, keyed by kind, of exactly this text.
+ */
 export function shapeCatalogLabel(item: ShapeCatalogEntry): string {
-  return item.meaning === undefined ? item.name : `${item.name}\n${item.meaning}`;
+  const translated = (words().shapes as Readonly<Record<string, string>>)[item.kind];
+  return translated ?? (item.meaning === undefined ? item.name : `${item.name}\n${item.meaning}`);
 }

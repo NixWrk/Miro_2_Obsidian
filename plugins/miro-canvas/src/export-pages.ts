@@ -9,6 +9,8 @@
  * panel, the capture and the tests all measure a page the same way.
  */
 
+import { words } from "./i18n";
+
 export const PAPER_FORMATS = ["a4", "a3", "letter", "16:9", "4:3", "free"] as const;
 export type PaperFormat = (typeof PAPER_FORMATS)[number];
 export type PaperOrientation = "landscape" | "portrait";
@@ -47,9 +49,10 @@ const PAPER_POINTS: Readonly<Record<Exclude<PaperFormat, "free">, readonly [numb
   "4:3": [540, 720],
 });
 
-export const PAPER_LABELS: Readonly<Record<PaperFormat, string>> = Object.freeze({
-  a4: "A4", a3: "A3", letter: "Letter", "16:9": "Slide 16:9", "4:3": "Slide 4:3", free: "Free size",
-});
+/** The name shown for a paper format, in the language in use. */
+export function paperLabels(): Readonly<Record<PaperFormat, string>> {
+  return words().export.paperLabels;
+}
 
 /** The most pages a board keeps, and the largest a page may be. */
 export const MAX_EXPORT_PAGES = 200;

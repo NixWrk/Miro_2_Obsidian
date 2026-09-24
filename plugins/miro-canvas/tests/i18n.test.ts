@@ -9,7 +9,11 @@ import { RU } from "../src/locales/ru";
  * Anything else equal to the English is a string someone forgot to
  * translate.
  */
-const SAME_IN_RUSSIAN = new Set<string>();
+const SAME_IN_RUSSIAN = new Set<string>([
+  "export.paperLabels.a4",
+  "export.paperLabels.a3",
+  "export.paperLabels.letter",
+]);
 
 type Table = { readonly [key: string]: unknown };
 

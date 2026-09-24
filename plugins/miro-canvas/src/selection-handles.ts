@@ -14,6 +14,7 @@
  * be exercised without a layout engine.
  */
 
+import { words } from "./i18n";
 import { contourPoint, shapeOutline } from "./shape-geometry";
 import { TOOLTIP_DELAY } from "./tooltips";
 
@@ -210,6 +211,15 @@ const SIDE_ARROWS: Readonly<Record<HandleSide, string>> = Object.freeze({
   top: "↑", right: "→", bottom: "↓", left: "←",
 });
 
+/** A connection point's hover text, in the language in use. */
+function connectHint(side: HandleSide): string {
+  const names = words().handles;
+  const hintOf: Readonly<Record<HandleSide, string>> = {
+    top: names.connectTop, right: names.connectRight, bottom: names.connectBottom, left: names.connectLeft,
+  };
+  return hintOf[side];
+}
+
 /** A point along one side of a rectangle, in the rectangle's own space. */
 export function sideAnchor(
   rect: HandleRect,
@@ -258,8 +268,10 @@ export function rightAngleStep(degrees: number, direction: 1 | -1): number {
   return normalizeAngle(target * 90);
 }
 
-/** The rotate grip's hover text: what it does and how it settles. */
-export const ROTATE_LABEL = "Rotate\nSettles on every 45°; hold Shift for 15° steps";
+/** The rotate grip's hover text, in the language in use: what it does and how it settles. */
+export function rotateLabel(): string {
+  return words().handles.rotate;
+}
 
 /** How close a turn must come to a multiple of 45 degrees to be drawn onto it. */
 export const MAGNET_REACH = 4;
@@ -424,7 +436,7 @@ export class SelectionHandles {
       ));
       grip.setAttribute("data-resize", handle);
       // A side explains itself by its cursor; a hint there would sit under the drag.
-      if (corner) grip.setAttribute("aria-label", "Drag to scale evenly; hold Shift to change both sides freely");
+      if (corner) grip.setAttribute("aria-label", words().handles.scaleCorner);
       this.listen(grip, "pointerdown", (event) => this.beginResize(handle, event));
       return grip;
     });
@@ -435,7 +447,7 @@ export class SelectionHandles {
           document,
           `miro-canvas-handle--connect miro-canvas-handle--${side}`,
           SIDE_ARROWS[side],
-          `Click to add a connected node ${side}, or drag to connect`,
+          connectHint(side),
         ));
         dot.setAttribute("data-handle-side", side);
         dot.setAttribute("data-handle-position", String(position));
@@ -450,11 +462,11 @@ export class SelectionHandles {
     // anticlockwise turn beside it.
     const rotateBar = root.appendChild(make(document, "div", "miro-canvas-handles__rotate-bar"));
     const turnOn = rotateBar.appendChild(makeGrip(
-      document, "miro-canvas-handle--turn miro-canvas-handle--turn-next", "↷", "Turn to the next right angle",
+      document, "miro-canvas-handle--turn miro-canvas-handle--turn-next", "↷", words().handles.turnNext,
     ));
-    const rotate = rotateBar.appendChild(makeGrip(document, "miro-canvas-handle--rotate", "↻", ROTATE_LABEL));
+    const rotate = rotateBar.appendChild(makeGrip(document, "miro-canvas-handle--rotate", "↻", rotateLabel()));
     const turnBack = rotateBar.appendChild(makeGrip(
-      document, "miro-canvas-handle--turn miro-canvas-handle--turn-back", "↶", "Turn to the previous right angle",
+      document, "miro-canvas-handle--turn miro-canvas-handle--turn-back", "↶", words().handles.turnBack,
     ));
     this.listen(rotate, "pointerdown", (event) => this.beginRotate(event));
     this.listen(turnBack, "click", () => this.turn(-1));
@@ -464,7 +476,7 @@ export class SelectionHandles {
         document,
         "miro-canvas-handle--endpoint",
         "",
-        "Drag to move this end anywhere on a node's outline",
+        words().handles.endAttach,
       ));
       grip.setAttribute("data-connector-end", which);
       grip.hidden = true;
@@ -583,10 +595,10 @@ export class SelectionHandles {
       for (const child of Array.from(layer.children ?? [])) child.remove?.();
       for (const grip of grips) {
         const title = grip.kind === "insert"
-          ? "Drag to bend the line here"
+          ? words().handles.routeInsert
           : grip.kind === "waypoint"
-            ? "Drag to move this bend; double-click to remove it"
-            : "Drag to move this segment; double-click to straighten the line";
+            ? words().handles.routeWaypoint
+            : words().handles.routeSegment;
         const element = layer.appendChild(makeGrip(this.document!, `miro-canvas-handle--route miro-canvas-handle--route-${grip.kind}`, "", title));
         element.setAttribute("data-route-grip", grip.kind);
         element.setAttribute("data-route-index", String(grip.index));
@@ -811,7 +823,7 @@ export class SelectionHandles {
       const grip = refs.ends[end];
       const at = state.endpoints?.[end];
       grip.hidden = !shown || at === undefined;
-      grip.setAttribute("aria-label", state.freeEnds === true ? "Drag to move this end" : "Drag to move this end anywhere on a node's outline");
+      grip.setAttribute("aria-label", state.freeEnds === true ? words().handles.endFree : words().handles.endAttach);
       if (at === undefined) continue;
       grip.style.left = `${at.x}px`;
       grip.style.top = `${at.y}px`;

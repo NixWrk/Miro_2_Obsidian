@@ -15,7 +15,7 @@
  */
 
 import {
-  PAPER_FORMATS, PAPER_LABELS, captureTiles, exportPixels, type ExportPageRecord, type ExportQuality, type ExportRect,
+  PAPER_FORMATS, captureTiles, exportPixels, paperLabels, type ExportPageRecord, type ExportQuality, type ExportRect,
   type ExportState, type PaperFormat, type PaperOrientation,
 } from "./export-pages";
 import { words } from "./i18n";
@@ -72,7 +72,7 @@ export class ExportPanel {
       const paper = this.row(root, words().export.paperLabel);
       const format = this.add(paper, "select", "dropdown") as HTMLSelectElement;
       for (const value of PAPER_FORMATS) {
-        const option = this.add(format, "option", "", PAPER_LABELS[value]) as HTMLOptionElement;
+        const option = this.add(format, "option", "", paperLabels()[value]) as HTMLOptionElement;
         option.value = value;
       }
       format.value = view.state.format;

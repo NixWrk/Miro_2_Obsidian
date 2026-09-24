@@ -1,5 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 
+import { setLocale } from "../src/i18n";
 import { QUICK_TOOLS, QUICK_TOOL_KEYS, QuickTools, type QuickTool } from "../src/quick-tools";
 
 class FakeElement {
@@ -280,5 +281,19 @@ describe("quick tools", () => {
     tools.dispose();
     toolButton(root, "select").dispatch("click");
     expect(calls).toEqual([]);
+  });
+});
+
+describe("quick tools in Russian", () => {
+  afterEach(() => setLocale("en"));
+
+  it("builds its tool names from the Russian word table", () => {
+    setLocale("ru");
+    const { root } = build();
+    expect(root.getAttribute("aria-label")).toBe("Инструменты доски");
+    expect(byLabel(root, "Ещё инструменты")).toBeDefined();
+    expect(byLabel(root, "Выделение\nV")).toBeDefined();
+    expect(byLabel(root, "Рамка\nF")).toBeDefined();
+    expect(byLabel(root, "Цвет новой линии")).toBeDefined();
   });
 });

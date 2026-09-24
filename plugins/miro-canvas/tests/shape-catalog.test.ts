@@ -1,5 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 
+import { setLocale } from "../src/i18n";
 import { SHAPE_CATALOG, shapeCatalogEntry, shapeCatalogLabel } from "../src/shape-catalog";
 import { shapePath } from "../src/shape-geometry";
 import { LOCAL_SHAPE_KINDS } from "../src/source-model";
@@ -46,5 +47,16 @@ describe("shape catalogue", () => {
     expect(shapeCatalogLabel(shapeCatalogEntry("star")!)).toBe("Star");
     expect(shapeCatalogEntry("not_a_shape")).toBeUndefined();
     expect(shapeCatalogEntry(undefined)).toBeUndefined();
+  });
+});
+
+describe("shape catalogue in Russian", () => {
+  afterEach(() => setLocale("en"));
+
+  it("names shapes and their flowchart meaning from the Russian word table", () => {
+    setLocale("ru");
+    expect(shapeCatalogLabel(shapeCatalogEntry("star")!)).toBe("Звезда");
+    const rhombus = shapeCatalogEntry("rhombus")!;
+    expect(shapeCatalogLabel(rhombus)).toBe("Ромб\nРешение: вопрос, разветвляющий поток");
   });
 });

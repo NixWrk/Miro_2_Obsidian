@@ -6,6 +6,7 @@
  * along +x, so one path serves both ends: SVG turns a start marker round.
  */
 
+import { words } from "./i18n";
 import { CONNECTOR_CAPS, CONNECTOR_ROUTES, CONNECTOR_STROKES } from "./source-model";
 
 export type ConnectorCap = (typeof CONNECTOR_CAPS)[number];
@@ -60,36 +61,20 @@ export function capReach(cap: string): number {
   return cap === "diamond" ? 12 : 0;
 }
 
-export const CAP_LABELS: Readonly<Record<ConnectorCap, string>> = Object.freeze({
-  none: "No end",
-  stealth: "Sharp arrow",
-  rounded_stealth: "Rounded arrow",
-  arrow: "Open arrow",
-  filled_triangle: "Filled triangle",
-  triangle: "Triangle",
-  filled_diamond: "Filled diamond",
-  diamond: "Diamond",
-  filled_oval: "Filled circle",
-  oval: "Circle",
-  erd_one: "One\nEntity relationship: one",
-  erd_many: "Many\nEntity relationship: many",
-  erd_one_or_many: "One or many\nEntity relationship: at least one",
-  erd_only_one: "Only one\nEntity relationship: exactly one",
-  erd_zero_or_many: "Zero or many\nEntity relationship: any number, possibly none",
-  erd_zero_or_one: "Zero or one\nEntity relationship: at most one",
-});
+/** A connector end's hover text, in the language in use. */
+export function capLabels(): Readonly<Record<ConnectorCap, string>> {
+  return words().connector.caps;
+}
 
-export const ROUTE_LABELS: Readonly<Record<ConnectorRoute, string>> = Object.freeze({
-  straight: "Straight line",
-  elbowed: "Elbowed line",
-  curved: "Curved line",
-});
+/** A connector route's hover text, in the language in use. */
+export function routeLabels(): Readonly<Record<ConnectorRoute, string>> {
+  return words().connector.routes;
+}
 
-export const STROKE_LABELS: Readonly<Record<ConnectorStroke, string>> = Object.freeze({
-  solid: "Solid line",
-  dashed: "Dashed line",
-  dotted: "Dotted line",
-});
+/** A connector stroke's hover text, in the language in use. */
+export function strokeLabels(): Readonly<Record<ConnectorStroke, string>> {
+  return words().connector.strokes;
+}
 
 /** Pictures of the three routes in a 24-unit box. */
 export const ROUTE_ICON_PATHS: Readonly<Record<ConnectorRoute, string>> = Object.freeze({

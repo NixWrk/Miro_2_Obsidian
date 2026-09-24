@@ -10,6 +10,7 @@
  */
 
 import { planRoute, type PlannedRoute } from "./connector-route";
+import { words } from "./i18n";
 import type { LineRoute, LocalLine } from "./local-items";
 import { validHeadSize } from "./connector-style";
 
@@ -27,8 +28,6 @@ export type LineKind = "line" | "arrow" | "elbow" | "block" | "curve" | "polylin
 
 export interface LineKindSpec {
   readonly kind: LineKind;
-  /** The hover text: the name, then how it is drawn when that is not obvious. */
-  readonly label: string;
   readonly route: LineRoute;
   readonly endCap?: string;
   readonly block?: true;
@@ -41,27 +40,26 @@ export interface LineKindSpec {
 }
 
 export const LINE_KINDS: readonly LineKindSpec[] = Object.freeze([
-  { kind: "line", label: "Line\nHold Shift to keep it level, upright or at 45°", route: "straight", input: "drag", icon: "M4 20L20 4" },
-  { kind: "arrow", label: "Arrow", route: "straight", endCap: "stealth", input: "drag", icon: "M4 20L20 4M11 4H20V13" },
-  { kind: "elbow", label: "Elbow arrow", route: "elbowed", endCap: "stealth", input: "drag", icon: "M4 19H12V5H20M16 1L20 5L16 9" },
+  { kind: "line", route: "straight", input: "drag", icon: "M4 20L20 4" },
+  { kind: "arrow", route: "straight", endCap: "stealth", input: "drag", icon: "M4 20L20 4M11 4H20V13" },
+  { kind: "elbow", route: "elbowed", endCap: "stealth", input: "drag", icon: "M4 19H12V5H20M16 1L20 5L16 9" },
   {
-    kind: "block", label: "Block arrow", route: "straight", block: true, width: 16, input: "drag",
+    kind: "block", route: "straight", block: true, width: 16, input: "drag",
     icon: "M3 17.5L14 10.5L13 8L21 7L17 14.5L15.5 12.3L4 19.5Z",
   },
-  { kind: "curve", label: "Curve", route: "curved", input: "drag", icon: "M4 19C14 19 10 5 20 5" },
-  {
-    kind: "polyline", label: "Polyline\nClick at each corner; double-click or Enter to finish",
-    route: "straight", input: "points", icon: "M3 19L9 7L15 15L21 5",
-  },
-  {
-    kind: "spline", label: "Spline\nClick at each point it passes; double-click or Enter to finish",
-    route: "curved", input: "points", icon: "M3 18C5 6 10 5 12 12S19 19 21 6",
-  },
+  { kind: "curve", route: "curved", input: "drag", icon: "M4 19C14 19 10 5 20 5" },
+  { kind: "polyline", route: "straight", input: "points", icon: "M3 19L9 7L15 15L21 5" },
+  { kind: "spline", route: "curved", input: "points", icon: "M3 18C5 6 10 5 12 12S19 19 21 6" },
 ] satisfies LineKindSpec[]);
 
 /** The spec of a line kind, or undefined for anything else the shape tool makes. */
 export function lineKind(kind: string | undefined): LineKindSpec | undefined {
   return LINE_KINDS.find((spec) => spec.kind === kind);
+}
+
+/** A line kind's hover text, in the language in use: the name, then how it is drawn when that is not obvious. */
+export function lineLabel(kind: LineKind): string {
+  return words().tools.lines[kind];
 }
 
 /**

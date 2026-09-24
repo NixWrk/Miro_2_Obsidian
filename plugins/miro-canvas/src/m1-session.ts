@@ -134,7 +134,7 @@ import {
 } from "./connector-endpoints";
 import { normalizeAnchor, resolveAnchor, type AnchorGeometry, type CanvasAnchor } from "./anchors";
 import { shapeOutline } from "./shape-geometry";
-import { FRAME_COLORS, MIRO_STICKY_COLORS, readableInk } from "./miro-palette";
+import { frameColors, miroStickyColors, readableInk } from "./miro-palette";
 import { highlightText, isHtmlText, markSelection, unhighlightText } from "./text-highlight";
 import {
 	CANVAS_CLIPBOARD_TYPE, CLIPBOARD_TYPE, clipboardText, linkedFilePaths, planPaste, readCanvasClipboard, readClipboardRecord,
@@ -183,12 +183,19 @@ export interface M1SessionSnapshot {
 
 type UnknownRecord = Record<string, unknown>;
 
-const STICKY_PALETTE: readonly PaletteColor[] = Object.freeze(MIRO_STICKY_COLORS.map((entry) => Object.freeze({
-	id: `miro-sticky-${entry.token}`, label: entry.label, color: entry.color, source: "miro" as const,
-})));
-const FRAME_PALETTE: readonly PaletteColor[] = Object.freeze(FRAME_COLORS.map((entry) => Object.freeze({
-	id: `miro-${entry.token}`, label: entry.label, color: entry.color, source: "miro" as const,
-})));
+/** A sticky note's fill choices, named in the language in use; built fresh so a language change on reload picks them up. */
+function stickyPalette(): readonly PaletteColor[] {
+	return Object.freeze(miroStickyColors().map((entry) => Object.freeze({
+		id: `miro-sticky-${entry.token}`, label: entry.label, color: entry.color, source: "miro" as const,
+	})));
+}
+
+/** A frame's fill choices, named in the language in use. */
+function framePalette(): readonly PaletteColor[] {
+	return Object.freeze(frameColors().map((entry) => Object.freeze({
+		id: `miro-${entry.token}`, label: entry.label, color: entry.color, source: "miro" as const,
+	})));
+}
 /** Miro's highlighter is a wider, see-through pen. */
 const HIGHLIGHTER_OPACITY = 0.4;
 const HIGHLIGHTER_SCALE = 3;
@@ -4622,9 +4629,9 @@ export class M1CanvasSession {
 			colors: presentation.colors,
 			palette: this.appearance.settings.palette,
 			// A note is filled from Miro's own sticky colours, as Miro offers them.
-			...(kinds.length > 0 && kinds.every((kind) => kind === "sticky") ? { fillPalette: STICKY_PALETTE } : {}),
+			...(kinds.length > 0 && kinds.every((kind) => kind === "sticky") ? { fillPalette: stickyPalette() } : {}),
 			// A frame takes quieter, see-through fills, so its items stay the thing seen.
-			...(kinds.length > 0 && kinds.every((kind) => kind === "frame") ? { fillPalette: FRAME_PALETTE } : {}),
+			...(kinds.length > 0 && kinds.every((kind) => kind === "frame") ? { fillPalette: framePalette() } : {}),
 			recentColors: this.appearance.settings.recentColors,
 			...presentation.style,
 			// One of the board's own connectors shows its own record's style.

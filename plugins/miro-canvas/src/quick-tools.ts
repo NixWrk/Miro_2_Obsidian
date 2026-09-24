@@ -6,9 +6,10 @@
  * its button or its letter and used once on the board; the host owns the
  * gesture and the creation.
  */
+import { words } from "./i18n";
 import { SHAPE_CATALOG, shapeCatalogEntry, shapeCatalogLabel } from "./shape-catalog";
 import { shapePicture } from "./selection-toolbar";
-import { LINE_KINDS, lineKind, type LineKindSpec } from "./free-line";
+import { LINE_KINDS, lineKind, lineLabel, type LineKindSpec } from "./free-line";
 import { validHeadSize } from "./connector-style";
 import { BAR_TOOLTIP_DELAY, PICTURE_TOOLTIP_DELAY } from "./tooltips";
 
@@ -18,33 +19,62 @@ export const QUICK_TOOLS = [
 ] as const;
 export type QuickTool = (typeof QUICK_TOOLS)[number];
 
-interface ToolSpec {
+interface ToolIconSpec {
   readonly tool: QuickTool;
-  readonly label: string;
   readonly icon: string;
   readonly glyph: string;
   /** The key that arms the tool, as Miro binds it. */
   readonly key?: string;
 }
 
-const BAR_TOOLS: readonly ToolSpec[] = [
-  { tool: "select", label: "Select", icon: "mouse-pointer-2", glyph: "↖", key: "V" },
+interface ToolSpec extends ToolIconSpec {
+  readonly label: string;
+}
+
+const BAR_TOOL_ICONS: readonly ToolIconSpec[] = [
+  { tool: "select", icon: "mouse-pointer-2", glyph: "↖", key: "V" },
   // Next to Select: it is a way of selecting large parts of a board.
-  { tool: "lasso", label: "Lasso", icon: "lasso", glyph: "◌" },
-  { tool: "text", label: "Text", icon: "type", glyph: "T", key: "T" },
-  { tool: "sticky", label: "Sticky note", icon: "sticky-note", glyph: "▢", key: "N" },
-  { tool: "shape", label: "Shape", icon: "shapes", glyph: "◇", key: "S" },
-  { tool: "pen", label: "Pen", icon: "pen", glyph: "✎", key: "P" },
-  { tool: "connector", label: "Lines and arrows", icon: "move-up-right", glyph: "↗", key: "L" },
-  { tool: "comment", label: "Comment", icon: "message-circle", glyph: "💬", key: "C" },
-  { tool: "frame", label: "Frame", icon: "frame", glyph: "#", key: "F" },
+  { tool: "lasso", icon: "lasso", glyph: "◌" },
+  { tool: "text", icon: "type", glyph: "T", key: "T" },
+  { tool: "sticky", icon: "sticky-note", glyph: "▢", key: "N" },
+  { tool: "shape", icon: "shapes", glyph: "◇", key: "S" },
+  { tool: "pen", icon: "pen", glyph: "✎", key: "P" },
+  { tool: "connector", icon: "move-up-right", glyph: "↗", key: "L" },
+  { tool: "comment", icon: "message-circle", glyph: "💬", key: "C" },
+  { tool: "frame", icon: "frame", glyph: "#", key: "F" },
 ];
 
-const MORE_TOOLS: readonly ToolSpec[] = [
-  { tool: "code", label: "Code block", icon: "code-xml", glyph: "</>" },
-  { tool: "table", label: "Grid", icon: "table", glyph: "▦" },
-  { tool: "link", label: "Web link", icon: "link", glyph: "🔗" },
+const MORE_TOOL_ICONS: readonly ToolIconSpec[] = [
+  { tool: "code", icon: "code-xml", glyph: "</>" },
+  { tool: "table", icon: "table", glyph: "▦" },
+  { tool: "link", icon: "link", glyph: "🔗" },
 ];
+
+/** A tool's name, in the language in use. */
+function toolLabel(tool: QuickTool): string {
+  const names = words().tools;
+  const labelOf: Readonly<Record<QuickTool, string>> = {
+    select: names.select, lasso: names.lasso, text: names.text, sticky: names.sticky, shape: names.shape,
+    pen: names.pen, highlighter: names.highlighter, smart: names.smartDrawing, eraser: names.eraser,
+    "erase-part": names.precisionEraser, connector: names.connector, comment: names.comment, frame: names.frame,
+    code: names.codeBlock, table: names.grid, link: names.webLink,
+  };
+  return labelOf[tool];
+}
+
+function withLabels(specs: readonly ToolIconSpec[]): readonly ToolSpec[] {
+  return specs.map((spec) => ({ ...spec, label: toolLabel(spec.tool) }));
+}
+
+/** The creation bar's own tools, with their names in the language in use. */
+function barTools(): readonly ToolSpec[] {
+  return withLabels(BAR_TOOL_ICONS);
+}
+
+/** The "more" menu's tools, with their names in the language in use. */
+function moreTools(): readonly ToolSpec[] {
+  return withLabels(MORE_TOOL_ICONS);
+}
 
 export interface QuickToolsState {
   readonly connectorColor?: string;
@@ -77,13 +107,18 @@ export const PEN_COLORS = ["#1a1a1a", "#ffffff", "#f24726", "#ff9d48", "#ffd02f"
 export const PEN_WIDTH_RANGE = { min: 1, max: 60 } as const;
 export const ERASER_SIZE_RANGE = { min: 8, max: 200 } as const;
 
-const DRAWING_TOOLS: readonly ToolSpec[] = [
-  { tool: "pen", label: "Pen", icon: "pen", glyph: "✎" },
-  { tool: "highlighter", label: "Highlighter", icon: "highlighter", glyph: "▨" },
-  { tool: "smart", label: "Smart drawing", icon: "wand-2", glyph: "✧" },
-  { tool: "eraser", label: "Eraser", icon: "eraser", glyph: "⌫" },
-  { tool: "erase-part", label: "Precision eraser", icon: "scissors", glyph: "✁" },
+const DRAWING_TOOL_ICONS: readonly ToolIconSpec[] = [
+  { tool: "pen", icon: "pen", glyph: "✎" },
+  { tool: "highlighter", icon: "highlighter", glyph: "▨" },
+  { tool: "smart", icon: "wand-2", glyph: "✧" },
+  { tool: "eraser", icon: "eraser", glyph: "⌫" },
+  { tool: "erase-part", icon: "scissors", glyph: "✁" },
 ];
+
+/** The pen's own row of tools, with their names in the language in use. */
+function drawingTools(): readonly ToolSpec[] {
+  return withLabels(DRAWING_TOOL_ICONS);
+}
 
 /** A line kind's picture: its course, and a block arrow filled. */
 function linePicture(document: Document, spec: LineKindSpec): SVGSVGElement | undefined {
@@ -104,7 +139,7 @@ const MAX_PREVIEW = 28;
 
 /** Whether a tool is one of the pen's, which keep their panel open while armed. */
 export function isDrawingTool(tool: QuickTool): boolean {
-  return DRAWING_TOOLS.some((spec) => spec.tool === tool);
+  return DRAWING_TOOL_ICONS.some((spec) => spec.tool === tool);
 }
 
 function isEraser(tool: QuickTool): boolean {
@@ -118,7 +153,7 @@ export interface QuickToolsOptions {
 
 /** The letter each tool answers to. */
 export const QUICK_TOOL_KEYS: ReadonlyMap<string, QuickTool> = new Map(
-  BAR_TOOLS.filter((spec) => spec.key !== undefined).map((spec) => [spec.key!, spec.tool]),
+  BAR_TOOL_ICONS.filter((spec) => spec.key !== undefined).map((spec) => [spec.key!, spec.tool]),
 );
 
 export class QuickTools {
@@ -159,7 +194,7 @@ export class QuickTools {
     this.connectorBar.hidden = true;
     for(const line of [...LINE_KINDS].sort((a,b)=>Number(!!b.endCap||!!b.block)-Number(!!a.endCap||!!a.block))) {
       const button=this.connectorBar.appendChild(this.make("button","miro-canvas-toolbar__button"));
-      button.type="button";button.setAttribute("aria-label",line.label);button.setAttribute("data-shape",line.kind);
+      button.type="button";button.setAttribute("aria-label",lineLabel(line.kind));button.setAttribute("data-shape",line.kind);
       const picture=linePicture(document,line);if(picture)button.appendChild(picture);else button.textContent=line.kind;
       this.shapeButtons.set(line.kind,button);
       this.listen(button,"click",()=>{this.actions.onShape(line.kind);this.actions.onArm("connector");this.closePanels();});
@@ -172,34 +207,34 @@ export class QuickTools {
       this.listen(option,"click",()=>this.actions.onConnector?.({color}));this.connectorColors.set(color,option);
     }
     this.connectorColor=connectorColors.appendChild(this.make("input","miro-canvas-toolbar__swatch"));
-    this.connectorColor.type="color";this.connectorColor.setAttribute("aria-label","New connector color");
+    this.connectorColor.type="color";this.connectorColor.setAttribute("aria-label",words().tools.newConnectorColor);
     this.listen(this.connectorColor,"input",()=>this.actions.onConnector?.({color:this.connectorColor.value}));
     const connectorSize=this.connectorBar.appendChild(this.make("span","miro-canvas-tools__size"));
     this.connectorPreview=connectorSize.appendChild(this.make("span","miro-canvas-tools__preview"));
     this.connectorPreview.setAttribute("aria-hidden","true");this.connectorPreview.setAttribute("data-kind","pen");
     this.connectorRange=connectorSize.appendChild(this.make("input","miro-canvas-toolbar__range"));
     this.connectorRange.type="range";this.connectorRange.min="1";this.connectorRange.max=String(PEN_WIDTH_RANGE.max);this.connectorRange.step="1";
-    this.connectorRange.setAttribute("aria-label","New connector width slider");
+    this.connectorRange.setAttribute("aria-label",words().tools.newConnectorWidthSlider);
     this.listen(this.connectorRange,"input",()=>this.actions.onConnector?.({width:Number(this.connectorRange.value)}));
     this.connectorWidth=connectorSize.appendChild(this.make("input","miro-canvas-toolbar__number miro-canvas-tools__number"));
-    this.connectorWidth.type="number";this.connectorWidth.min="1";this.connectorWidth.max="1000";this.connectorWidth.setAttribute("aria-label","New connector width");
+    this.connectorWidth.type="number";this.connectorWidth.min="1";this.connectorWidth.max="1000";this.connectorWidth.setAttribute("aria-label",words().tools.newConnectorWidth);
     this.listen(this.connectorWidth,"change",()=>{const width=Number(this.connectorWidth.value);if(Number.isFinite(width)&&width>=1&&width<=1000)this.actions.onConnector?.({width});});
     this.connectorHeadSize=connectorSize.appendChild(this.make("input","miro-canvas-toolbar__number miro-canvas-tools__number"));
     this.connectorHeadSize.type="number";this.connectorHeadSize.min="1";this.connectorHeadSize.max="1000";this.connectorHeadSize.step="any";
-    this.connectorHeadSize.placeholder="Auto";this.connectorHeadSize.setAttribute("aria-label","New connector arrowhead size");
-    this.connectorHeadSize.title="Arrowhead size in board units";
+    this.connectorHeadSize.placeholder=words().toolbar.auto;this.connectorHeadSize.setAttribute("aria-label",words().tools.newConnectorHeadSize);
+    this.connectorHeadSize.title=words().tools.arrowheadSizeHint;
     this.listen(this.connectorHeadSize,"change",()=>{
       const headSize=Number(this.connectorHeadSize.value);
       if(!this.connectorHeadSize.disabled && validHeadSize(headSize))this.actions.onConnector?.({headSize});
     });
     root.setAttribute("role", "toolbar");
-    root.setAttribute("aria-label", "Board tools");
+    root.setAttribute("aria-label", words().tools.ariaLabel);
     // Miro keeps the pen, the highlighter, smart drawing, the erasers and the
     // colour and size of the line in a row of their own, which stays open
     // while any of them is in use, so a colour or a size is one press away.
     const drawingBar = root.appendChild(this.make("div", "miro-canvas-toolbar__bar miro-canvas-tools__drawing"));
     drawingBar.hidden = true;
-    for (const drawing of DRAWING_TOOLS) drawingBar.appendChild(this.toolButton(drawing));
+    for (const drawing of drawingTools()) drawingBar.appendChild(this.toolButton(drawing));
     const colors = drawingBar.appendChild(this.make("span", "miro-canvas-tools__swatches"));
     for (const color of PEN_COLORS) {
       const option = colors.appendChild(this.make("button", "miro-canvas-toolbar__button miro-canvas-toolbar__button--swatch"));
@@ -213,7 +248,7 @@ export class QuickTools {
     }
     this.penColor = colors.appendChild(this.make("input", "miro-canvas-toolbar__swatch"));
     this.penColor.type = "color";
-    this.penColor.setAttribute("aria-label", "New drawing color");
+    this.penColor.setAttribute("aria-label", words().tools.newDrawingColor);
     this.listen(this.penColor, "input", () => this.actions.onPen({color: this.penColor.value}));
     // The size: a sample of it, a slider that acts as it moves, and the exact
     // number, which can be typed.
@@ -223,11 +258,11 @@ export class QuickTools {
     const sizeInput = size.appendChild(this.make("input", "miro-canvas-toolbar__range"));
     sizeInput.type = "range";
     sizeInput.step = "1";
-    sizeInput.setAttribute("aria-label", "Line width");
+    sizeInput.setAttribute("aria-label", words().tools.lineWidth);
     const sizeNumber = size.appendChild(this.make("input", "miro-canvas-toolbar__number miro-canvas-tools__number"));
     sizeNumber.type = "number";
     sizeNumber.step = "1";
-    sizeNumber.setAttribute("aria-label", "Line width in points");
+    sizeNumber.setAttribute("aria-label", words().tools.lineWidthPoints);
     const apply = (raw: string): void => {
       const range = isEraser(this.armed) ? ERASER_SIZE_RANGE : PEN_WIDTH_RANGE;
       const value = Number(raw);
@@ -249,7 +284,7 @@ export class QuickTools {
     this.sizeNumber = sizeNumber;
     this.sizePreview = sizePreview;
     const bar = root.appendChild(this.make("div", "miro-canvas-toolbar__bar"));
-    for (const spec of BAR_TOOLS) {
+    for (const spec of barTools()) {
       if (spec.tool === "shape") {
         const host = bar.appendChild(this.make("span", "miro-canvas-toolbar__popover"));
         const button = host.appendChild(this.toolButton(spec));
@@ -278,7 +313,7 @@ export class QuickTools {
           panel.appendChild(this.make("div", "miro-canvas-toolbar__heading", title));
           return panel.appendChild(this.make("div", "miro-canvas-toolbar__pictures miro-canvas-toolbar__pictures--shapes"));
         };
-        for (const [part, title] of [["basic", "Basic"], ["flowchart", "Flowchart"]] as const) {
+        for (const [part, title] of [["basic", words().toolbar.basic], ["flowchart", words().toolbar.flowchart]] as const) {
           const grid = section(title);
           for (const entry of SHAPE_CATALOG.filter((item) => item.section === part)) {
             option(grid, entry.kind, shapeCatalogLabel(entry), shapePicture(document, entry), entry.name);
@@ -298,9 +333,9 @@ export class QuickTools {
       bar.appendChild(this.toolButton(spec));
     }
     const moreHost = bar.appendChild(this.make("span", "miro-canvas-toolbar__popover miro-canvas-tools__more"));
-    const more = moreHost.appendChild(this.iconButton("More tools", "plus", "+"));
+    const more = moreHost.appendChild(this.iconButton(words().tools.more, "plus", "+"));
     const morePanel = moreHost.appendChild(this.panel(more, "miro-canvas-tools__menu"));
-    for (const spec of MORE_TOOLS) {
+    for (const spec of moreTools()) {
       const item = morePanel.appendChild(this.toolButton(spec, true));
       this.listen(item, "click", () => this.closePanels());
     }
@@ -361,8 +396,8 @@ export class QuickTools {
         input.max = String(range.max);
         if (input.value !== String(value) && this.document.activeElement !== input) input.value = String(value);
       }
-      this.sizeInput.setAttribute("aria-label", erasing ? "Eraser size" : "Line width");
-      this.sizeNumber.setAttribute("aria-label", erasing ? "Eraser size in pixels" : "Line width in points");
+      this.sizeInput.setAttribute("aria-label", erasing ? words().tools.eraserSize : words().tools.lineWidth);
+      this.sizeNumber.setAttribute("aria-label", erasing ? words().tools.eraserSizePixels : words().tools.lineWidthPoints);
     }
     if (this.sizePreview !== undefined) {
       // The sample is drawn at its true size up to the room the row has.

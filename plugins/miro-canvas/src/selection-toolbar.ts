@@ -26,15 +26,15 @@ import {
   type VerticalAlign,
 } from "./appearance";
 import {
-  CAP_LABELS,
   CAP_PATHS,
   ROUTE_ICON_PATHS,
-  ROUTE_LABELS,
-  STROKE_LABELS,
   capFilled,
+  capLabels,
   capReach,
   validHeadSize,
+  routeLabels,
   strokeDash,
+  strokeLabels,
   type ConnectorCap,
   type ConnectorRoute,
   type ConnectorStroke,
@@ -135,62 +135,108 @@ const FONT_FAMILIES = [
   "Open Sans", "Inter", "Roboto", "Noto Sans", "Arial", "Georgia",
   "Times New Roman", "Courier New", "system-ui", "sans-serif",
 ] as const;
-const ALIGNMENTS: readonly { readonly value: TextAlignment; readonly icon: string; readonly label: string }[] = [
-  { value: "left", icon: "align-left", label: "Align left" },
-  { value: "center", icon: "align-center", label: "Align center" },
-  { value: "right", icon: "align-right", label: "Align right" },
-  { value: "justify", icon: "align-justify", label: "Justify" },
+/** Icon and value only; `alignments()` adds the label in the language in use. */
+const ALIGNMENT_ICONS: readonly { readonly value: TextAlignment; readonly icon: string }[] = [
+  { value: "left", icon: "align-left" },
+  { value: "center", icon: "align-center" },
+  { value: "right", icon: "align-right" },
+  { value: "justify", icon: "align-justify" },
 ];
-const VERTICAL_ALIGNMENTS: readonly { readonly value: VerticalAlign; readonly icon: string; readonly label: string }[] = [
-  { value: "top", icon: "align-vertical-justify-start", label: "Align top" },
-  { value: "center", icon: "align-vertical-justify-center", label: "Align middle" },
-  { value: "bottom", icon: "align-vertical-justify-end", label: "Align bottom" },
+const VERTICAL_ALIGNMENT_ICONS: readonly { readonly value: VerticalAlign; readonly icon: string }[] = [
+  { value: "top", icon: "align-vertical-justify-start" },
+  { value: "center", icon: "align-vertical-justify-center" },
+  { value: "bottom", icon: "align-vertical-justify-end" },
 ];
-const FORMATS: readonly {
+const FORMAT_ICONS: readonly {
+  readonly format: "bold" | "italic" | "underline" | "strike";
+  readonly icon: string;
+  readonly glyph: string;
+}[] = [
+  { format: "bold", icon: "bold", glyph: "B" },
+  { format: "italic", icon: "italic", glyph: "I" },
+  { format: "underline", icon: "underline", glyph: "U" },
+  { format: "strike", icon: "strikethrough", glyph: "S" },
+];
+const BORDER_STYLE_VALUES: readonly BorderStyle[] = ["solid", "dashed", "dotted", "none"];
+const SHAPE_SECTION_ORDER: readonly ShapeSection[] = ["basic", "flowchart"];
+const SVG_NS = "http://www.w3.org/2000/svg";
+
+/** The four alignment choices, with their names in the language in use. */
+function alignmentChoices(): readonly { readonly value: TextAlignment; readonly icon: string; readonly label: string }[] {
+  const names = words().toolbar;
+  const labelOf: Readonly<Record<TextAlignment, string>> = {
+    left: names.alignLeft, center: names.alignCenter, right: names.alignRight, justify: names.justify,
+  };
+  return ALIGNMENT_ICONS.map(({ value, icon }) => ({ value, icon, label: labelOf[value] }));
+}
+
+function verticalAlignmentChoices(): readonly { readonly value: VerticalAlign; readonly icon: string; readonly label: string }[] {
+  const names = words().toolbar;
+  const labelOf: Readonly<Record<VerticalAlign, string>> = {
+    top: names.alignTop, center: names.alignMiddle, bottom: names.alignBottom,
+  };
+  return VERTICAL_ALIGNMENT_ICONS.map(({ value, icon }) => ({ value, icon, label: labelOf[value] }));
+}
+
+function formatChoices(): readonly {
   readonly format: "bold" | "italic" | "underline" | "strike";
   readonly icon: string;
   readonly glyph: string;
   readonly label: string;
-}[] = [
-  { format: "bold", icon: "bold", glyph: "B", label: "Bold" },
-  { format: "italic", icon: "italic", glyph: "I", label: "Italic" },
-  { format: "underline", icon: "underline", glyph: "U", label: "Underline" },
-  { format: "strike", icon: "strikethrough", glyph: "S", label: "Strikethrough" },
-];
-const BORDER_STYLES: readonly { readonly value: BorderStyle; readonly label: string }[] = [
-  { value: "solid", label: "Solid border" },
-  { value: "dashed", label: "Dashed border" },
-  { value: "dotted", label: "Dotted border" },
-  { value: "none", label: "No border" },
-];
-const SHAPE_SECTIONS: readonly { readonly section: ShapeSection; readonly title: string }[] = [
-  { section: "basic", title: "Basic" },
-  { section: "flowchart", title: "Flowchart" },
-];
-const SVG_NS = "http://www.w3.org/2000/svg";
+}[] {
+  const names = words().toolbar;
+  const labelOf: Readonly<Record<"bold" | "italic" | "underline" | "strike", string>> = {
+    bold: names.bold, italic: names.italic, underline: names.underline, strike: names.strikethrough,
+  };
+  return FORMAT_ICONS.map(({ format, icon, glyph }) => ({ format, icon, glyph, label: labelOf[format] }));
+}
+
+function borderStyleChoices(): readonly { readonly value: BorderStyle; readonly label: string }[] {
+  const names = words().toolbar;
+  const labelOf: Readonly<Record<BorderStyle, string>> = {
+    solid: names.solidBorder, dashed: names.dashedBorder, dotted: names.dottedBorder, none: names.noBorder,
+  };
+  return BORDER_STYLE_VALUES.map((value) => ({ value, label: labelOf[value] }));
+}
+
+function shapeSections(): readonly { readonly section: ShapeSection; readonly title: string }[] {
+  const names = words().toolbar;
+  const titleOf: Readonly<Record<ShapeSection, string>> = { basic: names.basic, flowchart: names.flowchart };
+  return SHAPE_SECTION_ORDER.map((section) => ({ section, title: titleOf[section] }));
+}
 
 /** Colour popovers: which appearance slot each one writes and how its button looks. */
-const COLOR_SLOTS: readonly {
+function colorSlots(): readonly {
   readonly slot: ColorSlot;
   readonly label: string;
   readonly valueLabel: string;
   readonly look: "text" | "fill" | "ring" | "highlight";
   readonly forEdge: boolean;
-}[] = [
-  { slot: "text", label: "Text color", valueLabel: "Text color", look: "text", forEdge: false },
-  { slot: "highlight", label: "Highlight", valueLabel: "Highlight color", look: "highlight", forEdge: false },
-  { slot: "fill", label: "Fill color", valueLabel: "Fill color", look: "fill", forEdge: false },
-  { slot: "border", label: "Border", valueLabel: "Border color", look: "ring", forEdge: false },
-  { slot: "edge", label: "Line color", valueLabel: "Line color", look: "fill", forEdge: true },
-];
+}[] {
+  const names = words().toolbar;
+  return [
+    { slot: "text", label: names.textColor, valueLabel: names.textColor, look: "text", forEdge: false },
+    { slot: "highlight", label: names.highlight, valueLabel: names.highlightColor, look: "highlight", forEdge: false },
+    { slot: "fill", label: names.fillColor, valueLabel: names.fillColor, look: "fill", forEdge: false },
+    { slot: "border", label: names.border, valueLabel: names.borderColor, look: "ring", forEdge: false },
+    { slot: "edge", label: names.lineColor, valueLabel: names.lineColor, look: "fill", forEdge: true },
+  ];
+}
+/** The colour slots, for the places that only need the slot itself, not its label. */
+const COLOR_SLOT_KEYS: readonly ColorSlot[] = ["text", "highlight", "fill", "border", "edge"];
+/** Which slots belong to a connector rather than a node. */
+const EDGE_COLOR_SLOTS: ReadonlySet<ColorSlot> = new Set<ColorSlot>(["edge"]);
 /** Transparent text or a transparent line only hides the element; a fill, a border or a highlight may go. */
 const TRANSPARENT_SLOTS: ReadonlySet<ColorSlot> = new Set<ColorSlot>(["fill", "border", "highlight"]);
-/** Marker colours, light enough for text of any colour to read on. */
-const HIGHLIGHT_PALETTE: readonly PaletteColor[] = Object.freeze([
-  ["yellow", "Yellow", "#fff59d"], ["orange", "Orange", "#ffd59a"], ["red", "Red", "#ffb4a2"],
-  ["pink", "Pink", "#f8c4dc"], ["violet", "Violet", "#d9ccf0"], ["blue", "Blue", "#bfe3fb"],
-  ["cyan", "Cyan", "#b8ecf0"], ["green", "Green", "#cde8b0"], ["lime", "Lime", "#e8f0a4"], ["gray", "Gray", "#e3e3e3"],
-].map(([id, label, color]) => Object.freeze({ id: `highlight-${id!}`, label: label!, color: color!, source: "miro" as const })));
+/** Marker colours, light enough for text of any colour to read on; named in the language in use. */
+function highlightPalette(): readonly PaletteColor[] {
+  const names = words().palette.highlight;
+  return [
+    ["yellow", names.yellow, "#fff59d"], ["orange", names.orange, "#ffd59a"], ["red", names.red, "#ffb4a2"],
+    ["pink", names.pink, "#f8c4dc"], ["violet", names.violet, "#d9ccf0"], ["blue", names.blue, "#bfe3fb"],
+    ["cyan", names.cyan, "#b8ecf0"], ["green", names.green, "#cde8b0"], ["lime", names.lime, "#e8f0a4"], ["gray", names.gray, "#e3e3e3"],
+  ].map(([id, label, color]) => Object.freeze({ id: `highlight-${id!}`, label: label!, color: color!, source: "miro" as const }));
+}
 
 function hasDocument(value: unknown): value is Document {
   return value !== null && typeof value === "object"
@@ -449,7 +495,7 @@ export class SelectionToolbar {
     }
     const root = make(this.document, "div", options.className ?? "miro-canvas-toolbar");
     root.setAttribute("role", "toolbar");
-    root.setAttribute("aria-label", options.title ?? "Selected element formatting");
+    root.setAttribute("aria-label", options.title ?? words().toolbar.ariaLabel);
     root.setAttribute("data-miro-canvas-toolbar", "true");
     root.hidden = true;
     this.element = root;
@@ -534,11 +580,11 @@ export class SelectionToolbar {
     const bar = append(root, make(document, "div", "miro-canvas-toolbar__bar"));
 
     // A node's shape: pictures only, every picture once.
-    const shape = this.makePopover(bar, "Shape", "miro-canvas-toolbar__button--shape");
+    const shape = this.makePopover(bar, words().toolbar.shape, "miro-canvas-toolbar__button--shape");
     shape.panel.className = `${shape.panel.className} miro-canvas-toolbar__panel--shapes`;
     showPicture(shape.button, SHAPE_CATALOG[0]!.kind, () => shapePicture(document, SHAPE_CATALOG[0]!), "▭");
     const shapeOptions: Record<string, HTMLButtonElement> = {};
-    for (const { section, title } of SHAPE_SECTIONS) {
+    for (const { section, title } of shapeSections()) {
       const grid = this.block(shape.panel, title, "miro-canvas-toolbar__pictures miro-canvas-toolbar__pictures--shapes");
       const items = SHAPE_CATALOG.filter((entry) => entry.section === section);
       const buttons = this.choices(
@@ -554,7 +600,7 @@ export class SelectionToolbar {
 
     // A node's text: family and size, then how the text is set.
     const textGroup = append(bar, make(document, "span", "miro-canvas-toolbar__group"));
-    const font = this.makePopover(textGroup, "Font", "miro-canvas-toolbar__button--font");
+    const font = this.makePopover(textGroup, words().toolbar.font, "miro-canvas-toolbar__button--font");
     const fontList = this.block(font.panel, undefined, "miro-canvas-toolbar__list");
     const fontOptions = FONT_FAMILIES.map((family) => {
       const option = append(fontList, makeChoice(document, family, family, "miro-canvas-toolbar__button--font-option"));
@@ -564,76 +610,76 @@ export class SelectionToolbar {
       return option;
     });
     const stepper = append(textGroup, make(document, "span", "miro-canvas-toolbar__stepper"));
-    const fontSize = append(stepper, makeNumber(document, "Font size", MIN_FONT_SIZE, MAX_FONT_SIZE));
+    const fontSize = append(stepper, makeNumber(document, words().toolbar.fontSize, MIN_FONT_SIZE, MAX_FONT_SIZE));
     const steps = append(stepper, make(document, "span", "miro-canvas-toolbar__stepper-buttons"));
-    const fontSizeUp = append(steps, makeButton(document, "Increase font size", "miro-canvas-toolbar__button--step"));
-    const fontSizeDown = append(steps, makeButton(document, "Decrease font size", "miro-canvas-toolbar__button--step"));
+    const fontSizeUp = append(steps, makeButton(document, words().toolbar.increaseFontSize, "miro-canvas-toolbar__button--step"));
+    const fontSizeDown = append(steps, makeButton(document, words().toolbar.decreaseFontSize, "miro-canvas-toolbar__button--step"));
     this.icon(fontSizeUp, "chevron-up", "⌃");
     this.icon(fontSizeDown, "chevron-down", "⌄");
 
-    const format = this.makePopover(textGroup, "Text style");
+    const format = this.makePopover(textGroup, words().toolbar.textStyle);
     this.icon(format.button, "bold", "B");
     const formatRow = this.block(format.panel, undefined);
     const formats: Record<string, HTMLButtonElement> = {};
-    for (const { format: value, icon, glyph, label } of FORMATS) {
+    for (const { format: value, icon, glyph, label } of formatChoices()) {
       const toggle = append(formatRow, makeChoice(document, label, value));
       this.icon(toggle, icon, glyph);
       formats[value] = toggle;
     }
 
-    const align = this.makePopover(textGroup, "Alignment");
-    this.icon(align.button, ALIGNMENTS[0]!.icon, "≡");
+    const align = this.makePopover(textGroup, words().toolbar.alignment);
+    this.icon(align.button, ALIGNMENT_ICONS[0]!.icon, "≡");
     const alignRow = this.block(align.panel, undefined);
-    const alignments = ALIGNMENTS.map(({ value, icon, label }) => {
+    const alignments = alignmentChoices().map(({ value, icon, label }) => {
       const toggle = append(alignRow, makeChoice(document, label, value));
       this.icon(toggle, icon, value.charAt(0).toUpperCase());
       return toggle;
     });
     const verticalRow = this.block(align.panel, undefined);
-    const verticalAlignments = VERTICAL_ALIGNMENTS.map(({ value, icon, label }) => {
+    const verticalAlignments = verticalAlignmentChoices().map(({ value, icon, label }) => {
       const toggle = append(verticalRow, makeChoice(document, label, value));
       this.icon(toggle, icon, value.charAt(0).toUpperCase());
       return toggle;
     });
-    const spacingRow = this.block(align.panel, "Line height");
-    const lineHeight = append(spacingRow, makeNumber(document, "Line height", 1, 10));
+    const spacingRow = this.block(align.panel, words().toolbar.lineHeight);
+    const lineHeight = append(spacingRow, makeNumber(document, words().toolbar.lineHeight, 1, 10));
     lineHeight.step = "0.1";
 
     // A connector: its two ends and the kind of line between them.
     const edgeGroup = append(bar, make(document, "span", "miro-canvas-toolbar__group"));
-    const editConnectorLabel = append(edgeGroup, makeButton(document, "Add or edit line label"));
+    const editConnectorLabel = append(edgeGroup, makeButton(document, words().toolbar.editConnectorLabel));
     this.icon(editConnectorLabel, "text", "T");
-    const startCap = this.makePopover(edgeGroup, "Line start", "miro-canvas-toolbar__button--cap");
-    const swapEnds = append(edgeGroup, makeButton(document, "Swap line ends"));
+    const startCap = this.makePopover(edgeGroup, words().toolbar.lineStart, "miro-canvas-toolbar__button--cap");
+    const swapEnds = append(edgeGroup, makeButton(document, words().toolbar.swapEnds));
     this.icon(swapEnds, "arrow-left-right", "⇄");
-    const endCap = this.makePopover(edgeGroup, "Line end", "miro-canvas-toolbar__button--cap");
+    const endCap = this.makePopover(edgeGroup, words().toolbar.lineEnd, "miro-canvas-toolbar__button--cap");
     const caps = (popover: Popover, at: "start" | "end"): HTMLButtonElement[] => this.choices(
       this.block(popover.panel, undefined, "miro-canvas-toolbar__pictures miro-canvas-toolbar__pictures--caps"),
-      CONNECTOR_CAPS, (cap) => CAP_LABELS[cap], (cap) => capPicture(document, cap, at), (cap) => (cap === "none" ? "—" : cap),
+      CONNECTOR_CAPS, (cap) => capLabels()[cap], (cap) => capPicture(document, cap, at), (cap) => (cap === "none" ? "—" : cap),
     );
     const startCaps = caps(startCap, "start");
     const endCaps = caps(endCap, "end");
-    const line = this.makePopover(edgeGroup, "Line", "miro-canvas-toolbar__button--line");
+    const line = this.makePopover(edgeGroup, words().toolbar.line, "miro-canvas-toolbar__button--line");
     const routes = this.choices(
-      this.block(line.panel, undefined), CONNECTOR_ROUTES, (route) => ROUTE_LABELS[route],
+      this.block(line.panel, undefined), CONNECTOR_ROUTES, (route) => routeLabels()[route],
       (route) => routePicture(document, route), (route) => route.charAt(0).toUpperCase(),
     );
     const strokes = this.choices(
-      this.block(line.panel, undefined), CONNECTOR_STROKES, (stroke) => STROKE_LABELS[stroke],
+      this.block(line.panel, undefined), CONNECTOR_STROKES, (stroke) => strokeLabels()[stroke],
       (stroke) => strokePicture(document, stroke), (stroke) => stroke.charAt(0).toUpperCase(),
     );
-    const lineWidthRow = this.block(line.panel, "Thickness", "miro-canvas-toolbar__row miro-canvas-toolbar__slider");
-    const lineWidth = append(lineWidthRow, makeRange(document, "Line thickness", 1, LINE_SLIDER_MAX));
+    const lineWidthRow = this.block(line.panel, words().toolbar.thickness, "miro-canvas-toolbar__row miro-canvas-toolbar__slider");
+    const lineWidth = append(lineWidthRow, makeRange(document, words().toolbar.lineThickness, 1, LINE_SLIDER_MAX));
     const lineWidthValue = append(lineWidthRow, make(document, "span", "miro-canvas-toolbar__value"));
-    const headSizeRow = this.block(line.panel, "Head size", "miro-canvas-toolbar__row");
-    const headSize = append(headSizeRow, makeNumber(document, "Arrowhead size", 1, 1000));
+    const headSizeRow = this.block(line.panel, words().toolbar.headSize, "miro-canvas-toolbar__row");
+    const headSize = append(headSizeRow, makeNumber(document, words().toolbar.arrowheadSize, 1, 1000));
     headSize.step = "any";
-    headSize.placeholder = "Auto";
+    headSize.placeholder = words().toolbar.auto;
 
     // Colours: text, fill and border for a node, the line colour for a connector.
     const colorGroup = append(bar, make(document, "span", "miro-canvas-toolbar__group"));
     const colors: Record<string, ColorRefs> = {};
-    for (const { slot, label, valueLabel, look } of COLOR_SLOTS) {
+    for (const { slot, label, valueLabel, look } of colorSlots()) {
       const popover = this.makePopover(colorGroup, label, `miro-canvas-toolbar__button--color miro-canvas-toolbar__button--color-${slot}`);
       popover.host.setAttribute("data-color-slot", slot);
       popover.button.setAttribute("data-look", look);
@@ -642,11 +688,11 @@ export class SelectionToolbar {
       else append(popover.button, make(document, "span", "miro-canvas-toolbar__swatch-mark"));
       // Obsidian's own colour leads the palette, so any colour can be undone.
       const standard = this.block(popover.panel, undefined, "miro-canvas-toolbar__row miro-canvas-toolbar__standard");
-      const reset = append(standard, makeButton(document, "Obsidian color", "miro-canvas-toolbar__button--default"));
+      const reset = append(standard, makeButton(document, words().toolbar.obsidianColor, "miro-canvas-toolbar__button--default"));
       reset.setAttribute("data-color-default", slot);
       reset.setAttribute("aria-pressed", "false");
       append(reset, make(document, "span", "miro-canvas-toolbar__default-mark"));
-      append(reset, make(document, "span", "miro-canvas-toolbar__default-label", "Default"));
+      append(reset, make(document, "span", "miro-canvas-toolbar__default-label", words().toolbar.defaultLabel));
       const swatches = this.block(popover.panel, undefined, "miro-canvas-toolbar__pictures miro-canvas-toolbar__palette");
       swatches.setAttribute("data-color-palette", slot);
       const recent = this.block(popover.panel, undefined, "miro-canvas-toolbar__pictures miro-canvas-toolbar__palette miro-canvas-toolbar__palette--recent");
@@ -656,8 +702,8 @@ export class SelectionToolbar {
       input.type = "color";
       // Distinct from the popover button's own label so assistive technology
       // and tests can address the value control unambiguously.
-      input.setAttribute("aria-label", `Custom ${valueLabel.toLowerCase()}`);
-      const clear = append(standard, makeButton(document, slot === "highlight" ? "No highlight" : "Transparent", "miro-canvas-toolbar__button--transparent"));
+      input.setAttribute("aria-label", words().toolbar.customColorLabel(valueLabel.toLowerCase()));
+      const clear = append(standard, makeButton(document, slot === "highlight" ? words().toolbar.noHighlight : words().toolbar.transparent, "miro-canvas-toolbar__button--transparent"));
       clear.setAttribute("aria-pressed", "false");
       this.icon(clear, "ban", "∅");
       clear.hidden = !TRANSPARENT_SLOTS.has(slot);
@@ -665,16 +711,16 @@ export class SelectionToolbar {
     }
     const borderPanel = colors.border!.popover.panel;
     const borderStyles = this.choices(
-      this.block(borderPanel, "Border style"), BORDER_STYLES.map((item) => item.value),
-      (value) => BORDER_STYLES.find((item) => item.value === value)!.label,
+      this.block(borderPanel, words().toolbar.borderStyleHeading), BORDER_STYLE_VALUES,
+      (value) => borderStyleChoices().find((item) => item.value === value)!.label,
       (value) => borderPicture(document, value), (value) => value.charAt(0).toUpperCase(),
     );
-    const borderWidthRow = this.block(borderPanel, "Border width", "miro-canvas-toolbar__row miro-canvas-toolbar__slider");
-    const borderWidth = append(borderWidthRow, makeRange(document, "Border width", 0, BORDER_SLIDER_MAX));
+    const borderWidthRow = this.block(borderPanel, words().toolbar.borderWidth, "miro-canvas-toolbar__row miro-canvas-toolbar__slider");
+    const borderWidth = append(borderWidthRow, makeRange(document, words().toolbar.borderWidth, 0, BORDER_SLIDER_MAX));
     const borderWidthValue = append(borderWidthRow, make(document, "span", "miro-canvas-toolbar__value"));
 
     // A link card no longer loads its page, so it is opened from here.
-    const openLink = append(bar, makeButton(document, "Open link", "miro-canvas-toolbar__button--open-link"));
+    const openLink = append(bar, makeButton(document, words().toolbar.openLink, "miro-canvas-toolbar__button--open-link"));
     this.icon(openLink, "external-link", "↗");
     openLink.hidden = true;
 
@@ -690,10 +736,10 @@ export class SelectionToolbar {
       return option;
     });
 
-    const lock = append(bar, makeButton(document, "Lock selection", "miro-canvas-toolbar__button--lock"));
+    const lock = append(bar, makeButton(document, words().toolbar.lockSelection, "miro-canvas-toolbar__button--lock"));
     lock.setAttribute("aria-pressed", "false");
     const nativeSlot = append(bar, make(document, "span", "miro-canvas-toolbar__native"));
-    const deleteSelection = append(nativeSlot, makeButton(document,"Delete selection","miro-canvas-toolbar__button--delete"));
+    const deleteSelection = append(nativeSlot, makeButton(document,words().toolbar.deleteSelection,"miro-canvas-toolbar__button--delete"));
     this.icon(deleteSelection,"trash-2","⌫");
     this.listen(deleteSelection,"click",()=>this.actions.onDelete?.());
     deleteSelection.hidden=true;
@@ -734,7 +780,7 @@ export class SelectionToolbar {
     });
     this.listen(refs.fontSizeDown, "click", () => this.stepFontSize(-1));
     this.listen(refs.fontSizeUp, "click", () => this.stepFontSize(1));
-    for (const { format } of FORMATS) {
+    for (const { format } of FORMAT_ICONS) {
       this.listen(refs.formats[format]!, "click", () => this.appearance({
         type: APPEARANCE_ACTIONS.setFormat,
         format: { [format]: this.state?.typography.format[format] !== true },
@@ -781,7 +827,7 @@ export class SelectionToolbar {
       const headSize = Number(refs.headSize.value);
       if (validHeadSize(headSize)) this.style({ connector: { headSize } });
     });
-    for (const { slot } of COLOR_SLOTS) {
+    for (const slot of COLOR_SLOT_KEYS) {
       const color = refs.colors[slot]!;
       this.listen(color.input, "change", () => {
         const value = normalizedHex(color.input.value);
@@ -890,8 +936,8 @@ export class SelectionToolbar {
     refs.textGroup.hidden = !state.kinds.some((kind) => kind !== "edge" && kind !== "media");
     refs.edgeGroup.hidden = !hasEdge;
     refs.editConnectorLabel.hidden = state.canEditConnectorLabel !== true;
-    for (const { slot, forEdge } of COLOR_SLOTS) {
-      refs.colors[slot]!.popover.host.hidden = forEdge ? !hasEdge : !hasNode;
+    for (const slot of COLOR_SLOT_KEYS) {
+      refs.colors[slot]!.popover.host.hidden = EDGE_COLOR_SLOTS.has(slot) ? !hasEdge : !hasNode;
     }
 
     const shape = shapeCatalogEntry(state.shape);
@@ -907,7 +953,7 @@ export class SelectionToolbar {
     pressWhere(refs.fontOptions, typography.fontFamily);
     refs.fontSize.value = String(typography.fontSize);
     let styled = false;
-    for (const { format } of FORMATS) {
+    for (const { format } of FORMAT_ICONS) {
       const on = typography.format[format] === true;
       styled ||= on;
       refs.formats[format]!.setAttribute("aria-pressed", on ? "true" : "false");
@@ -915,7 +961,7 @@ export class SelectionToolbar {
     refs.format.button.setAttribute("data-active", styled ? "true" : "false");
     pressWhere(refs.alignments, typography.alignment);
     pressWhere(refs.verticalAlignments, typography.verticalAlign ?? "top");
-    const alignment = ALIGNMENTS.find((item) => item.value === typography.alignment) ?? ALIGNMENTS[0]!;
+    const alignment = ALIGNMENT_ICONS.find((item) => item.value === typography.alignment) ?? ALIGNMENT_ICONS[0]!;
     this.icon(refs.align.button, alignment.icon, "≡");
     refs.lineHeight.value = typography.lineHeight === undefined ? "" : String(typography.lineHeight);
 
@@ -933,7 +979,7 @@ export class SelectionToolbar {
     refs.lineWidthValue.textContent = String(lineWidth ?? 2);
     if (this.document?.activeElement !== refs.headSize) refs.headSize.value = state.connector?.headSize === undefined ? "" : String(state.connector.headSize);
 
-    for (const { slot } of COLOR_SLOTS) {
+    for (const slot of COLOR_SLOT_KEYS) {
       const color = normalizedHex(state.colors[slot]);
       const slotRefs = refs.colors[slot]!;
       // Absent is Obsidian's own colour; null is a transparent choice.
@@ -944,7 +990,7 @@ export class SelectionToolbar {
       slotRefs.input.value = color?.slice(0, 7) ?? "#000000";
       slotRefs.popover.button.setAttribute("data-color-unset", color === undefined ? "true" : "false");
       slotRefs.popover.button.style.setProperty?.("--miro-canvas-swatch", color ?? "transparent");
-      const palette = slot === "fill" ? state.fillPalette ?? state.palette : slot === "highlight" ? HIGHLIGHT_PALETTE : state.palette;
+      const palette = slot === "fill" ? state.fillPalette ?? state.palette : slot === "highlight" ? highlightPalette() : state.palette;
       this.renderSwatches(slotRefs.swatches, slot, palette.map((entry) => entry.color), state.editable, color, palette);
       this.renderSwatches(slotRefs.recent, slot, state.recentColors, state.editable, color);
       slotRefs.recent.hidden = state.recentColors.length === 0;
@@ -955,17 +1001,17 @@ export class SelectionToolbar {
 
     this.icon(refs.lock, state.locked ? "lock" : "lock-open", state.locked ? "🔒" : "🔓");
     refs.lock.setAttribute("aria-pressed", state.locked ? "true" : "false");
-    refs.lock.setAttribute("aria-label", state.locked ? "Unlock selection" : "Lock selection");
+    refs.lock.setAttribute("aria-label", state.locked ? words().toolbar.unlockSelection : words().toolbar.lockSelection);
     refs.lock.disabled = state.reviewMode;
     refs.openLink.hidden = state.link === undefined || this.actions.onOpenLink === undefined;
-    refs.openLink.setAttribute("aria-label", state.link === undefined ? "Open link" : `Open link\n${state.link}`);
+    refs.openLink.setAttribute("aria-label", state.link === undefined ? words().toolbar.openLink : words().toolbar.openLinkWithUrl(state.link));
     // A frame or a connector alone has no layer to move; a control that does
     // not apply is removed, not disabled.
     refs.layer.host.hidden = this.actions.onLayer === undefined || !state.kinds.some((kind) => CARD_KINDS.has(kind));
     for (const control of this.controls(refs)) {
       control.disabled = !state.editable;
     }
-    const reason = state.editable ? undefined : state.blockedReason ?? "This selection is locked.";
+    const reason = state.editable ? undefined : state.blockedReason ?? words().toolbar.locked;
     refs.status.hidden = reason === undefined;
     refs.status.textContent = reason ?? "";
   }

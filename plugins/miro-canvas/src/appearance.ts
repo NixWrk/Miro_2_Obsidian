@@ -33,6 +33,8 @@
  * and payload; CSS is only produced by a consuming renderer after validation.
  */
 
+import { words } from "./i18n";
+
 export const DEFAULT_FONT_FAMILY = "Inter" as const;
 export const DEFAULT_FONT_SIZE = 16 as const;
 export const MIN_FONT_SIZE = 6 as const;
@@ -200,34 +202,40 @@ const OVERRIDE_FIELDS = new Set(["typography", "colors", "locked", "showAttachme
 const DISPLAY_THEMES: readonly DisplayTheme[] = ["system", "light", "dark"];
 const PALETTE_SOURCES: readonly PaletteSource[] = ["miro", "obsidian", "custom"];
 
-const BUILTIN_PALETTE: readonly PaletteColor[] = [
-  { id: "miro-black", label: "Black", color: "#1e1e1e", source: "miro" },
-  { id: "miro-white", label: "White", color: "#ffffff", source: "miro" },
-  { id: "miro-red", label: "Red", color: "#f24726", source: "miro" },
-  { id: "miro-orange", label: "Orange", color: "#ff9d48", source: "miro" },
-  { id: "miro-yellow", label: "Yellow", color: "#ffd02f", source: "miro" },
-  { id: "miro-green", label: "Green", color: "#67c6a0", source: "miro" },
-  { id: "miro-blue", label: "Blue", color: "#4262ff", source: "miro" },
-  { id: "miro-purple", label: "Purple", color: "#9b51e0", source: "miro" },
-  { id: "obsidian-red", label: "Obsidian red", color: "#e06c75", source: "obsidian" },
-  { id: "obsidian-orange", label: "Obsidian orange", color: "#d19a66", source: "obsidian" },
-  { id: "obsidian-yellow", label: "Obsidian yellow", color: "#e5c07b", source: "obsidian" },
-  { id: "obsidian-green", label: "Obsidian green", color: "#98c379", source: "obsidian" },
-  { id: "obsidian-cyan", label: "Obsidian cyan", color: "#56b6c2", source: "obsidian" },
-  { id: "obsidian-blue", label: "Obsidian blue", color: "#61afef", source: "obsidian" },
-  { id: "obsidian-purple", label: "Obsidian purple", color: "#c678dd", source: "obsidian" },
-  { id: "obsidian-gray", label: "Obsidian gray", color: "#abb2bf", source: "obsidian" },
+/** Id, colour and source only; `defaultPalette()` adds the label in the language in use. */
+const BUILTIN_PALETTE_SWATCHES: readonly { readonly id: string; readonly color: string; readonly source: PaletteSource; readonly key: keyof ReturnType<typeof words>["palette"]["builtin"] }[] = [
+  { id: "miro-black", color: "#1e1e1e", source: "miro", key: "black" },
+  { id: "miro-white", color: "#ffffff", source: "miro", key: "white" },
+  { id: "miro-red", color: "#f24726", source: "miro", key: "red" },
+  { id: "miro-orange", color: "#ff9d48", source: "miro", key: "orange" },
+  { id: "miro-yellow", color: "#ffd02f", source: "miro", key: "yellow" },
+  { id: "miro-green", color: "#67c6a0", source: "miro", key: "green" },
+  { id: "miro-blue", color: "#4262ff", source: "miro", key: "blue" },
+  { id: "miro-purple", color: "#9b51e0", source: "miro", key: "purple" },
+  { id: "obsidian-red", color: "#e06c75", source: "obsidian", key: "obsidianRed" },
+  { id: "obsidian-orange", color: "#d19a66", source: "obsidian", key: "obsidianOrange" },
+  { id: "obsidian-yellow", color: "#e5c07b", source: "obsidian", key: "obsidianYellow" },
+  { id: "obsidian-green", color: "#98c379", source: "obsidian", key: "obsidianGreen" },
+  { id: "obsidian-cyan", color: "#56b6c2", source: "obsidian", key: "obsidianCyan" },
+  { id: "obsidian-blue", color: "#61afef", source: "obsidian", key: "obsidianBlue" },
+  { id: "obsidian-purple", color: "#c678dd", source: "obsidian", key: "obsidianPurple" },
+  { id: "obsidian-gray", color: "#abb2bf", source: "obsidian", key: "obsidianGray" },
   // The six presets native Canvas offers in its own colour picker, so a board
   // styled here keeps matching one styled with the plugin switched off.
-  { id: "canvas-red", label: "Canvas red", color: "#fb464c", source: "obsidian" },
-  { id: "canvas-orange", label: "Canvas orange", color: "#e9973f", source: "obsidian" },
-  { id: "canvas-yellow", label: "Canvas yellow", color: "#e0de71", source: "obsidian" },
-  { id: "canvas-green", label: "Canvas green", color: "#44cf6e", source: "obsidian" },
-  { id: "canvas-cyan", label: "Canvas cyan", color: "#53dfdd", source: "obsidian" },
-  { id: "canvas-purple", label: "Canvas purple", color: "#a882ff", source: "obsidian" },
-].map((item) => Object.freeze(item) as PaletteColor);
+  { id: "canvas-red", color: "#fb464c", source: "obsidian", key: "canvasRed" },
+  { id: "canvas-orange", color: "#e9973f", source: "obsidian", key: "canvasOrange" },
+  { id: "canvas-yellow", color: "#e0de71", source: "obsidian", key: "canvasYellow" },
+  { id: "canvas-green", color: "#44cf6e", source: "obsidian", key: "canvasGreen" },
+  { id: "canvas-cyan", color: "#53dfdd", source: "obsidian", key: "canvasCyan" },
+  { id: "canvas-purple", color: "#a882ff", source: "obsidian", key: "canvasPurple" },
+];
 
-export const DEFAULT_PALETTE: readonly PaletteColor[] = Object.freeze(BUILTIN_PALETTE);
+/** The built-in palette, named in the language in use. */
+export function defaultPalette(): readonly PaletteColor[] {
+  const names = words().palette.builtin;
+  return Object.freeze(BUILTIN_PALETTE_SWATCHES.map(({ id, color, source, key }) =>
+    Object.freeze({ id, label: names[key], color, source })));
+}
 
 type UnknownRecord = Record<string, unknown>;
 const ABSENT = Symbol("appearance-absent");
@@ -783,10 +791,10 @@ function normalizePaletteEntry(value: unknown, index: number): PaletteColor | un
 }
 
 function cloneDefaultPalette(): readonly PaletteColor[] {
-  return freeze(DEFAULT_PALETTE.map((item) => freeze({ ...item })));
+  return freeze(defaultPalette().map((item) => freeze({ ...item })));
 }
 
-export function normalizePalette(value: unknown, fallback: readonly PaletteColor[] = DEFAULT_PALETTE): readonly PaletteColor[] {
+export function normalizePalette(value: unknown, fallback: readonly PaletteColor[] = defaultPalette()): readonly PaletteColor[] {
   const input = readArray(value);
   const source = input ?? readArray(fallback) ?? [];
   const result: PaletteColor[] = [];

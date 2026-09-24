@@ -1,8 +1,9 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 
 import {
-  LINE_KINDS, blockArrowOutline, bowPoint, lineBends, lineBoardPoints, lineFromBoard, lineKind, planLine,
+  LINE_KINDS, blockArrowOutline, bowPoint, lineBends, lineBoardPoints, lineFromBoard, lineKind, lineLabel, planLine,
 } from "../src/free-line";
+import { setLocale } from "../src/i18n";
 import { readLocalLine } from "../src/local-items";
 
 const STYLE = { route: "straight", color: "#1a1a1a", width: 2 } as const;
@@ -85,5 +86,16 @@ describe("block arrows", () => {
   it("keeps the head of a short arrow to half its length", () => {
     const outline = blockArrowOutline({ x: 0, y: 0 }, { x: 20, y: 0 }, 16);
     expect(outline[2]!.x).toBeCloseTo(10);
+  });
+});
+
+describe("line kind names in Russian", () => {
+  afterEach(() => setLocale("en"));
+
+  it("names every line kind from the Russian word table", () => {
+    setLocale("ru");
+    expect(lineLabel("arrow")).toBe("Стрелка");
+    expect(lineLabel("elbow")).toBe("Угловая стрелка");
+    expect(lineLabel("line")).toBe("Линия\nУдерживайте Shift, чтобы вести её строго горизонтально, вертикально или под 45°");
   });
 });

@@ -1,8 +1,9 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 
+import { setLocale } from "../src/i18n";
 import {
-  DEFAULT_EXPORT_STATE, captureTiles, exportPixels, exportRecord, isExportRecord, pageAround, paperRatio, paperSize,
-  readExportState, reshapePage,
+  DEFAULT_EXPORT_STATE, captureTiles, exportPixels, exportRecord, isExportRecord, pageAround, paperLabels, paperRatio,
+  paperSize, readExportState, reshapePage,
 } from "../src/export-pages";
 
 describe("paper", () => {
@@ -64,5 +65,17 @@ describe("the stored record", () => {
     expect(readExportState("nonsense")).toEqual(DEFAULT_EXPORT_STATE);
     expect(isExportRecord(exportRecord(state))).toBe(true);
     expect(isExportRecord({ pages: [{ id: "x" }] })).toBe(false);
+  });
+});
+
+describe("paper labels in Russian", () => {
+  afterEach(() => setLocale("en"));
+
+  it("keeps format names and translates the rest, from the Russian word table", () => {
+    setLocale("ru");
+    expect(paperLabels().a4).toBe("A4");
+    expect(paperLabels().letter).toBe("Letter");
+    expect(paperLabels()["16:9"]).toBe("Слайд 16:9");
+    expect(paperLabels().free).toBe("Свободный размер");
   });
 });

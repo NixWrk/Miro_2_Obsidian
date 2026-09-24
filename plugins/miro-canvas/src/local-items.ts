@@ -4,7 +4,7 @@
  * item it stands for in its local override; with the plugin off it is an
  * ordinary Canvas card or group.
  */
-import { MIRO_STICKY_COLORS } from "./miro-palette";
+import { miroStickyColors } from "./miro-palette";
 
 export const LOCAL_ITEM_TYPES = ["text", "sticky_note", "code", "frame", "table", "drawing", "line"] as const;
 export type LocalItemType = (typeof LOCAL_ITEM_TYPES)[number];
@@ -65,7 +65,7 @@ export interface LocalItem {
 }
 
 const MAX_TITLE_LENGTH = 256;
-const STICKY_TOKENS = new Set(MIRO_STICKY_COLORS.map((entry) => entry.token));
+const STICKY_TOKENS = new Set(miroStickyColors().map((entry) => entry.token));
 
 /** Where a new item is made, and how big it starts, as Miro sizes them. */
 export const LOCAL_ITEM_SIZES: Readonly<Record<LocalItemType, { readonly width: number; readonly height: number }>> = Object.freeze({

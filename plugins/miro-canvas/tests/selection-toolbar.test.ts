@@ -1,7 +1,8 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 
 import { APPEARANCE_ACTIONS, type AppearanceAction } from "../src/appearance";
-import { FRAME_COLORS } from "../src/miro-palette";
+import { setLocale } from "../src/i18n";
+import { frameColors } from "../src/miro-palette";
 import { SHAPE_CATALOG } from "../src/shape-catalog";
 import { CONNECTOR_CAPS } from "../src/source-model";
 import {
@@ -532,11 +533,11 @@ describe("selection toolbar", () => {
     const { root } = build({
       kinds: ["frame"],
       colors: { fill: "#6cbf8f38" },
-      fillPalette: FRAME_COLORS.map((entry) => ({ id: entry.token, label: entry.label, color: entry.color, source: "miro" as const })),
+      fillPalette: frameColors().map((entry) => ({ id: entry.token, label: entry.label, color: entry.color, source: "miro" as const })),
     });
     const fill = descendants(root).find((item) => item.attributes.get("data-color-palette") === "fill")!.children;
-    expect(fill).toHaveLength(FRAME_COLORS.length);
-    expect(FRAME_COLORS.every((entry) => /^#[0-9a-f]{6}38$/u.test(entry.color))).toBe(true);
+    expect(fill).toHaveLength(frameColors().length);
+    expect(frameColors().every((entry) => /^#[0-9a-f]{6}38$/u.test(entry.color))).toBe(true);
     expect(fill.find((item) => item.attributes.get("data-color") === "#6cbf8f38")!.getAttribute("aria-pressed")).toBe("true");
     const picker = descendants(root).find((item) => item.getAttribute("aria-label") === "Custom fill color") as unknown as { value: string };
     expect(picker.value).toBe("#6cbf8f");
@@ -636,5 +637,23 @@ describe("selection toolbar", () => {
     toolbar.dispose();
     byLabel(root, "Increase font size").dispatch("click");
     expect(appearance).toEqual([]);
+  });
+});
+
+describe("selection toolbar in Russian", () => {
+  afterEach(() => setLocale("en"));
+
+  it("builds its buttons and popovers from the Russian word table", () => {
+    setLocale("ru");
+    const { root } = build();
+    expect(byLabel(root, "Фигура").getAttribute("aria-expanded")).toBe("false");
+    expect(byLabel(root, "Шрифт")).toBeDefined();
+    expect(byLabel(root, "Стиль текста")).toBeDefined();
+    expect(byLabel(root, "Выравнивание")).toBeDefined();
+    expect(byLabel(root, "Заблокировать выделение")).toBeDefined();
+    const { root: edgeRoot } = build({ ...EDGE });
+    expect(byLabel(edgeRoot, "Начало линии")).toBeDefined();
+    expect(byLabel(edgeRoot, "Конец линии")).toBeDefined();
+    expect(byLabel(edgeRoot, "Поменять концы местами")).toBeDefined();
   });
 });
