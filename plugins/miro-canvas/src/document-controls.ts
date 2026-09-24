@@ -1,4 +1,5 @@
 import { describeLocalDocument, navigateDocument, openLocalDocument, type DocumentHost, type LocalDocument } from "./document-viewer";
+import { words } from "./i18n";
 
 /** Small local-file inspector. Rendering stays in Obsidian's native file viewer. */
 export class DocumentControls {
@@ -15,11 +16,11 @@ export class DocumentControls {
     this.element = document.createElement("section");
     this.element.className = "miro-canvas-document-controls";
     const heading = document.createElement("h3");
-    heading.textContent = this.current?.title ?? "Document unavailable";
+    heading.textContent = this.current?.title ?? words().documents.unavailableTitle;
     this.element.append(heading);
     this.status = document.createElement("p");
     this.status.setAttribute("role", "status");
-    this.status.textContent = this.current ? "Local file. Open in Obsidian's native viewer." : "Invalid local vault path.";
+    this.status.textContent = this.current ? words().documents.localFileHint : words().documents.invalidPath;
     this.element.append(this.status);
     this.pageInput = document.createElement("input");
     this.pageInput.type = "number";
@@ -27,10 +28,10 @@ export class DocumentControls {
     this.pageInput.max = "1000000";
     this.pageInput.step = "1";
     this.pageInput.value = String(this.current?.page ?? 1);
-    this.pageInput.setAttribute("aria-label", "PDF page");
+    this.pageInput.setAttribute("aria-label", words().documents.pageAriaLabel);
     this.fitInput = document.createElement("select");
-    this.fitInput.setAttribute("aria-label", "PDF fit");
-    for (const [value, label] of [["page", "Fit page"], ["width", "Fit width"]]) {
+    this.fitInput.setAttribute("aria-label", words().documents.fitAriaLabel);
+    for (const [value, label] of [["page", words().documents.fitPage], ["width", words().documents.fitWidth]]) {
       const option = document.createElement("option");
       option.value = value;
       option.textContent = label;
@@ -46,11 +47,11 @@ export class DocumentControls {
     };
     if (this.current?.kind === "pdf") {
       this.element.append(this.pageInput, this.fitInput);
-      button("Previous page", () => this.step(-1));
-      button("Next page", () => this.step(1));
-      button("Open page", () => { void this.open(); });
+      button(words().documents.previousPage, () => this.step(-1));
+      button(words().documents.nextPage, () => this.step(1));
+      button(words().documents.openPage, () => { void this.open(); });
     }
-    button("Open original", () => { void this.open(); });
+    button(words().documents.openOriginal, () => { void this.open(); });
   }
 
   private step(delta: number): void {
@@ -66,7 +67,7 @@ export class DocumentControls {
     if (!this.current || this.disposed) return null;
     const requestedPage = Number(this.pageInput.value);
     if (!Number.isSafeInteger(requestedPage) || requestedPage < 1 || requestedPage > 1_000_000) {
-      this.status.textContent = "Enter a valid positive page number.";
+      this.status.textContent = words().documents.invalidPageNumber;
       return null;
     }
     return describeLocalDocument(this.current.path, {
@@ -85,10 +86,10 @@ export class DocumentControls {
     if (this.disposed || sequence !== this.openSequence) return;
     if (result.ok) {
       this.current = result.document;
-      this.status.textContent = "Opened in the native viewer. Its controls handle scrolling and available pages.";
+      this.status.textContent = words().documents.openedInViewer;
     } else {
-      this.status.textContent = result.reason === "missing-file" ? "Local file is missing from this vault."
-        : "This document could not be opened safely.";
+      this.status.textContent = result.reason === "missing-file" ? words().documents.missingFile
+        : words().documents.openFailed;
     }
   }
 

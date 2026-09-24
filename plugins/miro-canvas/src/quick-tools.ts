@@ -11,6 +11,8 @@ import { SHAPE_CATALOG, shapeCatalogEntry, shapeCatalogLabel } from "./shape-cat
 import { shapePicture } from "./selection-toolbar";
 import { LINE_KINDS, lineKind, lineLabel, type LineKindSpec } from "./free-line";
 import { validHeadSize } from "./connector-style";
+import { defaultPalette } from "./appearance";
+import { miroStickyColors } from "./miro-palette";
 import { BAR_TOOLTIP_DELAY, PICTURE_TOOLTIP_DELAY } from "./tooltips";
 
 export const QUICK_TOOLS = [
@@ -103,6 +105,12 @@ export interface QuickToolsActions {
 
 /** What Miro keeps in a pen preset: its own colours and three thicknesses. */
 export const PEN_COLORS = ["#1a1a1a", "#ffffff", "#f24726", "#ff9d48", "#ffd02f", "#67c6a0", "#2d9bf0", "#9b51e0"] as const;
+
+/** A swatch's name, from a palette that already names it; the hex code otherwise. */
+function colorSwatchLabel(color: string): string {
+  const named = [...defaultPalette(), ...miroStickyColors()].find((entry) => entry.color.toLowerCase() === color.toLowerCase());
+  return named?.label ?? color;
+}
 /** The ranges the size slider covers: a line's width, an eraser's in pixels. */
 export const PEN_WIDTH_RANGE = { min: 1, max: 60 } as const;
 export const ERASER_SIZE_RANGE = { min: 8, max: 200 } as const;
@@ -202,7 +210,7 @@ export class QuickTools {
     const connectorColors=this.connectorBar.appendChild(this.make("span","miro-canvas-tools__swatches"));
     for(const color of PEN_COLORS){
       const option=connectorColors.appendChild(this.make("button","miro-canvas-toolbar__button miro-canvas-toolbar__button--swatch"));
-      option.type="button";option.setAttribute("aria-label",color);option.setAttribute("data-connector-color",color);
+      option.type="button";option.setAttribute("aria-label",colorSwatchLabel(color));option.setAttribute("data-connector-color",color);
       option.setAttribute("data-tooltip-delay",PICTURE_TOOLTIP_DELAY);option.style?.setProperty?.("--miro-canvas-swatch",color);
       this.listen(option,"click",()=>this.actions.onConnector?.({color}));this.connectorColors.set(color,option);
     }
@@ -239,7 +247,7 @@ export class QuickTools {
     for (const color of PEN_COLORS) {
       const option = colors.appendChild(this.make("button", "miro-canvas-toolbar__button miro-canvas-toolbar__button--swatch"));
       option.type = "button";
-      option.setAttribute("aria-label", color);
+      option.setAttribute("aria-label", colorSwatchLabel(color));
       option.setAttribute("data-tooltip-delay", PICTURE_TOOLTIP_DELAY);
       option.setAttribute("data-pen-color", color);
       option.style?.setProperty?.("--miro-canvas-swatch", color);

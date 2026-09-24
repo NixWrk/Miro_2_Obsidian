@@ -6,6 +6,7 @@
  * The host owns persistence and placement.
  */
 import { commentAuthorLabel, type CommentOrigin, type CommentThread } from "./local-comments";
+import { words } from "./i18n";
 import { TOOLTIP_DELAY } from "./tooltips";
 
 export interface ThreadMessage {
@@ -128,21 +129,21 @@ export class CommentThreadCard {
   public constructor(private readonly document: Document, private readonly host: CommentThreadCardHost) {
     const card = this.make("div", "miro-canvas-thread");
     card.setAttribute("role", "dialog");
-    card.setAttribute("aria-label", "Comment thread");
+    card.setAttribute("aria-label", words().comments.thread.ariaLabel);
     card.hidden = true;
 
     const header = card.appendChild(this.make("div", "miro-canvas-thread__header"));
-    this.toggle = header.appendChild(this.button("Resolve", "miro-canvas-thread__resolve"));
+    this.toggle = header.appendChild(this.button(words().comments.thread.resolve, "miro-canvas-thread__resolve"));
     this.toggle.setAttribute("role", "switch");
     this.toggle.appendChild(this.make("span", "miro-canvas-thread__switch"));
-    this.toggle.appendChild(this.make("span", "miro-canvas-thread__resolve-label", "Resolve"));
+    this.toggle.appendChild(this.make("span", "miro-canvas-thread__resolve-label", words().comments.thread.resolve));
     this.toggle.addEventListener("click", () => {
       if (!this.toggle.disabled && this.thread?.origin === "local") this.host.onResolve(this.thread.id, !this.thread.resolved);
     });
     header.appendChild(this.make("span", "miro-canvas-thread__spacer"));
     this.colorInput = header.appendChild(this.make("input", "miro-canvas-thread__color"));
     this.colorInput.type = "color";
-    this.colorInput.setAttribute("aria-label", "Comment color");
+    this.colorInput.setAttribute("aria-label", words().comments.thread.color);
     const saveColor = () => {
       if (this.colorInput.disabled) return;
       if (this.thread && this.thread.color !== this.colorInput.value) {
@@ -158,30 +159,30 @@ export class CommentThreadCard {
     });
     this.colorInput.addEventListener("change", saveColor);
     this.colorInput.addEventListener("blur", saveColor);
-    this.lockButton = header.appendChild(this.button("Lock comment", "miro-canvas-thread__icon", "lock", "🔒"));
+    this.lockButton = header.appendChild(this.button(words().comments.thread.lock, "miro-canvas-thread__icon", "lock", "🔒"));
     this.lockButton.addEventListener("click", () => {
       if (this.lockButton.disabled) return;
       if (this.composing) {
         this.composingLocked = !this.composingLocked;
         this.lockButton.setAttribute("aria-pressed", this.composingLocked ? "true" : "false");
-        this.lockButton.setAttribute("aria-label", this.composingLocked ? "Unlock comment" : "Lock comment");
+        this.lockButton.setAttribute("aria-label", this.composingLocked ? words().comments.thread.unlock : words().comments.thread.lock);
         this.element.setAttribute("data-comment-locked", this.composingLocked ? "true" : "false");
       } else if (this.thread) this.host.onAppearance?.(this.thread.id, this.thread.origin, {locked: this.thread.locked !== true});
     });
-    const panel = header.appendChild(this.button("Open in comments panel", "miro-canvas-thread__icon", "more-vertical", "⋮"));
+    const panel = header.appendChild(this.button(words().comments.thread.openPanel, "miro-canvas-thread__icon", "more-vertical", "⋮"));
     this.panelButton = panel;
     panel.addEventListener("click", () => {
       if (this.thread !== undefined) this.host.onOpenPanel(this.thread.id, this.thread.origin);
     });
-    this.deleteButton = header.appendChild(this.button("Delete comment", "miro-canvas-thread__icon", "trash-2", "×"));
+    this.deleteButton = header.appendChild(this.button(words().comments.thread.delete, "miro-canvas-thread__icon", "trash-2", "×"));
     this.deleteButton.addEventListener("click", () => {
       if (this.thread?.origin === "local" && this.thread.locked !== true && !this.deleteButton.disabled) this.host.onDelete(this.thread.id);
     });
-    this.hideImportedButton = header.appendChild(this.button("Remove imported comment from board", "miro-canvas-thread__icon", "trash-2", "×"));
+    this.hideImportedButton = header.appendChild(this.button(words().comments.thread.removeImported, "miro-canvas-thread__icon", "trash-2", "×"));
     this.hideImportedButton.addEventListener("click", () => {
       if (!this.hideImportedButton.disabled && this.thread?.origin === "imported") this.host.onHideImported?.(this.thread.id);
     });
-    const close = header.appendChild(this.button("Close", "miro-canvas-thread__icon", "x", "×"));
+    const close = header.appendChild(this.button(words().comments.thread.close, "miro-canvas-thread__icon", "x", "×"));
     close.addEventListener("click", () => this.host.onClose());
 
     this.list = card.appendChild(this.make("div", "miro-canvas-thread__messages"));
@@ -189,13 +190,13 @@ export class CommentThreadCard {
     this.composer = card.appendChild(this.make("form", "miro-canvas-thread__composer"));
     this.authorInput = this.composer.appendChild(this.make("input", "miro-canvas-thread__author-input"));
     this.authorInput.type = "text";
-    this.authorInput.placeholder = "Author name";
-    this.authorInput.setAttribute("aria-label", "Author name");
+    this.authorInput.placeholder = words().comments.thread.authorName;
+    this.authorInput.setAttribute("aria-label", words().comments.thread.authorName);
     this.input = this.composer.appendChild(this.make("input", "miro-canvas-thread__input") as HTMLInputElement);
     this.input.type = "text";
-    this.input.placeholder = "Leave a reply";
-    this.input.setAttribute("aria-label", "Reply");
-    this.send = this.composer.appendChild(this.button("Send reply", "miro-canvas-thread__icon miro-canvas-thread__send", "send", "➤"));
+    this.input.placeholder = words().comments.thread.replyPlaceholder;
+    this.input.setAttribute("aria-label", words().comments.thread.replyAriaLabel);
+    this.send = this.composer.appendChild(this.button(words().comments.thread.sendReply, "miro-canvas-thread__icon miro-canvas-thread__send", "send", "➤"));
     this.send.type = "submit";
     this.composer.addEventListener("submit", (event) => {
       event.preventDefault();
@@ -227,7 +228,7 @@ export class CommentThreadCard {
   public compose(authorName = ""): void {
     this.composingLocked = false;
     this.lockButton.setAttribute("aria-pressed", "false");
-    this.lockButton.setAttribute("aria-label", "Lock comment");
+    this.lockButton.setAttribute("aria-label", words().comments.thread.lock);
     this.element.setAttribute("data-comment-locked", "false");
     this.colorInput.value = authorColor(authorName || "Local user");
     this.colorInput.hidden = this.host.onAppearance === undefined;
@@ -246,7 +247,7 @@ export class CommentThreadCard {
     this.hideImportedButton.hidden = true;
     this.note.hidden = true;
     this.composer.hidden = false;
-    this.input.placeholder = "Add a comment";
+    this.input.placeholder = words().comments.thread.addCommentPlaceholder;
     this.input.value = "";
     while (this.list.firstChild !== null) this.list.removeChild(this.list.firstChild);
     this.list.hidden = true;
@@ -264,7 +265,7 @@ export class CommentThreadCard {
     this.toggle.hidden = false;
     this.panelButton.hidden = false;
     this.list.hidden = false;
-    this.input.placeholder = "Leave a reply";
+    this.input.placeholder = words().comments.thread.replyPlaceholder;
     this.thread = thread;
     this.element.hidden = false;
     this.element.setAttribute("data-comment-state", thread.resolved ? "resolved" : "open");
@@ -282,7 +283,7 @@ export class CommentThreadCard {
     this.colorInput.disabled = !options.editable || locked;
     this.lockButton.hidden = this.host.onAppearance === undefined;
     this.lockButton.disabled = !options.editable;
-    this.lockButton.setAttribute("aria-label", locked ? "Unlock comment" : "Lock comment");
+    this.lockButton.setAttribute("aria-label", locked ? words().comments.thread.unlock : words().comments.thread.lock);
     this.lockButton.setAttribute("aria-pressed", locked ? "true" : "false");
     this.element.style.setProperty("--miro-thread-color", color);
     this.deleteButton.hidden = !local;
@@ -291,9 +292,9 @@ export class CommentThreadCard {
     this.hideImportedButton.disabled = !options.editable || locked;
     this.composer.hidden = !canEdit;
     this.note.hidden = canEdit;
-    this.note.textContent = locked ? "Locked comment. Unlock to reply or edit."
-      : local ? "Review mode is on; comments are read-only." : "Imported from Miro; read-only.";
-    if (!locked && !local && authorEditable) this.note.textContent = "Imported from Miro; author names are local display aliases.";
+    this.note.textContent = locked ? words().comments.thread.lockedNote
+      : local ? words().comments.thread.reviewModeNote : words().comments.thread.importedNote;
+    if (!locked && !local && authorEditable) this.note.textContent = words().comments.thread.importedAliasNote;
     const messageSignature = JSON.stringify({
       messages: threadMessages(thread),
       authorEditable,
@@ -354,7 +355,7 @@ export class CommentThreadCard {
       const author = head.appendChild(this.make("input", "miro-canvas-thread__author"));
       author.type = "text";
       author.value = message.author;
-      author.setAttribute("aria-label", "Edit author name");
+      author.setAttribute("aria-label", words().comments.thread.editAuthorName);
       const threadId = this.thread!.id;
       const origin = this.thread!.origin;
       const generation = this.messageGeneration;
@@ -382,7 +383,7 @@ export class CommentThreadCard {
     const time = head.appendChild(this.make("time", "miro-canvas-thread__time", shortTime(message.createdAt, locale)));
     if (message.createdAt !== undefined) time.setAttribute("datetime", message.createdAt);
     if (deletable && this.host.onDeleteReply) {
-      const remove = head.appendChild(this.button("Delete reply", "miro-canvas-thread__icon", "trash-2", "×"));
+      const remove = head.appendChild(this.button(words().comments.thread.deleteReply, "miro-canvas-thread__icon", "trash-2", "×"));
       remove.addEventListener("click", () => {
         if (this.thread && !this.thread.immutable && this.thread.locked !== true && this.thread.origin === "local") this.host.onDeleteReply?.(this.thread.id, message.id);
       });

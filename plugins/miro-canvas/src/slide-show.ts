@@ -6,6 +6,7 @@
  * keyboard listener.
  */
 
+import { words } from "./i18n";
 import { TOOLTIP_DELAY } from "./tooltips";
 
 export interface SlideRect {
@@ -90,7 +91,7 @@ export class SlideShow {
     const bar = document.createElement("div");
     bar.className = "miro-canvas-slideshow";
     bar.setAttribute("role", "toolbar");
-    bar.setAttribute("aria-label", "Presentation");
+    bar.setAttribute("aria-label", words().slideShow.ariaLabel);
     const button = (label: string, icon: string, glyph: string, run: () => void): HTMLButtonElement => {
       const element = document.createElement("button");
       element.type = "button";
@@ -103,12 +104,12 @@ export class SlideShow {
       bar.appendChild(element);
       return element;
     };
-    button("Previous slide", "chevron-left", "‹", () => this.previous()).classList.add("miro-canvas-slideshow__previous");
+    button(words().slideShow.previousSlide, "chevron-left", "‹", () => this.previous()).classList.add("miro-canvas-slideshow__previous");
     const counter = document.createElement("span");
     counter.className = "miro-canvas-slideshow__counter";
     bar.appendChild(counter);
-    button("Next slide", "chevron-right", "›", () => this.next()).classList.add("miro-canvas-slideshow__next");
-    button("End presentation", "x", "×", () => this.stop());
+    button(words().slideShow.nextSlide, "chevron-right", "›", () => this.next()).classList.add("miro-canvas-slideshow__next");
+    button(words().slideShow.endPresentation, "x", "×", () => this.stop());
     // The board must not start a drag or select under the bar.
     bar.addEventListener("pointerdown", (event) => event.stopPropagation());
     this.root.appendChild(bar);

@@ -9,14 +9,16 @@ import { readCanvasElementFile, readCanvasElementId, readCanvasElementType } fro
 import { createCanvasAuthoring, type CanvasAuthoring } from "./canvas-authoring";
 import { layerActions } from "./layer-order";
 import { words } from "./i18n";
-import { SHAPE_CATALOG } from "./shape-catalog";
+import { SHAPE_CATALOG, shapeCatalogLabel } from "./shape-catalog";
 import { buildCanvasAnchorGeometry } from "./connector-endpoints";
 import { DocumentControls } from "./document-controls";
 import type { DocumentHost } from "./document-viewer";
 
 const IMAGE_EXTENSIONS = new Set(["png", "jpg", "jpeg", "gif", "webp", "bmp", "avif"]);
-/** Every picture the renderer can draw, once, under the picker's names. */
-const SHAPE_OPTIONS: readonly (readonly [string, string])[] = SHAPE_CATALOG.map((item) => [item.kind, item.name] as const);
+/** Every picture the renderer can draw, once, under the picker's names in the language in use. */
+function shapeOptions(): readonly (readonly [string, string])[] {
+  return SHAPE_CATALOG.map((item) => [item.kind, shapeCatalogLabel(item)] as const);
+}
 
 type AnchorPickKind = "free" | "selection" | "node" | "image" | "edge";
 
@@ -44,16 +46,16 @@ function basename(path: string): string {
 
 function humanizeToken(value: string): string {
   const spaced = value.replace(/[_-]+/gu, " ").trim();
-  return spaced.length > 0 ? `${spaced[0]!.toUpperCase()}${spaced.slice(1)}` : "Node";
+  return spaced.length > 0 ? `${spaced[0]!.toUpperCase()}${spaced.slice(1)}` : words().localTools.nodeFallback;
 }
 
 function elementLabel(element: unknown, edge: boolean): string | undefined {
   const id = readCanvasElementId(element);
   if (id === undefined) return undefined;
-  if (edge) return `Connector — ${id}`;
+  if (edge) return words().localTools.connectorOption(id);
   const file = readCanvasElementFile(element);
   if (file !== undefined) {
-    return `${isImageCanvasNode(element) ? "Image" : "File"}: ${basename(file)} — ${id}`;
+    return isImageCanvasNode(element) ? words().localTools.imageOption(basename(file), id) : words().localTools.fileOption(basename(file), id);
   }
   const type = readCanvasElementType(element);
   return `${humanizeToken(type ?? "node")} — ${id}`;
@@ -114,21 +116,21 @@ export class M2CanvasTools {
     const shapeFields = document.createElement("fieldset");
     shapeFields.className = "miro-canvas-m2-tools__section miro-canvas-m2-tools__section--shape";
     const shapeLegend = document.createElement("legend");
-    shapeLegend.textContent = "Create shape";
+    shapeLegend.textContent = words().localTools.createShape;
     shapeFields.append(shapeLegend);
     const shapeGrid = document.createElement("div");
     shapeGrid.className = "miro-canvas-m2-tools__grid";
     shapeFields.append(shapeGrid);
-    const shape = appendLabeled(document, shapeGrid, "Shape kind", document.createElement("select"));
-    for (const [value, label] of SHAPE_OPTIONS) {
+    const shape = appendLabeled(document, shapeGrid, words().localTools.shapeKind, document.createElement("select"));
+    for (const [value, label] of shapeOptions()) {
       const option = document.createElement("option");
       option.value = value;
       option.textContent = label;
       shape.append(option);
     }
-    const shapeText = appendLabeled(document, shapeGrid, "Shape text", document.createElement("input"));
+    const shapeText = appendLabeled(document, shapeGrid, words().localTools.shapeText, document.createElement("input"));
     shapeText.type = "text";
-    shapeText.value = "Shape";
+    shapeText.value = words().localTools.shapeTextDefault;
     const shapeNumber = (label: string, value: string) => {
       const input = document.createElement("input");
       input.type = "number";
@@ -136,36 +138,36 @@ export class M2CanvasTools {
       input.value = value;
       return appendLabeled(document, shapeGrid, label, input);
     };
-    const shapeX = shapeNumber("Shape X", "100");
-    const shapeY = shapeNumber("Shape Y", "100");
-    const shapeWidth = shapeNumber("Shape width", "240");
-    const shapeHeight = shapeNumber("Shape height", "140");
+    const shapeX = shapeNumber(words().localTools.shapeX, "100");
+    const shapeY = shapeNumber(words().localTools.shapeY, "100");
+    const shapeWidth = shapeNumber(words().localTools.shapeWidth, "240");
+    const shapeHeight = shapeNumber(words().localTools.shapeHeight, "140");
     const createShape = document.createElement("button");
     createShape.type = "button";
-    createShape.textContent = "Create shape";
+    createShape.textContent = words().localTools.createShape;
     createShape.className = "miro-canvas-m2-tools__primary-action";
     createShape.addEventListener("click", () => {
       const readNumber = (input: HTMLInputElement, label: string, positive = false): number | undefined => {
         const raw = input.value.trim();
         if (raw.length === 0) {
-          this.status.textContent = `${label} is required.`;
+          this.status.textContent = words().localTools.fieldRequired(label);
           return undefined;
         }
         const value = Number(raw);
         if (!Number.isFinite(value)) {
-          this.status.textContent = `${label} must be a finite number.`;
+          this.status.textContent = words().localTools.fieldNotFinite(label);
           return undefined;
         }
         if (positive && value <= 0) {
-          this.status.textContent = `${label} must be greater than zero.`;
+          this.status.textContent = words().localTools.fieldNotPositive(label);
           return undefined;
         }
         return value;
       };
-      const x = readNumber(shapeX, "Shape X");
-      const y = readNumber(shapeY, "Shape Y");
-      const width = readNumber(shapeWidth, "Shape width", true);
-      const height = readNumber(shapeHeight, "Shape height", true);
+      const x = readNumber(shapeX, words().localTools.shapeX);
+      const y = readNumber(shapeY, words().localTools.shapeY);
+      const width = readNumber(shapeWidth, words().localTools.shapeWidth, true);
+      const height = readNumber(shapeHeight, words().localTools.shapeHeight, true);
       if (x === undefined || y === undefined || width === undefined || height === undefined) return;
       const result = this.authoring.createShape({
         shape: shape.value,
@@ -175,8 +177,8 @@ export class M2CanvasTools {
         width,
         height,
       });
-      this.status.textContent = result.ok ? `Created shape ${result.nodeId ?? ""}.`
-        : result.diagnostics[0]?.message ?? "Shape creation was rejected.";
+      this.status.textContent = result.ok ? words().localTools.shapeCreated(result.nodeId ?? "")
+        : result.diagnostics[0]?.message ?? words().localTools.shapeCreationRejected;
       this.refreshFromNative();
     });
     shapeFields.append(createShape);
@@ -185,7 +187,7 @@ export class M2CanvasTools {
     const anchorFields = document.createElement("fieldset");
     anchorFields.className = "miro-canvas-m2-tools__section miro-canvas-m2-tools__section--anchor";
     const legend = document.createElement("legend");
-    legend.textContent = "Anchor coordinates (board X/Y or relative U/V, edge T)";
+    legend.textContent = words().localTools.anchorLegend;
     anchorFields.append(legend);
     const anchorGrid = document.createElement("div");
     anchorGrid.className = "miro-canvas-m2-tools__grid";
@@ -197,15 +199,15 @@ export class M2CanvasTools {
       input.value = "0.5";
       return appendLabeled(document, anchorGrid, name, input);
     };
-    this.x = number("Anchor X, U or T");
-    this.y = number("Anchor Y or V");
-    this.anchorTarget = appendLabeled(document, anchorGrid, "Anchor target", document.createElement("select"));
+    this.x = number(words().localTools.anchorXLabel);
+    this.y = number(words().localTools.anchorYLabel);
+    this.anchorTarget = appendLabeled(document, anchorGrid, words().localTools.anchorTarget, document.createElement("select"));
     const save = document.createElement("button");
-    save.textContent = "Save anchor";
+    save.textContent = words().localTools.saveAnchor;
     save.type = "button";
     save.className = "miro-canvas-m2-tools__primary-action";
     save.addEventListener("click", () => {
-      if (this.anchorKind === undefined) { this.status.textContent = "Choose an anchor type below first."; return; }
+      if (this.anchorKind === undefined) { this.status.textContent = words().localTools.chooseAnchorTypeFirst; return; }
       const current = this.currentAnchor(true);
       if (!current.ok || current.anchor === undefined) return;
       this.mutate("add-anchor", (draft) => addAnchor(draft, current.anchor!));
@@ -216,14 +218,14 @@ export class M2CanvasTools {
     const connectorFields = document.createElement("fieldset");
     connectorFields.className = "miro-canvas-m2-tools__section miro-canvas-m2-tools__section--connector";
     const connectorLegend = document.createElement("legend");
-    connectorLegend.textContent = "Connector endpoint";
+    connectorLegend.textContent = words().localTools.connectorLegend;
     connectorFields.append(connectorLegend);
     const connectorGrid = document.createElement("div");
     connectorGrid.className = "miro-canvas-m2-tools__grid";
     connectorFields.append(connectorGrid);
-    this.connectorEdge = appendLabeled(document, connectorGrid, "Connector", document.createElement("select"));
-    this.connectorEnd = appendLabeled(document, connectorGrid, "Connector end", document.createElement("select"));
-    for (const [value, label] of [["from", "From"], ["to", "To"]] as const) {
+    this.connectorEdge = appendLabeled(document, connectorGrid, words().localTools.connectorField, document.createElement("select"));
+    this.connectorEnd = appendLabeled(document, connectorGrid, words().localTools.connectorEndField, document.createElement("select"));
+    for (const [value, label] of [["from", words().localTools.endFrom], ["to", words().localTools.endTo]] as const) {
       const option = document.createElement("option");
       option.value = value;
       option.textContent = label;
@@ -231,11 +233,11 @@ export class M2CanvasTools {
     }
     const setEndpoint = document.createElement("button");
     setEndpoint.type = "button";
-    setEndpoint.textContent = "Set connector endpoint";
+    setEndpoint.textContent = words().localTools.setConnectorEndpoint;
     setEndpoint.className = "miro-canvas-m2-tools__primary-action";
     setEndpoint.addEventListener("click", () => {
-      if (this.anchorKind === undefined) { this.status.textContent = "Choose an anchor before editing a connector endpoint."; return; }
-      if (this.connectorEdge.value.length === 0) { this.status.textContent = "Choose a connector to edit."; return; }
+      if (this.anchorKind === undefined) { this.status.textContent = words().localTools.chooseAnchorBeforeConnector; return; }
+      if (this.connectorEdge.value.length === 0) { this.status.textContent = words().localTools.chooseConnectorToEdit; return; }
       const current = this.currentAnchor(true);
       if (!current.ok || current.anchor === undefined) return;
       const result = this.authoring.updateConnectorEndpoint({
@@ -243,8 +245,8 @@ export class M2CanvasTools {
         end: this.connectorEnd.value === "to" ? "to" : "from",
         anchor: current.anchor,
       });
-      this.status.textContent = result.ok ? "Connector endpoint saved in native Canvas history."
-        : result.diagnostics[0]?.message ?? "Connector endpoint edit was rejected.";
+      this.status.textContent = result.ok ? words().localTools.connectorEndpointSaved
+        : result.diagnostics[0]?.message ?? words().localTools.connectorEndpointRejected;
       this.refreshFromNative();
     });
     connectorFields.append(setEndpoint);
@@ -253,7 +255,7 @@ export class M2CanvasTools {
     const geometryFields = document.createElement("fieldset");
     geometryFields.className = "miro-canvas-m2-tools__section miro-canvas-m2-tools__section--geometry";
     const geometryLegend = document.createElement("legend");
-    geometryLegend.textContent = "Rotation and layer order";
+    geometryLegend.textContent = words().localTools.geometryLegend;
     geometryFields.append(geometryLegend);
     const geometryGrid = document.createElement("div");
     geometryGrid.className = "miro-canvas-m2-tools__grid";
@@ -264,18 +266,18 @@ export class M2CanvasTools {
     rotation.type = "number";
     rotation.step = "any";
     rotation.value = "0";
-    appendLabeled(document, geometryGrid, "Rotation degrees", rotation);
+    appendLabeled(document, geometryGrid, words().localTools.rotationDegrees, rotation);
     const applyRotation = document.createElement("button");
     applyRotation.type = "button";
-    applyRotation.textContent = "Apply rotation";
+    applyRotation.textContent = words().localTools.applyRotation;
     applyRotation.addEventListener("click", () => {
       const id = this.session.snapshot.selectedIds[0];
       const value = rotation.value.trim().length > 0 ? Number(rotation.value) : Number.NaN;
-      if (id === undefined) { this.status.textContent = "Select one Canvas element to rotate."; return; }
-      if (!Number.isFinite(value)) { this.status.textContent = "Rotation must be a finite number."; return; }
+      if (id === undefined) { this.status.textContent = words().localTools.selectOneToRotate; return; }
+      if (!Number.isFinite(value)) { this.status.textContent = words().localTools.rotationNotFinite; return; }
 		const result = this.session.setElementRotation(id, value);
-		this.status.textContent = result?.ok === true ? "Rotation saved in native Canvas history."
-			: result?.diagnostics[0]?.message ?? "Rotation was rejected.";
+		this.status.textContent = result?.ok === true ? words().localTools.rotationSaved
+			: result?.diagnostics[0]?.message ?? words().localTools.rotationRejected;
       this.refreshFromNative();
     });
     geometryActions.append(applyRotation);
@@ -287,8 +289,8 @@ export class M2CanvasTools {
         const ids = this.session.snapshot.selectedIds;
         if (ids.length === 0) { this.status.textContent = words().layer.selectCard; return; }
         const result = this.authoring.changeZOrder({ ids, direction });
-        this.status.textContent = result.ok ? "Layer order saved in native Canvas history."
-          : result.diagnostics[0]?.message ?? "Layer order change was rejected.";
+        this.status.textContent = result.ok ? words().localTools.layerOrderSaved
+          : result.diagnostics[0]?.message ?? words().localTools.layerOrderRejected;
         this.refreshFromNative();
       });
       geometryActions.append(button);
@@ -323,7 +325,7 @@ export class M2CanvasTools {
     } else {
       const hint = document.createElement("p");
       hint.className = "miro-canvas-m2-tools__document-hint";
-      hint.textContent = "Select a file node before opening these tools to view a local document.";
+      hint.textContent = words().localTools.selectFileHint;
       this.element.append(hint);
     }
     this.refresh();
@@ -334,11 +336,11 @@ export class M2CanvasTools {
   private mutate(action: string, transform: (draft: Record<string, unknown>) => Pick<CommentMutationResult, "ok" | "metadata"> & { diagnostics: readonly { message: string }[] }): void {
     const result = this.session.writeMetadata(action, (draft) => {
       const mutation = transform(draft);
-      if (!mutation.ok || !mutation.metadata) throw new Error(mutation.diagnostics[0]?.message ?? "Local action rejected.");
+      if (!mutation.ok || !mutation.metadata) throw new Error(mutation.diagnostics[0]?.message ?? words().localTools.localActionRejected);
       return mutation.metadata;
     });
-    this.status.textContent = result?.status === "applied" ? "Saved locally in this Canvas."
-      : result?.status === "noop" ? "No changes." : result?.diagnostics[0]?.message ?? "Metadata writer unavailable.";
+    this.status.textContent = result?.status === "applied" ? words().localTools.savedLocally
+      : result?.status === "noop" ? words().localTools.noChanges : result?.diagnostics[0]?.message ?? words().localTools.metadataWriterUnavailable;
     this.refresh();
   }
 
@@ -346,14 +348,14 @@ export class M2CanvasTools {
     const raw = input.value.trim();
     const value = raw.length > 0 ? Number(raw) : Number.NaN;
     if (Number.isFinite(value)) return value;
-    if (report) this.status.textContent = `${label} must be a finite number.`;
+    if (report) this.status.textContent = words().localTools.fieldNotFinite(label);
     return undefined;
   }
 
   private currentAnchor(report: boolean): { readonly ok: boolean; readonly anchor?: CanvasAnchor } {
     if (this.anchorKind === undefined) return { ok: true };
-    const x = this.numericAnchorValue(this.x, "Anchor X, U or T", report);
-    const y = this.numericAnchorValue(this.y, "Anchor Y or V", report);
+    const x = this.numericAnchorValue(this.x, words().localTools.anchorXLabel, report);
+    const y = this.numericAnchorValue(this.y, words().localTools.anchorYLabel, report);
     if (x === undefined || y === undefined) return { ok: false };
 
     let anchor: CanvasAnchor;
@@ -362,7 +364,7 @@ export class M2CanvasTools {
     } else {
       const id = this.anchorTarget.value;
       if (id.length === 0) {
-        if (report) this.status.textContent = "Choose an anchor target.";
+        if (report) this.status.textContent = words().localTools.chooseAnchorTarget;
         return { ok: false };
       }
       const edges = this.session.adapter.getEdges() ?? [];
@@ -374,17 +376,17 @@ export class M2CanvasTools {
         : this.anchorKind;
       if (kind === "edge") {
         if (edge === undefined) {
-          if (report) this.status.textContent = "The selected anchor target is not a connector.";
+          if (report) this.status.textContent = words().localTools.targetNotConnector;
           return { ok: false };
         }
         anchor = { type: "edge", edgeId: id, t: x };
       } else {
         if (node === undefined) {
-          if (report) this.status.textContent = "The selected anchor target is not a node.";
+          if (report) this.status.textContent = words().localTools.targetNotNode;
           return { ok: false };
         }
         if (kind === "image" && !isImageCanvasNode(node)) {
-          if (report) this.status.textContent = "Selected file is not a supported image.";
+          if (report) this.status.textContent = words().localTools.fileNotImage;
           return { ok: false };
         }
         anchor = { type: kind === "image" ? "image" : "node", nodeId: id, u: x, v: y };
@@ -392,7 +394,7 @@ export class M2CanvasTools {
     }
     const normalized = normalizeAnchor(anchor);
     if (!normalized.valid || normalized.anchor === undefined) {
-      if (report) this.status.textContent = normalized.diagnostics[0]?.message ?? "Invalid anchor.";
+      if (report) this.status.textContent = normalized.diagnostics[0]?.message ?? words().localTools.invalidAnchor;
       return { ok: false };
     }
     return { ok: true, anchor: normalized.anchor };
@@ -412,7 +414,7 @@ export class M2CanvasTools {
       this.anchorKind = previous;
       return;
     }
-    this.status.textContent = "Anchor selected. Add a comment, save it, or use it for a connector endpoint.";
+    this.status.textContent = words().localTools.anchorSelected;
     this.refresh();
   }
 
@@ -423,7 +425,7 @@ export class M2CanvasTools {
     const resolved = resolveAnchor(thread.anchor, geometry);
     const viewport = this.session.viewport.getViewport();
     if (!resolved.point || !viewport) {
-      this.status.textContent = resolved.diagnostics[0]?.message ?? "Target geometry is unavailable.";
+      this.status.textContent = resolved.diagnostics[0]?.message ?? words().localTools.targetGeometryUnavailable;
       return;
     }
     this.session.viewport.setViewport({ ...viewport, x: resolved.point.x, y: resolved.point.y });
@@ -444,7 +446,7 @@ export class M2CanvasTools {
       select.textContent = "";
       const empty = this.document.createElement("option");
       empty.value = "";
-      empty.textContent = options.length > 0 ? "Choose…" : "No targets available";
+      empty.textContent = options.length > 0 ? words().localTools.choosePlaceholder : words().localTools.noTargetsAvailable;
       select.append(empty);
       for (const item of options) {
         const option = this.document.createElement("option");

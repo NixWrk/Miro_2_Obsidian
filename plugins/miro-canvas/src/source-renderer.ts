@@ -403,7 +403,7 @@ function decorateDocument(
   setOwnedElementAttribute(icon, "data-extension", type);
   setOwnedElementText(icon, type);
   safeCall(face, "appendChild", [icon]);
-  addCardLine(document, face, "miro-source-card-title", source.title ?? (source.kind === "doc_format" ? "Document" : undefined));
+  addCardLine(document, face, "miro-source-card-title", source.title ?? (source.kind === "doc_format" ? words().documents.fallbackTitle : undefined));
   addCardLine(document, face, "miro-source-card-description", source.excerpt);
   addCardLine(document, face, "miro-source-card-host", site);
   return appendFace(layer, face);
@@ -527,7 +527,7 @@ function decorateComment(document: Document | undefined, layer: DomElementLike, 
   if (face === undefined) return false;
   addOwnedElementClass(face, "miro-source-card-face");
   addOwnedElementClass(face, "miro-source-comment-face");
-  addCardLine(document, face, "miro-source-comment-state", comment.resolved ? "Resolved" : "Open");
+  addCardLine(document, face, "miro-source-comment-state", comment.resolved ? words().comments.resolved : words().comments.open);
   for (const message of comment.messages) {
     const item = createElement(document, "div");
     const byline = createElement(document, "div");

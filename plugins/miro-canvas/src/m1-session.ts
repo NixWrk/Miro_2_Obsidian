@@ -741,8 +741,8 @@ export class M1CanvasSession {
 		this.authoring ??= createCanvasAuthoring(this.view);
 		const result = this.authoring.migrateLines();
 		this.options.onNotice?.(result.ok
-			? "Line migration finished. Unsupported legacy lines are retained; Undo restores the previous graph."
-			: firstProblem(result.diagnostics) ?? "Line migration was refused.");
+			? words().session.lineMigrationDone
+			: firstProblem(result.diagnostics) ?? words().session.lineMigrationRefused);
 		for (const diagnostic of result.diagnostics) this.addDiagnostic(diagnostic.message);
 		this.refresh();
 	}
@@ -927,7 +927,7 @@ export class M1CanvasSession {
 		this.authoring ??= createCanvasAuthoring(this.view);
 		const result = this.authoring.insertGraph({ nodes: [], edges: [edge], overrides: { [connector.id]: override } });
 		if (!result.ok) {
-			this.options.onNotice?.(firstProblem(result.diagnostics) ?? "Canvas rejected the new connector.");
+			this.options.onNotice?.(firstProblem(result.diagnostics) ?? words().session.connectorRejected);
 			this.refresh();
 			return;
 		}
@@ -956,7 +956,7 @@ export class M1CanvasSession {
 		}
 		const current = boardConnectors(this.adapter.getDocument()).find((item) => item.id === previous.id);
 		if (JSON.stringify(current) !== JSON.stringify(previous)) {
-			this.options.onNotice?.("The line changed while its end was moved; nothing was changed.");
+			this.options.onNotice?.(words().session.lineChangedDuringMove);
 			this.refresh();
 			return;
 		}
@@ -975,7 +975,7 @@ export class M1CanvasSession {
 			},
 		});
 		if (!result.ok) {
-			this.options.onNotice?.(firstProblem(result.diagnostics) ?? "Canvas refused to join the line to both cards.");
+			this.options.onNotice?.(firstProblem(result.diagnostics) ?? words().session.edgeJoinRejected);
 			this.refresh();
 			return;
 		}
@@ -1024,7 +1024,7 @@ export class M1CanvasSession {
 			waypoints: routeBends(plan).map((point) => ({ x: Math.round(point.x * 100) / 100, y: Math.round(point.y * 100) / 100 })),
 		};
 		if (readBoardConnector(connector) === undefined) {
-			this.options.onNotice?.("This edge's look cannot be kept by a free line; its end stays where it was.");
+			this.options.onNotice?.(words().session.edgeLookNotKept);
 			this.refresh();
 			return;
 		}
@@ -1044,7 +1044,7 @@ export class M1CanvasSession {
 			},
 		});
 		if (!result.ok) {
-			this.options.onNotice?.(firstProblem(result.diagnostics) ?? "Canvas refused to let the edge's end go.");
+			this.options.onNotice?.(firstProblem(result.diagnostics) ?? words().session.edgeEndRejected);
 			this.refresh();
 			return;
 		}
@@ -1158,7 +1158,7 @@ export class M1CanvasSession {
 		const result = change.label !== undefined
 			? this.authoring.updateEdgeLabel(id, change.label)
 			: this.authoring.updateElementStyles([{ id, connector: { labelT: change.labelT ?? this.settings.connectorLabelPosition } }]);
-		if (!result.ok) this.options.onNotice?.(firstProblem(result.diagnostics) ?? "The label could not be changed.");
+		if (!result.ok) this.options.onNotice?.(firstProblem(result.diagnostics) ?? words().session.labelChangeRejected);
 		this.refresh();
 	}
 
@@ -1174,7 +1174,7 @@ export class M1CanvasSession {
 		if (expected !== undefined) {
 			const current = boardConnectors(this.currentRawDocument).find((connector) => connector.id === expected.id);
 			if (JSON.stringify(current) !== JSON.stringify(expected)) {
-				this.options.onNotice?.("Connector move was cancelled because the connector changed during the drag.");
+				this.options.onNotice?.(words().session.connectorMoveCancelled);
 				this.refresh();
 				return false;
 			}
@@ -1216,7 +1216,7 @@ export class M1CanvasSession {
 		};
 		const nextGeometry = buildCanvasAnchorGeometry(proposed);
 		if (detached.some((connector) => nextGeometry.edges?.[connector.id] === undefined)) {
-			this.options.onNotice?.("Connector target is missing or would create a cycle.");
+			this.options.onNotice?.(words().session.connectorTargetInvalid);
 			return false;
 		}
 		return this.writeMetadata("board-connectors", (draft) => {
@@ -2145,7 +2145,7 @@ export class M1CanvasSession {
 		const result = this.authoring.updateConnectorEndpoint({ edgeId, end, anchor: landing.anchor });
 		if (!result.ok) {
 			this.addDiagnostic(firstProblem(result.diagnostics) ?? "Canvas rejected the connector end.");
-			this.options.onNotice?.(firstProblem(result.diagnostics) ?? "Canvas rejected the connector end.");
+			this.options.onNotice?.(firstProblem(result.diagnostics) ?? words().session.connectorEndRejected);
 		}
 		this.refresh();
 	}
@@ -2977,14 +2977,14 @@ export class M1CanvasSession {
 		const result = this.writeMetadata(action, (draft) => {
 			const mutation = transform(draft);
 			if (!mutation.ok || mutation.metadata === undefined) {
-				problem = mutation.diagnostics[0]?.message ?? "The comment could not be changed.";
+				problem = mutation.diagnostics[0]?.message ?? words().session.commentChangeFailed;
 				throw new Error(problem);
 			}
 			this.detachMissingCommentAnchors(mutation.metadata);
 			return mutation.metadata as Record<string, unknown>;
 		});
 		if (result?.status !== "applied" && result?.status !== "noop") {
-			this.options.onNotice?.(problem ?? result?.diagnostics[0]?.message ?? "The comment could not be saved.");
+			this.options.onNotice?.(problem ?? result?.diagnostics[0]?.message ?? words().session.commentSaveFailed);
 		}
 		this.refresh();
 	}
@@ -3819,8 +3819,8 @@ export class M1CanvasSession {
 			created = this.authoring.createShape({ shape: this.toolShape, text: "", ...rect });
 		} else {
 			const item: LocalItem = tool === "sticky" ? { type: "sticky_note", color: "light_yellow" }
-				: tool === "code" ? { type: "code", title: "Code block" }
-					: tool === "table" ? { type: "table", title: "Grid" }
+				: tool === "code" ? { type: "code", title: words().session.codeBlockDefaultTitle }
+					: tool === "table" ? { type: "table", title: words().session.gridDefaultTitle }
 						: { type: tool as "text" | "frame" };
 			const frames = (readRuntime(this.currentRawDocument, "nodes") as readonly unknown[] | undefined ?? [])
 				.filter((node) => readRuntime(node, "type") === "group").length;
@@ -3828,7 +3828,7 @@ export class M1CanvasSession {
 				item, ...rect,
 				...(tool === "code" ? { text: "```\n\n```" } : {}),
 				...(tool === "table" ? { text: TABLE_TEMPLATE } : {}),
-				...(tool === "frame" ? { label: `Frame ${frames + 1}` } : {}),
+				...(tool === "frame" ? { label: words().session.frameDefaultName(frames + 1) } : {}),
 			});
 		}
 		if (!created.ok || created.nodeId === undefined) {
@@ -3983,7 +3983,7 @@ export class M1CanvasSession {
 		const from = this.connectorLanding(this.viewportPoint(points[0]!) ?? points[0]!, undefined, points[points.length - 1], "");
 		const to = this.connectorLanding(this.viewportPoint(points[points.length - 1]!) ?? points[points.length - 1]!, from?.nodeId, points[0], "");
 		if (from === undefined || to === undefined) {
-			this.options.onNotice?.("Line not placed: an end was put down where the connector settings do not let it hold. Allow unattached ends to draw on empty board.");
+			this.options.onNotice?.(words().session.linePlacementRefused);
 			this.refresh(); return;
 		}
 		this.placeConnector({
@@ -4234,7 +4234,7 @@ export class M1CanvasSession {
 		const updates = changes.filter((change) => this.drawingEditable(change.id, "edit"));
 		const removals = gone.filter((id) => this.drawingEditable(id, "delete"));
 		if (updates.length + removals.length < changes.length + gone.length) {
-			this.options.onNotice?.("Locked drawings were left as they are.");
+			this.options.onNotice?.(words().session.lockedDrawingsSkipped);
 		}
 		if (updates.length === 0 && removals.length === 0) {
 			this.refresh();
@@ -4259,7 +4259,7 @@ export class M1CanvasSession {
 		if (caught.length === 0) return;
 		this.readInteractionState();
 		const ids = caught.filter((id) => this.drawingEditable(id, "delete"));
-		if (ids.length < caught.length) this.options.onNotice?.("Locked drawings were left as they are.");
+		if (ids.length < caught.length) this.options.onNotice?.(words().session.lockedDrawingsSkipped);
 		if (ids.length === 0) return;
 		this.authoring ??= createCanvasAuthoring(this.view);
 		const result = this.authoring.deleteItems({ ids });
@@ -4386,8 +4386,8 @@ export class M1CanvasSession {
 		form.style.top = `${client.y - rootRect.top}px`;
 		const input = document.createElement("input");
 		input.type = "url";
-		input.placeholder = "Paste a web address";
-		input.setAttribute("aria-label", "Web address");
+		input.placeholder = words().session.webAddressPlaceholder;
+		input.setAttribute("aria-label", words().session.webAddress);
 		form.appendChild(input);
 		const outside = (event: Event): void => {
 			const target = event.target as Node | null;
@@ -4426,7 +4426,7 @@ export class M1CanvasSession {
 			const created = this.authoring.createItem({
 				item: { type: "link" }, url, x: board.x - size.width / 2, y: board.y - size.height / 2, ...size,
 			});
-			if (!created.ok) this.options.onNotice?.(firstProblem(created.diagnostics) ?? "Canvas rejected the link.");
+			if (!created.ok) this.options.onNotice?.(firstProblem(created.diagnostics) ?? words().session.linkRejected);
 			this.refresh();
 		});
 		root.appendChild(form);
@@ -5173,11 +5173,11 @@ export class M1CanvasSession {
 			for (const diagnostic of result.diagnostics) {
 				this.addDiagnostic(diagnostic.message);
 			}
-			this.notice(`Miro Canvas: ${action} applied.`);
+			this.notice(words().shell.actionApplied(action));
 		} else if (result.status === "rejected") {
-			const diagnostic = result.diagnostics[0]?.message ?? "The metadata transaction was rejected.";
+			const diagnostic = result.diagnostics[0]?.message ?? words().shell.transactionRejected;
 			this.addDiagnostic(diagnostic);
-			this.notice(`Miro Canvas: ${diagnostic}`);
+			this.notice(words().shell.actionRejected(diagnostic));
 		}
 		this.refresh();
 		return result;
@@ -5566,7 +5566,7 @@ export class M1CanvasSession {
 			// Fall back on the document's command below.
 		}
 		if (ownerDocument(this.root)?.execCommand?.(action) !== true) {
-			this.options.onNotice?.("The clipboard is unavailable here. Focus the board and use Ctrl+C, Ctrl+X or Ctrl+V.");
+			this.options.onNotice?.(words().session.clipboardUnavailable);
 		}
 	}
 
@@ -5800,7 +5800,7 @@ export class M1CanvasSession {
 		if (this.mixedSelectionFrame === undefined) {
 			const frame = root.ownerDocument.createElement("div");
 			frame.className = "miro-canvas-mixed-selection-frame";
-			frame.setAttribute("aria-label", "Move selected elements");
+			frame.setAttribute("aria-label", words().session.moveSelectedElements);
 			for (const side of ["top", "right", "bottom", "left"]) {
 				frame.appendChild(root.ownerDocument.createElement("div")).className = `miro-canvas-mixed-selection-frame__${side}`;
 			}
@@ -5849,7 +5849,7 @@ export class M1CanvasSession {
 			return this.commentLocked(key.slice(separator + 1), key.slice(0, separator) as CommentOrigin);
 		});
 		if (lockedComment) {
-			this.options.onNotice?.("A locked comment cannot be moved.");
+			this.options.onNotice?.(words().session.lockedCommentCannotMove);
 			return true;
 		}
 		if (!this.editAllowed("move", ids)) return true;
@@ -5923,7 +5923,7 @@ export class M1CanvasSession {
 			if (changed) {
 				this.authoring ??= createCanvasAuthoring(this.view);
 				const result = this.authoring.moveSelection(ids, dx, dy, original, routeEnds);
-				if (!result.ok) this.options.onNotice?.("Selection move was refused because the board changed or an item is locked.");
+				if (!result.ok) this.options.onNotice?.(words().session.selectionMoveRefused);
 				else {
 					restoreSelection();
 					// Native Canvas may finish its own pointer-up after this capture
@@ -5951,7 +5951,7 @@ export class M1CanvasSession {
 			this.connectorLayer?.reset();
 			this.callNative("deselectAll");
 		} else {
-			this.options.onNotice?.(firstProblem(result.diagnostics) ?? "Delete was refused.");
+			this.options.onNotice?.(firstProblem(result.diagnostics) ?? words().session.deleteRefused);
 		}
 		this.refresh();
 	}

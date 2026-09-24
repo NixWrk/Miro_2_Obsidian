@@ -10,6 +10,7 @@ import {
   normalizeAnchor,
   type CanvasAnchor,
 } from "./anchors";
+import { words } from "./i18n";
 
 export type CommentOrigin = "local" | "imported";
 export type CommentScope = "board" | "selection";
@@ -72,13 +73,13 @@ export function commentAuthorLabel(message: { readonly author?: CommentAuthor })
   for (const value of [message.author?.name, message.author?.displayName, message.author?.id]) {
     if (typeof value === "string" && value.trim()) return value.trim();
   }
-  return "Unknown author";
+  return words().comments.unknownAuthor;
 }
 
 export function commentTimeLabel(value: unknown, options: CommentDisplayOptions = {}): string {
-  if (typeof value !== "string" || !value.trim()) return "Time unavailable";
+  if (typeof value !== "string" || !value.trim()) return words().comments.timeUnavailable;
   const date = new Date(value);
-  if (!Number.isFinite(date.getTime())) return "Time unavailable";
+  if (!Number.isFinite(date.getTime())) return words().comments.timeUnavailable;
   return new Intl.DateTimeFormat(options.locale, {
     year: "numeric", month: "short", day: "numeric",
     hour: "2-digit", minute: "2-digit", timeZoneName: "short",

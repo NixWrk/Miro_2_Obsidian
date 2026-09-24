@@ -10,6 +10,7 @@ import {
   type CommentThread,
 } from "./local-comments";
 import { authorColor, authorInitial, threadMessages } from "./comment-thread";
+import { words } from "./i18n";
 import { TOOLTIP_DELAY } from "./tooltips";
 
 export interface CommentMarker {
@@ -75,7 +76,6 @@ export function buildCommentMarkers(
         code: "projection-invalid", message: "Comment marker position must be finite." });
       continue;
     }
-    const status = thread.resolved ? "Resolved" : "Open";
     // An exported thread lists its opening message among its messages.
     const messages = threadMessages(thread);
     const author = messages[0]?.author ?? commentAuthorLabel(thread);
@@ -87,7 +87,10 @@ export function buildCommentMarkers(
       anchorType: anchor.type === "free" ? "board" : anchor.type,
       state: thread.resolved ? "resolved" : "open",
       point: Object.freeze({ x: point.x, y: point.y }),
-      label: `${thread.locked === true ? "Locked " : ""}${status} comment by ${author}, ${commentTimeLabel(thread.createdAt, display)}: ${messages[0]?.text ?? thread.text}. ${replyCount} replies. Open thread`,
+      label: words().comments.markers.label(
+        thread.locked === true, thread.resolved === true, author,
+        commentTimeLabel(thread.createdAt, display), messages[0]?.text ?? thread.text, replyCount,
+      ),
       replyCount,
       initial: authorInitial(author),
       color: typeof thread.color === "string" && /^#[0-9a-f]{6}$/i.test(thread.color) ? thread.color : authorColor(author),
@@ -140,7 +143,7 @@ export class CommentMarkers {
     this.element = dom.createElement("div");
     this.element.className = "miro-canvas-comment-markers";
     this.element.setAttribute("role", "group");
-    this.element.setAttribute("aria-label", "Canvas comments");
+    this.element.setAttribute("aria-label", words().comments.markers.ariaLabel);
     Object.assign(this.element.style, { position: "absolute", inset: "0", pointerEvents: "none" });
   }
 

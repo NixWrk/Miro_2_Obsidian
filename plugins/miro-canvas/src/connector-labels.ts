@@ -14,6 +14,7 @@
 
 import { pointOnPolyline, type AnchorPoint } from "./anchors";
 import { nearestRouteFraction } from "./board-connectors";
+import { words } from "./i18n";
 
 export interface ConnectorLabel {
   readonly id: string;
@@ -170,7 +171,7 @@ export class ConnectorLabels {
     const label = wrapper.appendChild(this.document.createElement("div"));
     label.className = "canvas-path-label";
     const placeholder = item.native?.querySelector(".canvas-path-label")?.getAttribute("data-placeholder");
-    label.setAttribute("data-placeholder", placeholder ?? "Add text…");
+    label.setAttribute("data-placeholder", placeholder ?? words().connector.labelPlaceholder);
     wrapper.addEventListener("pointerdown", (event) => this.drag(event, item.id));
     wrapper.addEventListener("dblclick", (event) => {
       event.preventDefault();
