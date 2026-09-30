@@ -14,7 +14,7 @@ below. Normal export needs only `boards:read` and `team:read`; add
 1. Start the no-cache server:
 
 ```powershell
-python tools\miro_websdk_exporter\serve_no_cache.py --port 8766
+miro2obsidian websdk-serve --port 8766
 ```
 
 2. Register this App URL in Miro:
@@ -39,10 +39,11 @@ http://localhost:8765/callback
 start the exporter with:
 
 ```powershell
-python tools\miro_websdk_exporter\serve_no_cache.py --port 8765
+miro2obsidian websdk-serve --port 8765
 ```
 
-`serve_no_cache.py` routes a callback without OAuth `code` to the current
+The packaged server (and its source compatibility launcher `serve_no_cache.py`)
+routes a callback without OAuth `code` to the current
 `index.html` entrypoint and listens on IPv4 plus IPv6 loopback. Stop this
 server before a REST OAuth run that also needs port `8765`.
 

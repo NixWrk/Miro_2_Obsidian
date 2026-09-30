@@ -18,11 +18,11 @@ to it when they prefer to read along.
 
 ## Create the person's own Miro app (once)
 
-1. Miro → avatar → **Settings** → **Your apps**
-   (<https://miro.com/app/settings/user-profile/apps/>). Create a Developer team
-   if asked and accept the developer terms.
-2. **+ Create new app**, a recognisable name such as
-   `Miro to Obsidian - local export`, the Developer team.
+1. Miro → avatar → **Developer Hub** → **Your apps**
+   (<https://developers.miro.com/page/developer-hub#your-apps>). Select an
+   organization and an existing Developer team, or create one if needed.
+2. Create an app in that team with a recognisable name such as
+   `Miro to Obsidian - local export`.
 3. App settings - exact values:
    - App URL / SDK URI: `http://localhost:8766/index.html`
    - OAuth redirect URI: `http://localhost:8765/callback`, and tick **Use this
@@ -31,8 +31,11 @@ to it when they prefer to read along.
 5. **Install app and get OAuth token** → choose the **team that owns the
    board** (not just the Developer team) → **Install & authorize**. A team
    administrator may have to approve it.
-6. The person copies **Client ID** and **Client secret** into their own
-   terminal - never into the chat:
+6. In Manual or Code mode, the person enters **Client ID** and **Client secret**
+   in the GUI **Set up Miro app** dialog for this session, or in their own
+   terminal for CLI use - never into the chat. In Agent mode, use Miro's UI
+   Copy buttons and paste directly into the GUI fields without reading or
+   exposing the clipboard contents:
    - PowerShell: `$env:MIRO_CLIENT_ID = "..."`, `$env:MIRO_CLIENT_SECRET = "..."`
    - macOS/Linux: `export MIRO_CLIENT_ID=...`, `export MIRO_CLIENT_SECRET=...`
 
@@ -58,11 +61,13 @@ In the window: **Miro account** → **Authenticate / refresh** → choose the bo
 (or **Miro URL** / **Miro URL list**), choose **Format**, run.
 
 **Maximum export** (adds what only the open board exposes through Miro's Web
-SDK) currently needs a source checkout: start
-`python tools\miro_websdk_exporter\serve_no_cache.py --port 8766`, open the
+SDK): start `miro2obsidian websdk-serve --port 8766`, open the
 board in Miro → **+ More apps** → the app → **Export board**, keep the
-downloaded JSON and pass it with `--websdk-json <file>` together with a fresh
-REST export of the same board.
+downloaded JSON and select it in the GUI's **Web SDK JSON** field, or pass it
+with `--websdk-json <file>` together with a fresh REST export of the same
+board. The strict canonical merge checks identity, freshness and coverage.
+Agent mode should operate the browser controls when available; if unavailable,
+report the limitation and use Code mode for REST-only export.
 
 ## When it goes wrong
 

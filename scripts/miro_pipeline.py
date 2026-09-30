@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from pathlib import Path
 
 from Json_2_Canvas.output_formats import (
@@ -13,6 +14,7 @@ from Json_2_Canvas.output_formats import (
 )
 from Json_2_Canvas.Scale_engine import DEFAULT_FIT_MARGIN, ViewProfile
 from miro2obsidian import application
+from miro2obsidian.credential_store import CredentialStoreUnavailable, load_access_token
 from scripts.miro_oauth_token import (
     DEFAULT_AUTHORIZE_URL,
     DEFAULT_BROWSER,
@@ -27,6 +29,11 @@ from scripts.obsidian_vault_settings import resolve_attachment_dir
 def add_auth_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--token-env", default="MIRO_ACCESS_TOKEN")
     parser.add_argument("--oauth", action="store_true")
+    parser.add_argument(
+        "--stored-token",
+        action="store_true",
+        help="Use the token saved by the GUI in the OS credential store.",
+    )
     parser.add_argument("--oauth-client-id-env", default="MIRO_CLIENT_ID")
     parser.add_argument("--oauth-client-secret-env", default="MIRO_CLIENT_SECRET")
     parser.add_argument("--oauth-redirect-uri", default=DEFAULT_REDIRECT_URI)
@@ -141,12 +148,22 @@ def view_profile_from_args(args: argparse.Namespace) -> ViewProfile:
 
 
 def main() -> int:
+    if len(sys.argv) > 1 and sys.argv[1] == "websdk-serve":
+        from miro2obsidian.websdk_server import main as serve_websdk
+
+        return serve_websdk(sys.argv[2:])
+    if len(sys.argv) > 1 and sys.argv[1] == "setup-serve":
+        from miro2obsidian.browser_setup import main as serve_setup
+
+        return serve_setup(sys.argv[2:])
     parser = build_parser()
     args = parser.parse_args()
     attachment_dir = args.attachment_dir or resolve_attachment_dir(
         args.vault_root, args.target_dir
     )
     if args.existing_json:
+        if args.stored_token:
+            parser.error("--stored-token cannot be combined with --existing-json")
         if args.websdk_json is not None:
             parser.error("--websdk-json cannot be combined with --existing-json")
         if args.allow_missing_assets:
@@ -187,7 +204,17 @@ def main() -> int:
             parser.error(
                 "--websdk-json cannot be combined with --allow-missing-assets"
             )
-        token = resolve_token_from_args(args)
+        if args.stored_token and args.oauth:
+            parser.error("Choose either --stored-token or --oauth")
+        if args.stored_token:
+            try:
+                token = load_access_token()
+            except CredentialStoreUnavailable as exc:
+                parser.error(str(exc))
+            if not token:
+                parser.error("No saved Miro token. Connect once in GUI Code automation mode.")
+        else:
+            token = resolve_token_from_args(args)
         result = application.run_rest_experimental_pipeline(
             board_id=args.board_id,
             token=token,

@@ -19,6 +19,7 @@ from Miro_2_Obsidian_GUI import (
     board_refs_from_file,
     default_source_json_path,
     default_web_board_list,
+    explain_code_step,
     show_error_later,
 )
 from scripts.miro_oauth_token import OAuthConfig
@@ -134,6 +135,18 @@ class MiroObsidianGuiHelperTests(unittest.TestCase):
         with patch.dict(os.environ, {"MIRO_ACCESS_TOKEN": "env-token"}, clear=True):
             self.assertEqual(authorize_gui_token(), "env-token")
 
+    def test_authorize_gui_token_uses_session_credentials_over_old_environment(self) -> None:
+        config = OAuthConfig(client_id="new-client", client_secret="new-secret")
+        with patch.dict(os.environ, {"MIRO_ACCESS_TOKEN": "old-token"}, clear=True):
+            with patch("Miro_2_Obsidian_GUI.config_from_env") as config_from_env:
+                with patch(
+                    "Miro_2_Obsidian_GUI.authorize_and_get_token",
+                    return_value="new-token",
+                ) as authorize:
+                    self.assertEqual(authorize_gui_token(config=config), "new-token")
+        config_from_env.assert_not_called()
+        authorize.assert_called_once_with(config)
+
     def test_authorize_gui_token_uses_env_oauth_credentials(self) -> None:
         config = OAuthConfig(client_id="client-1", client_secret="secret-1")
         messages = []
@@ -183,11 +196,13 @@ class MiroObsidianGuiHelperTests(unittest.TestCase):
     def test_authorize_token_reuses_inflight_oauth_result(self) -> None:
         app = object.__new__(MiroPipelineApp)
         app.token = None
+        app.oauth_config = None
         app.token_lock = threading.Lock()
         app._log = lambda _message: None
         release = threading.Event()
 
-        def fake_authorize(_logger):
+        def fake_authorize(_logger, *, config):
+            self.assertIsNone(config)
             release.wait(1)
             return "token-1"
 
@@ -209,6 +224,157 @@ class MiroObsidianGuiHelperTests(unittest.TestCase):
 
         self.assertEqual(sorted(results), ["token-1", "token-1"])
         authorize.assert_called_once()
+
+    def test_switch_miro_team_clears_board_and_reauthorizes(self) -> None:
+        app = object.__new__(MiroPipelineApp)
+        app.token = "old-token"
+        app.oauth_config = object()
+        app.token_lock = threading.Lock()
+        app.boards_by_label = {"Old board": {"id": "old-board"}}
+        app.selected_account_board_id = "old-board"
+        app.board_menu = unittest.mock.Mock()
+        app._log = unittest.mock.Mock()
+        app.authenticate_and_refresh_boards = unittest.mock.Mock()
+
+        with patch("Miro_2_Obsidian_GUI.clear_access_token") as clear:
+            MiroPipelineApp.reauthorize_and_refresh_boards(app)
+        clear.assert_called_once_with()
+
+        self.assertIsNone(app.token)
+        self.assertEqual(app.boards_by_label, {})
+        self.assertEqual(app.selected_account_board_id, "")
+        app.board_menu.configure.assert_called_once_with(values=["Authenticate first"])
+        app.board_menu.set.assert_called_once_with("Authenticate first")
+        app.authenticate_and_refresh_boards.assert_called_once_with()
+
+    def test_code_mode_reuses_token_from_os_credential_store(self) -> None:
+        app = object.__new__(MiroPipelineApp)
+        app.token = None
+        app.oauth_config = None
+        app.token_lock = threading.Lock()
+        app.active_workflow_mode = "Code automation"
+        app._log = lambda _message: None
+        with patch("Miro_2_Obsidian_GUI.load_access_token", return_value="stored-token") as load:
+            with patch("Miro_2_Obsidian_GUI.authorize_gui_token") as authorize:
+                self.assertEqual(MiroPipelineApp._authorize_token(app), "stored-token")
+        load.assert_called_once_with()
+        authorize.assert_not_called()
+
+    def test_code_mode_saves_new_token_once(self) -> None:
+        app = object.__new__(MiroPipelineApp)
+        app.token = None
+        app.oauth_config = None
+        app.token_lock = threading.Lock()
+        app.active_workflow_mode = "Code automation"
+        app._log = lambda _message: None
+        with patch("Miro_2_Obsidian_GUI.load_access_token", return_value=None):
+            with patch("Miro_2_Obsidian_GUI.authorize_gui_token", return_value="new-token") as authorize:
+                with patch("Miro_2_Obsidian_GUI.save_access_token") as save:
+                    self.assertEqual(MiroPipelineApp._authorize_token(app), "new-token")
+                    self.assertEqual(MiroPipelineApp._authorize_token(app), "new-token")
+        authorize.assert_called_once()
+        save.assert_called_once_with("new-token")
+
+    def test_code_mode_continues_when_os_credential_store_is_unavailable(self) -> None:
+        from miro2obsidian.credential_store import CredentialStoreUnavailable
+
+        app = object.__new__(MiroPipelineApp)
+        app.token = None
+        app.oauth_config = None
+        app.token_lock = threading.Lock()
+        app.active_workflow_mode = "Code automation"
+        app._credential_saved_in_session = False
+        messages = []
+        app._log = messages.append
+        with patch("Miro_2_Obsidian_GUI.load_access_token", side_effect=CredentialStoreUnavailable("No vault")):
+            with patch("Miro_2_Obsidian_GUI.authorize_gui_token", return_value="session-token"):
+                with patch("Miro_2_Obsidian_GUI.save_access_token", side_effect=CredentialStoreUnavailable("No vault")):
+                    self.assertEqual(MiroPipelineApp._authorize_token(app), "session-token")
+        self.assertTrue(any("session only" in message for message in messages))
+
+    def test_forget_miro_connection_clears_session_and_store(self) -> None:
+        app = object.__new__(MiroPipelineApp)
+        app.token = "old-token"
+        app._credential_saved_in_session = True
+        app.token_lock = threading.Lock()
+        app.boards_by_label = {"Old": {"id": "board"}}
+        app.selected_account_board_id = "board"
+        app.board_menu = unittest.mock.Mock()
+        app._log = unittest.mock.Mock()
+        with patch("Miro_2_Obsidian_GUI.clear_access_token") as clear:
+            MiroPipelineApp.forget_miro_connection(app)
+        clear.assert_called_once_with()
+        self.assertIsNone(app.token)
+        self.assertFalse(app._credential_saved_in_session)
+        self.assertEqual(app.boards_by_label, {})
+        self.assertEqual(app.selected_account_board_id, "")
+
+    def test_code_narration_follows_actual_pipeline_events(self) -> None:
+        self.assertIsNone(explain_code_step("Unrelated message"))
+        app = object.__new__(MiroPipelineApp)
+        app._token = lambda: "test-token"
+        messages = []
+        app._log = messages.append
+        options = ConversionOptions(
+            scale=None,
+            theme="dark",
+            text_style_mode="miro",
+            output_format="miro-canvas",
+            allow_missing_assets=False,
+            prefer_experimental=True,
+            install_obsidian_plugins=False,
+        )
+
+        def fake_pipeline(**kwargs):
+            kwargs["logger"]("Exporting the complete board through REST v2-experimental.")
+            kwargs["logger"]("Converting through the single Converter.py path at scale=1.")
+            return "ok"
+
+        with patch("Miro_2_Obsidian_GUI.run_rest_experimental_pipeline", side_effect=fake_pipeline):
+            MiroPipelineApp._run_one_board(
+                app,
+                board_id="board-1",
+                label="Board",
+                source_json=Path("source.json"),
+                target_dir=Path("Canvas"),
+                vault_root=Path("vault"),
+                attachment_dir=None,
+                profile=object(),
+                min_font_px=8,
+                options=options,
+                narrate=True,
+            )
+        self.assertTrue(messages[0].startswith("Code: requesting"))
+        self.assertTrue(messages[2].startswith("Code: converting"))
+
+    def test_manual_websdk_file_is_passed_to_shared_pipeline(self) -> None:
+        app = object.__new__(MiroPipelineApp)
+        app._token = lambda: "test-token"
+        app._log = lambda _message: None
+        options = ConversionOptions(
+            scale=None,
+            theme="dark",
+            text_style_mode="miro",
+            output_format="miro-canvas",
+            allow_missing_assets=False,
+            prefer_experimental=True,
+            install_obsidian_plugins=False,
+        )
+        with patch("Miro_2_Obsidian_GUI.run_rest_experimental_pipeline") as pipeline:
+            MiroPipelineApp._run_one_board(
+                app,
+                board_id="board-1",
+                label="Board",
+                source_json=Path("source.json"),
+                target_dir=Path("Canvas"),
+                vault_root=Path("vault"),
+                attachment_dir=None,
+                profile=object(),
+                min_font_px=8,
+                options=options,
+                websdk_json=Path("websdk.json"),
+            )
+        self.assertEqual(pipeline.call_args.kwargs["websdk_json"], Path("websdk.json"))
 
     def test_gui_wires_explicit_existing_json_degraded_opt_in(self) -> None:
         source = (Path(__file__).resolve().parents[1] / "Miro_2_Obsidian_GUI.py").read_text(encoding="utf-8")

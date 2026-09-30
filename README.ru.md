@@ -146,9 +146,26 @@ miro2obsidian `
 miro2obsidian-gui
 ```
 
+GUI разделяет четыре источника и три режима выполнения:
+
+- **Manual**: пользователь управляет Miro; скачанный JSON всей доски можно
+  выбрать в поле **Web SDK JSON** для строгого объединения с REST.
+- **Code automation**: REST, comments, assets и Canvas выполняются кодом с
+  пояснениями в журнале. Токен хранится в системном хранилище при его наличии;
+  CLI повторяет экспорт с `--stored-token` без браузера.
+- **Agent**: локальный агент через общий JSON-протокол пытается выполнить
+  браузерные действия и Web SDK. GUI открывает отдельный профиль Chromium и
+  передаёт адаптеру временный локальный CDP-адрес. Установленный локально Codex доступен как
+  необязательный адаптер по умолчанию. Вход, MFA и одобрение администратора
+  при необходимости остаются за владельцем аккаунта.
+
+Подробности: [три режима работы](docs/WORKFLOW_MODES.ru.md).
+
 GUI разделяет четыре сценария:
 
-- **Miro account**: OAuth, список видимых досок и выбор одной доски.
+- **Miro account**: **Set up Miro app** принимает credentials на время
+  сеанса, затем OAuth, список видимых досок и выбор одной доски. В режиме
+  **Code automation** сохраняет только токен в системном хранилище.
 - **Miro URL**: экспорт одной ссылки.
 - **Miro URL list**: экспорт ссылок из Markdown или JSON.
 - **Existing JSON**: локальная конвертация без обращения к Miro.
@@ -220,7 +237,7 @@ $env:MIRO_REDIRECT_URI = "http://localhost:8765/callback"
 5. Запустите Web SDK exporter на отдельном порту:
 
 ```powershell
-python tools\miro_websdk_exporter\serve_no_cache.py --port 8766
+miro2obsidian websdk-serve --port 8766
 ```
 
 6. Укажите `http://localhost:8766/index.html` как App URL, установите

@@ -142,6 +142,33 @@ class MissingItemsAuditTests(unittest.TestCase):
         self.assertEqual(missing[0].reason, "required_asset_not_represented")
         self.assertTrue(missing[0].actionable)
 
+    def test_document_page_preview_is_an_intentional_drop_only_with_file_parent(self) -> None:
+        document = {"id": "doc-1", "type": "doc_format", "local_name": "doc.pdf"}
+        page = {
+            "id": "page-1",
+            "type": "image",
+            "parentId": "doc-1",
+            "position": {"x": 10, "y": 20, "slotId": "page-slot"},
+            "data": {"imageUrl": "https://example.test/page.png"},
+            "geometry": {"width": 100, "height": 100},
+        }
+
+        represented = audit_missing_items(
+            [document, page],
+            {"nodes": [{"id": "doc-1", "type": "file", "file": "doc.pdf"}], "edges": []},
+        )
+        self.assertEqual(len(represented), 1)
+        self.assertEqual(represented[0].reason, "document_preview_slot")
+        self.assertFalse(represented[0].actionable)
+
+        no_file = audit_missing_items(
+            [document, page],
+            {"nodes": [{"id": "doc-1", "type": "text"}], "edges": []},
+        )
+        page_result = next(item for item in no_file if item.item_id == "page-1")
+        self.assertEqual(page_result.reason, "recoverable_content_missing")
+        self.assertTrue(page_result.actionable)
+
     def test_known_board_coverage_limit_is_visible_but_not_actionable(self) -> None:
         miro = {
             "items": [],

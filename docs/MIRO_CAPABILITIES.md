@@ -154,7 +154,7 @@ With `--oauth`, the local callback defaults to `http://localhost:8765/callback` 
 Host the buildless app on the port reserved for its static content:
 
 ```powershell
-python tools\miro_websdk_exporter\serve_no_cache.py --port 8766
+miro2obsidian websdk-serve --port 8766
 ```
 
 Register `http://localhost:8766/index.html` as the Miro
@@ -209,6 +209,7 @@ When `scripts/audit_missing_miro_items.py` reports a missing Miro id:
 - `board_metadata`, `empty_card_like_item`, `connector_without_endpoints`, and `unsupported_without_geometry` are non-actionable unless this matrix says the source should contain recoverable content.
 - `unsupported_position_only` is actionable: the source exposes a board position, so the converter should preserve a diagnostic placeholder unless a type-specific rule says to drop it.
 - `embed_without_resolvable_url` is actionable when HTML or preview metadata exists.
+- `document_preview_slot` is non-actionable only when an image with `position.slotId` belongs to a `doc_format` source item represented by a Canvas file node. The page image duplicates the exported document; if that file node is absent, the image remains actionable.
 - `unclassified_missing_item` is always actionable and should become a minimized fixture and tracked issue.
 - New item types must be added here before being marked intentional in the audit.
 

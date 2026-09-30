@@ -6,16 +6,19 @@ description: Walk a person through bringing a Miro board into Obsidian with miro
 # Import a Miro board into Obsidian
 
 miro2obsidian exports what Miro's public APIs expose about a board and writes
-it into an Obsidian vault as a Canvas file. You guide; the person clicks in
-Miro and holds their own credentials. Read
+it into an Obsidian vault as a Canvas file. Use the requested workflow: guide
+the person in Manual mode, run the local code path in Code automation mode, or
+operate available browser tools in Agent mode. Read
 [references/steps.md](references/steps.md) for exact screens, commands and the
 troubleshooting table before starting.
 
 ## Never
 
-- Never ask for, read, print, store or paste a Client secret, an access token or
-  any other credential. The person sets them in their own environment; you only
-  refer to the variable names.
+- Never ask for, read, print, persist in project files, or relay a Client
+  secret, access token, or other credential. In Agent mode, use UI Copy/Paste
+  controls to move app credentials into the program's setup dialog without
+  displaying their contents to yourself or in chat. The program may save a
+  user-authorized access token in the OS credential store for Code mode.
 - Never contact Miro (export, OAuth) before the person agrees to it for that
   board.
 - Never edit `miroSource` in a written board, and never promise a byte-for-byte
@@ -39,10 +42,12 @@ troubleshooting table before starting.
 
 A Miro app of their own is required by Miro's security model; creating it
 takes 10-20 minutes and no programming (steps 1-5 in the reference). The app
-must be installed in the team that owns the board. Then either the desktop
-window (`miro2obsidian-gui`: **Miro account** → **Authenticate / refresh** →
-pick the board) or the command line with `--oauth` does the export and the
-conversion in one run.
+must be installed in the team that owns the board. For the three workflows,
+see `docs/WORKFLOW_MODES.md` (Russian: `docs/WORKFLOW_MODES.ru.md`). In Agent
+mode, attempt app setup and export yourself using an authenticated browser;
+only ask the person to handle sign-in, MFA, consent, or team administrator
+approval when required. The desktop window (`miro2obsidian-gui`) or the
+command line with `--oauth` does REST export and conversion in one run.
 
 ## Convert
 
@@ -70,4 +75,4 @@ unless `--keep-board-attachments` is given.
 
 The program can be deleted once the boards are in the vault; the boards do
 not need it. The person may also uninstall or revoke the Miro app in Miro's
-**Your apps** settings. Running the import again later repeats these steps.
+**Developer Hub → Your apps**. Running the import again later repeats these steps.

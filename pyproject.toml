@@ -13,6 +13,8 @@ dependencies = [
     "customtkinter==6.0.0",
     "requests==2.34.2",
     "jsonschema==4.23.0",
+    "keyring==25.7.0",
+    "playwright==1.62.0",
 ]
 
 [project.scripts]
@@ -26,6 +28,16 @@ py-modules = ["Miro_2_Obsidian_GUI"]
 # The board schema and its compatibility fixtures are the contract the
 # plugin pins; they ship with the package.
 miro2obsidian = ["schemas/v1/*.json", "schemas/v1/fixtures/*.json", "schemas/v1/fixtures/*/*.canvas"]
+
+[tool.setuptools.data-files]
+"share/miro2obsidian/websdk" = [
+    "tools/miro_websdk_exporter/index.html",
+    "tools/miro_websdk_exporter/panel.html",
+    "tools/miro_websdk_exporter/exporter.js",
+    "tools/miro_websdk_exporter/icon-outline.svg",
+    "tools/miro_websdk_exporter/icon-color.svg",
+    "tools/miro_websdk_exporter/manifest.example.yml",
+]
 
 [tool.setuptools.packages.find]
 include = [

@@ -17,6 +17,8 @@ def _check() -> list[str]:
 
     from miro2obsidian import application  # noqa: F401 - the whole pipeline
     from miro2obsidian.schema import validate_board
+    from miro2obsidian.websdk_server import websdk_directory
+    from playwright._impl._driver import compute_driver_executable
 
     if validate_board({"nodes": [], "edges": []}):
         problems.append("the board schema rejects an empty board")
@@ -24,13 +26,39 @@ def _check() -> list[str]:
 
     if not obsidian_plugin_setup.ZOOM_UNLOCK_SOURCE.is_dir():
         problems.append(f"missing bundled plugin: {obsidian_plugin_setup.ZOOM_UNLOCK_SOURCE}")
+    try:
+        websdk_directory()
+    except FileNotFoundError as exc:
+        problems.append(str(exc))
     themes = Path(customtkinter.__file__).resolve().parent / "assets" / "themes"
     if not themes.is_dir():
         problems.append(f"missing customtkinter themes: {themes}")
+    node, cli = compute_driver_executable()
+    if not Path(node).is_file() or not Path(cli).is_file():
+        problems.append("missing bundled Playwright browser driver")
     return problems
 
 
 def run_self_test_if_asked() -> None:
+    if "--browser-self-test" in sys.argv[1:]:
+        from tempfile import TemporaryDirectory
+
+        from miro2obsidian.browser_bridge import start_browser_bridge
+
+        try:
+            with TemporaryDirectory(prefix="miro2obsidian-browser-self-test-") as directory:
+                with start_browser_bridge(
+                    "data:text/html,<title>browser-self-test</title>",
+                    profile_dir=Path(directory),
+                    headless=True,
+                    install_missing=False,
+                ):
+                    pass
+        except Exception as exc:  # noqa: BLE001
+            print(f"browser-self-test: {exc}")
+            sys.exit(1)
+        print("browser-self-test: ok")
+        sys.exit(0)
     if "--self-test" not in sys.argv[1:]:
         return
     problems = _check()

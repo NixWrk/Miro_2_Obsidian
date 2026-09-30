@@ -8,14 +8,18 @@
 
 from pathlib import Path
 
-from PyInstaller.utils.hooks import collect_data_files
+import playwright as playwright_package
+from PyInstaller.utils.hooks import collect_data_files, collect_submodules
 
 ROOT = Path(SPECPATH).resolve().parent
+PLAYWRIGHT_DIR = Path(playwright_package.__file__).resolve().parent
 
 datas = [
     (str(ROOT / "miro2obsidian" / "schemas"), "miro2obsidian/schemas"),
     (str(ROOT / "tools" / "obsidian_plugins" / "canvas-zoom-unlock"), "tools/obsidian_plugins/canvas-zoom-unlock"),
+    (str(ROOT / "tools" / "miro_websdk_exporter"), "share/miro2obsidian/websdk"),
     *collect_data_files("customtkinter"),
+    (str(PLAYWRIGHT_DIR / "driver"), "playwright/driver"),
 ]
 
 
@@ -24,8 +28,8 @@ def analysis(entry: str) -> Analysis:
         [str(ROOT / "release" / entry)],
         pathex=[str(ROOT), str(ROOT / "release")],
         datas=datas,
-        hiddenimports=["miro2obsidian.validate"],
-        excludes=["pytest", "playwright"],
+        hiddenimports=["miro2obsidian.validate", *collect_submodules("keyring.backends")],
+        excludes=["pytest"],
     )
 
 

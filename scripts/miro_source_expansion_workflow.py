@@ -98,7 +98,7 @@ def build_workflow_plan(
             "## 5. Export the same unchanged board through the Web SDK app",
             "",
             "```powershell",
-            f"python tools\\miro_websdk_exporter\\serve_no_cache.py --port {websdk_port}",
+            f"miro2obsidian websdk-serve --port {websdk_port}",
             "```",
             "",
             (

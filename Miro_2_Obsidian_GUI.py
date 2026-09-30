@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import os
+import json
 import re
 import threading
+import webbrowser
 from dataclasses import dataclass
 from pathlib import Path
 from tkinter import filedialog, messagebox
@@ -27,7 +29,20 @@ from Json_2_Canvas.output_formats import (  # noqa: E402
 )
 from Json_2_Canvas.Scale_engine import ViewProfile  # noqa: E402
 from Miro_2_Json.miro_downloader import get_boards  # noqa: E402
-from scripts.miro_oauth_token import authorize_and_get_token, callback_recovery_hint, config_from_env  # noqa: E402
+from scripts.miro_oauth_token import (  # noqa: E402
+    OAuthConfig,
+    authorize_and_get_token,
+    callback_recovery_hint,
+    config_from_env,
+    session_oauth_config,
+)
+from miro2obsidian.agent_runner import parse_agent_command, run_agent  # noqa: E402
+from miro2obsidian.credential_store import (  # noqa: E402
+    CredentialStoreUnavailable,
+    clear_access_token,
+    load_access_token,
+    save_access_token,
+)
 from miro2obsidian.application import (  # noqa: E402
     pipeline_result_is_degraded,
     run_existing_json_pipeline,
@@ -42,6 +57,14 @@ URL_LIST_SOURCE_MODE = "Miro URL list"
 JSON_SOURCE_MODE = "Existing JSON"
 MIRO_EXPORT_MODES = {ACCOUNT_SOURCE_MODE, URL_SOURCE_MODE, URL_LIST_SOURCE_MODE}
 ZOOM_UNLOCKED_MIN_ZOOM = "0.000244140625"
+MANUAL_WORKFLOW = "Manual"
+CODE_WORKFLOW = "Code automation"
+AGENT_WORKFLOW = "Agent"
+WORKFLOW_HINTS = {
+    MANUAL_WORKFLOW: "You control Miro and may supply a downloaded Web SDK JSON.",
+    CODE_WORKFLOW: "Code exports REST, assets, and Canvas; steps appear in the log.",
+    AGENT_WORKFLOW: "A configured agent handles browser steps; the app validates its output.",
+}
 BOARD_URL_RE = re.compile(r"https://miro\.com/app/board/(?P<id>[^/?#)]+)", flags=re.IGNORECASE)
 
 
@@ -146,28 +169,44 @@ def board_label(board: dict) -> str:
     return f"{prefix}{name} ({board.get('id')})"
 
 
+def explain_code_step(message: str) -> str | None:
+    if message.startswith("Exporting the complete board through"):
+        return "Code: requesting all board items, comments, and required assets from Miro."
+    if message.startswith("Merging verified Web SDK export:"):
+        return "Code: checking the Web SDK capture and merging it with REST data."
+    if message.startswith("Converting through the single Converter.py path"):
+        return "Code: converting the checked source into an Obsidian Canvas."
+    if message.startswith("Canvas written:"):
+        return "Code: Canvas written; checking output format and attachments."
+    return None
+
+
 def show_error_later(after: Callable[[int, Callable[[], None]], object], title: str, error: BaseException) -> None:
     message = str(error)
     after(0, lambda: messagebox.showerror(title, message))
 
 
-def authorize_gui_token(logger: Callable[[str], None] | None = None) -> str:
+def authorize_gui_token(
+    logger: Callable[[str], None] | None = None,
+    *,
+    config: OAuthConfig | None = None,
+) -> str:
     def log(message: str) -> None:
         if logger:
             logger(message)
 
-    token = os.environ.get("MIRO_ACCESS_TOKEN")
+    token = os.environ.get("MIRO_ACCESS_TOKEN") if config is None else None
     if token:
         log("Using MIRO_ACCESS_TOKEN from environment.")
         return token
 
     try:
-        config = config_from_env()
+        config = config or config_from_env()
     except ValueError as exc:
         raise RuntimeError(
-            "Direct Miro export needs credentials. Use Existing JSON without Miro auth, "
-            "or configure your own Miro Developer App with "
-            "MIRO_CLIENT_ID/MIRO_CLIENT_SECRET or ignored .miro_oauth.local.json. "
+            "Direct Miro export needs credentials. Use Set up Miro app in this GUI, "
+            "or configure MIRO_CLIENT_ID and MIRO_CLIENT_SECRET for your own Miro app. "
+            "Existing JSON works without Miro auth. "
             "MIRO_ACCESS_TOKEN is only a developer shortcut when it came from your own app. "
             "The old Miro->JSON GUI looked app-free only because bundled app secrets existed."
         ) from exc
@@ -187,6 +226,10 @@ class MiroPipelineApp(ctk.CTk):
         self.minsize(940, 680)
 
         self.token: str | None = os.environ.get("MIRO_ACCESS_TOKEN")
+        self.oauth_config: OAuthConfig | None = None
+        self._credential_saved_in_session = False
+        self.active_workflow_mode = MANUAL_WORKFLOW
+        self.agent_command_spec: list[str] | None = None
         self.token_lock = threading.Lock()
         self.boards_by_label: dict[str, dict] = {}
         self.selected_account_board_id = ""
@@ -204,7 +247,16 @@ class MiroPipelineApp(ctk.CTk):
         pad = {"padx": 10, "pady": 7}
 
         title = ctk.CTkLabel(self, text="Miro -> Obsidian Canvas", font=ctk.CTkFont(size=22, weight="bold"))
-        title.grid(row=0, column=0, columnspan=4, sticky="w", padx=12, pady=(16, 10))
+        title.grid(row=0, column=0, columnspan=2, sticky="w", padx=12, pady=(16, 10))
+        ctk.CTkLabel(self, text="Workflow").grid(row=0, column=2, sticky="e", **pad)
+        self.workflow_mode = ctk.CTkOptionMenu(
+            self,
+            values=[MANUAL_WORKFLOW, CODE_WORKFLOW, AGENT_WORKFLOW],
+            command=self.on_workflow_mode_changed,
+            width=180,
+        )
+        self.workflow_mode.set(MANUAL_WORKFLOW)
+        self.workflow_mode.grid(row=0, column=3, sticky="we", **pad)
 
         ctk.CTkLabel(self, text="Source").grid(row=1, column=0, sticky="e", **pad)
         self.source_mode = ctk.CTkOptionMenu(
@@ -225,6 +277,9 @@ class MiroPipelineApp(ctk.CTk):
         self.board_menu = ctk.CTkOptionMenu(self.account_frame, values=["Authenticate first"], command=self.on_board_selected)
         self.board_menu.grid(row=0, column=1, sticky="we", **pad)
         ctk.CTkButton(self.account_frame, text="Authenticate / refresh", width=170, command=self.authenticate_and_refresh_boards).grid(row=0, column=2, columnspan=2, **pad)
+        ctk.CTkButton(self.account_frame, text="Switch Miro team", command=self.reauthorize_and_refresh_boards).grid(row=1, column=1, sticky="we", **pad)
+        ctk.CTkButton(self.account_frame, text="Set up Miro app", width=170, command=self.open_miro_setup).grid(row=1, column=2, columnspan=2, **pad)
+        ctk.CTkButton(self.account_frame, text="Forget saved token", command=self.forget_miro_connection).grid(row=2, column=2, columnspan=2, **pad)
 
         self.url_frame = ctk.CTkFrame(self.path_frame, fg_color="transparent")
         self.url_frame.grid_columnconfigure(1, weight=1)
@@ -373,10 +428,25 @@ class MiroPipelineApp(ctk.CTk):
             row=2, column=2, columnspan=6, sticky="we", padx=8, pady=(0, 8)
         )
 
+        ctk.CTkLabel(options, text="Web SDK JSON").grid(row=4, column=0, sticky="e", padx=8, pady=(0, 8))
+        self.websdk_path = ctk.CTkEntry(options, placeholder_text="Optional whole-board download")
+        self.websdk_path.grid(row=4, column=1, columnspan=5, sticky="we", padx=8, pady=(0, 8))
+        ctk.CTkButton(options, text="Browse", command=self.pick_websdk_file).grid(
+            row=4, column=6, columnspan=2, sticky="we", padx=8, pady=(0, 8)
+        )
+
+        self.workflow_hint = ctk.CTkLabel(
+            self, text=WORKFLOW_HINTS[MANUAL_WORKFLOW], anchor="w", text_color="gray60"
+        )
+        self.workflow_hint.grid(row=6, column=0, columnspan=2, sticky="we", padx=12, pady=(10, 8))
+        self.agent_settings_button = ctk.CTkButton(
+            self, text="Configure agent", command=self.open_agent_settings, state="disabled"
+        )
+        self.agent_settings_button.grid(row=6, column=2, sticky="we", padx=10, pady=(10, 8))
         self.run_button = ctk.CTkButton(self, text="Run pipeline", height=40, command=self.run_pipeline)
         self.run_button.grid(row=6, column=3, sticky="e", padx=10, pady=(10, 8))
 
-        self.log = ctk.CTkTextbox(self, height=230)
+        self.log = ctk.CTkTextbox(self, height=150)
         self.log.grid(row=7, column=0, columnspan=4, sticky="nsew", padx=10, pady=(4, 10))
         self.grid_rowconfigure(7, weight=1)
         self.on_source_mode_changed(ACCOUNT_SOURCE_MODE)
@@ -410,16 +480,116 @@ class MiroPipelineApp(ctk.CTk):
         value = board_id_from_text(self.board_id.get())
         return value or "board"
 
+    def open_miro_setup(self) -> None:
+        dialog = ctk.CTkToplevel(self)
+        dialog.title("Set up your Miro app")
+        dialog.geometry("620x380")
+        dialog.transient(self)
+        dialog.grid_columnconfigure(1, weight=1)
+        ctk.CTkLabel(
+            dialog,
+            text=(
+                "Create an app in Miro, set App URL to "
+                "http://localhost:8766/index.html and OAuth redirect URI to "
+                "http://localhost:8765/callback. Select boards:read and team:read, "
+                "then install the app in the board's team. Leave 'Expire user "
+                "authorization token' unchecked for unattended Code mode."
+            ),
+            wraplength=520,
+            justify="left",
+        ).grid(row=0, column=0, columnspan=3, padx=16, pady=(18, 12), sticky="w")
+        ctk.CTkLabel(dialog, text="Client ID").grid(row=1, column=0, padx=16, pady=8, sticky="e")
+        client_id_entry = ctk.CTkEntry(dialog)
+        client_id_entry.grid(row=1, column=1, padx=(16, 8), pady=8, sticky="we")
+        ctk.CTkLabel(dialog, text="Client secret").grid(row=2, column=0, padx=16, pady=8, sticky="e")
+        secret_entry = ctk.CTkEntry(dialog, show="*")
+        secret_entry.grid(row=2, column=1, padx=(16, 8), pady=8, sticky="we")
+        def paste_credential(entry: ctk.CTkEntry) -> None:
+            try:
+                value = dialog.clipboard_get()
+            except Exception:  # noqa: BLE001
+                messagebox.showerror("Miro app", "Clipboard is empty.", parent=dialog)
+                return
+            entry.delete(0, "end")
+            entry.insert(0, value)
+
+        ctk.CTkButton(
+            dialog,
+            text="Paste",
+            width=70,
+            command=lambda: paste_credential(client_id_entry),
+        ).grid(row=1, column=2, padx=(0, 16), pady=8)
+        ctk.CTkButton(
+            dialog,
+            text="Paste",
+            width=70,
+            command=lambda: paste_credential(secret_entry),
+        ).grid(row=2, column=2, padx=(0, 16), pady=8)
+        ctk.CTkLabel(
+            dialog,
+            text="These values stay in this program's memory for this session.",
+            wraplength=580,
+        ).grid(row=3, column=0, columnspan=3, padx=16, pady=8, sticky="w")
+
+        def use_credentials() -> None:
+            try:
+                config = session_oauth_config(client_id_entry.get(), secret_entry.get())
+            except ValueError as exc:
+                messagebox.showerror("Miro app", str(exc), parent=dialog)
+                return
+            with self.token_lock:
+                self.oauth_config = config
+                self.token = None
+                self._credential_saved_in_session = False
+                self._clear_saved_token()
+            secret_entry.delete(0, "end")
+            dialog.destroy()
+            self._log("Miro app credentials ready for this session.")
+            self.authenticate_and_refresh_boards()
+
+        ctk.CTkButton(
+            dialog,
+            text="Open Miro Developer Hub",
+            command=lambda: webbrowser.open(
+                "https://developers.miro.com/page/developer-hub#your-apps"
+            ),
+        ).grid(row=4, column=0, padx=16, pady=16, sticky="we")
+        ctk.CTkButton(
+            dialog, text="Connect", command=use_credentials
+        ).grid(row=4, column=1, columnspan=2, padx=16, pady=16, sticky="we")
+        client_id_entry.focus_set()
+
+    def _clear_saved_token(self) -> None:
+        try:
+            clear_access_token()
+        except CredentialStoreUnavailable:
+            self._log("No OS credential store is available; session token cleared.")
+
     def _authorize_token(self) -> str:
         with self.token_lock:
-            if self.token:
-                return self.token
-            self.token = authorize_gui_token(self._log)
+            mode = self.__dict__.get("active_workflow_mode", MANUAL_WORKFLOW)
+            persistent = mode in {CODE_WORKFLOW, AGENT_WORKFLOW}
+            if not self.token and persistent:
+                try:
+                    self.token = load_access_token()
+                except CredentialStoreUnavailable as exc:
+                    self._log(str(exc))
+                if self.token:
+                    self._credential_saved_in_session = True
+                    self._log("Using the Miro token from the OS credential store.")
+            if not self.token:
+                self.token = authorize_gui_token(self._log, config=self.oauth_config)
+            if persistent and not self.__dict__.get("_credential_saved_in_session", False):
+                try:
+                    save_access_token(self.token)
+                except CredentialStoreUnavailable as exc:
+                    self._log(f"Token available for this session only: {exc}")
+                else:
+                    self._credential_saved_in_session = True
+                    self._log("Miro token saved in the OS credential store for future runs.")
             return self.token
 
     def _token(self) -> str:
-        if self.token:
-            return self.token
         return self._authorize_token()
 
     def authorize_oauth(self) -> None:
@@ -466,6 +636,29 @@ class MiroPipelineApp(ctk.CTk):
         teams = len({team for team in team_keys if team})
         self._log(f"Loaded boards: {len(labels)} across {teams} team(s) visible to this Miro app/user.")
 
+    def forget_miro_connection(self) -> None:
+        with self.token_lock:
+            self.token = None
+            self._credential_saved_in_session = False
+            self._clear_saved_token()
+        self.boards_by_label = {}
+        self.selected_account_board_id = ""
+        self.board_menu.configure(values=["Authenticate first"])
+        self.board_menu.set("Authenticate first")
+        self._log("Saved Miro token removed from the OS credential store.")
+
+    def reauthorize_and_refresh_boards(self) -> None:
+        with self.token_lock:
+            self.token = None
+            self._credential_saved_in_session = False
+            self._clear_saved_token()
+        self.boards_by_label = {}
+        self.selected_account_board_id = ""
+        self.board_menu.configure(values=["Authenticate first"])
+        self.board_menu.set("Authenticate first")
+        self._log("Choose the team that owns the target board in Miro OAuth.")
+        self.authenticate_and_refresh_boards()
+
     def authenticate_and_refresh_boards(self) -> None:
         def worker() -> None:
             try:
@@ -502,6 +695,56 @@ class MiroPipelineApp(ctk.CTk):
         path = filedialog.askopenfilename(filetypes=[("JSON files", "*.json")])
         if path:
             self._set_entry(self.json_path, path)
+
+    def pick_websdk_file(self) -> None:
+        path = filedialog.askopenfilename(filetypes=[("Web SDK JSON", "*.json")])
+        if path:
+            self._set_entry(self.websdk_path, path)
+
+    def on_workflow_mode_changed(self, mode: str) -> None:
+        self.active_workflow_mode = mode
+        self.workflow_hint.configure(text=WORKFLOW_HINTS.get(mode, ""))
+        self.agent_settings_button.configure(state="normal" if mode == AGENT_WORKFLOW else "disabled")
+        if mode == CODE_WORKFLOW:
+            self._log("Code mode: REST and assets run automatically; the OS vault stores the token when available.")
+        elif mode == AGENT_WORKFLOW:
+            self._log("Agent mode: a configured local agent will handle browser-dependent steps.")
+        else:
+            self._log("Manual mode: choose each source and run the pipeline yourself.")
+
+    def open_agent_settings(self) -> None:
+        dialog = ctk.CTkToplevel(self)
+        dialog.title("Agent command")
+        dialog.geometry("650x190")
+        dialog.transient(self)
+        dialog.grab_set()
+        ctk.CTkLabel(
+            dialog,
+            text="JSON argument array for any local agent adapter. Leave blank for the default.",
+            wraplength=610,
+        ).pack(fill="x", padx=16, pady=(16, 8))
+        entry = ctk.CTkEntry(dialog)
+        entry.pack(fill="x", padx=16, pady=8)
+        if self.agent_command_spec:
+            entry.insert(0, json.dumps(self.agent_command_spec))
+        ctk.CTkLabel(
+            dialog, text="Example: [\"python\", \"/path/to/adapter.py\"]. Never put secrets here.",
+            text_color="gray60",
+        ).pack(fill="x", padx=16, pady=4)
+
+        def save_command() -> None:
+            raw = entry.get().strip()
+            try:
+                command = parse_agent_command(raw) if raw else None
+            except ValueError as exc:
+                messagebox.showerror("Agent command", str(exc), parent=dialog)
+                return
+            self.agent_command_spec = command
+            dialog.destroy()
+            self._log("Agent command configured for this session." if command else "Using the default agent adapter.")
+
+        ctk.CTkButton(dialog, text="Use", command=save_command).pack(pady=(4, 14))
+        entry.focus_set()
 
     def pick_target_dir(self) -> None:
         path = filedialog.askdirectory()
@@ -581,7 +824,16 @@ class MiroPipelineApp(ctk.CTk):
         profile: ViewProfile,
         min_font_px: int,
         options: ConversionOptions,
+        websdk_json: Path | None = None,
+        narrate: bool = False,
     ):
+        def log_step(message: str) -> None:
+            if narrate:
+                explanation = explain_code_step(message)
+                if explanation:
+                    self._log(explanation)
+            self._log(f"{label}: {message}")
+
         return run_rest_experimental_pipeline(
             board_id=board_id,
             token=self._token(),
@@ -599,16 +851,23 @@ class MiroPipelineApp(ctk.CTk):
             install_obsidian_plugins=options.install_obsidian_plugins,
             attachment_dir=attachment_dir,
             share_attachments=options.share_attachments,
-            logger=lambda message: self._log(f"{label}: {message}"),
+            websdk_json=websdk_json,
+            logger=log_step,
         )
 
     def run_pipeline(self) -> None:
         try:
             source_mode = self.source_mode.get()
+            workflow_mode = self.workflow_mode.get()
             target_text = self.target_dir.get().strip()
             if not target_text:
                 raise ValueError("Canvas folder is required.")
             json_path_text = self.json_path.get().strip()
+            websdk_path_text = self.websdk_path.get().strip()
+            if websdk_path_text and workflow_mode != AGENT_WORKFLOW and source_mode not in {ACCOUNT_SOURCE_MODE, URL_SOURCE_MODE}:
+                raise ValueError("Web SDK JSON can be paired with one Miro board at a time.")
+            if websdk_path_text and workflow_mode != AGENT_WORKFLOW and not Path(websdk_path_text).is_file():
+                raise ValueError("Choose an existing whole-board Web SDK JSON file.")
             url_list_text = self.url_list_path.get().strip()
             board_text = self.board_id.get()
             account_board_id = self.selected_account_board_id
@@ -629,6 +888,7 @@ class MiroPipelineApp(ctk.CTk):
                 install_obsidian_plugins=self.install_obsidian_plugins.get(),
                 share_attachments=self.share_attachments.get(),
             )
+            agent_command_spec = self.agent_command_spec
         except Exception as exc:  # noqa: BLE001
             self._log(f"Pipeline failed: {exc}")
             show_error_later(self.after, "Pipeline failed", exc)
@@ -644,6 +904,60 @@ class MiroPipelineApp(ctk.CTk):
                 vault_root = vault_paths.vault_root
                 attachment_dir = vault_paths.attachment_dir
                 self.after(0, lambda: self._set_entry(self.vault_root, str(vault_root), disabled=True))
+
+                if workflow_mode == AGENT_WORKFLOW:
+                    if source_mode not in {ACCOUNT_SOURCE_MODE, URL_SOURCE_MODE}:
+                        raise ValueError("Agent mode currently needs one Miro board or board URL.")
+                    board_id = (
+                        account_board_id
+                        if source_mode == ACCOUNT_SOURCE_MODE
+                        else board_id_from_text(board_text)
+                    )
+                    if not board_id:
+                        raise ValueError("Choose or paste a Miro board before starting Agent mode.")
+                    self._log("Agent 1/3: opening a dedicated Miro browser profile for the agent.")
+                    self._log("Agent browser: first sign-in or MFA may still need the account owner.")
+                    outcome = run_agent(
+                        board_url=f"https://miro.com/app/board/{board_id}/",
+                        target_dir=target_dir,
+                        vault_root=vault_root,
+                        output_format=options.output_format,
+                        repo_root=REPO_ROOT,
+                        command=agent_command_spec,
+                        on_status=self._log,
+                    )
+                    if outcome.status == "needs_user":
+                        if outcome.reason == "browser_unavailable":
+                            message = (
+                                "This agent session cannot control a signed-in browser. "
+                                "Use Code automation for REST or configure an agent adapter "
+                                "with browser access."
+                            )
+                        elif outcome.reason == "agent_network_unavailable":
+                            message = (
+                                "The agent cannot reach its service from this environment. "
+                                "Check the agent's network access and retry."
+                            )
+                        elif outcome.reason == "login":
+                            message = "Sign in to Miro in the dedicated browser, then retry Agent mode."
+                        else:
+                            message = "Check Miro sign-in, consent, and team approval; then retry."
+                        self._log(f"Agent paused: {message}")
+                        self.after(0, lambda message=message: messagebox.showwarning("Miro needs attention", message))
+                    elif outcome.status == "failed":
+                        raise RuntimeError("The agent could not complete the board export.")
+                    else:
+                        done_path = str(outcome.artifact_path)
+                        self._log(f"Agent 3/3: validated result at {done_path}")
+                        self.after(0, lambda: messagebox.showinfo("Pipeline complete", done_path))
+                    return
+
+                if workflow_mode == CODE_WORKFLOW:
+                    self._log("Code: checking the vault and selected source.")
+                    if source_mode == JSON_SOURCE_MODE:
+                        self._log("Code: reading local JSON; Miro access is unnecessary.")
+                    elif not websdk_path_text:
+                        self._log("Code: this run will use REST only; no Web SDK capture was selected.")
 
                 if source_mode == JSON_SOURCE_MODE:
                     source_text = json_path_text
@@ -691,6 +1005,7 @@ class MiroPipelineApp(ctk.CTk):
                             profile=profile,
                             min_font_px=min_font_px,
                             options=options,
+                            narrate=workflow_mode == CODE_WORKFLOW,
                         )
                         run_results.append(last_result)
                     result = last_result
@@ -715,6 +1030,8 @@ class MiroPipelineApp(ctk.CTk):
                         profile=profile,
                         min_font_px=min_font_px,
                         options=options,
+                        websdk_json=Path(websdk_path_text) if websdk_path_text else None,
+                        narrate=workflow_mode == CODE_WORKFLOW,
                     )
                     run_results.append(result)
                 done_path = str(result.canvas_path) if result else str(target_dir)
@@ -730,6 +1047,8 @@ class MiroPipelineApp(ctk.CTk):
                         ),
                     )
                 else:
+                    if workflow_mode == CODE_WORKFLOW:
+                        self._log("Code: export finished; the output passed the pipeline checks.")
                     self._log(f"Done: {done_path}")
                     self.after(0, lambda: messagebox.showinfo("Pipeline complete", done_path))
             except Exception as exc:  # noqa: BLE001

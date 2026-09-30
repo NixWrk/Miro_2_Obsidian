@@ -37,7 +37,7 @@ class MiroSourceExpansionWorkflowTests(unittest.TestCase):
         self.assertIn("--board-id", plan)
         self.assertIn("--board-id board-1", plan)
         self.assertIn("http://localhost:8766/index.html", plan)
-        self.assertIn("serve_no_cache.py --port 8766", plan)
+        self.assertIn("miro2obsidian websdk-serve --port 8766", plan)
         self.assertIn("exporter_version", plan)
         self.assertIn("same Miro team as the target board", plan)
         self.assertIn("If several `export to Json` apps exist", plan)
@@ -59,7 +59,7 @@ class MiroSourceExpansionWorkflowTests(unittest.TestCase):
             plan_path = write_workflow_plan(output_dir)
             plan = plan_path.read_text(encoding="utf-8")
 
-            self.assertIn("serve_no_cache.py --port 8766", plan)
+            self.assertIn("miro2obsidian websdk-serve --port 8766", plan)
             self.assertTrue((output_dir / ".miro-source-expansion").is_file())
 
     def test_output_validation_rejects_file_and_invalid_sentinel(self) -> None:

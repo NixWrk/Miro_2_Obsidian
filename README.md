@@ -156,9 +156,26 @@ miro2obsidian `
 miro2obsidian-gui
 ```
 
-The GUI supports four explicit workflows:
+The GUI has four source choices and three execution modes:
 
-- **Miro account**: authenticate, list visible boards, and choose one.
+- **Manual**: operate Miro yourself and optionally select a downloaded
+  whole-board JSON in **Web SDK JSON** for strict REST/Web SDK union.
+- **Code automation**: code runs REST, comments, assets, and Canvas conversion
+  with narrated log steps. The token is kept in the OS credential store when available;
+  the CLI can repeat exports with `--stored-token` without a browser.
+- **Agent**: a local agent using the JSON-stdio adapter attempts browser steps
+  and Web SDK capture too. The GUI opens a dedicated Chromium profile and
+  passes its temporary local CDP endpoint to any adapter. A locally installed
+  Codex CLI is an optional default.
+  Sign-in, MFA, and team approval can still require the account owner.
+
+See [three workflow modes](docs/WORKFLOW_MODES.md) for setup and limits.
+
+The GUI supports four source choices:
+
+- **Miro account**: use **Set up Miro app** for session-only credentials,
+  authenticate, list visible boards, and choose one. **Code automation** stores
+  only the token in the OS credential store.
 - **Miro URL**: export one board URL.
 - **Miro URL list**: export board URLs from a Markdown or JSON file.
 - **Existing JSON**: convert a local canonical JSON without contacting Miro.
@@ -228,7 +245,7 @@ $env:MIRO_REDIRECT_URI = "http://localhost:8765/callback"
 5. Start the buildless Web SDK exporter on a separate port:
 
 ```powershell
-python tools\miro_websdk_exporter\serve_no_cache.py --port 8766
+miro2obsidian websdk-serve --port 8766
 ```
 
 6. Register `http://localhost:8766/index.html` as the Miro App URL, install the
@@ -251,9 +268,9 @@ more than 24 hours old, and be no more than 60 minutes apart. The run fails
 before publication if pagination, comments, required assets, source identity,
 or Canvas integrity is incomplete.
 
-For local OAuth testing, `.miro_oauth.local.example.json` can be copied to the
-ignored `.miro_oauth.local.json`. Environment variables are preferred for
-automation.
+For unattended Windows REST exports after one GUI connection, use
+`--stored-token` under the same Windows account. The GUI's **Forget saved token**
+button removes that connection.
 
 ## Source completeness
 

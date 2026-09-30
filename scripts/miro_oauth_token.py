@@ -13,7 +13,7 @@ import webbrowser
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 from urllib.parse import parse_qs, urlencode, urlparse
 
 
@@ -47,6 +47,14 @@ class CallbackResult:
 
 class OAuthTokenExchangeError(RuntimeError):
     pass
+
+
+def session_oauth_config(client_id: str, client_secret: str) -> OAuthConfig:
+    client_id = client_id.strip()
+    client_secret = client_secret.strip()
+    if not client_id or not client_secret:
+        raise ValueError("Enter both the Miro Client ID and Client secret.")
+    return OAuthConfig(client_id=client_id, client_secret=client_secret)
 
 
 def load_local_oauth_config() -> dict[str, str]:
@@ -443,6 +451,8 @@ def authorize_and_get_token(
     open_browser: bool = True,
     browser: str = DEFAULT_BROWSER,
     session: Any | None = None,
+    on_authorize_url: Callable[[str], None] | None = None,
+    report: Callable[[str], None] = print,
 ) -> str:
     redirect = urlparse(config.redirect_uri)
     if redirect.scheme != "http" or not redirect.hostname:
@@ -488,16 +498,18 @@ def authorize_and_get_token(
             thread.start()
 
         bind_hosts = ", ".join(host for host, _ in servers)
-        print(f"listening_on={bind_hosts}:{port}")
+        report(f"listening_on={bind_hosts}:{port}")
         for host, error in bind_failures:
-            print(f"callback_bind_skipped={host}:{port} ({error})")
+            report(f"callback_bind_skipped={host}:{port} ({error})")
 
         authorize_url = build_authorize_url(config, state=state)
-        print(f"authorization_url={authorize_url}")
-        print(f"waiting_for_callback={config.redirect_uri}")
+        report(f"authorization_url={authorize_url}")
+        report(f"waiting_for_callback={config.redirect_uri}")
         hint = callback_recovery_hint(config)
         if hint:
-            print(hint)
+            report(hint)
+        if on_authorize_url is not None:
+            on_authorize_url(authorize_url)
         if open_browser:
             open_authorize_url(authorize_url, browser=browser)
 

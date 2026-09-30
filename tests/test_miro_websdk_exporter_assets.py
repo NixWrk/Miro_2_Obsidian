@@ -188,7 +188,7 @@ class MiroWebsdkExporterAssetTests(unittest.TestCase):
         self.assertIn("Profile settings", readme)
         self.assertIn("http://localhost:8766/index.html", readme)
         self.assertIn("../../docs/MIRO_APP_SETUP.md", readme)
-        self.assertIn("serve_no_cache.py --port 8766", readme)
+        self.assertIn("miro2obsidian websdk-serve --port 8766", readme)
         self.assertIn("exporter_version", readme)
         self.assertIn("+ More apps", readme)
         self.assertIn("+ More tools", readme)

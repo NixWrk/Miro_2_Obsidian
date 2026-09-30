@@ -239,6 +239,8 @@ def audit_missing_items(miro_root: Any, canvas_root: dict[str, Any]) -> list[Mis
     from Json_2_Canvas.Converter import iter_objects, source_completeness_issues  # noqa: WPS433
 
     represented = represented_canvas_ids(canvas_root)
+    source_items = [item for item in iter_objects(miro_root) if isinstance(item, dict)]
+    source_by_id = {str(item["id"]): item for item in source_items if item.get("id") is not None}
     nodes_by_id: dict[str, list[dict[str, Any]]] = {}
     for node in canvas_root.get("nodes", []):
         if isinstance(node, dict) and node.get("id") is not None:
@@ -254,8 +256,8 @@ def audit_missing_items(miro_root: Any, canvas_root: dict[str, Any]) -> list[Mis
             "; ".join(completeness_issues),
             actionable=not coverage_only,
         ))
-    for item in iter_objects(miro_root):
-        if not isinstance(item, dict) or item.get("id") is None:
+    for item in source_items:
+        if item.get("id") is None:
             continue
         item_id = str(item["id"])
         if item_id in represented:
@@ -270,6 +272,24 @@ def audit_missing_items(miro_root: Any, canvas_root: dict[str, Any]) -> list[Mis
                     text_snippet(item),
                     actionable=True,
                 ))
+            continue
+        parent = item.get("parent")
+        parent_id = item.get("parentId") or (parent.get("id") if isinstance(parent, dict) else None)
+        parent_id = str(parent_id) if parent_id is not None else ""
+        position = item.get("position")
+        if (
+            str(item.get("type") or "").lower() == "image"
+            and isinstance(position, dict)
+            and position.get("slotId")
+            and str(source_by_id.get(parent_id, {}).get("type") or "").lower() == "doc_format"
+            and any(node.get("type") == "file" for node in nodes_by_id.get(parent_id, []))
+        ):
+            missing.append(MissingMiroItem(
+                item_id,
+                "image",
+                "document_preview_slot",
+                "Page preview belongs to a represented doc_format file; omitting it avoids duplicate content.",
+            ))
             continue
         missing.append(classify_missing_item(item))
     return missing

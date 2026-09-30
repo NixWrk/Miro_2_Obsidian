@@ -872,6 +872,56 @@ class MiroPipelineTests(unittest.TestCase):
         self.assertEqual(result, 0)
         self.assertFalse(rest.call_args.kwargs["prefer_experimental"])
 
+    def test_cli_uses_stored_token_without_oauth(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            expected = application.PipelineResult(
+                source_json=root / "board.json",
+                canvas_path=root / "board.canvas",
+                item_count=1,
+                asset_stats={},
+                scale=1.0,
+                scale_context={},
+                messages=[],
+            )
+            argv = [
+                "miro2obsidian",
+                "--board-id", "board-1",
+                "--source-json", str(root / "board.json"),
+                "--target-dir", str(root),
+                "--vault-root", str(root),
+                "--stored-token",
+            ]
+            with (
+                patch.object(sys, "argv", argv),
+                patch("scripts.miro_pipeline.resolve_attachment_dir", return_value=None),
+                patch("scripts.miro_pipeline.load_access_token", return_value="stored-token") as load,
+                patch("scripts.miro_pipeline.resolve_token_from_args") as oauth,
+                patch("miro2obsidian.application.run_rest_experimental_pipeline", return_value=expected) as rest,
+            ):
+                result = miro_pipeline.main()
+        self.assertEqual(result, 0)
+        load.assert_called_once_with()
+        oauth.assert_not_called()
+        self.assertEqual(rest.call_args.kwargs["token"], "stored-token")
+
+    def test_cli_reports_unavailable_os_store(self) -> None:
+        from miro2obsidian.credential_store import CredentialStoreUnavailable
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            argv = [
+                "miro2obsidian", "--board-id", "board-1",
+                "--source-json", str(root / "board.json"),
+                "--target-dir", str(root), "--vault-root", str(root),
+                "--stored-token",
+            ]
+            with patch.object(sys, "argv", argv):
+                with patch("scripts.miro_pipeline.load_access_token", side_effect=CredentialStoreUnavailable("No OS keyring")):
+                    with self.assertRaises(SystemExit) as caught:
+                        miro_pipeline.main()
+        self.assertEqual(caught.exception.code, 2)
+
     def test_cli_forwards_websdk_json_to_rest_pipeline(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -1194,6 +1244,7 @@ class MiroPipelineTests(unittest.TestCase):
                 output_format="advanced-canvas",
                 allow_missing_assets=True,
                 allow_incomplete_source=False,
+                stored_token=False,
                 stable_items=False,
                 install_obsidian_plugins=False,
                 advanced_canvas_source_plugins_dir=None,

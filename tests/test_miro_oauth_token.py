@@ -65,6 +65,14 @@ class MiroOAuthTokenTests(unittest.TestCase):
     def test_default_scopes_are_read_only(self) -> None:
         self.assertEqual(DEFAULT_SCOPES, "boards:read team:read")
 
+    def test_session_oauth_config_accepts_a_new_pair_without_a_file(self) -> None:
+        config = oauth.session_oauth_config(" client-1 ", " secret-1 ")
+        self.assertEqual(config.client_id, "client-1")
+        self.assertEqual(config.client_secret, "secret-1")
+        self.assertEqual(config.redirect_uri, DEFAULT_REDIRECT_URI)
+        with self.assertRaisesRegex(ValueError, "both"):
+            oauth.session_oauth_config("client-1", "")
+
     def test_build_authorize_url_encodes_required_fields(self) -> None:
         config = OAuthConfig(
             client_id="client-1",

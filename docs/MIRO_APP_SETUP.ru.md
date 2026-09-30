@@ -49,13 +49,12 @@ team реальной доски.
 ## 1. Создайте Miro app
 
 1. Войдите в Miro.
-2. Откройте avatar, затем **Settings** и **Your apps**. Прямая ссылка:
-   [Miro Your apps](https://miro.com/app/settings/user-profile/apps/).
-3. Если Miro предлагает создать Developer team, создайте её и примите developer
-   terms.
-4. Нажмите **+ Create new app**.
+2. Откройте avatar, затем **Developer Hub** → **Your apps** либо сразу
+   [Miro Developer Hub](https://developers.miro.com/page/developer-hub#your-apps).
+3. Выберите организацию и существующую Developer team. Если её нет, создайте
+   новую и примите developer terms.
+4. Создайте app в этой team.
 5. Задайте понятное имя, например `Miro to Obsidian - local export`.
-6. Выберите доступную Developer team и создайте app.
 
 Это действие не переносит и не копирует доски. Оно создаёт credentials и
 границу разрешений для локального экспорта.
@@ -104,12 +103,23 @@ Host является частью redirect URI. Не заменяйте `localh
 Выбор team критичен. App из Developer team не появляется автоматически на
 досках личной, корпоративной или клиентской team.
 
-## 5. Сохраните credentials локально
+## 5. Передайте credentials локально
 
 Скопируйте **Client ID** и **Client secret** из настроек app. Не отправляйте их в
-issue, chat, screenshot или tracked-файл.
+issue, chat, screenshot или tracked-файл. В GUI нажмите **Set up Miro app**,
+введите оба значения и нажмите **Connect**. GUI хранит их в памяти до закрытия
+программы и автоматически запускает OAuth. В режиме **Code automation**
+полученный access token дополнительно сохраняется в системном хранилище;
+кнопка **Forget saved token** удаляет его. См. [три режима](WORKFLOW_MODES.ru.md).
 
-Для текущей PowerShell-сессии:
+Можно использовать кнопки **Paste** рядом с полями: скопировать значение
+кнопкой Miro, затем вставить прямо в GUI. В GUI значение secret скрыто.
+Не включайте необратимую опцию **Expire user authorization token** при создании
+app: текущий клиент ещё не обновляет OAuth token автоматически.
+
+Если целевой доски нет в списке, нажмите **Switch Miro team** и выберите в окне
+OAuth команду, которой принадлежит доска. Для автоматизации без GUI допустимы
+переменные окружения текущей PowerShell-сессии:
 
 ```powershell
 $env:MIRO_CLIENT_ID = "<ваш client id>"
@@ -117,14 +127,7 @@ $env:MIRO_CLIENT_SECRET = "<ваш client secret>"
 $env:MIRO_REDIRECT_URI = "http://localhost:8765/callback"
 ```
 
-Либо скопируйте шаблон:
-
-```powershell
-Copy-Item .miro_oauth.local.example.json .miro_oauth.local.json
-```
-
-Замените placeholders в `.miro_oauth.local.json`. Файл игнорируется Git. Для
-автоматизации предпочтительнее environment variables.
+Значения не нужно сохранять в файл проекта.
 
 ## 6. Проверьте REST-подключение
 
@@ -135,7 +138,8 @@ python -m pip install .
 miro2obsidian-gui
 ```
 
-Выберите **Miro account** и нажмите **Authenticate / refresh**. Browser откроет
+Если credentials уже заданы вне GUI, выберите **Miro account** и нажмите
+**Authenticate / refresh**. Browser откроет
 Miro OAuth и вернётся на `http://localhost:8765/callback`. После согласия GUI
 покажет доски, доступные и пользователю, и app.
 
@@ -147,7 +151,7 @@ Miro OAuth и вернётся на `http://localhost:8765/callback`. После
 Во втором terminal запустите локальный Web SDK server:
 
 ```powershell
-python tools\miro_websdk_exporter\serve_no_cache.py --port 8766
+miro2obsidian websdk-serve --port 8766
 ```
 
 Затем:
@@ -175,6 +179,7 @@ session nonce и автоматически объединять с REST.
 | OAuth callback не работает | Отличается host, port или path | Везде использовать `http://localhost:8765/callback` |
 | Список досок пуст или неполон | Нет доступа пользователя, установки в team или `team:read` | Проверить все три условия; при необходимости обратиться к admin |
 | Порт `8765` занят | Web SDK compatibility server конфликтует с OAuth callback | Web SDK держать на `8766`, OAuth на `8765` |
+| `WinError 5` при записи Canvas | Открытый Obsidian удерживает создаваемый файл | Закройте Obsidian, повторите экспорт и откройте готовый Canvas после успешного завершения |
 | Probe сообщает о permission | App настроено read-only | Добавить `boards:write` только для намеренного probe |
 
 ## План удобства для начинающих
@@ -190,7 +195,8 @@ Python, Node.js, environment variables, JSON paths и знания о local port
 2. Предлагать два понятных пути: **Connect Miro** и **Convert existing JSON**.
 3. Открывать правильную страницу Miro и показывать по одному действию.
 4. Давать copy-кнопки для app name, URL и минимальных scopes.
-5. Объяснять, какие действия в Miro обязательны и почему их нельзя автоматизировать.
+5. Автоматизировать действия в Miro через открытый браузер, когда это возможно,
+   и явно показывать шаги подтверждения доступа.
 6. Принимать и проверять Client ID/secret и хранить их в системном credential
    store, а не в plain-text файле проекта.
 7. Автоматически запускать и останавливать OAuth и Web SDK loopback services.
@@ -202,9 +208,10 @@ Python, Node.js, environment variables, JSON paths и знания о local port
 12. Показывать единый progress от выбора доски через REST, comments, assets,
     Web SDK merge, conversion и validation до готового Canvas.
 
-Miro всё равно требует, чтобы пользователь или admin создал app, выбрал team,
-проверил scopes, установил app и подтвердил OAuth. Мастер может провести,
-предзаполнить, проверить и продолжить эти шаги, но не должен обходить consent.
+Miro требует входа в аккаунт с правом создать и установить app и явного
+согласия на запрошенные права. Действия в интерфейсе можно автоматизировать в
+уже открытой пользовательской сессии, как при этом живом тесте; одобрение
+администратора при ограничениях team остаётся внешним условием.
 
 ## Требования к дизайну интерфейсов
 

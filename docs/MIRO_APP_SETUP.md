@@ -50,12 +50,12 @@ the team that owns the real board.
 ## 1. Create the Miro app
 
 1. Sign in to Miro.
-2. Open your avatar, then **Settings** and **Your apps**. The direct dashboard is
-   [Miro Your apps](https://miro.com/app/settings/user-profile/apps/).
-3. If Miro asks for a Developer team, create it and accept the developer terms.
-4. Select **+ Create new app**.
+2. Open your avatar, then **Developer Hub** → **Your apps**, or open the
+   [Miro Developer Hub](https://developers.miro.com/page/developer-hub#your-apps).
+3. Select the organization and an existing Developer team. If none is available,
+   create one and accept the developer terms.
+4. Create an app in that team.
 5. Use a recognizable name, for example `Miro to Obsidian - local export`.
-6. Select the available Developer team and create the app.
 
 Creating the app does not move or copy any board. It creates credentials and a
 permission boundary for local export.
@@ -105,12 +105,23 @@ items. It does not make a read-only export more complete.
 This team selection is essential. An app installed in a Developer team does not
 automatically appear on boards in a personal, company, or client team.
 
-## 5. Store credentials locally
+## 5. Provide credentials locally
 
 Copy the **Client ID** and **Client secret** from the app settings. Do not paste
-them into an issue, chat, screenshot, or tracked file.
+them into an issue, chat, screenshot, or tracked file. In the desktop GUI, select
+**Set up Miro app**, enter both values, and select **Connect**. The GUI keeps
+them in memory for this session and starts OAuth automatically. In **Code
+automation**, the resulting access token is also stored in the current user's OS
+credential store when available; **Forget saved token** removes it. See [three modes](WORKFLOW_MODES.md).
 
-For the current PowerShell session:
+The **Paste** buttons beside the fields can transfer values copied from Miro
+straight into the GUI. The secret field is masked. Leave the irreversible
+**Expire user authorization token** option unchecked when creating the app:
+the current client does not automatically refresh OAuth tokens.
+
+If the target board is absent, select **Switch Miro team** and choose the team
+that owns it in the OAuth window. For automation without the GUI, use environment
+variables in the current PowerShell session:
 
 ```powershell
 $env:MIRO_CLIENT_ID = "<your client id>"
@@ -118,14 +129,7 @@ $env:MIRO_CLIENT_SECRET = "<your client secret>"
 $env:MIRO_REDIRECT_URI = "http://localhost:8765/callback"
 ```
 
-Alternatively, copy the provided template:
-
-```powershell
-Copy-Item .miro_oauth.local.example.json .miro_oauth.local.json
-```
-
-Then replace the placeholders in `.miro_oauth.local.json`. That file is ignored
-by Git. Environment variables are preferable for automation.
+There is no need to save these values in a project file.
 
 ## 6. Check the REST connection
 
@@ -136,7 +140,8 @@ python -m pip install .
 miro2obsidian-gui
 ```
 
-Choose **Miro account** and select **Authenticate / refresh**. The browser opens
+Choose **Miro account** and select **Authenticate / refresh** if you have
+already provided credentials outside the GUI. The browser opens
 Miro OAuth and returns to `http://localhost:8765/callback`. After consent, the
 GUI should list the boards visible to both the user and the app.
 
@@ -148,7 +153,7 @@ items, REST comments, and required downloadable assets.
 Start the local Web SDK server in a second terminal:
 
 ```powershell
-python tools\miro_websdk_exporter\serve_no_cache.py --port 8766
+miro2obsidian websdk-serve --port 8766
 ```
 
 Then:
@@ -176,6 +181,7 @@ merge it with REST without asking the user to manage JSON files.
 | OAuth callback fails | Redirect URI differs by host, port, or path | Use exactly `http://localhost:8765/callback` in Miro and locally |
 | Board list is empty or incomplete | User access, team installation, or `team:read` is missing | Check all three; ask the team administrator when needed |
 | Port `8765` is busy | Web SDK compatibility server and OAuth callback are competing | Keep Web SDK on `8766` and OAuth on `8765` |
+| `WinError 5` while writing Canvas | Obsidian has locked the new file | Close Obsidian, retry the export, and open the Canvas after successful completion |
 | Probe action reports missing permission | The app is read-only | Add `boards:write` only for that intentional probe |
 
 ## Planned beginner experience
@@ -190,7 +196,8 @@ The first-run wizard must:
 2. Offer **Connect Miro** and **Convert existing JSON** as plain-language paths.
 3. Open the correct Miro dashboard and show one instruction at a time.
 4. Provide copy buttons for the app name, URLs, and minimal scopes.
-5. Explain which Miro clicks are mandatory and why they cannot be automated.
+5. Automate Miro UI steps in an open browser session where possible and
+   clearly present access approval steps.
 6. Accept and validate Client ID and Client secret, then store them in the OS
    credential store rather than a plain-text project file.
 7. Start and stop OAuth and Web SDK loopback services automatically.
@@ -203,9 +210,10 @@ The first-run wizard must:
 12. Show one progress flow from board selection through REST, comments, assets,
     Web SDK merge, conversion, validation, and final Canvas location.
 
-Miro still requires the user or administrator to create the app, choose the
-team, review scopes, install it, and approve OAuth. The wizard can guide,
-pre-fill, validate, and resume those steps, but must not bypass consent.
+Miro requires an account with permission to create and install an app and
+explicit approval of the requested scopes. UI steps can be automated in an
+open authenticated browser session, as in this live test. Team administrator
+approval remains an external requirement where installation is restricted.
 
 ## Interface design requirements
 
