@@ -48,6 +48,7 @@ __all__ = [
     "connection_status",
     "disconnect",
     "get_access_token",
+    "reconnect_with_saved_app",
 ]
 
 ENV_TOKEN = "MIRO_ACCESS_TOKEN"
@@ -421,6 +422,37 @@ def connect_with_credentials(
     )
     save_connection(connection)
     return _status_from_connection(connection)
+
+
+def reconnect_with_saved_app(
+    *,
+    open_browser: bool = True,
+    on_authorize_url: Callable[[str], None] | None = None,
+    report: Callable[[str], None] = _noop,
+    timeout_seconds: int = DEFAULT_TIMEOUT_SECONDS,
+    browser: str = DEFAULT_BROWSER,
+    session: Any | None = None,
+) -> ConnectionStatus:
+    """Run Miro OAuth again with the Client ID/secret saved in the connection.
+
+    Used to switch the Miro team without typing the credentials again: Miro asks
+    which team to install for on every authorization. The credentials never
+    leave this module. Raises :class:`NotConnected` when no connection with app
+    credentials is saved (the person must set the app up first).
+    """
+    connection = load_connection()
+    if connection is None or not (connection.client_id and connection.client_secret):
+        raise NotConnected("No Miro app is saved yet. Set up the Miro app first.")
+    return connect_with_credentials(
+        connection.client_id,
+        connection.client_secret,
+        open_browser=open_browser,
+        on_authorize_url=on_authorize_url,
+        report=report,
+        timeout_seconds=timeout_seconds,
+        browser=browser,
+        session=session,
+    )
 
 
 def disconnect(*, revoke: bool = True, session: Any | None = None) -> bool:

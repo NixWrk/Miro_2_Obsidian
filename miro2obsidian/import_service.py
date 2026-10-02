@@ -344,6 +344,8 @@ class ImportOptions:
     theme: str = "dark"
     text_style_mode: str = "miro"
     prefer_experimental: bool = True
+    #: Accept a board whose assets cannot all be downloaded (reported as degraded).
+    allow_missing_assets: bool = False
 
     def __post_init__(self) -> None:
         vault = Path(self.vault_root)
@@ -878,6 +880,7 @@ def _import_board(batch: _Batch, options: ImportOptions, board: ResolvedBoard) -
             install_obsidian_plugins=options.install_obsidian_plugins,
             attachment_dir=attachment_dir,
             share_attachments=options.share_attachments,
+            allow_missing_assets=options.allow_missing_assets,
             logger=lambda m: _step(batch, board, m),
         )
     except Exception as exc:  # noqa: BLE001 - one board failing must not stop the batch

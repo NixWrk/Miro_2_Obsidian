@@ -4,25 +4,36 @@ import json
 import os
 import threading
 import tempfile
-import time
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from Json_2_Canvas.Scale_engine import ViewProfile
 from Miro_2_Obsidian_GUI import (
+    ACCOUNT_SOURCE_MODE,
+    AGENT_WORKFLOW,
+    CODE_WORKFLOW,
+    JSON_SOURCE_MODE,
+    MANUAL_WORKFLOW,
+    URL_LIST_SOURCE_MODE,
+    URL_SOURCE_MODE,
     ConversionOptions,
     MiroPipelineApp,
-    authorize_gui_token,
+    RunRequest,
     board_id_from_text,
     board_label,
     board_output_name,
     board_refs_from_file,
+    build_import_options,
     default_source_json_path,
     default_web_board_list,
     explain_code_step,
+    selected_board_inputs,
     show_error_later,
 )
-from scripts.miro_oauth_token import OAuthConfig
+from miro2obsidian import gui_support, miro_auth
+from miro2obsidian.agent_runner import AgentOutcome
+from miro2obsidian.import_service import ImportResult, ResolvedBoard
 
 
 class _Value:
@@ -33,14 +44,99 @@ class _Value:
         return self.value
 
 
+def _display_available() -> bool:
+    try:
+        import tkinter
+
+        root = tkinter.Tk()
+        root.destroy()
+    except Exception:  # noqa: BLE001 - no tkinter or no display
+        return False
+    return True
+
+
+def _options(**overrides: object) -> ConversionOptions:
+    values: dict[str, object] = dict(
+        scale=None,
+        theme="dark",
+        text_style_mode="miro",
+        output_format="native-canvas",
+        allow_missing_assets=False,
+        prefer_experimental=True,
+        install_obsidian_plugins=False,
+    )
+    values.update(overrides)
+    return ConversionOptions(**values)  # type: ignore[arg-type]
+
+
+def _app() -> MiroPipelineApp:
+    """An app object without a window: only the logic under test is wired."""
+    app = object.__new__(MiroPipelineApp)
+    app.logged = []
+    app._log = app.logged.append
+    app.after = lambda _ms, _callback=None: None
+    app._ui = lambda _callback: None
+    app.active_workflow_mode = MANUAL_WORKFLOW
+    return app
+
+
+class _SyncThread:
+    """Runs the thread target immediately so worker logic can be asserted."""
+
+    def __init__(self, target=None, args=(), kwargs=None, daemon=None) -> None:
+        self.target, self.args, self.kwargs = target, args, kwargs or {}
+
+    def start(self) -> None:
+        self.target(*self.args, **self.kwargs)
+
+
 class MiroObsidianGuiHelperTests(unittest.TestCase):
-    @unittest.skipUnless(os.name == "nt", "GUI smoke test requires Windows")
+    @unittest.skipUnless(_display_available(), "GUI smoke test needs a display (use xvfb-run on Linux)")
     def test_gui_constructs_with_pinned_customtkinter(self) -> None:
         app = MiroPipelineApp()
         try:
             app.withdraw()
             app.update_idletasks()
             self.assertEqual(app.run_button.cget("text"), "Run pipeline")
+            self.assertEqual(app.copy_agent_button.cget("text"), "Copy instructions for my agent")
+            self.assertEqual(app.websdk_choice.get(), gui_support.WEBSDK_OFF)
+            app.workflow_mode.set(CODE_WORKFLOW)
+            app.on_workflow_mode_changed(CODE_WORKFLOW)
+            self.assertEqual(app.websdk_choice.get(), gui_support.WEBSDK_AUTO)
+            app.on_workflow_mode_changed(AGENT_WORKFLOW)
+            self.assertEqual(app.websdk_choice.cget("state"), "disabled")
+        finally:
+            app.destroy()
+
+    @unittest.skipUnless(_display_available(), "GUI smoke test needs a display (use xvfb-run on Linux)")
+    def test_setup_wizard_walks_the_setup_steps_and_resumes(self) -> None:
+        from Miro_2_Obsidian_GUI import SetupWizard
+
+        app = MiroPipelineApp()
+        try:
+            app.withdraw()
+            with tempfile.TemporaryDirectory() as tmp:
+                settings = Path(tmp) / "gui-settings.json"
+                wizard = SetupWizard(app, settings_file=settings)
+                try:
+                    steps = wizard.steps
+                    self.assertEqual(wizard.index, 0)
+                    self.assertEqual(steps[-1]["id"], "connect")
+                    for _ in range(len(steps) - 1):
+                        wizard.next()
+                    wizard.update_idletasks()
+                    self.assertTrue(wizard.step.get("form"))
+                    self.assertEqual(wizard.secret_entry.cget("show"), "*")
+                    wizard.back()
+                    self.assertEqual(wizard.index, len(steps) - 2)
+                finally:
+                    wizard.destroy()
+                second = SetupWizard(app, settings_file=settings)
+                try:
+                    self.assertEqual(second.index, len(steps) - 1)
+                finally:
+                    second.destroy()
+                self.assertNotIn("secret", settings.read_text(encoding="utf-8").lower())
         finally:
             app.destroy()
 
@@ -131,51 +227,6 @@ class MiroObsidianGuiHelperTests(unittest.TestCase):
     def test_board_label_handles_missing_context(self) -> None:
         self.assertEqual(board_label({"id": "board-1", "name": "Roadmap"}), "Roadmap (board-1)")
 
-    def test_authorize_gui_token_prefers_existing_env_token(self) -> None:
-        with patch.dict(os.environ, {"MIRO_ACCESS_TOKEN": "env-token"}, clear=True):
-            self.assertEqual(authorize_gui_token(), "env-token")
-
-    def test_authorize_gui_token_uses_session_credentials_over_old_environment(self) -> None:
-        config = OAuthConfig(client_id="new-client", client_secret="new-secret")
-        with patch.dict(os.environ, {"MIRO_ACCESS_TOKEN": "old-token"}, clear=True):
-            with patch("Miro_2_Obsidian_GUI.config_from_env") as config_from_env:
-                with patch(
-                    "Miro_2_Obsidian_GUI.authorize_and_get_token",
-                    return_value="new-token",
-                ) as authorize:
-                    self.assertEqual(authorize_gui_token(config=config), "new-token")
-        config_from_env.assert_not_called()
-        authorize.assert_called_once_with(config)
-
-    def test_authorize_gui_token_uses_env_oauth_credentials(self) -> None:
-        config = OAuthConfig(client_id="client-1", client_secret="secret-1")
-        messages = []
-        env = {"MIRO_CLIENT_ID": "client-1", "MIRO_CLIENT_SECRET": "secret-1"}
-        with patch.dict(os.environ, env, clear=True):
-            with patch("Miro_2_Obsidian_GUI.config_from_env", return_value=config) as config_from_env:
-                with patch("Miro_2_Obsidian_GUI.authorize_and_get_token", return_value="modern-token") as modern:
-                    self.assertEqual(authorize_gui_token(messages.append), "modern-token")
-
-        config_from_env.assert_called_once_with()
-        modern.assert_called_once_with(config)
-        self.assertTrue(any("127.0.0.1:8765" in message for message in messages))
-
-    def test_authorize_gui_token_uses_ignored_local_oauth_config(self) -> None:
-        config = OAuthConfig(client_id="local-client", client_secret="local-secret")
-        with patch.dict(os.environ, {}, clear=True):
-            with patch("Miro_2_Obsidian_GUI.config_from_env", return_value=config) as config_from_env:
-                with patch("Miro_2_Obsidian_GUI.authorize_and_get_token", return_value="local-token") as modern:
-                    self.assertEqual(authorize_gui_token(), "local-token")
-
-        config_from_env.assert_called_once_with()
-        modern.assert_called_once_with(config)
-
-    def test_authorize_gui_token_requires_a_token_or_oauth_app(self) -> None:
-        with patch.dict(os.environ, {}, clear=True):
-            with patch("Miro_2_Obsidian_GUI.config_from_env", side_effect=ValueError("missing")):
-                with self.assertRaisesRegex(RuntimeError, "Existing JSON"):
-                    authorize_gui_token()
-
     def test_show_error_later_keeps_exception_message_after_except_scope(self) -> None:
         callbacks = []
 
@@ -193,189 +244,6 @@ class MiroObsidianGuiHelperTests(unittest.TestCase):
         self.assertEqual(callbacks[0][0], 0)
         showerror.assert_called_once_with("OAuth failed", "auth needs credentials")
 
-    def test_authorize_token_reuses_inflight_oauth_result(self) -> None:
-        app = object.__new__(MiroPipelineApp)
-        app.token = None
-        app.oauth_config = None
-        app.token_lock = threading.Lock()
-        app._log = lambda _message: None
-        release = threading.Event()
-
-        def fake_authorize(_logger, *, config):
-            self.assertIsNone(config)
-            release.wait(1)
-            return "token-1"
-
-        results: list[str] = []
-        threads = [
-            threading.Thread(target=lambda: results.append(MiroPipelineApp._authorize_token(app))),
-            threading.Thread(target=lambda: results.append(MiroPipelineApp._authorize_token(app))),
-        ]
-        with patch("Miro_2_Obsidian_GUI.authorize_gui_token", side_effect=fake_authorize) as authorize:
-            for thread in threads:
-                thread.start()
-            for _ in range(50):
-                if authorize.call_count:
-                    break
-                time.sleep(0.01)
-            release.set()
-            for thread in threads:
-                thread.join(timeout=2)
-
-        self.assertEqual(sorted(results), ["token-1", "token-1"])
-        authorize.assert_called_once()
-
-    def test_switch_miro_team_clears_board_and_reauthorizes(self) -> None:
-        app = object.__new__(MiroPipelineApp)
-        app.token = "old-token"
-        app.oauth_config = object()
-        app.token_lock = threading.Lock()
-        app.boards_by_label = {"Old board": {"id": "old-board"}}
-        app.selected_account_board_id = "old-board"
-        app.board_menu = unittest.mock.Mock()
-        app._log = unittest.mock.Mock()
-        app.authenticate_and_refresh_boards = unittest.mock.Mock()
-
-        with patch("Miro_2_Obsidian_GUI.clear_access_token") as clear:
-            MiroPipelineApp.reauthorize_and_refresh_boards(app)
-        clear.assert_called_once_with()
-
-        self.assertIsNone(app.token)
-        self.assertEqual(app.boards_by_label, {})
-        self.assertEqual(app.selected_account_board_id, "")
-        app.board_menu.configure.assert_called_once_with(values=["Authenticate first"])
-        app.board_menu.set.assert_called_once_with("Authenticate first")
-        app.authenticate_and_refresh_boards.assert_called_once_with()
-
-    def test_code_mode_reuses_token_from_os_credential_store(self) -> None:
-        app = object.__new__(MiroPipelineApp)
-        app.token = None
-        app.oauth_config = None
-        app.token_lock = threading.Lock()
-        app.active_workflow_mode = "Code automation"
-        app._log = lambda _message: None
-        with patch("Miro_2_Obsidian_GUI.load_access_token", return_value="stored-token") as load:
-            with patch("Miro_2_Obsidian_GUI.authorize_gui_token") as authorize:
-                self.assertEqual(MiroPipelineApp._authorize_token(app), "stored-token")
-        load.assert_called_once_with()
-        authorize.assert_not_called()
-
-    def test_code_mode_saves_new_token_once(self) -> None:
-        app = object.__new__(MiroPipelineApp)
-        app.token = None
-        app.oauth_config = None
-        app.token_lock = threading.Lock()
-        app.active_workflow_mode = "Code automation"
-        app._log = lambda _message: None
-        with patch("Miro_2_Obsidian_GUI.load_access_token", return_value=None):
-            with patch("Miro_2_Obsidian_GUI.authorize_gui_token", return_value="new-token") as authorize:
-                with patch("Miro_2_Obsidian_GUI.save_access_token") as save:
-                    self.assertEqual(MiroPipelineApp._authorize_token(app), "new-token")
-                    self.assertEqual(MiroPipelineApp._authorize_token(app), "new-token")
-        authorize.assert_called_once()
-        save.assert_called_once_with("new-token")
-
-    def test_code_mode_continues_when_os_credential_store_is_unavailable(self) -> None:
-        from miro2obsidian.credential_store import CredentialStoreUnavailable
-
-        app = object.__new__(MiroPipelineApp)
-        app.token = None
-        app.oauth_config = None
-        app.token_lock = threading.Lock()
-        app.active_workflow_mode = "Code automation"
-        app._credential_saved_in_session = False
-        messages = []
-        app._log = messages.append
-        with patch("Miro_2_Obsidian_GUI.load_access_token", side_effect=CredentialStoreUnavailable("No vault")):
-            with patch("Miro_2_Obsidian_GUI.authorize_gui_token", return_value="session-token"):
-                with patch("Miro_2_Obsidian_GUI.save_access_token", side_effect=CredentialStoreUnavailable("No vault")):
-                    self.assertEqual(MiroPipelineApp._authorize_token(app), "session-token")
-        self.assertTrue(any("session only" in message for message in messages))
-
-    def test_forget_miro_connection_clears_session_and_store(self) -> None:
-        app = object.__new__(MiroPipelineApp)
-        app.token = "old-token"
-        app._credential_saved_in_session = True
-        app.token_lock = threading.Lock()
-        app.boards_by_label = {"Old": {"id": "board"}}
-        app.selected_account_board_id = "board"
-        app.board_menu = unittest.mock.Mock()
-        app._log = unittest.mock.Mock()
-        with patch("Miro_2_Obsidian_GUI.clear_access_token") as clear:
-            MiroPipelineApp.forget_miro_connection(app)
-        clear.assert_called_once_with()
-        self.assertIsNone(app.token)
-        self.assertFalse(app._credential_saved_in_session)
-        self.assertEqual(app.boards_by_label, {})
-        self.assertEqual(app.selected_account_board_id, "")
-
-    def test_code_narration_follows_actual_pipeline_events(self) -> None:
-        self.assertIsNone(explain_code_step("Unrelated message"))
-        app = object.__new__(MiroPipelineApp)
-        app._token = lambda: "test-token"
-        messages = []
-        app._log = messages.append
-        options = ConversionOptions(
-            scale=None,
-            theme="dark",
-            text_style_mode="miro",
-            output_format="miro-canvas",
-            allow_missing_assets=False,
-            prefer_experimental=True,
-            install_obsidian_plugins=False,
-        )
-
-        def fake_pipeline(**kwargs):
-            kwargs["logger"]("Exporting the complete board through REST v2-experimental.")
-            kwargs["logger"]("Converting through the single Converter.py path at scale=1.")
-            return "ok"
-
-        with patch("Miro_2_Obsidian_GUI.run_rest_experimental_pipeline", side_effect=fake_pipeline):
-            MiroPipelineApp._run_one_board(
-                app,
-                board_id="board-1",
-                label="Board",
-                source_json=Path("source.json"),
-                target_dir=Path("Canvas"),
-                vault_root=Path("vault"),
-                attachment_dir=None,
-                profile=object(),
-                min_font_px=8,
-                options=options,
-                narrate=True,
-            )
-        self.assertTrue(messages[0].startswith("Code: requesting"))
-        self.assertTrue(messages[2].startswith("Code: converting"))
-
-    def test_manual_websdk_file_is_passed_to_shared_pipeline(self) -> None:
-        app = object.__new__(MiroPipelineApp)
-        app._token = lambda: "test-token"
-        app._log = lambda _message: None
-        options = ConversionOptions(
-            scale=None,
-            theme="dark",
-            text_style_mode="miro",
-            output_format="miro-canvas",
-            allow_missing_assets=False,
-            prefer_experimental=True,
-            install_obsidian_plugins=False,
-        )
-        with patch("Miro_2_Obsidian_GUI.run_rest_experimental_pipeline") as pipeline:
-            MiroPipelineApp._run_one_board(
-                app,
-                board_id="board-1",
-                label="Board",
-                source_json=Path("source.json"),
-                target_dir=Path("Canvas"),
-                vault_root=Path("vault"),
-                attachment_dir=None,
-                profile=object(),
-                min_font_px=8,
-                options=options,
-                websdk_json=Path("websdk.json"),
-            )
-        self.assertEqual(pipeline.call_args.kwargs["websdk_json"], Path("websdk.json"))
-
     def test_gui_wires_explicit_existing_json_degraded_opt_in(self) -> None:
         source = (Path(__file__).resolve().parents[1] / "Miro_2_Obsidian_GUI.py").read_text(encoding="utf-8")
         self.assertIn("Allow incomplete/unverified JSON", source)
@@ -387,55 +255,394 @@ class MiroObsidianGuiHelperTests(unittest.TestCase):
         self.assertIn("share_attachments=self.share_attachments.get()", source)
         self.assertIn("share_attachments=options.share_attachments", source)
 
-    def test_miro_export_modes_use_canonical_pipeline(self) -> None:
-        app = object.__new__(MiroPipelineApp)
-        app._token = lambda: "token-1"
-        app._log = lambda _message: None
+
+    # -- token handling goes through miro_auth only -------------------------
+
+    def test_gui_never_touches_the_legacy_token_functions(self) -> None:
+        source = (Path(__file__).resolve().parents[1] / "Miro_2_Obsidian_GUI.py").read_text(encoding="utf-8")
+        for forbidden in ("save_access_token", "load_access_token", "clear_access_token", "authorize_oauth"):
+            self.assertNotIn(forbidden, source)
+        self.assertNotIn("Expire user authorization token", source)
+
+    def test_token_comes_from_miro_auth(self) -> None:
+        app = _app()
+        with patch("Miro_2_Obsidian_GUI.miro_auth.get_access_token", return_value="tok") as get:
+            self.assertEqual(app._token(), "tok")
+        get.assert_called_once_with()
+
+    def test_legacy_authorize_gui_token_name_routes_through_miro_auth(self) -> None:
+        from Miro_2_Obsidian_GUI import authorize_gui_token
+        from Miro_2_Json.GUI import resolve_gui_token
+
+        self.assertIs(resolve_gui_token, authorize_gui_token)
+        messages = []
+        with patch("Miro_2_Obsidian_GUI.miro_auth.get_access_token", return_value="tok"):
+            self.assertEqual(authorize_gui_token(messages.append), "tok")
+        self.assertTrue(messages)
+        with patch.dict(os.environ, {"MIRO_ACCESS_TOKEN": "env-token"}, clear=True):
+            self.assertEqual(authorize_gui_token(), "env-token")
+
+    def test_token_errors_become_plain_language(self) -> None:
+        app = _app()
+        with patch(
+            "Miro_2_Obsidian_GUI.miro_auth.get_access_token", side_effect=miro_auth.NotConnected("x")
+        ):
+            with self.assertRaisesRegex(RuntimeError, "Set up Miro app"):
+                app._token()
+        with patch(
+            "Miro_2_Obsidian_GUI.miro_auth.get_access_token",
+            side_effect=miro_auth.TokenRefreshFailed("gone", needs_reauthorization=True),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "Switch Miro team"):
+                app._token()
+
+    def test_connect_runs_miro_auth_in_a_worker_and_reports_team(self) -> None:
+        app = _app()
+        app.connect_lock = threading.Lock()
+        app.source_mode = _Value(JSON_SOURCE_MODE)
+        app.connection_label = unittest.mock.Mock()
+        connected = []
+        status = miro_auth.ConnectionStatus(connected=True, team_name="Acme", refreshable=True)
+        with patch("Miro_2_Obsidian_GUI.threading.Thread", _SyncThread):
+            with patch(
+                "Miro_2_Obsidian_GUI.miro_auth.connect_with_credentials", return_value=status
+            ) as connect:
+                app.connect_miro_app("client", "secret", on_success=connected.append)
+        connect.assert_called_once()
+        self.assertEqual(connect.call_args.args, ("client", "secret"))
+        self.assertEqual(connected, [status])
+        self.assertTrue(any("Acme" in line for line in app.logged))
+        self.assertFalse(any("secret" in line for line in app.logged))
+
+    def test_connect_failure_is_reported_without_a_dialog_loop(self) -> None:
+        app = _app()
+        app.connect_lock = threading.Lock()
+        errors = []
+        with patch("Miro_2_Obsidian_GUI.threading.Thread", _SyncThread):
+            with patch(
+                "Miro_2_Obsidian_GUI.miro_auth.connect_with_credentials",
+                side_effect=RuntimeError("Miro refused"),
+            ):
+                app.connect_miro_app("client", "secret", on_error=errors.append)
+        self.assertEqual(errors, ["Miro refused"])
+        self.assertFalse(app.connect_lock.locked())
+
+    def test_switch_miro_team_clears_boards_and_reconnects_with_saved_app(self) -> None:
+        app = _app()
+        app.boards_by_label = {"Old board": {"id": "old-board"}}
+        app.selected_account_board_id = "old-board"
+        app.board_menu = unittest.mock.Mock()
+        app.connect_miro_app = unittest.mock.Mock()
+
+        MiroPipelineApp.reauthorize_and_refresh_boards(app)
+
+        self.assertEqual(app.boards_by_label, {})
+        self.assertEqual(app.selected_account_board_id, "")
+        app.board_menu.configure.assert_called_once_with(values=["Connect first"])
+        app.connect_miro_app.assert_called_once_with("", "", reconnect=True)
+
+    def test_switch_team_without_saved_app_opens_the_setup(self) -> None:
+        app = _app()
+        app.connect_lock = threading.Lock()
+        opened = []
+        app._ui = lambda callback: opened.append(callback)
+        app.open_miro_setup = unittest.mock.Mock()
+        with patch("Miro_2_Obsidian_GUI.threading.Thread", _SyncThread):
+            with patch(
+                "Miro_2_Obsidian_GUI.miro_auth.reconnect_with_saved_app",
+                side_effect=miro_auth.NotConnected("none"),
+            ):
+                app.connect_miro_app("", "", reconnect=True)
+        self.assertEqual(opened, [app.open_miro_setup])
+
+    def test_forget_asks_first_then_disconnects_through_miro_auth(self) -> None:
+        app = _app()
+        app.boards_by_label = {"Old": {"id": "board"}}
+        app.selected_account_board_id = "board"
+        app.board_menu = unittest.mock.Mock()
+        app.refresh_connection_status = unittest.mock.Mock()
+        with patch("Miro_2_Obsidian_GUI.threading.Thread", _SyncThread):
+            with patch("Miro_2_Obsidian_GUI.messagebox.askyesno", return_value=False):
+                with patch("Miro_2_Obsidian_GUI.miro_auth.disconnect") as disconnect:
+                    MiroPipelineApp.forget_miro_connection(app)
+            disconnect.assert_not_called()
+            self.assertEqual(app.selected_account_board_id, "board")
+
+            with patch("Miro_2_Obsidian_GUI.messagebox.askyesno", return_value=True) as ask:
+                with patch("Miro_2_Obsidian_GUI.miro_auth.disconnect", return_value=True) as disconnect:
+                    MiroPipelineApp.forget_miro_connection(app)
+        ask.assert_called_once()
+        disconnect.assert_called_once_with()
+        self.assertEqual(app.boards_by_label, {})
+        self.assertEqual(app.selected_account_board_id, "")
+        self.assertTrue(any("revoked" in line for line in app.logged))
+        app.refresh_connection_status.assert_called_once_with()
+
+    # -- board selection and import options ----------------------------------
+
+    def test_selected_board_inputs_for_each_miro_source(self) -> None:
+        account = selected_board_inputs(
+            ACCOUNT_SOURCE_MODE, account_board_id="uXjA=", account_label="Alpha"
+        )
+        self.assertEqual(account, [ResolvedBoard("uXjA=", name="Alpha")])
+        self.assertEqual(
+            selected_board_inputs(URL_SOURCE_MODE, board_text="https://miro.com/app/board/uXjB=/?x=1"),
+            ["uXjB="],
+        )
+        self.assertEqual(selected_board_inputs(URL_SOURCE_MODE, board_text="Roadmap"), ["Roadmap"])
+        with tempfile.TemporaryDirectory() as tmp:
+            listing = Path(tmp) / "boards.md"
+            listing.write_text("- [Alpha](https://miro.com/app/board/uXjA=/)\n", encoding="utf-8")
+            self.assertEqual(
+                selected_board_inputs(URL_LIST_SOURCE_MODE, url_list_text=str(listing)),
+                [ResolvedBoard("uXjA=", name="Alpha")],
+            )
+        for mode in (ACCOUNT_SOURCE_MODE, URL_SOURCE_MODE, URL_LIST_SOURCE_MODE):
+            with self.assertRaises(ValueError):
+                selected_board_inputs(mode)
+
+    def test_build_import_options_maps_the_form(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            vault = Path(tmp)
+            target = vault / "Boards"
+            profile = ViewProfile()
+            result = build_import_options(
+                vault_root=vault,
+                target_dir=target,
+                attachment_dir=None,
+                options=_options(allow_missing_assets=True, prefer_experimental=False, scale=2.0),
+                profile=profile,
+                min_font_px=9,
+                websdk="skip",
+            )
+        self.assertEqual(result.websdk, "skip")
+        self.assertEqual(result.target_dir, target)
+        self.assertEqual(result.source_dir, target / "_miro_sources")
+        self.assertEqual(result.output_format, "native-canvas")
+        self.assertTrue(result.allow_missing_assets)
+        self.assertFalse(result.prefer_experimental)
+        self.assertEqual(result.scale, 2.0)
+        self.assertEqual(result.min_font_px, 9)
+        self.assertIs(result.view_profile, profile)
+
+    # -- running -------------------------------------------------------------
+
+    def _request(self, vault: Path, **overrides: object) -> RunRequest:
+        values: dict[str, object] = dict(
+            source_mode=URL_SOURCE_MODE,
+            workflow_mode=CODE_WORKFLOW,
+            target_text=str(vault / "Boards"),
+            options=_options(),
+            profile=ViewProfile(),
+            min_font_px=8,
+            websdk="auto",
+            board_text="https://miro.com/app/board/uXjA=/",
+        )
+        values.update(overrides)
+        return RunRequest(**values)  # type: ignore[arg-type]
+
+    def test_code_automation_runs_the_import_service_with_automatic_capture(self) -> None:
+        app = _app()
+        app._ui = lambda callback: callback()
+        app._set_entry = unittest.mock.Mock()
+        app.vault_root = unittest.mock.Mock()
+        app.run_status = unittest.mock.Mock()
+        result = ImportResult(
+            "degraded",
+            board_id="uXjA=",
+            board_name="Alpha",
+            reason="websdk_unavailable",
+            message="REST only.",
+            next_step="Click the app icon.",
+            artifact_path="C:/vault/Boards/Alpha.canvas",
+        )
+
+        def fake_run_imports(inputs, options, *, on_event=None, **_kw):
+            on_event({"event": "board_started", "board_id": "uXjA=", "message": "Importing Alpha."})
+            on_event(
+                {
+                    "event": "step",
+                    "board_id": "uXjA=",
+                    "message": "Opened the board in the browser. If the export does not start within about 20 seconds, click the app icon.",
+                    "board_url": "https://miro.com/app/board/uXjA=/",
+                }
+            )
+            return [result]
+
+        with tempfile.TemporaryDirectory() as tmp:
+            vault = Path(tmp)
+            (vault / ".obsidian").mkdir()
+            with patch("Miro_2_Obsidian_GUI.run_imports", side_effect=fake_run_imports) as run:
+                outcomes = app._execute_request(self._request(vault))
+        inputs, options = run.call_args.args
+        self.assertEqual(inputs, ["uXjA="])
+        self.assertEqual(options.websdk, "auto")
+        self.assertEqual(options.vault_root, vault.resolve())
+        self.assertEqual([o.status for o in outcomes], ["degraded"])
+        self.assertTrue(outcomes[0].websdk_missing)
+        self.assertTrue(any("Importing Alpha." in line for line in app.logged))
+        self.assertTrue(any("click the app icon" in line for line in app.logged))
+        # the instruction is also pinned above the log while the capture waits
+        texts = [call.kwargs["text"] for call in app.run_status.configure.call_args_list]
+        self.assertTrue(any("click the app icon" in text for text in texts))
+
+    def test_manual_run_passes_a_websdk_file_to_the_import_service(self) -> None:
+        app = _app()
+        app._set_entry = unittest.mock.Mock()
+        app.vault_root = unittest.mock.Mock()
+        with tempfile.TemporaryDirectory() as tmp:
+            vault = Path(tmp)
+            (vault / ".obsidian").mkdir()
+            capture = vault / "websdk.json"
+            capture.write_text("{}", encoding="utf-8")
+            request = self._request(vault, workflow_mode=MANUAL_WORKFLOW, websdk=capture)
+            with patch("Miro_2_Obsidian_GUI.run_imports", return_value=[]) as run:
+                app._execute_request(request)
+        self.assertEqual(run.call_args.args[1].websdk, capture)
+
+    def test_existing_json_keeps_the_legacy_pipeline(self) -> None:
+        app = _app()
+        app._set_entry = unittest.mock.Mock()
+        app.vault_root = unittest.mock.Mock()
+        pipeline = unittest.mock.Mock(canvas_path=Path("a.canvas"), source_json=Path("a.json"))
+        with tempfile.TemporaryDirectory() as tmp:
+            vault = Path(tmp)
+            (vault / ".obsidian").mkdir()
+            request = self._request(
+                vault, source_mode=JSON_SOURCE_MODE, websdk=None, json_path_text=str(vault / "a.json")
+            )
+            with patch("Miro_2_Obsidian_GUI.run_existing_json_pipeline", return_value=pipeline) as run:
+                with patch("Miro_2_Obsidian_GUI.pipeline_result_is_degraded", return_value=False):
+                    with patch("Miro_2_Obsidian_GUI.run_imports") as imports:
+                        outcomes = app._execute_request(request)
+        run.assert_called_once()
+        imports.assert_not_called()
+        self.assertEqual(outcomes[0].status, "complete")
+        self.assertEqual(outcomes[0].artifact_path, "a.canvas")
+
+    def test_agent_degraded_is_written_with_gaps_and_warns_about_missing_websdk(self) -> None:
+        app = _app()
+        app._set_entry = unittest.mock.Mock()
+        app.vault_root = unittest.mock.Mock()
+        agent = AgentOutcome(
+            "degraded",
+            artifact_path=Path("x.canvas"),
+            websdk_used=False,
+            message="Only REST data.",
+            next_step="Click the app icon and run again.",
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            vault = Path(tmp)
+            (vault / ".obsidian").mkdir()
+            request = self._request(vault, workflow_mode=AGENT_WORKFLOW, websdk=None)
+            with patch("Miro_2_Obsidian_GUI.run_agent", return_value=agent) as run_agent:
+                outcomes = app._execute_request(request)
+        run_agent.assert_called_once()
+        outcome = outcomes[0]
+        self.assertEqual(outcome.status, "degraded")
+        self.assertTrue(outcome.websdk_missing)
+        text = "\n".join(gui_support.outcome_lines(outcome))
+        self.assertIn("Written with gaps", text)
+        self.assertIn("Only REST data.", text)
+        self.assertIn("Web SDK data is missing", text)
+        self.assertIn("Click the app icon and run again.", text)
+
+    def test_present_outcomes_picks_the_dialog_by_severity(self) -> None:
+        app = _app()
+        shown = []
+        app.after = lambda _ms, callback: callback()
+        for status, expected in (("complete", "showinfo"), ("degraded", "showwarning"), ("needs_user", "showwarning"), ("failed", "showerror")):
+            with patch.multiple(
+                "Miro_2_Obsidian_GUI.messagebox",
+                showinfo=lambda *a: shown.append("showinfo"),
+                showwarning=lambda *a: shown.append("showwarning"),
+                showerror=lambda *a: shown.append("showerror"),
+            ):
+                app._present_outcomes(
+                    [gui_support.BoardOutcome(status, name="B", message="m", next_step="do it")]
+                )
+            self.assertEqual(shown[-1], expected)
+
+    def test_needs_user_dialog_shows_the_next_step(self) -> None:
+        app = _app()
+        captured = []
+        app.after = lambda _ms, callback: callback()
+        outcome = gui_support.outcome_from_import_result(
+            ImportResult(
+                "needs_user",
+                board_id="b",
+                reason="file_locked",
+                message="A file is locked.",
+                next_step="Close the board in Obsidian, then press Run pipeline again.",
+            )
+        )
+        with patch("Miro_2_Obsidian_GUI.messagebox.showwarning", lambda title, text: captured.append((title, text))):
+            app._present_outcomes([outcome])
+        self.assertEqual(captured[0][0], "Miro needs your attention")
+        self.assertIn("Close the board in Obsidian, then press Run pipeline again.", captured[0][1])
+
+    def test_collect_run_request_validates_the_websdk_choice(self) -> None:
+        app = _app()
+        app.source_mode = _Value(URL_SOURCE_MODE)
+        app.workflow_mode = _Value(CODE_WORKFLOW)
+        app.target_dir = _Value("/vault/Boards")
+        app.websdk_choice = _Value(gui_support.WEBSDK_FILE)
+        app.websdk_path = _Value("")
+        app.min_font_px = _Value("8")
+        app.min_zoom = _Value("0.12")
+        app.scale_mode = _Value("readable")
         app.scale = _Value("")
         app.theme = _Value("dark")
         app.text_style_mode = _Value("miro")
+        app.output_format = _Value("native-canvas")
         app.allow_missing_assets = _Value(False)
-        app.stable_items = _Value(True)
+        app.stable_items = _Value(False)
         app.install_obsidian_plugins = _Value(False)
-        options = ConversionOptions(
-            scale=None,
-            theme="dark",
-            text_style_mode="miro",
-            output_format="advanced-canvas",
-            allow_missing_assets=False,
-            prefer_experimental=False,
-            install_obsidian_plugins=False,
+        app.share_attachments = _Value(True)
+        app.json_path = _Value("")
+        app.url_list_path = _Value("")
+        app.board_id = _Value("https://miro.com/app/board/uXjA=/")
+        app.selected_account_board_id = ""
+        app.agent_command_spec = None
+        with self.assertRaisesRegex(ValueError, "Web SDK JSON"):
+            app._collect_run_request()
+        app.websdk_choice = _Value(gui_support.WEBSDK_AUTO)
+        request = app._collect_run_request()
+        self.assertEqual(request.websdk, "auto")
+        app.websdk_choice = _Value(gui_support.WEBSDK_OFF)
+        self.assertEqual(app._collect_run_request().websdk, "skip")
+
+    def test_copy_instructions_text_uses_the_form(self) -> None:
+        app = _app()
+        app.target_dir = _Value("")
+        app.source_mode = _Value(URL_SOURCE_MODE)
+        app.board_id = _Value("https://miro.com/app/board/uXjA=/")
+        app.url_list_path = _Value("")
+        app.selected_account_board_id = ""
+        app.output_format = _Value("native-canvas")
+        app.websdk_choice = _Value(gui_support.WEBSDK_OFF)
+        app.websdk_path = _Value("")
+        with patch("Miro_2_Obsidian_GUI.gui_support.agent_cli_command", return_value="miro2obsidian"):
+            text = app._agent_instructions_text()
+        self.assertIn("miro2obsidian agent-guide", text)
+        self.assertIn('--board "uXjA="', text)
+        self.assertIn("--format native-canvas", text)
+        self.assertIn("--websdk skip", text)
+        self.assertIn("miro2obsidian mcp --print-config", text)
+
+    def test_code_narration_explains_import_service_steps(self) -> None:
+        self.assertTrue(
+            explain_code_step("Exporting the board through Miro's REST API.").startswith("Code: requesting")
         )
-
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            source_json = root / "source.json"
-            target_dir = root / "target"
-            vault_root = root / "vault"
-            attachment_dir = vault_root / "Files" / "Attachments"
-            profile = object()
-
-            with patch("Miro_2_Obsidian_GUI.run_rest_experimental_pipeline", return_value="ok") as pipeline:
-                result = MiroPipelineApp._run_one_board(
-                    app,
-                    board_id="board-1",
-                    label="Board",
-                    source_json=source_json,
-                    target_dir=target_dir,
-                    vault_root=vault_root,
-                    attachment_dir=attachment_dir,
-                    profile=profile,
-                    min_font_px=8,
-                    options=options,
-                )
-
-        self.assertEqual(result, "ok")
-        pipeline.assert_called_once()
-        self.assertEqual(pipeline.call_args.kwargs["board_id"], "board-1")
-        self.assertEqual(pipeline.call_args.kwargs["token"], "token-1")
-        self.assertEqual(pipeline.call_args.kwargs["source_json"], source_json)
-        self.assertEqual(pipeline.call_args.kwargs["attachment_dir"], attachment_dir)
-        self.assertFalse(pipeline.call_args.kwargs["prefer_experimental"])
+        self.assertTrue(explain_code_step("Asking the Miro app for a capture of the board.").startswith("Code:"))
+        app = _app()
+        app.run_status = unittest.mock.Mock()
+        app._on_import_event(
+            {"event": "step", "board_id": "b", "message": "Exporting the board through Miro's REST API."},
+            narrate=True,
+        )
+        self.assertTrue(app.logged[0].startswith("Code: requesting"))
+        self.assertIn("REST API", app.logged[1])
 
 
 if __name__ == "__main__":
