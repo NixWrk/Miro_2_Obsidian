@@ -57,8 +57,8 @@ _LOG = logging.getLogger(__name__)
 _REFRESH_LOCK = threading.Lock()
 
 CONNECT_HINT = (
-    "Connect once with `miro2obsidian setup-serve` (a local form that saves the "
-    "connection in your OS credential store), or use Code automation mode in the "
+    "Connect once with `miro2obsidian auth login --form` (a local form that saves "
+    "the connection in your OS credential store), or with Set up Miro app in the "
     f"GUI. Alternatively set {ENV_TOKEN} for this run."
 )
 

@@ -41,6 +41,14 @@ AGENT_REASONS = (
     "websdk_capture_timeout",
     "websdk_unavailable",
     "app_setup_required",
+    # Reasons `miro2obsidian import --json` reports, so an agent can relay them as is.
+    "token_refresh_failed",
+    "board_not_found",
+    "board_ambiguous",
+    "missing_assets",
+    "incomplete_source",
+    "file_locked",
+    "error",
     "other",
 )
 _RESPONSE_KEYS = frozenset(

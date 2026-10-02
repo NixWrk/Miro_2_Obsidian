@@ -153,7 +153,7 @@ class OutcomeTests(unittest.TestCase):
         not_connected = outcome(
             "needs_user",
             "not_connected",
-            "Miro is not connected. Connect once with `miro2obsidian setup-serve` (a local form).",
+            "Miro is not connected. Connect once with `miro2obsidian auth login --form` (a local form).",
             "Run `miro2obsidian setup guide` to create your Miro app (once), then `miro2obsidian auth login --form`.",
         )
         self.assertEqual(not_connected.message, "Miro is not connected.")

@@ -189,8 +189,13 @@ being presented as a complete Miro backup.
 
 ## Production union
 
-Run the strict REST export and merge the downloaded Web SDK board JSON in one
-transactional pipeline:
+The usual path needs no file at all: `miro2obsidian import --board <ref>
+--vault <vault> --websdk auto` (or `required`) starts this server, asks for a
+capture of the board, receives it through the handoff and runs the REST export
+right after it. `miro2obsidian capture --board <ref>` only fetches the capture.
+
+With a capture saved as a file (the Download fallback), run the strict REST
+export and merge it in one transactional pipeline:
 
 ```powershell
 python scripts\miro_pipeline.py `

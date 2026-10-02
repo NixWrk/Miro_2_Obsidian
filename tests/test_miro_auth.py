@@ -211,7 +211,7 @@ def test_legacy_v1_token_is_used_when_no_connection(vault) -> None:
 
 
 def test_not_connected_gives_next_step(vault) -> None:
-    with pytest.raises(NotConnected, match="setup-serve"):
+    with pytest.raises(NotConnected, match="auth login --form"):
         get_access_token()
     status = connection_status()
     assert not status.connected and status.source is None
