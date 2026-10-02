@@ -84,4 +84,5 @@ Exit codes: 0 complete, 2 degraded, 3 needs_user, 1 failed or wrong usage.
     miro2obsidian auth status --verify --json        ask Miro if the connection works
     miro2obsidian auth logout --json                 forget the saved connection
     miro2obsidian setup manifest                     print the Miro app manifest
+    miro2obsidian mcp                                run an MCP server exposing all of this as tools
 """

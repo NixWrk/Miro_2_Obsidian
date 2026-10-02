@@ -16,7 +16,7 @@ def _check() -> list[str]:
     import customtkinter  # noqa: F401 - the desktop window's toolkit and its themes
 
     from miro2obsidian import application  # noqa: F401 - the whole pipeline
-    from miro2obsidian import cli, import_service  # noqa: F401 - agent surface
+    from miro2obsidian import cli, import_service, mcp_server  # noqa: F401 - agent surface
     from miro2obsidian.schema import validate_board
     from miro2obsidian.websdk_server import websdk_directory
     from playwright._impl._driver import compute_driver_executable
@@ -34,8 +34,8 @@ def _check() -> list[str]:
     themes = Path(customtkinter.__file__).resolve().parent / "assets" / "themes"
     if not themes.is_dir():
         problems.append(f"missing customtkinter themes: {themes}")
-    node, cli = compute_driver_executable()
-    if not Path(node).is_file() or not Path(cli).is_file():
+    node, driver_cli = compute_driver_executable()
+    if not Path(node).is_file() or not Path(driver_cli).is_file():
         problems.append("missing bundled Playwright browser driver")
     return problems
 

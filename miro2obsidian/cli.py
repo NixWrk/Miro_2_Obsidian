@@ -1,7 +1,8 @@
 """Machine-readable commands for scripts and agents.
 
 Dispatched from ``scripts.miro_pipeline.main`` when the first argument is one
-of :data:`SUBCOMMANDS`. Every command accepts ``--json``: a single JSON object,
+of :data:`SUBCOMMANDS`. Every command except ``mcp`` (the stdio MCP server, see
+:mod:`miro2obsidian.mcp_server`) accepts ``--json``: a single JSON object,
 or JSON Lines for the streaming commands (``capture``, ``import``) which end
 with ``{"event": "summary", "results": [...], "exit_code": n}``. Nothing here
 ever prints a token, Client secret or board content, and secrets are never
@@ -25,11 +26,11 @@ from typing import Any, Sequence
 
 from Json_2_Canvas.output_formats import ADVANCED_CANVAS, OUTPUT_FORMATS
 from Json_2_Canvas.Scale_engine import DEFAULT_FIT_MARGIN, ViewProfile
-from miro2obsidian import app_setup, import_service, miro_auth
+from miro2obsidian import app_setup, import_service, mcp_server, miro_auth
 from miro2obsidian.agent_guide import AGENT_GUIDE
 from miro2obsidian.credential_store import CredentialStoreUnavailable
 
-SUBCOMMANDS = ("doctor", "setup", "auth", "boards", "capture", "import", "agent-guide")
+SUBCOMMANDS = ("doctor", "setup", "auth", "boards", "capture", "import", "agent-guide", "mcp")
 PROGRAM = "miro2obsidian"
 CLIENT_ID_ENV = "MIRO_CLIENT_ID"
 CLIENT_SECRET_ENV = "MIRO_CLIENT_SECRET"
@@ -151,6 +152,20 @@ def build_parser() -> argparse.ArgumentParser:
 
     guide = sub.add_parser("agent-guide", help="Print the procedure for AI agents.")
     _json_flag(guide)
+
+    mcp = sub.add_parser(
+        "mcp",
+        help="Run the MCP server (stdio) so MCP-capable agents can set up and run imports.",
+        description="Run the Model Context Protocol server on stdin/stdout, or print the configuration "
+        "that registers it with an MCP client.",
+    )
+    mcp.add_argument("--print-config", action="store_true", help="Print a ready-to-use client configuration and exit.")
+    mcp.add_argument(
+        "--client",
+        choices=list(mcp_server.CLIENT_CHOICES),
+        default="generic",
+        help="Which client --print-config targets (default: generic mcpServers JSON).",
+    )
     return parser
 
 
@@ -582,6 +597,13 @@ def _cmd_agent_guide(args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
+def _cmd_mcp(args: argparse.Namespace) -> int:
+    if args.print_config:
+        sys.stdout.write(mcp_server.render_config(args.client))
+        return EXIT_OK
+    return mcp_server.serve_stdio()
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     """Run a subcommand; returns the process exit code."""
     parser = build_parser()
@@ -596,6 +618,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         "boards": _cmd_boards,
         "capture": _cmd_capture,
         "agent-guide": _cmd_agent_guide,
+        "mcp": _cmd_mcp,
     }
     try:
         if args.command == "import":

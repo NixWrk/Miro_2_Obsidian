@@ -59,6 +59,7 @@ subcommands (run `miro2obsidian <subcommand> --help`; most accept --json):
   capture       obtain a Web SDK capture of one board
   import        import boards into an Obsidian vault (one command, many boards)
   agent-guide   print the step-by-step procedure for AI agents
+  mcp           run the MCP server (stdio) for MCP-capable agents; --print-config shows client setup
   websdk-serve  serve the Miro Web SDK app and capture handoff
   setup-serve   local form to connect a Miro app from a browser
   validate      check a .canvas file against the board schema

@@ -62,7 +62,7 @@ def vault(tmp_path) -> Path:
 
 
 def test_subcommand_list() -> None:
-    assert set(cli.SUBCOMMANDS) == {"doctor", "setup", "auth", "boards", "capture", "import", "agent-guide"}
+    assert set(cli.SUBCOMMANDS) == {"doctor", "setup", "auth", "boards", "capture", "import", "agent-guide", "mcp"}
 
 
 def test_pipeline_main_dispatches_subcommands(monkeypatch) -> None:
