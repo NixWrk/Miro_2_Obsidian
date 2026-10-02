@@ -78,8 +78,9 @@ class MiroWebsdkExporterAssetTests(unittest.TestCase):
         self.assertEqual(specs[1][1].address_family, socket.AF_INET6)
 
     def test_exporter_calls_board_and_selection_apis(self) -> None:
-        js = (EXPORTER_DIR / "exporter.js").read_text(encoding="utf-8")
+        js = (EXPORTER_DIR / "exporter-core.js").read_text(encoding="utf-8")
 
+        self.assertIn("Miro2ObsidianExporter = api", js)
         self.assertIn("miro.board.get()", js)
         self.assertIn("miro.board.getSelection()", js)
         self.assertIn("function createGeneratedProbeItems", js)
@@ -148,12 +149,19 @@ class MiroWebsdkExporterAssetTests(unittest.TestCase):
         self.assertIn("miro.board.ui.openPanel", html)
         self.assertIn("panel.html", html)
         self.assertIn("Exporter version: 20260727-complete-json", html)
+        self.assertIn("./exporter-core.js", html)
+        self.assertIn("./handoff.js", html)
+        self.assertIn("runPendingExport", html)
 
     def test_panel_loads_miro_sdk_and_local_exporter(self) -> None:
         html = (EXPORTER_DIR / "panel.html").read_text(encoding="utf-8")
 
         self.assertIn("https://miro.com/app/static/sdk/v2/miro.js", html)
+        self.assertIn("./exporter-core.js?v=20260727-complete-json", html)
+        self.assertIn("./handoff.js?v=20260727-complete-json", html)
         self.assertIn("./exporter.js", html)
+        self.assertIn("send-to-app", html)
+        self.assertIn("handoff-status", html)
         self.assertIn("create-generated-probe", html)
         self.assertIn("export-board", html)
         self.assertIn("export-selection", html)
@@ -199,6 +207,11 @@ class MiroWebsdkExporterAssetTests(unittest.TestCase):
         self.assertIn("--board-id", readme)
         self.assertIn("left-hand app toolbar", readme)
         self.assertIn("monochrome outline icon", readme)
+        self.assertIn("MIRO2OBSIDIAN_CAPTURE_DIR", readme)
+        self.assertIn("Access-Control-Allow-Origin", readme)
+        self.assertIn("DNS", readme)
+        self.assertIn("X-Miro2Obsidian-Token", readme)
+        self.assertIn("could", readme)
 
 
 if __name__ == "__main__":

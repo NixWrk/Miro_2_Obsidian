@@ -36,6 +36,7 @@ jobs:
         run: |
           node tests/websdk_serialization_smoke.js tools/miro_websdk_exporter/exporter.js
           node tests/websdk_capture_completeness_smoke.js tools/miro_websdk_exporter/exporter.js
+          node tests/websdk_handoff_smoke.js tools/miro_websdk_exporter/exporter.js
 
   dependency-audit:
     runs-on: ubuntu-latest

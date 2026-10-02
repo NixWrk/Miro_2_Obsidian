@@ -1,4 +1,5 @@
 const fs = require("fs");
+const path = require("path");
 const vm = require("vm");
 
 const exporterPath = process.argv[2];
@@ -6,6 +7,8 @@ if (!exporterPath) {
   throw new Error("exporter path is required");
 }
 const exporterSource = fs.readFileSync(exporterPath, "utf8");
+const corePath = path.join(path.dirname(exporterPath), "exporter-core.js");
+const coreSource = fs.readFileSync(corePath, "utf8");
 
 async function runScenario({ items, selection = [], boardInfo, includeGetInfo = true }) {
   const listeners = {};
@@ -41,6 +44,7 @@ async function runScenario({ items, selection = [], boardInfo, includeGetInfo = 
   global.miro = { board };
   global.window = { miro: global.miro };
 
+  vm.runInThisContext(coreSource, { filename: corePath });
   vm.runInThisContext(exporterSource, { filename: exporterPath });
   await listeners["export-board:click"]();
   return JSON.parse(element("output").textContent);

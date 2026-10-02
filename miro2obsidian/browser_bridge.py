@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 import os
 import subprocess
-import sys
 import time
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -13,6 +12,8 @@ from pathlib import Path
 from typing import Callable, Iterator
 from urllib.parse import urlsplit
 from urllib.request import urlopen
+
+from miro2obsidian.paths import app_data_dir
 
 
 PROFILE_ENV = "MIRO2OBSIDIAN_BROWSER_PROFILE"
@@ -36,13 +37,7 @@ def browser_profile_dir() -> Path:
     override = os.environ.get(PROFILE_ENV)
     if override:
         return Path(override).expanduser().resolve()
-    if os.name == "nt":
-        base = Path(os.environ.get("LOCALAPPDATA") or Path.home() / "AppData" / "Local")
-    elif sys.platform == "darwin":
-        base = Path.home() / "Library" / "Application Support"
-    else:
-        base = Path(os.environ.get("XDG_DATA_HOME") or Path.home() / ".local" / "share")
-    return (base / "miro2obsidian" / "browser-profile").resolve()
+    return (app_data_dir() / "browser-profile").resolve()
 
 
 def _install_chromium() -> None:

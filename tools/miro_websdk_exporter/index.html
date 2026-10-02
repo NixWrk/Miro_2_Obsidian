@@ -45,16 +45,24 @@
     <main>
       <h1>Miro2Obsidian exporter</h1>
       <p>Exporter version: 20260727-complete-json</p>
-      <p>This page registers the Miro toolbar icon and opens the exporter panel.</p>
+      <p>This page registers the Miro toolbar icon and opens the exporter panel. When a local
+        miro2obsidian program has requested this board, it also exports and sends the board by itself.</p>
       <button id="open-panel" type="button">Open exporter panel</button>
       <pre id="status" aria-live="polite">Waiting for Miro Web SDK...</pre>
     </main>
     <script src="https://miro.com/app/static/sdk/v2/miro.js"></script>
+    <script src="./exporter-core.js?v=20260727-complete-json"></script>
+    <script src="./handoff.js?v=20260727-complete-json"></script>
     <script>
       (function () {
         const panelUrl = "panel.html";
         const status = document.getElementById("status");
         const openPanelButton = document.getElementById("open-panel");
+        const FAST_POLL_MS = 3000;
+        const SLOW_POLL_MS = 15000;
+        const RETRY_AFTER_ERROR_MS = 60000;
+        let lastErrorAt = 0;
+        let polling = false;
 
         function setStatus(message) {
           status.textContent = message;
@@ -66,8 +74,46 @@
             return;
           }
 
+          // The panel checks the same pending request on load and exports by itself.
           await miro.board.ui.openPanel({ url: panelUrl });
           setStatus("Exporter panel opened.");
+        }
+
+        // Headless handoff: if the local program asked for this board, export and send it.
+        // Returns true while a miro2obsidian server is reachable.
+        async function checkPendingRequest() {
+          const handoff = window.Miro2ObsidianHandoff;
+          if (!handoff || !window.Miro2ObsidianExporter) {
+            return false;
+          }
+          if (Date.now() - lastErrorAt < RETRY_AFTER_ERROR_MS) {
+            return true;
+          }
+          const result = await handoff.runPendingExport();
+          if (result.state === "sent") {
+            setStatus(`Sent to miro2obsidian (${result.items} items).`);
+          } else if (result.state === "error") {
+            lastErrorAt = Date.now();
+            setStatus(`Export for miro2obsidian failed: ${result.error}`);
+          } else if (result.state === "busy") {
+            setStatus("Export for miro2obsidian is already running.");
+          }
+          return result.state !== "no-server";
+        }
+
+        async function pollPendingRequests() {
+          if (polling) {
+            return;
+          }
+          polling = true;
+          let delay = SLOW_POLL_MS;
+          try {
+            delay = (await checkPendingRequest()) ? FAST_POLL_MS : SLOW_POLL_MS;
+          } catch (error) {
+            delay = SLOW_POLL_MS;
+          }
+          polling = false;
+          setTimeout(pollPendingRequests, delay);
         }
 
         async function init() {
@@ -80,6 +126,7 @@
 
           await miro.board.ui.on("icon:click", openExporterPanel);
           setStatus("Ready. Click the app icon on the Miro toolbar to open the exporter panel.");
+          pollPendingRequests();
         }
 
         init().catch((error) => {

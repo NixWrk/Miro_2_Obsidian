@@ -62,10 +62,14 @@
         <button id="export-selection" type="button">Export selection</button>
         <button id="download-json" type="button" disabled>Download JSON</button>
         <button id="copy-json" type="button" disabled>Copy JSON</button>
+        <button id="send-to-app" type="button" disabled>Send to miro2obsidian</button>
       </div>
+      <p id="handoff-status" aria-live="polite"></p>
       <pre id="output" aria-live="polite">Waiting for export...</pre>
     </main>
     <script src="https://miro.com/app/static/sdk/v2/miro.js"></script>
+    <script src="./exporter-core.js?v=20260727-complete-json"></script>
+    <script src="./handoff.js?v=20260727-complete-json"></script>
     <script src="./exporter.js?v=20260727-complete-json"></script>
   </body>
 </html>

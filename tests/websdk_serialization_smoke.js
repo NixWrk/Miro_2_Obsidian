@@ -1,4 +1,5 @@
 const fs = require("fs");
+const path = require("path");
 const vm = require("vm");
 
 const exporterPath = process.argv[2];
@@ -53,6 +54,8 @@ global.miro = {
 };
 global.window = { miro: global.miro };
 
+const corePath = path.join(path.dirname(exporterPath), "exporter-core.js");
+vm.runInThisContext(fs.readFileSync(corePath, "utf8"), { filename: corePath });
 vm.runInThisContext(fs.readFileSync(exporterPath, "utf8"), { filename: exporterPath });
 
 (async () => {

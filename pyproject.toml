@@ -33,6 +33,8 @@ miro2obsidian = ["schemas/v1/*.json", "schemas/v1/fixtures/*.json", "schemas/v1/
 "share/miro2obsidian/websdk" = [
     "tools/miro_websdk_exporter/index.html",
     "tools/miro_websdk_exporter/panel.html",
+    "tools/miro_websdk_exporter/exporter-core.js",
+    "tools/miro_websdk_exporter/handoff.js",
     "tools/miro_websdk_exporter/exporter.js",
     "tools/miro_websdk_exporter/icon-outline.svg",
     "tools/miro_websdk_exporter/icon-color.svg",
