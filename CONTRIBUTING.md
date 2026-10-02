@@ -36,8 +36,7 @@ fixture in `tests/fixtures/<case_name>/`:
 
 - `input.miro.json` with only the source data needed to reproduce the case;
 - `case.json` with structural, semantic, or geometry assertions;
--
-otes.md` explaining the rule and expected result;
+- `notes.md` explaining the rule and expected result;
 - a visual baseline only when the behavior cannot be asserted reliably in JSON.
 
 Do not add complete private board exports as fixtures. Remove unrelated content,

@@ -21,9 +21,23 @@ items focus on packaging, onboarding, and richer offline Canvas editing.
 - [ ] Add a resumable first-run wizard for creating and validating a personal
   Miro Developer App.
 - [ ] Start and verify the local OAuth and Web SDK services automatically.
-- [ ] Store credentials in the operating-system credential store with explicit
-  disconnect and forget actions.
-- [ ] Add a direct, nonce-protected Web SDK handoff to the local application.
+  Partly done (2026-10-02): `import`, `capture` and `auth login --form` start
+  their own servers and `doctor` reports port conflicts. Still open: resuming a
+  half-finished setup and a live check that Miro starts the app on board open.
+- [x] Store credentials in the operating-system credential store with explicit
+  disconnect and forget actions (`auth logout`, automatic token renewal). The
+  Windows chunking and Miro's refresh and revoke endpoints still need a live
+  check.
+- [x] Add a direct, nonce-protected Web SDK handoff to the local application.
+  The handoff from Miro's real iframe still needs a live check.
+- [x] Give scripts and agents one import service, a JSON command line
+  (`doctor`, `setup`, `auth`, `boards`, `capture`, `import`, `agent-guide`) and
+  protocol v2 for the GUI's Agent mode.
+- [ ] Confirm live: the app starts on board open without a click; the handoff
+  POST from the Miro iframe (Chrome local-network rules); token refresh,
+  token-info and revoke; the app manifest editor; Windows Credential Manager
+  chunking; MCP with real clients; the GUI wizard on Windows. See the pending
+  list in `docs/ENVIRONMENT_TEST_MATRIX.md`.
 - [ ] Provide one guided export flow from board selection to the final Canvas.
 - [ ] Redesign the Miro panel and local GUI around beginner and advanced modes.
 - [ ] Test the complete flow with new users on a clean Windows computer.
@@ -76,7 +90,8 @@ The work below is done in this order; each phase builds on the ones before it.
    board.
 5. **Testing with people.** The full user journey on a clean Windows machine and
    fixes; then other operating systems, phones and tablets.
-6. **Ecosystem.** An MCP server beside the skill; import from other plugins'
+6. **Ecosystem.** An MCP server beside the skill (`miro2obsidian mcp`, added
+   2026-10-02, not yet tried with real clients); import from other plugins'
    formats; faster card dragging on very large boards; the remaining small
    limitations.
 
@@ -111,8 +126,10 @@ can be removed afterwards; the settings button repeats the flow.
   guides every step with a clear, illustrated guide. The exporter can be
   removed afterwards; a button in the plugin settings repeats the flow.
 - [ ] Python builds of the exporter for Windows, macOS and Linux.
-- [ ] A skill or MCP server for miro2obsidian itself, so an agent can set up the
-  Miro app, run the export and conversion, and fix problems with the user.
+- [x] A skill or MCP server for miro2obsidian itself, so an agent can set up the
+  Miro app, run the export and conversion, and fix problems with the user. The
+  `miro2obsidian-import` skill drives the new command line; the MCP server
+  awaits live testing with real clients.
 - [ ] Walk the full user journey on a clean machine - install, first setup,
   Miro app, export, conversion, opening and editing the board - and fix every
   problem found.

@@ -12,9 +12,11 @@ how to create one, and which parts of setup are manual today.
 - Allow longer when a team administrator must approve the app.
 - The app is configured once and can then export every board that the authorized
   Miro user and installed app are allowed to read.
-- The current pre-release still requires Python, a local server, and a manual Web
-  SDK JSON download. The planned first-run wizard will remove those technical
-  steps.
+- The program starts its own local servers and receives the Web SDK capture
+  itself. You do not manage JSON files unless the automatic hand-off fails.
+- A few steps stay with you because Miro's security model reserves them for a
+  person: creating the app, signing in, approving access, and possibly one click
+  on the app icon. See [Workflow modes](WORKFLOW_MODES.md).
 
 Creating the app is required by Miro's security model. This repository must not
 ship one shared client secret that silently gives unrelated users access to each
@@ -40,7 +42,7 @@ You need:
 - a Miro account that can open the target board;
 - permission to install an app in the team that owns that board, or help from
   that team's administrator;
-- this repository and Python 3.13 for the current pre-release;
+- the program: a ready-made build, or this repository and Python 3.13;
 - an Obsidian vault for the final Canvas.
 
 A Miro Developer team is a safe sandbox for testing, but an app installed only
@@ -61,6 +63,15 @@ Creating the app does not move or copy any board. It creates credentials and a
 permission boundary for local export.
 
 ## 2. Configure URLs
+
+The fastest way is the manifest. Run `miro2obsidian setup manifest` (the GUI
+wizard has a **Copy manifest** action) and, if your app's settings page offers
+editing the app manifest, paste it there and save. It sets the app name, the two
+URLs below, and the two scopes. If no manifest editor is offered, enter the same
+values by hand. Whether Miro's page offers one has not been checked live.
+
+`miro2obsidian setup guide` prints this whole checklist in the terminal, and
+`miro2obsidian setup open` opens the Developer Hub.
 
 Enter these exact values in the app settings:
 
@@ -105,114 +116,145 @@ items. It does not make a read-only export more complete.
 This team selection is essential. An app installed in a Developer team does not
 automatically appear on boards in a personal, company, or client team.
 
-## 5. Provide credentials locally
+## 5. Connect the program to your app
 
 Copy the **Client ID** and **Client secret** from the app settings. Do not paste
-them into an issue, chat, screenshot, or tracked file. In the desktop GUI, select
-**Set up Miro app**, enter both values, and select **Connect**. The GUI keeps
-them in memory for this session and starts OAuth automatically. In **Code
-automation**, the resulting access token is also stored in the current user's OS
-credential store when available; **Forget saved token** removes it. See [three modes](WORKFLOW_MODES.md).
+them into an issue, chat, screenshot, or tracked file. Then connect in one of
+two ways:
 
-The **Paste** buttons beside the fields can transfer values copied from Miro
-straight into the GUI. The secret field is masked. Leave the irreversible
-**Expire user authorization token** option unchecked when creating the app:
-the current client does not automatically refresh OAuth tokens.
+- **Desktop window.** Run `miro2obsidian-gui` and open the **Set up Miro app**
+  wizard. It shows one step at a time with Copy and Open buttons. Enter both
+  values, then approve access in the browser.
+- **Command line.** Run `miro2obsidian auth login --form`. A form opens in your
+  browser on your own computer. Paste the Client ID and Client secret there and
+  approve access in Miro. The command never takes the secret as an argument.
+  Without `--form` it reads `MIRO_CLIENT_ID` and `MIRO_CLIENT_SECRET` from the
+  environment or asks for them with a hidden prompt.
 
-If the target board is absent, select **Switch Miro team** and choose the team
-that owns it in the OAuth window. For automation without the GUI, use environment
-variables in the current PowerShell session:
+The program saves one connection in your operating system's credential store
+(Windows Credential Manager, macOS Keychain, or a Linux Secret Service keyring).
+The connection holds your Client ID, **Client secret**, the access and refresh
+tokens, their expiry and the team. The secret is kept so the program can renew
+the token without you. See [SECURITY.md](../SECURITY.md) for the trade-off and
+for how to remove it.
 
-```powershell
-$env:MIRO_CLIENT_ID = "<your client id>"
-$env:MIRO_CLIENT_SECRET = "<your client secret>"
-$env:MIRO_REDIRECT_URI = "http://localhost:8765/callback"
-```
+Tokens renew themselves, so you may switch on **Expire user authorization
+token** when you create the app. Earlier versions needed it left off. If you
+ticked it already, nothing needs to change.
 
-There is no need to save these values in a project file.
+If the target board is absent later, install the app in the team that owns it
+and connect again, choosing that team in the OAuth window. To forget the
+connection, run `miro2obsidian auth logout` (the GUI has a matching button). It
+asks Miro to revoke the token on a best-effort basis and always removes the
+saved connection from your computer.
 
-## 6. Check the REST connection
+Without an OS credential store, set `MIRO_ACCESS_TOKEN` in the environment for
+the run. That token does not renew itself.
 
-Install runtime dependencies and start the desktop application:
-
-```powershell
-python -m pip install .
-miro2obsidian-gui
-```
-
-Choose **Miro account** and select **Authenticate / refresh** if you have
-already provided credentials outside the GUI. The browser opens
-Miro OAuth and returns to `http://localhost:8765/callback`. After consent, the
-GUI should list the boards visible to both the user and the app.
-
-At this point the GUI can run the strict REST path. That path includes board
-items, REST comments, and required downloadable assets.
-
-## 7. Add the Web SDK capture for maximum export
-
-Start the local Web SDK server in a second terminal:
+## 6. Check the connection
 
 ```powershell
-miro2obsidian websdk-serve --port 8766
+miro2obsidian auth status --verify
+miro2obsidian boards
+miro2obsidian doctor
 ```
 
-Then:
+`auth status --verify` asks Miro whether the token works. `boards` lists the
+boards visible to both you and the app (`--query` filters by name). `doctor`
+checks the credential store, ports `8765` and `8766`, and the browser. If a
+board you expect is missing, see the table below.
 
-1. Open the target board in Miro.
-2. Open **+ More apps** or **+ More tools** in the board's left toolbar.
-3. Select `Miro to Obsidian - local export`.
-4. Select **Export board**, not **Export selection**.
-5. Keep the downloaded JSON. It must be from the same board and close in time to
-   the REST export.
-6. Pass it to `miro2obsidian` with `--websdk-json` as shown in the
-   project [README](../README.md#export-maximum-public-api-data).
+At this point you can run the strict REST path. It includes board items, REST
+comments, and required downloadable assets:
 
-The current Web SDK download is a manual bridge. The planned local companion
-will receive it directly over loopback, verify a one-time session nonce, and
-merge it with REST without asking the user to manage JSON files.
+```powershell
+miro2obsidian import --board "<board name, URL or id>" --vault <vault> --websdk skip
+```
+
+## 7. Export the maximum automatically
+
+Leave the Web SDK option on automatic (`--websdk auto`, the default). For each
+board the program:
+
+1. starts its local server on port `8766` (the one in your App URL);
+2. asks the Miro app for a capture of that board;
+3. opens the board in your default browser;
+4. receives the whole-board capture over loopback, validates it, and runs the
+   REST export right after.
+
+If Miro starts the app by itself when the board opens, no click is needed. If
+nothing happens in about 20 seconds, click the app icon in the board's left
+toolbar (**+ More apps**, then `Miro to Obsidian - local export`). The program
+waits up to 3 minutes per board (`--capture-timeout`).
+
+If no capture arrives, `--websdk auto` still writes a REST-only Canvas, marks
+the board `degraded`, and says what may be missing. Use `--websdk required` when
+you want a click request instead.
+
+Whether Miro starts the app on board open without a click has not been verified
+live. Plan for one click.
+
+### Fallback: download the capture by hand
+
+If the automatic hand-off does not work, run the exporter yourself:
+
+1. Start `miro2obsidian websdk-serve --port 8766`.
+2. Open the board, open the app, and choose **Export board**, not **Export
+   selection**. With the server running the capture is sent to the program
+   automatically. **Download JSON** and **Copy JSON** remain.
+3. Pass a downloaded file with `--websdk <file>` (CLI) or **From file** (GUI).
+   It must come from the same board and be recent. A wrong or stale capture is
+   rejected.
+
+The hand-off is described in the [exporter README](../tools/miro_websdk_exporter/README.md#handoff-to-the-local-program).
 
 ## Common problems
 
 | Symptom | Likely cause | Fix |
 |---|---|---|
-| `ERR_CONNECTION_REFUSED` in Miro | Local server is not running on the configured port | Start `serve_no_cache.py` on port `8766` |
+| `ERR_CONNECTION_REFUSED` in Miro | Local server is not running on the configured port | Run an import or `miro2obsidian websdk-serve --port 8766` and keep it running |
 | `404 File not found` | App URL points to an old path or another static server | Use `http://localhost:8766/index.html` |
 | App is absent from the board | It is installed in another team | Install it in the team that owns the board |
 | OAuth callback fails | Redirect URI differs by host, port, or path | Use exactly `http://localhost:8765/callback` in Miro and locally |
 | Board list is empty or incomplete | User access, team installation, or `team:read` is missing | Check all three; ask the team administrator when needed |
 | Port `8765` is busy | Web SDK compatibility server and OAuth callback are competing | Keep Web SDK on `8766` and OAuth on `8765` |
+| The app is not on the board's toolbar | It is installed in another team | Install it in the team that owns the board (step 4), then reopen the board |
+| Capture timeout (`websdk_capture_timeout`, or a `degraded` board with `websdk_unavailable`) | Miro did not start the app by itself | Click the app icon on the open board, then run the same command again. Use `--websdk required` to be asked instead of degrading |
+| Port `8766` is busy | Another program, or an old server of a different kind, holds it | Stop that program and run again. A running `miro2obsidian websdk-serve` is reused automatically. `doctor` shows who holds the port |
+| The capture was rejected | It belongs to another board, or is stale (older than the allowed age) | Open the right board and capture again. Do not reuse an old file |
+| Miro says the token is revoked or expired | The grant was revoked, or the app was removed | Run `miro2obsidian auth login --form` again |
 | `WinError 5` while writing Canvas | Obsidian has locked the new file | Close Obsidian, retry the export, and open the Canvas after successful completion |
 | Probe action reports missing permission | The app is read-only | Add `boards:write` only for that intentional probe |
 
-## Planned beginner experience
+## Beginner experience: done and planned
 
 The product target is: download, run, follow one wizard, choose a board and an
 Obsidian vault, then select **Export**. A beginner should not need a terminal,
 Python, Node.js, environment variables, JSON paths, or knowledge of local ports.
 
-The first-run wizard must:
+Already in place:
+
+- A step-by-step **Set up Miro app** wizard in the desktop window with Copy and
+  Open buttons, and the same checklist on the command line (`setup guide`).
+- A manifest to paste (`setup manifest`).
+- Credentials in the OS credential store, with automatic token renewal and
+  explicit disconnect (`auth logout`).
+- The OAuth and Web SDK local services start and stop on their own during an
+  import. Port conflicts are reported by `doctor`.
+- A direct, nonce-protected hand-off of the Web SDK capture to the program.
+
+Still planned or unverified:
 
 1. Ship as a signed Windows installer or portable package with its runtime.
-2. Offer **Connect Miro** and **Convert existing JSON** as plain-language paths.
-3. Open the correct Miro dashboard and show one instruction at a time.
-4. Provide copy buttons for the app name, URLs, and minimal scopes.
-5. Automate Miro UI steps in an open browser session where possible and
-   clearly present access approval steps.
-6. Accept and validate Client ID and Client secret, then store them in the OS
-   credential store rather than a plain-text project file.
-7. Start and stop OAuth and Web SDK loopback services automatically.
-8. Detect port conflicts, app/team mismatch, missing scopes, failed OAuth, and
-   stale Web SDK captures with actionable messages.
-9. Resume from the last completed step after Miro or the browser is closed.
-10. Detect Obsidian vaults and attachment settings and choose safe defaults.
-11. Transfer the Web SDK capture directly to the local companion with a
-    short-lived nonce.
-12. Show one progress flow from board selection through REST, comments, assets,
-    Web SDK merge, conversion, validation, and final Canvas location.
+2. Resume from the last completed step after Miro or the browser is closed.
+3. Detect Obsidian vaults and attachment settings and choose safe defaults.
+4. Show one progress flow from board selection through REST, comments, assets,
+   Web SDK merge, conversion, validation, and final Canvas location.
+5. Confirm live that the app starts on board open without a click.
+6. Test the whole flow with new users on a clean Windows computer.
 
-Miro requires an account with permission to create and install an app and
-explicit approval of the requested scopes. UI steps can be automated in an
-open authenticated browser session, as in this live test. Team administrator
+Creating the app still requires an account with permission to create and install
+an app, and explicit approval of the requested scopes. Team administrator
 approval remains an external requirement where installation is restricted.
 
 ## Interface design requirements

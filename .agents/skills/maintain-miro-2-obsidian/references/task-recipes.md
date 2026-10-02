@@ -52,6 +52,16 @@ Keep network/export/conversion behavior in `miro2obsidian.application`. Test
 helpers without opening a window. Manually launch `miro2obsidian-gui` only when
 visual or interaction behavior changed.
 
+## Import workflow, CLI, agent or MCP change
+
+Orchestration belongs in `miro2obsidian/import_service.py`; keep `cli.py`,
+`mcp_server.py` and the GUI thin. Tokens come only from `miro2obsidian/miro_auth.py`.
+Check commands against `miro2obsidian <command> --help` (no network is needed),
+and keep `agent-guide`, `docs/WORKFLOW_MODES*.md`, `docs/AGENT_SETUP*.md`,
+`docs/MIRO_APP_SETUP*.md` and the `miro2obsidian-import` skill in step. Do not
+run a live import without the user's own Miro app; record unverified live
+behavior in `docs/ENVIRONMENT_TEST_MATRIX.md` as pending, never as passed.
+
 ## Documentation or command change
 
 Update `README.md` and `README.ru.md` together. Prefer installed entry points for

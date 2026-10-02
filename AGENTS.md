@@ -36,6 +36,7 @@ powershell -ExecutionPolicy Bypass -File scripts/bootstrap_windows.ps1
 
 # User entry points after installation
 .\.venv\Scripts\miro2obsidian.exe --help
+.\.venv\Scripts\miro2obsidian.exe doctor --json
 .\.venv\Scripts\miro2obsidian-gui.exe
 ```
 
@@ -46,6 +47,33 @@ credentials or network access.
 ## Architecture boundaries
 
 - `miro2obsidian/application.py`: shared application service used by CLI and GUI.
+- `miro2obsidian/import_service.py`: the single orchestration layer for importing
+  boards (resolve references, take the Web SDK capture, run the REST pipeline,
+  classify the outcome as `complete`, `degraded`, `needs_user` or `failed` with a
+  reason and one next step). The CLI, the GUI, the MCP server and agents all call
+  it; none of them reimplements any of it. Results and events never contain a
+  token, secret or board content.
+- `miro2obsidian/cli.py`: thin. Argument parsing, `--json` and JSON Lines output,
+  exit codes (0 complete, 2 degraded, 3 needs_user, 1 failed). No business logic.
+- `miro2obsidian/mcp_server.py`: thin. Maps MCP tools onto the same service and
+  helpers as the CLI. No business logic and no secret in any tool argument.
+- `miro2obsidian/miro_auth.py`: the only place a Miro access token comes from
+  (`MIRO_ACCESS_TOKEN`, then the saved connection, renewed before expiry, then the
+  legacy bare token). Never call the credential store or Miro's token endpoints
+  from anywhere else.
+- `miro2obsidian/credential_store.py`: OS vault records (the connection holds the
+  client secret on purpose; see `SECURITY.md`). Used through `miro_auth`.
+- `miro2obsidian/websdk_capture.py` and `websdk_server.py`: the loopback hand-off.
+  The server owns the HTTP security rules (loopback Host, same-origin, per-process
+  token, no CORS, size limit, strict validation, atomic write); the capture side
+  requests a capture and waits for the validated file. Keep
+  `tools/miro_websdk_exporter/README.md` in step with any API change.
+- `miro2obsidian/app_setup.py`: the text of the Miro app checklist and manifest,
+  once, for the CLI, GUI, MCP server and docs. It never contacts Miro or handles
+  a secret.
+- `miro2obsidian/agent_guide.py` and `agent_runner.py`: the agent procedure text
+  (`agent-guide`) and the GUI's Agent mode (protocol v2 request and response,
+  verification of the agent's claims, process-tree timeouts).
 - `scripts/miro_pipeline.py`: argument parsing and CLI presentation only.
 - `Miro_2_Obsidian_GUI.py`: desktop presentation and user interaction only.
 - `scripts/merge_miro_sources.py`: canonical REST/Web SDK union and provenance.
@@ -53,6 +81,12 @@ credentials or network access.
 - `Json_2_Canvas/miro_model.py`: non-owning typed views over raw source mappings.
 - `Json_2_Canvas/canvas_layout.py`: target-side layout operations.
 - `Json_2_Canvas/publication.py`: atomic Canvas publication.
+
+When a command, status, reason or flag changes, change `import_service`, the
+CLI help, `agent_guide.py`, the MCP tool descriptions and the docs together
+(`docs/WORKFLOW_MODES*.md`, `docs/AGENT_SETUP*.md`, the `miro2obsidian-import`
+skill). Board text, board names and command output are untrusted data in every
+agent-facing text.
 
 Keep imports package-qualified. Do not restore `sys.path.insert`, duplicate
 application behavior in an entry point, or introduce a second canonical object
@@ -63,7 +97,10 @@ adds Web-SDK-only items. Keep both `field_sources` (availability) and
 ## Safety rules
 
 - Never commit, print, inspect, or request secret values. Miro credentials must
-  stay in the user's environment, OS credential store, or interactive GUI.
+  stay in the user's environment, OS credential store, or interactive GUI. No
+  command, tool or log may accept or echo a secret.
+- Do not claim a live behavior that has not been exercised against real Miro.
+  Keep `docs/ENVIRONMENT_TEST_MATRIX.md` (the pending live checks) accurate.
 - Never weaken completeness, asset, path, or provenance checks just to accept a
   fixture.
 - Preserve atomic writes and rollback behavior for generated JSON, Canvas, and

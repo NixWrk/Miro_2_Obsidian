@@ -10,6 +10,11 @@ translation is not yet available.
 - [Russian project overview](../README.ru.md)
 - [Beginner Miro app setup](MIRO_APP_SETUP.md)
 - [Russian beginner setup](MIRO_APP_SETUP.ru.md)
+- [Three ways to run Miro to Obsidian: manual, code automation, agent](WORKFLOW_MODES.md)
+  ([Russian](WORKFLOW_MODES.ru.md))
+- [Set up an AI agent](AGENT_SETUP.md) ([Russian](AGENT_SETUP.ru.md))
+- [Environment test matrix and pending live checks](ENVIRONMENT_TEST_MATRIX.md)
+  ([Russian](ENVIRONMENT_TEST_MATRIX.ru.md))
 - [Miro Web SDK exporter](../tools/miro_websdk_exporter/README.md)
 - [Canvas render harness](../tools/canvas_render/README.md)
 - [Regression fixture format](../tests/fixtures/README.md)
@@ -26,6 +31,7 @@ translation is not yet available.
 - [Miro API and item capability matrix](MIRO_CAPABILITIES.md)
 - [Source expansion runbook](SOURCE_EXPANSION.md)
 - [Public roadmap](../ROADMAP.md)
+- [Security policy](../SECURITY.md)
 
 Historical maintainer journals and real-board diagnostics are intentionally not
 published. Reproducible behavior belongs in minimized fixtures and executable

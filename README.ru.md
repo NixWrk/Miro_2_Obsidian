@@ -24,7 +24,8 @@ canonical JSON сохраняются исходные объекты обоих
   connectors, комментариев, mind maps, code blocks и поддерживаемых slides.
 - Проверка полноты, ID, файловых ссылок, рёбер, маппинга, геометрии и визуальных
   regression fixtures.
-- Воспроизводимый CLI и единый desktop GUI.
+- Воспроизводимый CLI, desktop GUI и интерфейс для агентов (команды с `--json`
+  и MCP-сервер).
 
 ## Статус
 
@@ -52,6 +53,25 @@ Miro board
 REST остаётся главным источником для совпадающих item ID. Web SDK заполняет
 пустые поля и добавляет доступные только ему элементы. Все исходные записи
 сохраняются в `source_provenance.original_items`.
+
+## Три способа пользоваться
+
+| Способ | Что делаете вы | Подробнее |
+|---|---|---|
+| **Вручную** | Сами создаёте своё приложение Miro и запускаете экспорт в окне программы или в командной строке | [Подключение собственных досок Miro](docs/MIRO_APP_SETUP.ru.md) |
+| **Автоматизация кодом** | Выполняете единовременные шаги для человека; дальше код сам обновляет токены, делает захват, экспорт и конвертацию, в том числе по расписанию | [Режимы работы](docs/WORKFLOW_MODES.ru.md) |
+| **Агент** | Говорите любому ИИ-агенту: «настрой всё и выгрузи доски X и Y в папку Z» | [Настройка агента](docs/AGENT_SETUP.ru.md) |
+
+Несколько шагов Miro оставляет человеку: создать своё приложение в Developer
+Hub, войти (с MFA), одобрить доступ и, где это требуется, получить одобрение
+администратора team. Может понадобиться и один клик по значку приложения на
+доске. Ни один способ эти шаги не обходит; [Режимы работы](docs/WORKFLOW_MODES.ru.md)
+точно перечисляют, что автоматизировано, а что нет.
+
+Для MCP-клиентов: `miro2obsidian mcp` запускает сервер, а
+`miro2obsidian mcp --print-config --client claude-desktop` печатает конфигурацию
+(есть ещё `claude-code`, `codex`, `generic`). Сервер пока не пробовали с
+настоящими клиентами.
 
 ## Установка
 
@@ -110,8 +130,11 @@ powershell -ExecutionPolicy Bypass -File scripts\install_agent_skill.ps1 -Name m
 
 Третий skill, `miro2obsidian-import`, позволяет агенту провести человека через
 весь импорт - получить программу, создать своё приложение Miro, выгрузить доску,
-сконвертировать её в нужный формат и проверить результат, - ни разу не касаясь
-его ключей:
+сконвертировать её в нужный формат и проверить результат - через командную
+строку `miro2obsidian` (`doctor`, `setup guide`, `auth login --form`, `boards`,
+`import --json`), ни разу не касаясь его ключей. Агент без skills может
+выполнить `miro2obsidian agent-guide` или воспользоваться MCP-сервером. См.
+[Настройка агента](docs/AGENT_SETUP.ru.md):
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts\install_agent_skill.ps1 -Name miro2obsidian-import
@@ -123,10 +146,27 @@ powershell -ExecutionPolicy Bypass -File scripts\install_agent_skill.ps1 -Name m
 ## Быстрый старт
 
 Если вы никогда не создавали Miro Developer App, начните с инструкции
-[Подключение собственных досок Miro](docs/MIRO_APP_SETUP.ru.md). Текущая
-одноразовая настройка обычно занимает 10-20 минут и не требует программирования,
-но пока содержит несколько ручных действий в Miro и с локальным сервером. Там
-же записан план мастера, который уберёт terminal setup.
+[Подключение собственных досок Miro](docs/MIRO_APP_SETUP.ru.md). Одноразовая
+настройка обычно занимает 10-20 минут и не требует программирования. Создание
+приложения в Developer Hub остаётся за вами, остальное делает программа.
+
+### Импорт досок из командной строки
+
+```powershell
+miro2obsidian setup guide                      # создать своё приложение Miro (один раз)
+miro2obsidian auth login --form                # подключить его; откроется локальная форма
+miro2obsidian doctor --vault path\to\ObsidianVault
+miro2obsidian boards
+miro2obsidian import --board "Roadmap" --board https://miro.com/app/board/<id>/ `
+  --vault path\to\ObsidianVault --folder Miro --format native-canvas
+```
+
+Все команды принимают `--json`. `import` и `capture` печатают JSON Lines с итогом
+в конце. Коды выхода: `0` — complete, `2` — degraded (записано, но с названным
+пробелом), `3` — нужен человек, `1` — failed. Сохранённое подключение само
+обновляет токен, поэтому последующие и плановые запуски обходятся без браузера.
+Другие команды: `setup manifest`, `setup open`, `auth status [--verify]`,
+`auth logout`, `capture`, `agent-guide`.
 
 ### Конвертация готового JSON
 
@@ -148,24 +188,26 @@ miro2obsidian-gui
 
 GUI разделяет четыре источника и три режима выполнения:
 
-- **Manual**: пользователь управляет Miro; скачанный JSON всей доски можно
-  выбрать в поле **Web SDK JSON** для строгого объединения с REST.
-- **Code automation**: REST, comments, assets и Canvas выполняются кодом с
-  пояснениями в журнале. Токен хранится в системном хранилище при его наличии;
-  CLI повторяет экспорт с `--stored-token` без браузера.
-- **Agent**: локальный агент через общий JSON-протокол пытается выполнить
-  браузерные действия и Web SDK. GUI открывает отдельный профиль Chromium и
-  передаёт адаптеру временный локальный CDP-адрес. Установленный локально Codex доступен как
-  необязательный адаптер по умолчанию. Вход, MFA и одобрение администратора
-  при необходимости остаются за владельцем аккаунта.
+- **Manual**: пользователь управляет Miro сам. Пошаговый мастер **Set up Miro
+  app** (с кнопками Copy и Open и копированием манифеста) помогает создать и
+  подключить приложение.
+- **Code automation**: код прогоняет одну или несколько досок через сервис
+  импорта и показывает статус каждой. Подключение хранится в системном
+  хранилище и само обновляет токен. Для Web SDK есть варианты **Automatic**,
+  **Off** и **From file**.
+- **Agent**: локальный агент, запущенный из GUI, настраивает и выполняет импорт
+  через CLI. Результат degraded (только REST) принимается и показывается как
+  есть. Для шагов, требующих человека, GUI открывает отдельный профиль Chromium.
+  Кнопка **Copy instructions for my agent** даёт готовую задачу для любого
+  агента. Вход, MFA и одобрение администратора остаются за владельцем аккаунта.
 
 Подробности: [три режима работы](docs/WORKFLOW_MODES.ru.md).
 
 GUI разделяет четыре сценария:
 
-- **Miro account**: **Set up Miro app** принимает credentials на время
-  сеанса, затем OAuth, список видимых досок и выбор одной доски. В режиме
-  **Code automation** сохраняет только токен в системном хранилище.
+- **Miro account**: **Set up Miro app**, затем OAuth, список видимых досок и
+  выбор одной доски. Подключение, включая client secret вашего приложения,
+  сохраняется в системном хранилище; см. [`SECURITY.md`](SECURITY.md).
 - **Miro URL**: экспорт одной ссылки.
 - **Miro URL list**: экспорт ссылок из Markdown или JSON.
 - **Existing JSON**: локальная конвертация без обращения к Miro.
@@ -219,34 +261,40 @@ miro2obsidian `
 ### Максимально полный экспорт
 
 [Инструкция для начинающих](docs/MIRO_APP_SETUP.ru.md) объясняет каждый экран
-Miro, сложность и выигрыш, установку в team, частые ошибки и будущую
-автоматизацию первого запуска.
+Miro, сложность и выигрыш, установку в team и частые ошибки.
 
 1. Создайте собственное Miro Developer App в team целевой доски.
-2. Добавьте OAuth redirect URI `http://localhost:8765/callback`.
-3. Включите `boards:read` и `team:read`. `boards:write` нужен только probe-
-   скриптам, которые намеренно создают тестовые элементы.
-4. Задайте credentials локально:
+   `miro2obsidian setup manifest` печатает имя приложения, URL и scopes
+   (`boards:read`, `team:read`), которые можно вставить или ввести вручную.
+   `boards:write` нужен только probe-скриптам, которые намеренно создают
+   тестовые элементы.
+2. Подключите его: `miro2obsidian auth login --form`.
+3. Запустите импорт. Программа сама поднимает сервер Web SDK, открывает доску в
+   браузере, принимает захват всей доски через loopback и сразу после него
+   запускает REST-экспорт:
 
 ```powershell
-$env:MIRO_CLIENT_ID = "<your app client id>"
-$env:MIRO_CLIENT_SECRET = "<your app client secret>"
-$env:MIRO_REDIRECT_URI = "http://localhost:8765/callback"
+miro2obsidian import --board <название, URL или id> --vault path\to\ObsidianVault `
+  --folder CanvasFolder --websdk auto
 ```
 
-5. Запустите Web SDK exporter на отдельном порту:
+Если Miro сам запускает приложение-экспортёр при открытии доски, клик не нужен;
+иначе один раз нажмите на значок приложения на левой панели доски. Запускает ли
+Miro приложение само, вживую пока не проверено. Если захват не пришёл,
+`--websdk auto` запишет результат только из REST, пометит его как `degraded` и
+предупредит; `--websdk required` вместо этого попросит клик.
 
-```powershell
-miro2obsidian websdk-serve --port 8766
-```
+По умолчанию REST и Web SDK должны описывать одну доску, быть не старше 24
+часов и отличаться по времени не более чем на 60 минут. Pipeline не публикует
+результат при неполной пагинации, комментариях, обязательных ассетах,
+несовпадении досок или повреждённом Canvas.
 
-6. Укажите `http://localhost:8766/index.html` как App URL, установите
-   приложение в team доски, откройте его на доске и нажмите **Export board**.
-7. Передайте скачанный JSON в production pipeline:
+Прежние флаги одной доски по-прежнему работают для скриптов и автономного
+объединения:
 
 ```powershell
 miro2obsidian `
-  --oauth `
+  --stored-token `
   --board-id <board_id> `
   --websdk-json path\to\websdk-board.json `
   --source-json path\to\canonical-board.json `
@@ -254,14 +302,12 @@ miro2obsidian `
   --target-dir path\to\ObsidianVault\CanvasFolder
 ```
 
-По умолчанию REST и Web SDK должны описывать одну доску, быть не старше 24
-часов и отличаться по времени не более чем на 60 минут. Pipeline не публикует
-результат при неполной пагинации, комментариях, обязательных ассетах,
-несовпадении досок или повреждённом Canvas.
-
-Для локального OAuth можно скопировать `.miro_oauth.local.example.json` в
-игнорируемый `.miro_oauth.local.json`. Для автоматизации предпочтительнее
-переменные окружения.
+`--stored-token` использует сохранённое подключение и при необходимости
+обновляет его, поэтому запускам без присмотра браузер не нужен. Для разовой
+авторизации используйте `--oauth` с `MIRO_CLIENT_ID` и `MIRO_CLIENT_SECRET` в
+окружении. `miro2obsidian auth logout` удаляет сохранённое подключение.
+Скачанный из приложения-экспортёра захват — только запасной путь: передайте его
+через `--websdk-json` или `import --websdk <файл>`.
 
 ## Критерий полноты
 
@@ -314,6 +360,8 @@ Web-renderer служит быстрой диагностикой. Источн�
 
 - [English documentation index](docs/README.md)
 - [Подключение собственного Miro app](docs/MIRO_APP_SETUP.ru.md)
+- [Три режима работы](docs/WORKFLOW_MODES.ru.md)
+- [Настройка ИИ-агента](docs/AGENT_SETUP.ru.md)
 - [Web SDK exporter](tools/miro_websdk_exporter/README.md)
 - [Отличия Miro и Canvas](docs/MIRO_VS_CANVAS_DISPLAY_GAPS.ru.md)
 - [Матрица возможностей Miro](docs/MIRO_CAPABILITIES.md)
@@ -328,7 +376,9 @@ Web-renderer служит быстрой диагностикой. Источн�
 ## Безопасность
 
 Нельзя коммитить OAuth client secrets, access tokens, callback URL с
-`code=...`, приватные board exports и локальные `.env`. Перед публикацией fork
+`code=...`, приватные board exports и локальные `.env`. Сохранённое подключение
+Miro, включая client secret вашего приложения, лежит в системном хранилище
+учётных данных; `miro2obsidian auth logout` его удаляет. Перед публикацией fork
 прочитайте [`SECURITY.md`](SECURITY.md).
 
 ## Лицензия

@@ -25,7 +25,8 @@ before producing the `.canvas` file.
   comments, mind maps, code blocks, and supported slide data to JSON Canvas.
 - Validates completeness, IDs, file references, edges, item mapping, geometry,
   and visual regression fixtures.
-- Supports both a reproducible CLI pipeline and a desktop GUI.
+- Supports a reproducible CLI, a desktop GUI, and an agent-ready interface
+  (`--json` commands and an MCP server).
 
 ## Status
 
@@ -54,6 +55,25 @@ Miro board
 REST remains authoritative for shared item IDs. Web SDK data fills empty fields
 and contributes Web SDK-only items. Every original source item remains under
 `source_provenance.original_items`.
+
+## Three ways to use it
+
+| Way | You | Details |
+|---|---|---|
+| **Manual** | Create your Miro app and run the export yourself, in the desktop window or on the command line | [Connect your own Miro boards](docs/MIRO_APP_SETUP.md) |
+| **Code automation** | Do the one-time human steps; code then renews tokens, captures, exports and converts, including on a schedule | [Workflow modes](docs/WORKFLOW_MODES.md) |
+| **Agent** | Tell any AI agent "set everything up and export boards X and Y to folder Z" | [Agent setup](docs/AGENT_SETUP.md) |
+
+Miro reserves a few steps for a person: creating your own app in the Developer
+Hub, signing in (with MFA), approving access, and, where required, team
+administrator approval. One click on the app icon on the board may also be
+needed. No variant can skip these; [Workflow modes](docs/WORKFLOW_MODES.md)
+lists exactly what is automatic and what is not.
+
+For MCP clients: `miro2obsidian mcp` starts the server and
+`miro2obsidian mcp --print-config --client claude-desktop` prints the config
+(also `claude-code`, `codex`, `generic`). The server has not yet been tried with
+real clients.
 
 ## Requirements
 
@@ -123,8 +143,11 @@ powershell -ExecutionPolicy Bypass -File scripts\install_agent_skill.ps1 -Name m
 
 A third skill, `miro2obsidian-import`, lets an agent walk a person through the
 whole import - getting the program, creating their own Miro app, exporting,
-converting to the format they use and checking the result - without ever
-handling their credentials:
+converting to the format they use and checking the result - by driving the
+`miro2obsidian` command line (`doctor`, `setup guide`, `auth login --form`,
+`boards`, `import --json`), without ever handling their credentials. An agent
+without skills can run `miro2obsidian agent-guide` instead, or use the MCP
+server. See [Agent setup](docs/AGENT_SETUP.md):
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts\install_agent_skill.ps1 -Name miro2obsidian-import
@@ -136,9 +159,26 @@ Codex. Ready-made builds check boards with `miro2obsidian validate <file>`.
 ## Quick start
 
 New to Miro Developer Apps? Start with [Connect your own Miro boards](docs/MIRO_APP_SETUP.md).
-The current one-time setup normally takes 10-20 minutes and requires no coding,
-but it still includes a few manual Miro and local-server steps. The guide also
-defines the planned download-and-run wizard that will remove terminal setup.
+The one-time setup normally takes 10-20 minutes and requires no coding. Creating
+the app in Miro's Developer Hub stays with you; the program does the rest.
+
+### Import boards from the command line
+
+```powershell
+miro2obsidian setup guide                      # create your own Miro app (once)
+miro2obsidian auth login --form                # connect it; a local form opens
+miro2obsidian doctor --vault path\to\ObsidianVault
+miro2obsidian boards
+miro2obsidian import --board "Roadmap" --board https://miro.com/app/board/<id>/ `
+  --vault path\to\ObsidianVault --folder Miro --format native-canvas
+```
+
+Every command accepts `--json`. `import` and `capture` print JSON Lines that end
+with a summary. Exit codes: `0` complete, `2` degraded (written, with a reported
+gap), `3` a person must act, `1` failed. The saved connection renews its own
+token, so later and scheduled runs need no browser. Other commands: `setup
+manifest`, `setup open`, `auth status [--verify]`, `auth logout`, `capture`,
+`agent-guide`.
 
 ### Convert an existing JSON export
 
@@ -158,24 +198,26 @@ miro2obsidian-gui
 
 The GUI has four source choices and three execution modes:
 
-- **Manual**: operate Miro yourself and optionally select a downloaded
-  whole-board JSON in **Web SDK JSON** for strict REST/Web SDK union.
-- **Code automation**: code runs REST, comments, assets, and Canvas conversion
-  with narrated log steps. The token is kept in the OS credential store when available;
-  the CLI can repeat exports with `--stored-token` without a browser.
-- **Agent**: a local agent using the JSON-stdio adapter attempts browser steps
-  and Web SDK capture too. The GUI opens a dedicated Chromium profile and
-  passes its temporary local CDP endpoint to any adapter. A locally installed
-  Codex CLI is an optional default.
-  Sign-in, MFA, and team approval can still require the account owner.
+- **Manual**: operate Miro yourself. A step-by-step **Set up Miro app** wizard
+  (with Copy and Open buttons and a manifest copy) helps you create and connect
+  your app.
+- **Code automation**: code runs one or many boards through the import service,
+  with a status for each board. The connection lives in the OS credential store
+  and renews its own token. The Web SDK option is **Automatic**, **Off** or **From
+  file**.
+- **Agent**: a local agent launched by the GUI sets up and imports through the
+  CLI. It accepts a degraded (REST-only) result and shows it as such. The GUI
+  opens a dedicated Chromium profile for human-gated steps. **Copy instructions
+  for my agent** gives you a prompt for any agent.
+  Sign-in, MFA, and team approval still belong to the account owner.
 
 See [three workflow modes](docs/WORKFLOW_MODES.md) for setup and limits.
 
 The GUI supports four source choices:
 
-- **Miro account**: use **Set up Miro app** for session-only credentials,
-  authenticate, list visible boards, and choose one. **Code automation** stores
-  only the token in the OS credential store.
+- **Miro account**: use **Set up Miro app**, authenticate, list visible boards,
+  and choose one. The connection, including your app's client secret, is saved in
+  the OS credential store; see [`SECURITY.md`](SECURITY.md).
 - **Miro URL**: export one board URL.
 - **Miro URL list**: export board URLs from a Markdown or JSON file.
 - **Existing JSON**: convert a local canonical JSON without contacting Miro.
@@ -227,35 +269,38 @@ once" (GUI) to keep today's per-board sidecar layout instead.
 ### Export maximum public-API data
 
 The [beginner setup guide](docs/MIRO_APP_SETUP.md) explains every Miro screen,
-the difficulty and benefit, team installation, troubleshooting, and which steps
-the future first-run wizard will automate.
+the difficulty and benefit, team installation, and troubleshooting.
 
-1. Create a Miro Developer App in the team that owns the board.
-2. Register `http://localhost:8765/callback` as an OAuth redirect URI.
-3. Enable `boards:read` and `team:read`. Add `boards:write` only for probe
+1. Create a Miro Developer App in the team that owns the board. `miro2obsidian
+   setup manifest` prints the app name, URLs and scopes (`boards:read`,
+   `team:read`) to paste or enter by hand. Add `boards:write` only for probe
    scripts that intentionally create test items.
-4. Set local credentials:
+2. Connect it: `miro2obsidian auth login --form`.
+3. Import. The program starts its own Web SDK server, opens the board in your
+   browser, receives the whole-board capture over loopback, and runs the REST
+   export right after it:
 
 ```powershell
-$env:MIRO_CLIENT_ID = "<your app client id>"
-$env:MIRO_CLIENT_SECRET = "<your app client secret>"
-$env:MIRO_REDIRECT_URI = "http://localhost:8765/callback"
+miro2obsidian import --board <name, URL or id> --vault path\to\ObsidianVault `
+  --folder CanvasFolder --websdk auto
 ```
 
-5. Start the buildless Web SDK exporter on a separate port:
+If Miro starts the exporter app by itself when the board opens, no click is
+needed; otherwise click the app icon in the board's left toolbar once. Whether
+Miro starts it by itself is not yet verified live. If no capture arrives,
+`--websdk auto` writes a REST-only result, marks it `degraded` and warns;
+`--websdk required` asks for the click instead.
 
-```powershell
-miro2obsidian websdk-serve --port 8766
-```
+By default, the REST and Web SDK captures must describe the same board, be no
+more than 24 hours old, and be no more than 60 minutes apart. The run fails
+before publication if pagination, comments, required assets, source identity,
+or Canvas integrity is incomplete.
 
-6. Register `http://localhost:8766/index.html` as the Miro App URL, install the
-   app into the target board's team, open it on that board, and choose
-   **Export board**.
-7. Run the transactional production pipeline with the downloaded Web SDK JSON:
+The older single-board flags still work for scripts and offline merges:
 
 ```powershell
 miro2obsidian `
-  --oauth `
+  --stored-token `
   --board-id <board_id> `
   --websdk-json path\to\websdk-board.json `
   --source-json path\to\canonical-board.json `
@@ -263,14 +308,12 @@ miro2obsidian `
   --target-dir path\to\ObsidianVault\CanvasFolder
 ```
 
-By default, the REST and Web SDK captures must describe the same board, be no
-more than 24 hours old, and be no more than 60 minutes apart. The run fails
-before publication if pagination, comments, required assets, source identity,
-or Canvas integrity is incomplete.
-
-For unattended Windows REST exports after one GUI connection, use
-`--stored-token` under the same Windows account. The GUI's **Forget saved token**
-button removes that connection.
+`--stored-token` uses the saved connection and renews it when needed, so
+unattended runs need no browser. Use `--oauth` with `MIRO_CLIENT_ID` and
+`MIRO_CLIENT_SECRET` in the environment for a one-off authorization instead.
+`miro2obsidian auth logout` removes the saved connection. A downloaded capture
+from the exporter app is only the fallback: pass it with `--websdk-json` or
+`import --websdk <file>`.
 
 ## Source completeness
 
@@ -325,6 +368,7 @@ visual source of truth: open the converted board in a vault.
 |---|---|
 | `Json_2_Canvas/` | Converter core, scale engine, and focused JSON-to-Canvas GUI |
 | `Miro_2_Json/` | REST downloader helpers and legacy focused downloader GUI |
+| `miro2obsidian/` | Import service, CLI and agent commands, Miro connection and credential store, Web SDK hand-off, app setup |
 | `scripts/` | OAuth, export, merge, pipeline, probes, audits, and regression commands |
 | `tests/` | Unit tests and minimized regression fixtures |
 | `tools/miro_websdk_exporter/` | Buildless whole-board Web SDK exporter |
@@ -340,6 +384,8 @@ excluded by `.gitignore`.
 
 - [Documentation index](docs/README.md)
 - [Beginner Miro app setup](docs/MIRO_APP_SETUP.md)
+- [Three workflow modes](docs/WORKFLOW_MODES.md)
+- [Set up an AI agent](docs/AGENT_SETUP.md)
 - [Web SDK exporter](tools/miro_websdk_exporter/README.md)
 - [Miro versus Canvas display gaps](docs/MIRO_VS_CANVAS_DISPLAY_GAPS.md)
 - [Miro API and item capability matrix](docs/MIRO_CAPABILITIES.md)
@@ -354,7 +400,9 @@ excluded by `.gitignore`.
 ## Security
 
 Never commit OAuth client secrets, access tokens, authorization callback URLs
-containing `code=...`, real private board exports, or local `.env` files. See
+containing `code=...`, real private board exports, or local `.env` files. The
+saved Miro connection, which includes your app's client secret, lives in your OS
+credential store; `miro2obsidian auth logout` removes it. See
 [`SECURITY.md`](SECURITY.md) before reporting a vulnerability or publishing a
 fork.
 

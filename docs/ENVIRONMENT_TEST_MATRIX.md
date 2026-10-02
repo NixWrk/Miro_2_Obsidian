@@ -33,3 +33,19 @@ The successful REST/Web SDK union above used the owner's earlier validated JSON.
 Agent-only creation, installation, and fresh Web SDK capture remain unverified
 end to end on this PC. The two temporary local servers used for this follow-up
 were stopped afterward.
+
+## Pending live checks (2026-10-02)
+
+These were implemented and covered by tests that use fakes. None has been
+exercised against real Miro, a real browser session or the named platform. Do
+not read any row as passed.
+
+| Check | Status | What to confirm |
+|---|---|---|
+| The Miro app loads on board open | Not run | Whether Miro loads the app's `index.html` by itself when the board opens, so a requested capture arrives with no click. If not, the one click on the app icon is the dependable path. |
+| Handoff POST from the real Miro iframe | Not run | That the app's request to `http://localhost:8766/api/...` is allowed from the Miro iframe under Chrome's local-network access rules, with the same-origin and token checks in place. |
+| Token refresh, token-info and revoke endpoints | Not run | The request and response shapes follow Miro's documentation. Confirm refresh with rotated refresh tokens, the token-info team and scopes lookup, and revoke. |
+| The app manifest editor | Not run | Whether Miro's app settings page offers a manifest editor and accepts the output of `miro2obsidian setup manifest`. |
+| Windows Credential Manager chunking | Not run | A connection record over 2560 bytes is split into parts with a checksummed manifest, then loads back intact and deletes cleanly. |
+| MCP server with real clients | Not run | `miro2obsidian mcp` and `--print-config` with Claude Desktop, Claude Code and Codex. |
+| GUI wizard on Windows | Not run | The step-by-step **Set up Miro app** wizard, the Automatic, Off and From file Web SDK options, multi-board runs and the **Copy instructions for my agent** button. |
