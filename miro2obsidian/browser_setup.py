@@ -11,8 +11,8 @@ from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlsplit
 
-from miro2obsidian.credential_store import save_access_token
-from scripts.miro_oauth_token import authorize_and_get_token, session_oauth_config
+from miro2obsidian import miro_auth
+from scripts.miro_oauth_token import session_oauth_config
 
 
 @dataclass
@@ -20,6 +20,7 @@ class SetupState:
     csrf: str = field(default_factory=lambda: secrets.token_urlsafe(32))
     status: str = "waiting"
     error: str = ""
+    team_name: str = ""
     authorize_url: str | None = None
     lock: threading.Lock = field(default_factory=threading.Lock)
     ready: threading.Event = field(default_factory=threading.Event)
@@ -60,8 +61,8 @@ def make_handler(state: SetupState, *, origin: str) -> type[BaseHTTPRequestHandl
                     self._send(303, "Continue to Miro authorization", location=authorize_url)
             elif path == "/status":
                 with state.lock:
-                    status, error = state.status, state.error
-                self._send(200, _status_page(status, error))
+                    status, error, team = state.status, state.error, state.team_name
+                self._send(200, _status_page(status, error, team))
             else:
                 self._send(404, "Not found")
 
@@ -105,14 +106,15 @@ def make_handler(state: SetupState, *, origin: str) -> type[BaseHTTPRequestHandl
 
             def work() -> None:
                 try:
-                    token = authorize_and_get_token(
-                        config,
+                    connection = miro_auth.connect_with_credentials(
+                        config.client_id,
+                        config.client_secret,
                         open_browser=False,
                         on_authorize_url=lambda url: _publish_authorize_url(state, url),
                         report=lambda _message: None,
                     )
-                    save_access_token(token)
                     with state.lock:
+                        state.team_name = connection.team_name or ""
                         state.status = "complete"
                 except Exception as exc:  # noqa: BLE001 - never expose credentials in an error
                     with state.lock:
@@ -155,8 +157,9 @@ def _page(body: str) -> str:
 def _form_page(csrf: str) -> str:
     return _page(
         '<h1>Connect your Miro app</h1><p>Copy the Client ID and Client secret from '
-        'your own Miro app. They stay in this local process memory until OAuth finishes. '
-        'Only the access token is saved in your operating system credential store.</p>'
+        'your own Miro app. After you authorize in Miro, the connection (access and refresh '
+        'tokens plus your Client ID and Client secret, so tokens can renew without you) is '
+        'saved only in your operating system credential store, never in a file.</p>'
         '<form method="post" action="/connect" autocomplete="off">'
         f'<input type="hidden" name="csrf" value="{html.escape(csrf, quote=True)}">'
         '<label>Client ID<input name="client_id" required autocomplete="off"></label>'
@@ -165,11 +168,12 @@ def _form_page(csrf: str) -> str:
     )
 
 
-def _status_page(status: str, error: str) -> str:
+def _status_page(status: str, error: str, team_name: str = "") -> str:
+    team = f" to team {html.escape(team_name)}" if team_name else ""
     message = {
         "waiting": "Ready to connect.",
         "authorizing": "Waiting for Miro authorization. Finish it in this browser, then refresh this page.",
-        "complete": "Miro is connected. The access token is in your operating system credential store.",
+        "complete": f"Miro is connected{team}. The connection is saved in your operating system credential store.",
         "failed": "Connection failed. Check the app credentials, redirect URI, and Miro permissions.",
     }.get(status, "Unknown setup state")
     detail = f"<p>Error category: {html.escape(error)}</p>" if error else ""

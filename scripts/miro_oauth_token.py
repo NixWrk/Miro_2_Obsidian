@@ -10,7 +10,8 @@ import socket
 import subprocess
 import threading
 import webbrowser
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Callable
@@ -19,6 +20,10 @@ from urllib.parse import parse_qs, urlencode, urlparse
 
 DEFAULT_AUTHORIZE_URL = "https://miro.com/oauth/authorize"
 DEFAULT_TOKEN_URL = "https://api.miro.com/v1/oauth/token"
+TOKEN_INFO_URL = "https://api.miro.com/v1/oauth-token"
+# UNVERIFIED against a live app: Miro documents token revocation under
+# /v2/oauth/revoke, but the exact body shape has not been exercised here.
+REVOKE_URL = "https://api.miro.com/v2/oauth/revoke"
 DEFAULT_REDIRECT_URI = "http://localhost:8765/callback"
 ALTERNATE_LOOPBACK_REDIRECT_URI = "http://127.0.0.1:8765/callback"
 DEFAULT_SCOPES = "boards:read team:read"
@@ -46,7 +51,67 @@ class CallbackResult:
 
 
 class OAuthTokenExchangeError(RuntimeError):
-    pass
+    """A Miro OAuth request failed; the message never contains secrets."""
+
+    def __init__(self, message: str, *, status_code: int | None = None) -> None:
+        super().__init__(message)
+        self.status_code = status_code
+
+
+@dataclass(frozen=True)
+class TokenGrant:
+    """What Miro returned for an authorization or a refresh.
+
+    ``expires_at`` is UTC and is ``None`` for tokens that do not expire (the
+    app was created without "Expire user authorization token").
+    """
+
+    access_token: str = field(repr=False)
+    refresh_token: str | None = field(default=None, repr=False)
+    expires_at: datetime | None = None
+    scope: str | None = None
+    team_id: str | None = None
+    user_id: str | None = None
+
+
+def _utcnow() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _clean_id(value: Any) -> str | None:
+    if value is None or isinstance(value, bool):
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def grant_from_payload(
+    payload: Any, *, fallback_refresh_token: str | None = None, now: datetime | None = None
+) -> TokenGrant:
+    """Build a TokenGrant from a Miro token-endpoint JSON object."""
+    if not isinstance(payload, dict):
+        raise RuntimeError("OAuth token response was not a JSON object")
+    token = payload.get("access_token")
+    if not token:
+        raise RuntimeError("OAuth token response did not include access_token")
+    expires_at: datetime | None = None
+    expires_in = payload.get("expires_in")
+    if expires_in not in (None, "") and not isinstance(expires_in, bool):
+        try:
+            seconds = float(expires_in)
+        except (TypeError, ValueError):
+            seconds = None
+        if seconds is not None and math.isfinite(seconds) and seconds > 0:
+            expires_at = (now or _utcnow()) + timedelta(seconds=seconds)
+    refresh = payload.get("refresh_token") or fallback_refresh_token
+    return TokenGrant(
+        access_token=str(token),
+        refresh_token=str(refresh) if refresh else None,
+        expires_at=expires_at,
+        scope=_clean_id(payload.get("scope")),
+        team_id=_clean_id(payload.get("team_id")),
+        user_id=_clean_id(payload.get("user_id")),
+    )
 
 
 def session_oauth_config(client_id: str, client_secret: str) -> OAuthConfig:
@@ -221,17 +286,19 @@ def extract_authorization_code(value: str) -> str:
     return candidate
 
 
+def _redact(text: str, *sensitive_values: str | None) -> str:
+    for sensitive in sensitive_values:
+        if sensitive:
+            text = text.replace(sensitive, "[redacted]")
+    return text
+
+
 def _safe_response_payload(response: Any, *, config: OAuthConfig, code: str) -> str:
     try:
         payload = response.json()
     except ValueError:
         payload = getattr(response, "text", "")
-
-    text = str(payload)
-    for sensitive in (config.client_secret, code):
-        if sensitive:
-            text = text.replace(sensitive, "[redacted]")
-    return text
+    return _redact(str(payload), config.client_secret, code)
 
 
 def format_token_exchange_error(
@@ -414,14 +481,19 @@ def open_authorize_url(authorize_url: str, *, browser: str = DEFAULT_BROWSER) ->
     return opened
 
 
-def exchange_access_token(
+def _http(session: Any | None) -> Any:
+    if session is not None:
+        return session
+    import requests
+
+    return requests
+
+
+def exchange_token_grant(
     config: OAuthConfig, code: str, *, session: Any | None = None
-) -> str:
-    if session is None:
-        import requests
-
-        session = requests
-
+) -> TokenGrant:
+    """Exchange an authorization code for a full grant (refresh token, expiry, team)."""
+    session = _http(session)
     response = session.post(
         config.token_url,
         data={
@@ -435,13 +507,140 @@ def exchange_access_token(
     )
     if not getattr(response, "ok", False):
         raise OAuthTokenExchangeError(
-            format_token_exchange_error(response, config=config, code=code)
+            format_token_exchange_error(response, config=config, code=code),
+            status_code=getattr(response, "status_code", None),
+        )
+    return grant_from_payload(response.json())
+
+
+def exchange_access_token(
+    config: OAuthConfig, code: str, *, session: Any | None = None
+) -> str:
+    """Compatibility wrapper: exchange a code and return only the access token."""
+    return exchange_token_grant(config, code, session=session).access_token
+
+
+def refresh_token_grant(
+    config: OAuthConfig | tuple[str, str],
+    refresh_token: str,
+    *,
+    session: Any | None = None,
+) -> TokenGrant:
+    """Trade a refresh token for a new access token.
+
+    ``config`` is an OAuthConfig or a ``(client_id, client_secret)`` pair.
+    Miro rotates refresh tokens: the returned grant carries the new one, and
+    the old one stops working, so callers must persist the result at once.
+    """
+    if isinstance(config, tuple):
+        config = OAuthConfig(client_id=config[0], client_secret=config[1])
+    if not refresh_token:
+        raise ValueError("A refresh token is required.")
+    session = _http(session)
+    response = session.post(
+        config.token_url,
+        data={
+            "grant_type": "refresh_token",
+            "client_id": config.client_id,
+            "client_secret": config.client_secret,
+            "refresh_token": refresh_token,
+        },
+        timeout=30,
+    )
+    if not getattr(response, "ok", False):
+        status = getattr(response, "status_code", "unknown")
+        detail = _redact(
+            _response_text(response), config.client_secret, refresh_token
+        )
+        raise OAuthTokenExchangeError(
+            f"Miro token refresh failed.\nHTTP status: {status}\nResponse: {detail}",
+            status_code=status if isinstance(status, int) else None,
+        )
+    return grant_from_payload(
+        response.json(), fallback_refresh_token=refresh_token
+    )
+
+
+def _response_text(response: Any) -> str:
+    try:
+        return str(response.json())
+    except ValueError:
+        return str(getattr(response, "text", ""))
+
+
+def fetch_token_info(access_token: str, *, session: Any | None = None) -> dict[str, Any]:
+    """Ask Miro what an access token is for (team, user, scopes).
+
+    Returns a sanitized dict: ``team_id``, ``team_name``, ``user_id``,
+    ``user_name``, ``scopes`` (list) and ``type``. The token is never echoed.
+    """
+    session = _http(session)
+    response = session.get(
+        TOKEN_INFO_URL,
+        headers={"Authorization": f"Bearer {access_token}", "Accept": "application/json"},
+        timeout=30,
+    )
+    if not getattr(response, "ok", False):
+        status = getattr(response, "status_code", "unknown")
+        raise OAuthTokenExchangeError(
+            "Miro did not accept the access token.\nHTTP status: "
+            f"{status}\nResponse: {_redact(_response_text(response), access_token)}",
+            status_code=status if isinstance(status, int) else None,
         )
     payload = response.json()
-    token = payload.get("access_token")
-    if not token:
-        raise RuntimeError("OAuth token response did not include access_token")
-    return str(token)
+    if not isinstance(payload, dict):
+        raise RuntimeError("Miro token info response was not a JSON object")
+    team = payload.get("team") if isinstance(payload.get("team"), dict) else {}
+    user = payload.get("user") if isinstance(payload.get("user"), dict) else {}
+    raw_scopes = payload.get("scopes")
+    if isinstance(raw_scopes, str):
+        raw_scopes = raw_scopes.split()
+    scopes = [str(item) for item in raw_scopes] if isinstance(raw_scopes, list) else []
+    return {
+        "team_id": _clean_id(team.get("id")),
+        "team_name": _clean_id(team.get("name")),
+        "user_id": _clean_id(user.get("id")),
+        "user_name": _clean_id(user.get("name")),
+        "scopes": scopes,
+        "type": _clean_id(payload.get("type")),
+    }
+
+
+def revoke_token(
+    config: OAuthConfig | tuple[str, str],
+    access_token: str,
+    *,
+    session: Any | None = None,
+) -> None:
+    """Ask Miro to revoke an access token (and with it the grant).
+
+    MUST BE VERIFIED LIVE: this posts a form body ``{client_id, client_secret,
+    access_token, token}`` to ``REVOKE_URL`` (``/v2/oauth/revoke``); the exact
+    parameter names Miro accepts have not been confirmed against a real app
+    (both ``access_token`` and the RFC 7009 name ``token`` are sent). Callers
+    must treat failure as non-fatal and still forget the token locally.
+    """
+    if isinstance(config, tuple):
+        config = OAuthConfig(client_id=config[0], client_secret=config[1])
+    session = _http(session)
+    response = session.post(
+        REVOKE_URL,
+        data={
+            "client_id": config.client_id,
+            "client_secret": config.client_secret,
+            "access_token": access_token,
+            "token": access_token,
+        },
+        timeout=30,
+    )
+    if not getattr(response, "ok", False):
+        status = getattr(response, "status_code", "unknown")
+        raise OAuthTokenExchangeError(
+            "Miro token revocation failed.\nHTTP status: "
+            f"{status}\nResponse: "
+            f"{_redact(_response_text(response), config.client_secret, access_token)}",
+            status_code=status if isinstance(status, int) else None,
+        )
 
 
 def authorize_and_get_token(
@@ -454,6 +653,28 @@ def authorize_and_get_token(
     on_authorize_url: Callable[[str], None] | None = None,
     report: Callable[[str], None] = print,
 ) -> str:
+    """Compatibility wrapper around authorize_and_get_grant returning the token."""
+    return authorize_and_get_grant(
+        config,
+        timeout_seconds=timeout_seconds,
+        open_browser=open_browser,
+        browser=browser,
+        session=session,
+        on_authorize_url=on_authorize_url,
+        report=report,
+    ).access_token
+
+
+def authorize_and_get_grant(
+    config: OAuthConfig,
+    *,
+    timeout_seconds: int = DEFAULT_TIMEOUT_SECONDS,
+    open_browser: bool = True,
+    browser: str = DEFAULT_BROWSER,
+    session: Any | None = None,
+    on_authorize_url: Callable[[str], None] | None = None,
+    report: Callable[[str], None] = print,
+) -> TokenGrant:
     redirect = urlparse(config.redirect_uri)
     if redirect.scheme != "http" or not redirect.hostname:
         raise ValueError(
@@ -524,7 +745,7 @@ def authorize_and_get_token(
         raise RuntimeError(f"Miro OAuth callback returned error: {result.error}")
     if not result.code:
         raise RuntimeError("Miro OAuth callback did not include a code")
-    return exchange_access_token(config, result.code, session=session)
+    return exchange_token_grant(config, result.code, session=session)
 
 
 def exchange_manual_authorization(

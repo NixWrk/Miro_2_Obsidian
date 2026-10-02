@@ -6,26 +6,36 @@ import threading
 from http.server import ThreadingHTTPServer
 from urllib.parse import urlencode
 
-from miro2obsidian import browser_setup
+from miro2obsidian import browser_setup, credential_store, miro_auth
+from scripts import miro_oauth_token as oauth
 
 
-def test_local_setup_uses_same_origin_and_saves_only_token(monkeypatch) -> None:
+def test_local_setup_uses_same_origin_and_saves_full_connection(monkeypatch) -> None:
     state = browser_setup.SetupState()
-    saved: list[str] = []
+    saved: list[credential_store.MiroConnection] = []
     saved_event = threading.Event()
     seen: list[tuple[str, str]] = []
 
     def fake_oauth(config, *, on_authorize_url, **_kwargs):
         seen.append((config.client_id, config.client_secret))
         on_authorize_url("https://miro.com/oauth/authorize?state=test")
-        return "test-access-token"
+        return oauth.TokenGrant(
+            access_token="test-access-token",
+            refresh_token="test-refresh-token",
+            scope="boards:read",
+        )
 
-    monkeypatch.setattr(browser_setup, "authorize_and_get_token", fake_oauth)
-    def fake_save(token: str) -> None:
-        saved.append(token)
+    def fake_save(connection) -> None:
+        saved.append(connection)
         saved_event.set()
 
-    monkeypatch.setattr(browser_setup, "save_access_token", fake_save)
+    monkeypatch.setattr(miro_auth, "authorize_and_get_grant", fake_oauth)
+    monkeypatch.setattr(
+        miro_auth,
+        "fetch_token_info",
+        lambda token, **_kw: {"team_id": "t-1", "team_name": "<b>Design</b>", "scopes": ["boards:read"]},
+    )
+    monkeypatch.setattr(miro_auth, "save_connection", fake_save)
     server = ThreadingHTTPServer(("127.0.0.1", 0), browser_setup.make_handler(
         state, origin="http://127.0.0.1:8767"
     ))
@@ -55,7 +65,11 @@ def test_local_setup_uses_same_origin_and_saves_only_token(monkeypatch) -> None:
         accepted.read()
         assert saved_event.wait(1)
         assert seen == [("app-id", "test-secret")]
-        assert saved == ["test-access-token"]
+        assert len(saved) == 1
+        assert saved[0].access_token == "test-access-token"
+        assert saved[0].refresh_token == "test-refresh-token"
+        assert (saved[0].client_id, saved[0].client_secret) == ("app-id", "test-secret")
+        assert saved[0].team_name == "<b>Design</b>"
         connection.request("GET", "/continue")
         resume = connection.getresponse()
         assert resume.status == 303
@@ -64,6 +78,9 @@ def test_local_setup_uses_same_origin_and_saves_only_token(monkeypatch) -> None:
         connection.request("GET", "/status")
         status = connection.getresponse().read().decode()
         assert "Miro is connected" in status
+        assert "&lt;b&gt;Design&lt;/b&gt;" in status
+        assert "<b>Design</b>" not in status
+        assert "test-refresh-token" not in status
         assert "test-secret" not in status
         assert "test-access-token" not in status
         connection.close()

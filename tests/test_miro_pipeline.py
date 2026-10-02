@@ -895,13 +895,13 @@ class MiroPipelineTests(unittest.TestCase):
             with (
                 patch.object(sys, "argv", argv),
                 patch("scripts.miro_pipeline.resolve_attachment_dir", return_value=None),
-                patch("scripts.miro_pipeline.load_access_token", return_value="stored-token") as load,
+                patch("scripts.miro_pipeline.get_access_token", return_value="stored-token") as load,
                 patch("scripts.miro_pipeline.resolve_token_from_args") as oauth,
                 patch("miro2obsidian.application.run_rest_experimental_pipeline", return_value=expected) as rest,
             ):
                 result = miro_pipeline.main()
         self.assertEqual(result, 0)
-        load.assert_called_once_with()
+        load.assert_called_once_with(allow_env=False)
         oauth.assert_not_called()
         self.assertEqual(rest.call_args.kwargs["token"], "stored-token")
 
@@ -917,10 +917,28 @@ class MiroPipelineTests(unittest.TestCase):
                 "--stored-token",
             ]
             with patch.object(sys, "argv", argv):
-                with patch("scripts.miro_pipeline.load_access_token", side_effect=CredentialStoreUnavailable("No OS keyring")):
+                with patch("scripts.miro_pipeline.get_access_token", side_effect=CredentialStoreUnavailable("No OS keyring")):
                     with self.assertRaises(SystemExit) as caught:
                         miro_pipeline.main()
         self.assertEqual(caught.exception.code, 2)
+
+    def test_cli_reports_not_connected_and_failed_refresh_plainly(self) -> None:
+        from miro2obsidian.miro_auth import NotConnected, TokenRefreshFailed
+
+        for error in (NotConnected("Miro is not connected."), TokenRefreshFailed("Connect again.")):
+            with tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                argv = [
+                    "miro2obsidian", "--board-id", "board-1",
+                    "--source-json", str(root / "board.json"),
+                    "--target-dir", str(root), "--vault-root", str(root),
+                    "--stored-token",
+                ]
+                with patch.object(sys, "argv", argv):
+                    with patch("scripts.miro_pipeline.get_access_token", side_effect=error):
+                        with self.assertRaises(SystemExit) as caught:
+                            miro_pipeline.main()
+            self.assertEqual(caught.exception.code, 2)
 
     def test_cli_forwards_websdk_json_to_rest_pipeline(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

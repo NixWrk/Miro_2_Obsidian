@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import threading
 import unittest
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.error import HTTPError
 from urllib.request import urlopen
@@ -341,8 +342,8 @@ class MiroOAuthTokenTests(unittest.TestCase):
                             "scripts.miro_oauth_token.open_authorize_url", return_value=True
                         ) as open_url:
                             with patch(
-                                "scripts.miro_oauth_token.exchange_access_token",
-                                return_value="token-1",
+                                "scripts.miro_oauth_token.exchange_token_grant",
+                                return_value=oauth.TokenGrant(access_token="token-1"),
                             ):
                                 token = oauth.authorize_and_get_token(
                                     config, timeout_seconds=1
@@ -470,6 +471,128 @@ class MiroOAuthTokenTests(unittest.TestCase):
                 "client_secret": "secret-1",
             },
         )
+
+    def test_exchange_token_grant_parses_refresh_expiry_and_team(self) -> None:
+        config = OAuthConfig(client_id="client-1", client_secret="secret-1")
+        session = FakeSession(
+            FakeResponse(
+                {
+                    "access_token": "token-1",
+                    "refresh_token": "refresh-1",
+                    "expires_in": 3600,
+                    "scope": "boards:read team:read",
+                    "team_id": 3074457,
+                    "user_id": "u-1",
+                }
+            )
+        )
+        before = datetime.now(timezone.utc)
+        grant = oauth.exchange_token_grant(config, "code-1", session=session)
+        self.assertEqual(grant.access_token, "token-1")
+        self.assertEqual(grant.refresh_token, "refresh-1")
+        self.assertEqual(grant.scope, "boards:read team:read")
+        self.assertEqual((grant.team_id, grant.user_id), ("3074457", "u-1"))
+        assert grant.expires_at is not None
+        self.assertGreaterEqual(grant.expires_at, before + timedelta(seconds=3599))
+        self.assertNotIn("token-1", repr(grant))
+
+    def test_exchange_token_grant_without_expiry_never_expires(self) -> None:
+        config = OAuthConfig(client_id="client-1", client_secret="secret-1")
+        grant = oauth.exchange_token_grant(config, "code-1", session=FakeSession())
+        self.assertIsNone(grant.expires_at)
+        self.assertIsNone(grant.refresh_token)
+
+    def test_refresh_token_grant_posts_refresh_form_and_keeps_rotated_token(self) -> None:
+        session = FakeSession(
+            FakeResponse({"access_token": "token-2", "refresh_token": "refresh-2", "expires_in": 60})
+        )
+        grant = oauth.refresh_token_grant(("client-1", "secret-1"), "refresh-1", session=session)
+        self.assertEqual(session.calls[0]["url"], "https://api.miro.com/v1/oauth/token")
+        self.assertEqual(
+            session.calls[0]["data"],
+            {
+                "grant_type": "refresh_token",
+                "client_id": "client-1",
+                "client_secret": "secret-1",
+                "refresh_token": "refresh-1",
+            },
+        )
+        self.assertEqual((grant.access_token, grant.refresh_token), ("token-2", "refresh-2"))
+
+    def test_refresh_token_grant_keeps_old_refresh_token_when_not_rotated(self) -> None:
+        session = FakeSession(FakeResponse({"access_token": "token-2"}))
+        grant = oauth.refresh_token_grant(
+            OAuthConfig(client_id="client-1", client_secret="secret-1"), "refresh-1", session=session
+        )
+        self.assertEqual(grant.refresh_token, "refresh-1")
+
+    def test_refresh_error_is_sanitized_and_carries_status(self) -> None:
+        session = FakeSession(
+            FakeResponse(
+                {"error": "invalid_grant", "echo": "secret-1 refresh-1"}, ok=False, status_code=400
+            )
+        )
+        with self.assertRaises(OAuthTokenExchangeError) as caught:
+            oauth.refresh_token_grant(("client-1", "secret-1"), "refresh-1", session=session)
+        self.assertEqual(caught.exception.status_code, 400)
+        self.assertIn("invalid_grant", str(caught.exception))
+        self.assertNotIn("secret-1", str(caught.exception))
+        self.assertNotIn("refresh-1", str(caught.exception))
+
+    def test_fetch_token_info_returns_sanitized_summary_without_token(self) -> None:
+        class GetSession:
+            def __init__(self, response):
+                self.response = response
+                self.calls = []
+
+            def get(self, url, *, headers, timeout):
+                self.calls.append((url, headers))
+                return self.response
+
+        session = GetSession(
+            FakeResponse(
+                {
+                    "type": "oauth_token",
+                    "scopes": ["boards:read", "team:read"],
+                    "team": {"id": "t-1", "name": "Design"},
+                    "user": {"id": "u-1", "name": "Ada"},
+                    "createdBy": {"id": "secret-ish"},
+                }
+            )
+        )
+        info = oauth.fetch_token_info("token-1", session=session)
+        self.assertEqual(session.calls[0][0], "https://api.miro.com/v1/oauth-token")
+        self.assertEqual(session.calls[0][1]["Authorization"], "Bearer token-1")
+        self.assertEqual(
+            info,
+            {
+                "team_id": "t-1",
+                "team_name": "Design",
+                "user_id": "u-1",
+                "user_name": "Ada",
+                "scopes": ["boards:read", "team:read"],
+                "type": "oauth_token",
+            },
+        )
+        self.assertNotIn("token-1", str(info))
+
+        rejected = GetSession(FakeResponse({"message": "bad token-1"}, ok=False, status_code=401))
+        with self.assertRaises(OAuthTokenExchangeError) as caught:
+            oauth.fetch_token_info("token-1", session=rejected)
+        self.assertEqual(caught.exception.status_code, 401)
+        self.assertNotIn("token-1", str(caught.exception))
+
+    def test_revoke_token_posts_form_and_sanitizes_failure(self) -> None:
+        session = FakeSession(FakeResponse({}))
+        oauth.revoke_token(("client-1", "secret-1"), "token-1", session=session)
+        self.assertEqual(session.calls[0]["url"], oauth.REVOKE_URL)
+        self.assertEqual(session.calls[0]["data"]["client_id"], "client-1")
+        self.assertEqual(session.calls[0]["data"]["access_token"], "token-1")
+        failing = FakeSession(FakeResponse({"error": "secret-1 token-1"}, ok=False, status_code=404))
+        with self.assertRaises(OAuthTokenExchangeError) as caught:
+            oauth.revoke_token(("client-1", "secret-1"), "token-1", session=failing)
+        self.assertNotIn("secret-1", str(caught.exception))
+        self.assertNotIn("token-1", str(caught.exception))
 
 
 if __name__ == "__main__":

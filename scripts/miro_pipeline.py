@@ -14,7 +14,8 @@ from Json_2_Canvas.output_formats import (
 )
 from Json_2_Canvas.Scale_engine import DEFAULT_FIT_MARGIN, ViewProfile
 from miro2obsidian import application
-from miro2obsidian.credential_store import CredentialStoreUnavailable, load_access_token
+from miro2obsidian.credential_store import CredentialStoreUnavailable
+from miro2obsidian.miro_auth import NotConnected, TokenRefreshFailed, get_access_token
 from scripts.miro_oauth_token import (
     DEFAULT_AUTHORIZE_URL,
     DEFAULT_BROWSER,
@@ -32,7 +33,7 @@ def add_auth_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--stored-token",
         action="store_true",
-        help="Use the token saved by the GUI in the OS credential store.",
+        help="Use the saved Miro connection from the OS credential store (renewed automatically when it expires).",
     )
     parser.add_argument("--oauth-client-id-env", default="MIRO_CLIENT_ID")
     parser.add_argument("--oauth-client-secret-env", default="MIRO_CLIENT_SECRET")
@@ -208,11 +209,9 @@ def main() -> int:
             parser.error("Choose either --stored-token or --oauth")
         if args.stored_token:
             try:
-                token = load_access_token()
-            except CredentialStoreUnavailable as exc:
+                token = get_access_token(allow_env=False)
+            except (NotConnected, TokenRefreshFailed, CredentialStoreUnavailable) as exc:
                 parser.error(str(exc))
-            if not token:
-                parser.error("No saved Miro token. Connect once in GUI Code automation mode.")
         else:
             token = resolve_token_from_args(args)
         result = application.run_rest_experimental_pipeline(
