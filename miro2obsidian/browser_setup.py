@@ -7,8 +7,11 @@ import html
 import ipaddress
 import secrets
 import threading
+import time
+import webbrowser
 from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from typing import Callable
 from urllib.parse import parse_qs, urlsplit
 
 from miro2obsidian import miro_auth
@@ -182,6 +185,52 @@ def _status_page(status: str, error: str, team_name: str = "") -> str:
         "<p><a href='/continue'>Continue to Miro authorization</a></p>"
         "<p><a href='/status'>Refresh status</a></p>"
     )
+
+
+def run_form(
+    *,
+    host: str = "127.0.0.1",
+    port: int = 0,
+    open_browser: bool = True,
+    timeout_seconds: float = 600,
+    report: Callable[[str], None] = lambda _message: None,
+) -> SetupState:
+    """Serve the setup form until the connection completes, fails or times out.
+
+    The form is the same one ``setup-serve`` runs; this variant stops by itself
+    so a command can open it, wait and report. ``report`` receives the form URL
+    (never a credential). Returns the final :class:`SetupState`
+    (``status`` is ``complete``, ``failed`` or, on timeout, ``waiting`` /
+    ``authorizing``).
+    """
+    if not ipaddress.ip_address(host).is_loopback:
+        raise ValueError("The setup form must listen on a loopback address.")
+    state = SetupState()
+    server = ThreadingHTTPServer((host, port), BaseHTTPRequestHandler)
+    origin = f"http://{host}:{server.server_address[1]}"
+    # The handler needs the final origin, which port 0 only reveals after binding.
+    server.RequestHandlerClass = make_handler(state, origin=origin)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    url = f"{origin}/"
+    report(url)
+    if open_browser:
+        try:
+            webbrowser.open(url)
+        except Exception:  # noqa: BLE001 - the URL was reported; the person can open it
+            pass
+    deadline = time.monotonic() + timeout_seconds
+    try:
+        while time.monotonic() < deadline:
+            with state.lock:
+                if state.status in {"complete", "failed"}:
+                    break
+            time.sleep(0.25)
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
+    return state
 
 
 def main(argv: list[str] | None = None) -> int:

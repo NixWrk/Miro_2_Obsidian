@@ -28,7 +28,7 @@ def analysis(entry: str) -> Analysis:
         [str(ROOT / "release" / entry)],
         pathex=[str(ROOT), str(ROOT / "release")],
         datas=datas,
-        hiddenimports=["miro2obsidian.validate", *collect_submodules("keyring.backends")],
+        hiddenimports=[*collect_submodules("miro2obsidian"), *collect_submodules("keyring.backends")],
         excludes=["pytest"],
     )
 

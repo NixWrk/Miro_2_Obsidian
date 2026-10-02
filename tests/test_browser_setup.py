@@ -88,3 +88,38 @@ def test_local_setup_uses_same_origin_and_saves_full_connection(monkeypatch) -> 
         server.shutdown()
         server.server_close()
         thread.join(timeout=5)
+
+
+def test_run_form_serves_then_stops_itself_on_timeout(monkeypatch) -> None:
+    reported: list[str] = []
+    served: list[int] = []
+
+    def report(url: str) -> None:
+        reported.append(url)
+        host, port = re.match(r"http://([^:/]+):(\d+)/", url).groups()
+        connection = http.client.HTTPConnection(host, int(port), timeout=5)
+        connection.request("GET", "/")
+        response = connection.getresponse()
+        served.append(response.status)
+        assert "Client secret" in response.read().decode("utf-8")
+        connection.close()
+
+    state = browser_setup.run_form(open_browser=False, timeout_seconds=0.5, report=report)
+    assert served == [200]
+    assert state.status == "waiting"
+    assert reported and reported[0].startswith("http://127.0.0.1:")
+    # the server is gone once run_form returns
+    host, port = re.match(r"http://([^:/]+):(\d+)/", reported[0]).groups()
+    try:
+        http.client.HTTPConnection(host, int(port), timeout=1).request("GET", "/")
+    except OSError:
+        pass
+    else:  # pragma: no cover
+        raise AssertionError("the setup form kept listening")
+
+
+def test_run_form_rejects_non_loopback_hosts() -> None:
+    import pytest
+
+    with pytest.raises(ValueError, match="loopback"):
+        browser_setup.run_form(host="0.0.0.0", open_browser=False, timeout_seconds=0.1)

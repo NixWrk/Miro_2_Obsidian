@@ -16,6 +16,7 @@ def _check() -> list[str]:
     import customtkinter  # noqa: F401 - the desktop window's toolkit and its themes
 
     from miro2obsidian import application  # noqa: F401 - the whole pipeline
+    from miro2obsidian import cli, import_service  # noqa: F401 - agent surface
     from miro2obsidian.schema import validate_board
     from miro2obsidian.websdk_server import websdk_directory
     from playwright._impl._driver import compute_driver_executable

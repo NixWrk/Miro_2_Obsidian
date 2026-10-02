@@ -50,12 +50,32 @@ def add_auth_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--oauth-callback-url")
 
 
+SUBCOMMAND_HELP = """\
+subcommands (run `miro2obsidian <subcommand> --help`; most accept --json):
+  doctor        check the setup and list what to do next
+  setup         guide | manifest | open: create your own Miro app
+  auth          status | login | logout: connect Miro (credentials never via arguments)
+  boards        list boards the connected app can see
+  capture       obtain a Web SDK capture of one board
+  import        import boards into an Obsidian vault (one command, many boards)
+  agent-guide   print the step-by-step procedure for AI agents
+  websdk-serve  serve the Miro Web SDK app and capture handoff
+  setup-serve   local form to connect a Miro app from a browser
+  validate      check a .canvas file against the board schema
+
+exit codes of the subcommands: 0 ok, 2 degraded, 3 a person must act, 1 failed.
+The flags below are the single-board pipeline (kept for scripts).
+"""
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
             "Run the canonical Miro -> JSON -> Obsidian Canvas pipeline: "
             "REST v2-experimental export, asset download, one Converter.py call."
-        )
+        ),
+        epilog=SUBCOMMAND_HELP,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument(
         "--existing-json",
@@ -157,6 +177,15 @@ def main() -> int:
         from miro2obsidian.browser_setup import main as serve_setup
 
         return serve_setup(sys.argv[2:])
+    if len(sys.argv) > 1 and sys.argv[1] == "validate":
+        from miro2obsidian.validate import main as validate_boards
+
+        return validate_boards(sys.argv[2:])
+    if len(sys.argv) > 1:
+        from miro2obsidian import cli
+
+        if sys.argv[1] in cli.SUBCOMMANDS:
+            return cli.main(sys.argv[1:])
     parser = build_parser()
     args = parser.parse_args()
     attachment_dir = args.attachment_dir or resolve_attachment_dir(
