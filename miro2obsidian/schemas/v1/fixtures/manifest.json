@@ -151,7 +151,7 @@
       "miro_canvas_schema": "valid",
       "miro_canvas_validator": {
         "valid": true,
-        "diagnostic_codes": []
+        "status": "valid"
       }
     }
   ]
