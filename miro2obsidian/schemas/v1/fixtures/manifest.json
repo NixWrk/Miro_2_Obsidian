@@ -26,7 +26,10 @@
       "board_schema": "valid",
       "miro_source_schema": "valid",
       "miro_canvas_schema": "valid",
-      "miro_canvas_validator": { "valid": true, "status": "valid" }
+      "miro_canvas_validator": {
+        "valid": true,
+        "status": "valid"
+      }
     },
     {
       "id": "future-fields-board",
@@ -35,7 +38,10 @@
       "board_schema": "valid",
       "miro_source_schema": "not_applicable",
       "miro_canvas_schema": "valid",
-      "miro_canvas_validator": { "valid": true, "status": "valid" }
+      "miro_canvas_validator": {
+        "valid": true,
+        "status": "valid"
+      }
     },
     {
       "id": "wrong-schema-version",
@@ -44,7 +50,10 @@
       "board_schema": "invalid",
       "miro_source_schema": "not_applicable",
       "miro_canvas_schema": "invalid",
-      "miro_canvas_validator": { "valid": false, "status": "unsupported" }
+      "miro_canvas_validator": {
+        "valid": false,
+        "status": "unsupported"
+      }
     },
     {
       "id": "duplicate-zorder",
@@ -53,7 +62,10 @@
       "board_schema": "invalid",
       "miro_source_schema": "not_applicable",
       "miro_canvas_schema": "invalid",
-      "miro_canvas_validator": { "valid": false, "status": "invalid" }
+      "miro_canvas_validator": {
+        "valid": false,
+        "status": "invalid"
+      }
     },
     {
       "id": "binding-missing-sourceid",
@@ -62,7 +74,10 @@
       "board_schema": "invalid",
       "miro_source_schema": "not_applicable",
       "miro_canvas_schema": "invalid",
-      "miro_canvas_validator": { "valid": false, "status": "invalid" }
+      "miro_canvas_validator": {
+        "valid": false,
+        "status": "invalid"
+      }
     },
     {
       "id": "non-numeric-rotation",
@@ -71,7 +86,10 @@
       "board_schema": "invalid",
       "miro_source_schema": "not_applicable",
       "miro_canvas_schema": "invalid",
-      "miro_canvas_validator": { "valid": false, "status": "invalid" }
+      "miro_canvas_validator": {
+        "valid": false,
+        "status": "invalid"
+      }
     },
     {
       "id": "malformed-export-page",
@@ -80,7 +98,10 @@
       "board_schema": "invalid",
       "miro_source_schema": "not_applicable",
       "miro_canvas_schema": "invalid",
-      "miro_canvas_validator": { "valid": false, "status": "invalid" }
+      "miro_canvas_validator": {
+        "valid": false,
+        "status": "invalid"
+      }
     },
     {
       "id": "malformed-connector",
@@ -89,7 +110,10 @@
       "board_schema": "invalid",
       "miro_source_schema": "not_applicable",
       "miro_canvas_schema": "invalid",
-      "miro_canvas_validator": { "valid": false, "status": "invalid" }
+      "miro_canvas_validator": {
+        "valid": false,
+        "status": "invalid"
+      }
     },
     {
       "id": "source-item-missing-id",
@@ -117,6 +141,18 @@
       "miro_source_schema": "not_applicable",
       "miro_canvas_schema": "not_applicable",
       "miro_canvas_validator": null
+    },
+    {
+      "id": "pressure-stroke",
+      "path": "valid/pressure-stroke.canvas",
+      "description": "Variable width drawing with one width per point, retaining maximum width for older readers.",
+      "board_schema": "valid",
+      "miro_source_schema": "not_applicable",
+      "miro_canvas_schema": "valid",
+      "miro_canvas_validator": {
+        "valid": true,
+        "diagnostic_codes": []
+      }
     }
   ]
 }

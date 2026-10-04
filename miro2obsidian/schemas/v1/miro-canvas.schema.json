@@ -259,6 +259,13 @@
           "maxItems": 8192,
           "items": { "type": "number" }
         },
+        "widths": {
+          "description": "Optional width at each point, in board units. Its length equals points.length / 2; width remains the maximum for old readers and bounds.",
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 4096,
+          "items": { "type": "number", "exclusiveMinimum": 0, "maximum": 1000 }
+        },
         "breaks": {
           "type": "array",
           "items": { "type": "integer", "exclusiveMinimum": 0 }
