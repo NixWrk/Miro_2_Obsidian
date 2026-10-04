@@ -1,125 +1,96 @@
 # Roadmap
 
-The current priority is a beginner-friendly, local-first Windows release. The
-converter and maximum public-API export pipeline already work; the remaining
-items focus on packaging, onboarding, and richer offline Canvas editing.
+Status reconciled on 2026-10-03. Checkboxes below track acceptance work:
+implemented code, published builds, and live verification are different states.
+Only work present in `main` is described as available in the main checkout.
 
-## Public release
+## Product boundaries
 
-- [x] Revoke and rotate the historical Miro OAuth credential before changing
-  the repository visibility.
-- [ ] After switching to public, enable GitHub private vulnerability reporting,
-  secret scanning with push protection, and `main` branch protection requiring
-  the `test` and `dependency-audit` checks. GitHub does not offer these settings
-  for this private repository without a paid plan.
-- [ ] Publish a first pre-release after a clean-machine installation test.
+This repository owns Miro export, conversion, the desktop/CLI application,
+attachment storage, and the versioned board contract in `miro2obsidian/schemas`.
+The [miro-canvas plugin](https://github.com/NixWrk/Obsidian-Plugin---Miro-Canvas)
+owns Canvas editing, rendering, and its own backlog. Follow its documentation
+for minimap, comments, drawing, connectors, layer order, and PDF/PPTX board
+export; the old in-tree plugin specification is historical.
 
-## Beginner workflow
+## Implemented in main
 
-- [ ] Ship a portable or installed Windows build with its Python runtime and
-  required application assets.
-- [ ] Add a resumable first-run wizard for creating and validating a personal
-  Miro Developer App.
-- [ ] Start and verify the local OAuth and Web SDK services automatically.
-- [ ] Store credentials in the operating-system credential store with explicit
-  disconnect and forget actions.
-- [ ] Add a direct, nonce-protected Web SDK handoff to the local application.
-- [ ] Provide one guided export flow from board selection to the final Canvas.
-- [ ] Redesign the Miro panel and local GUI around beginner and advanced modes.
-- [ ] Test the complete flow with new users on a clean Windows computer.
+- Strict REST items/comments/assets export, whole-board Web SDK JSON capture,
+  canonical union with field provenance, and atomic Canvas publication.
+- CLI and GUI output formats: raw JSON, native Canvas, Advanced Canvas, and
+  miro-canvas. Existing JSON conversion remains offline.
+- SHA-256 attachment deduplication and a reusable vault manifest.
+- Versioned board schemas, compatibility fixtures, and board validation.
+- Manual, code-automation, and agent GUI modes, with a dedicated Chromium
+  profile and explicit human sign-in/approval steps.
+- Packaged Web SDK server and Windows/macOS/Linux build workflows. Build code
+  does not by itself prove a published release or a clean-machine pass.
+- Repository maintenance, board-format, and Miro import agent skills.
+- The plugin was extracted on 2026-09-24; both products share the schema.
 
-## Export and conversion
+## Import automation awaiting integration
+
+The seven commits from `ebc7b85` through `52c0ec4` on
+`origin/claude/magical-franklin-8q3t48` are not in `main` as of this review.
+They add token renewal/check/revoke, a nonce-protected Web SDK handoff, a shared
+import service, JSON CLI, MCP server, and a GUI setup/capture wizard.
+
+- [ ] Review and test these commits in isolation, then integrate them while
+  retaining explicit `complete`, `degraded`, `needs_user`, and `failed` results.
+- [ ] Verify a fresh end-to-end export with the user's own Miro app. The
+  successful 2026-09-28 union used a previously downloaded Web SDK JSON;
+  repeated fresh agent capture was not confirmed on 2026-09-30.
+- [ ] Check app startup on board open and handoff POST from the real Miro
+  iframe under browser local-network rules.
+- [ ] Check real token refresh with rotation, token-info, revoke, and large
+  Windows Credential Manager records.
+- [ ] Check the app manifest editor, GUI wizard, interrupted-setup recovery,
+  multi-board imports, and MCP with actual clients.
+
+The branch's [environment test matrix](https://github.com/NixWrk/Miro_2_Obsidian/blob/52c0ec4/docs/ENVIRONMENT_TEST_MATRIX.ru.md)
+separates implemented code from pending live checks. Do not use its new CLI
+commands as instructions for `main` before integration.
+
+## Release and beginner acceptance
+
+- [ ] Verify published artifacts and test the complete install/connect/export/
+  convert/open flow with new users on a clean Windows computer.
+- [ ] Verify packaged CLI/GUI and the maximum-export assets on macOS and Linux;
+  run the corresponding display, keyboard, and filesystem checks.
+- [ ] Finish beginner/advanced presentation and one guided board-to-Canvas
+  workflow; make reconnect, disconnect, retry, and setup recovery understandable.
+- [ ] Publish the first pre-release after the clean-machine acceptance gate.
+- [ ] Add code signing for distributed builds.
+- [ ] Fix asynchronous browser-test teardown: the passing suite can still
+  report a pending Playwright task and `TargetClosedError` during shutdown.
+- [ ] Verify repository visibility and configure vulnerability reporting,
+  secret scanning/push protection, and main-branch protection with the `test`
+  and `dependency-audit` checks where supported by the account plan.
+
+The historical OAuth credential was revoked. Credentials must remain in the
+user's environment, interactive form, or OS credential store.
+
+## Export and conversion evidence
 
 - [ ] Compare Miro and native Obsidian text modes on several large boards and
   document the recommended default.
-- [ ] Add probes for source-limited Kanban and visual item families before
-  introducing converter behavior for them.
-- [ ] Automate final visual validation in a controlled Obsidian window.
+- [ ] Probe source-limited Kanban and other widget families before adding new
+  converter behavior. Table cell content and exact unsupported-widget geometry
+  require source evidence, not invented renderer content.
+- [ ] Automate final visual validation in real Obsidian, including plugin-off
+  and optional-plugin cases.
+- [ ] Supply reviewed visual baselines for the seven fixture scenarios that
+  currently skip image comparison, or document a sufficient structural-only
+  acceptance criterion for each.
 
-## miro-canvas
+## Later work and ownership
 
-The Obsidian plugin that draws the Miro look from boards in the `miro-canvas`
-format lives in [its own repository](https://github.com/NixWrk/Obsidian-Plugin---Miro-Canvas) since 2026-09-24, with its design
-notes (`docs/miro-canvas.md`), its task list and its history. The two are tied
-by the versioned board schema in `miro2obsidian/schemas`: the plugin pins a
-copy and runs its example boards. The plan below still covers both products.
+- [ ] Plugin: optional onboarding board and illustrated English/Russian guide.
+- [ ] Plugin: non-destructive imports from Excalidraw and mind-map formats,
+  mind-map editing, large-board interaction profiling, and platform/input QA.
+- [ ] Shared contract: evaluate first-class agent board editing through the
+  plugin's transaction boundary; a format/validation skill alone is not that API.
 
-## Plan (agreed 2026-09-23)
-
-The work below is done in this order; each phase builds on the ones before it.
-
-0. **Finish what is started (done 2026-09-24).** PDF/PPTX export of boards:
-   pages marked on the board or a presentation's slides, photographed as native
-   Canvas's image export does and packed into PDF or PowerPoint. Manual layer
-   order in the main interface: bring to front, bring forward, send backward and send to back
-   for cards, from the selection toolbar, native Canvas's card and selection
-   menus and commands, for one card or a whole selection.
-1. **Foundations (done 2026-09-24).** A formal, versioned schema of
-   `miroSource` and `miroCanvas` with compatibility fixtures
-   (`miro2obsidian/schemas/v1`, `python -m miro2obsidian.validate`); the
-   plugin's translation system with English and Russian, its language taken
-   from Obsidian's own; a light agent skill that describes the format and
-   validates boards against the schema (`.agents/skills/miro-canvas-format`).
-2. **The converter as a product of its own (done 2026-09-24).** Attachment
-   deduplication by SHA-256; export to raw JSON, native Canvas, Advanced Canvas
-   and miro-canvas from the CLI and the GUI; builds for Windows, macOS and Linux
-   (the Windows build is checked; the macOS and Linux builds await the Build
-   workflow's first run, and the builds do not yet carry the Web SDK server for
-   the maximum export).
-3. **Delivery and the import guide (done 2026-09-24).** The plugin in
-   [its own repository](https://github.com/NixWrk/Obsidian-Plugin---Miro-Canvas)
-   tied to miro2obsidian by the schema and fixtures; the first-setup question
-   "Import from Miro?" with a six-step guide and a settings button to repeat
-   it; the `miro2obsidian-import` agent skill.
-4. **Getting to know the plugin.** An optional onboarding board, then a visual
-   guide to features and setup order in both languages, illustrated from that
-   board.
-5. **Testing with people.** The full user journey on a clean Windows machine and
-   fixes; then other operating systems, phones and tablets.
-6. **Ecosystem.** An MCP server beside the skill; import from other plugins'
-   formats; faster card dragging on very large boards; the remaining small
-   limitations.
-
-**Exporter delivery (decided 2026-09-23).** The exporter stays in Python. The
-plugin does not install it by itself - the Obsidian Community directory forbids
-plugins that install or update themselves or their dependencies - but either
-offers the user a ready build for their operating system to download, or
-hands the setup to an agent through a skill or MCP server for miro2obsidian
-that walks the user through the Miro app, export and conversion. The exporter
-can be removed afterwards; the settings button repeats the flow.
-
-## Future (set 2026-09-23)
-
-### Converter and plugin as two products
-
-- [ ] Move `miro-canvas` into its own repository while keeping it tied to
-  miro2obsidian through a shared, versioned data contract: miro2obsidian owns
-  the `miroSource`/`miroCanvas` JSON Schema and publishes compatibility
-  fixtures with each release; the plugin pins a schema version and runs those
-  fixtures in its CI. Neither repository vendors the other's code.
-- [ ] The converter keeps working without the plugin: its own simple,
-  beginner-friendly GUI exports raw JSON, native Canvas, Advanced Canvas and
-  miro-canvas boards, and never requires any of them.
-- [ ] Deduplicate attachments by content hash (SHA-256): identical images and
-  files across or within boards are stored once and referenced from every
-  node, with a manifest mapping hashes to vault paths so later imports reuse
-  what the vault already has.
-- [ ] Plugin onboarding for Miro imports: a plugin-only user needs none of the
-  Miro export code, so on first setup the plugin asks whether to import from
-  Miro; if so it offers the Python exporter build for the user's operating
-  system, or an agent set up through the miro2obsidian skill or MCP server, and
-  guides every step with a clear, illustrated guide. The exporter can be
-  removed afterwards; a button in the plugin settings repeats the flow.
-- [ ] Python builds of the exporter for Windows, macOS and Linux.
-- [ ] A skill or MCP server for miro2obsidian itself, so an agent can set up the
-  Miro app, run the export and conversion, and fix problems with the user.
-- [ ] Walk the full user journey on a clean machine - install, first setup,
-  Miro app, export, conversion, opening and editing the board - and fix every
-  problem found.
-- [ ] Give agents first-class access to the miro-canvas format through a skill
-  or an MCP server: read, validate and edit boards (nodes, connectors,
-  comments, overrides) as safely as native Canvas files, through the same
-  transactions the plugin uses.
-
-Completed work is recorded in Git history and the regression suite rather than
-duplicated here.
+The exporter stays a separate Python application. The plugin may guide a
+download or delegate setup to an agent; it must not install or update itself
+or its dependencies. Neither repository vendors the other's implementation.

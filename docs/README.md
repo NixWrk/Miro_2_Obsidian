@@ -10,12 +10,18 @@ translation is not yet available.
 - [Russian project overview](../README.ru.md)
 - [Beginner Miro app setup](MIRO_APP_SETUP.md)
 - [Russian beginner setup](MIRO_APP_SETUP.ru.md)
+- [Manual, code-automation and agent workflows](WORKFLOW_MODES.md)
+- [Russian workflow guide](WORKFLOW_MODES.ru.md)
+- [Dated environment checks and limitations](ENVIRONMENT_TEST_MATRIX.md)
+- [Russian environment checks](ENVIRONMENT_TEST_MATRIX.ru.md)
 - [Miro Web SDK exporter](../tools/miro_websdk_exporter/README.md)
 - [Canvas render harness](../tools/canvas_render/README.md)
 - [Regression fixture format](../tests/fixtures/README.md)
 
 ## Product and compatibility
 
+- [Application design system](DESIGN_SYSTEM.md)
+- [Russian design system](DESIGN_SYSTEM.ru.md)
 - [Measured Miro versus Canvas display gaps](MIRO_VS_CANVAS_DISPLAY_GAPS.md)
 - [Russian display-gap report](MIRO_VS_CANVAS_DISPLAY_GAPS.ru.md)
 - [`miro-canvas` Obsidian plugin](https://github.com/NixWrk/Obsidian-Plugin---Miro-Canvas) - its own repository, with its

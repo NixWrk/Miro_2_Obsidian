@@ -18,10 +18,11 @@ to it when they prefer to read along.
 
 ## Create the person's own Miro app (once)
 
-1. Miro → avatar → **Developer Hub** → **Your apps**
-   (<https://developers.miro.com/page/developer-hub#your-apps>). Select an
+1. Miro → avatar → **Settings** → **Your apps**
+   (<https://miro.com/app/settings/user-profile/apps/>). Select an
    organization and an existing Developer team, or create one if needed.
-2. Create an app in that team with a recognisable name such as
+2. Click **Create new app** below the **Explore the Developer Hub** banner (the
+   **Get started** button is optional). Create an app in that team with a recognisable name such as
    `Miro to Obsidian - local export`.
 3. App settings - exact values:
    - App URL / SDK URI: `http://localhost:8766/index.html`
@@ -41,6 +42,10 @@ to it when they prefer to read along.
 
    From a source checkout they may instead fill `.miro_oauth.local.json`
    (copied from `.miro_oauth.local.example.json`; Git ignores it).
+
+Use the same browser for Miro, email sign-in and the local setup form. A sign-in
+completed in another browser does not authorize this one. The generic Your apps
+link may redirect to the user's company settings; never hard-code that company ID.
 
 ## Export and convert
 

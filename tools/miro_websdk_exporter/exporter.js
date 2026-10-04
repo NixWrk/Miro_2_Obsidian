@@ -421,6 +421,7 @@
 
   function setPayload(payload) {
     lastPayload = payload;
+    if (output.dataset) delete output.dataset.uiMessage;
     output.textContent = JSON.stringify(payload, null, 2);
     downloadButton.disabled = false;
     copyButton.disabled = false;
@@ -1034,21 +1035,33 @@
     }
     await navigator.clipboard.writeText(JSON.stringify(lastPayload, null, 2));
     if (window.miro && miro.board && miro.board.notifications) {
-      await miro.board.notifications.showInfo("Miro Web SDK export copied");
+      await miro.board.notifications.showInfo(window.miro2obsidianUI ? window.miro2obsidianUI.text("Miro Web SDK export copied") : "Miro Web SDK export copied");
     }
   }
 
+  let running = false;
   async function run(action) {
-    output.textContent = "Exporting...";
+    if (running) return;
+    running = true;
+    const captureButtons = [exportBoardButton, exportSelectionButton, createGeneratedProbeButton];
+    captureButtons.forEach((button) => { button.disabled = true; });
+    if (window.miro2obsidianUI) window.miro2obsidianUI.setMessage(output, "Exporting...");
+    else output.textContent = "Exporting...";
     downloadButton.disabled = true;
     copyButton.disabled = true;
     try {
       await action();
       if (window.miro && miro.board && miro.board.notifications) {
-        await miro.board.notifications.showInfo("Miro Web SDK export ready");
+        await miro.board.notifications.showInfo(window.miro2obsidianUI ? window.miro2obsidianUI.text("Miro Web SDK export ready") : "Miro Web SDK export ready");
       }
     } catch (error) {
+      if (output.dataset) delete output.dataset.uiMessage;
       output.textContent = String(error && error.stack ? error.stack : error);
+      downloadButton.disabled = true;
+      copyButton.disabled = true;
+    } finally {
+      running = false;
+      captureButtons.forEach((button) => { button.disabled = false; });
     }
   }
 

@@ -40,7 +40,7 @@ troubleshooting table before starting.
 
 ## Export from Miro
 
-A Miro app of their own is required by Miro's security model; creating it
+This local-first program uses a Miro app configured by the person; creating it
 takes 10-20 minutes and no programming (steps 1-5 in the reference). The app
 must be installed in the team that owns the board. For the three workflows,
 see `docs/WORKFLOW_MODES.md` (Russian: `docs/WORKFLOW_MODES.ru.md`). In Agent

@@ -11,6 +11,8 @@ from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlsplit
 
+from miro2obsidian.app_setup import setup_intro_html
+from miro2obsidian.ui_theme import html_page, theme_script_source
 from miro2obsidian.credential_store import save_access_token
 from scripts.miro_oauth_token import authorize_and_get_token, session_oauth_config
 
@@ -40,7 +42,8 @@ def make_handler(state: SetupState, *, origin: str) -> type[BaseHTTPRequestHandl
             self.send_header("X-Content-Type-Options", "nosniff")
             self.send_header(
                 "Content-Security-Policy",
-                "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'",
+                "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; "
+                f"script-src {theme_script_source()}",
             )
             if location is not None:
                 self.send_header("Location", location)
@@ -142,26 +145,21 @@ def _publish_authorize_url(state: SetupState, url: str) -> None:
 
 
 def _page(body: str) -> str:
-    return (
-        '<!doctype html><html lang="en"><head><meta charset="utf-8">'
-        '<meta name="viewport" content="width=device-width,initial-scale=1">'
-        '<title>Connect Miro locally</title><style>'
-        'body{font:16px system-ui;max-width:34rem;margin:3rem auto;padding:0 1rem}'
-        'label{display:block;margin:1rem 0}input{display:block;width:100%;box-sizing:border-box;padding:.6rem}'
-        'button{padding:.7rem 1rem}</style></head><body>' + body + '</body></html>'
-    )
+    return html_page(body)
 
 
 def _form_page(csrf: str) -> str:
     return _page(
-        '<h1>Connect your Miro app</h1><p>Copy the Client ID and Client secret from '
+        setup_intro_html() +
+        '<details id="connect"><summary>I have configured my Miro app — connect</summary>'
+        '<p>Copy the Client ID and Client secret from '
         'your own Miro app. They stay in this local process memory until OAuth finishes. '
         'Only the access token is saved in your operating system credential store.</p>'
         '<form method="post" action="/connect" autocomplete="off">'
         f'<input type="hidden" name="csrf" value="{html.escape(csrf, quote=True)}">'
         '<label>Client ID<input name="client_id" required autocomplete="off"></label>'
         '<label>Client secret<input name="client_secret" type="password" required autocomplete="off"></label>'
-        '<button type="submit">Connect to Miro</button></form>'
+        '<button type="submit">Connect to Miro</button></form></details>'
     )
 
 
@@ -173,10 +171,16 @@ def _status_page(status: str, error: str) -> str:
         "failed": "Connection failed. Check the app credentials, redirect URI, and Miro permissions.",
     }.get(status, "Unknown setup state")
     detail = f"<p>Error category: {html.escape(error)}</p>" if error else ""
+    actions = {
+        "waiting": "<p><a href='/'>Set up Miro app</a></p>",
+        "authorizing": "<p><a href='/continue'>Continue to Miro authorization</a></p>"
+                       "<p><a href='/status'>Refresh status</a></p>",
+        "failed": "<p>Restart setup from the app.</p>",
+        "complete": "<p>Return to the app to choose your board.</p>",
+    }.get(status, "<p><a href='/status'>Refresh status</a></p>")
     return _page(
-        f"<h1>Miro setup</h1><p>{message}</p>{detail}"
-        "<p><a href='/continue'>Continue to Miro authorization</a></p>"
-        "<p><a href='/status'>Refresh status</a></p>"
+        f'<section class="status-card"><h2>Miro setup</h2><p>{message}</p>{detail}'
+        f"{actions}</section>"
     )
 
 

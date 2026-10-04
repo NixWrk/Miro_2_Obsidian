@@ -1,3 +1,5 @@
 tools/obsidian_plugins/canvas-zoom-unlock/manifest.json text eol=lf
 tools/obsidian_plugins/canvas-zoom-unlock/main.js text eol=lf
 tools/obsidian_plugins/canvas-zoom-unlock/styles.css text eol=lf
+# Unified patches contain space-prefixed blank context lines and require LF.
+docs/patches/*.patch text eol=lf whitespace=-blank-at-eol

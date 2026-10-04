@@ -1,12 +1,29 @@
 from __future__ import annotations
 
 import http.client
+import base64
+import hashlib
 import re
 import threading
 from http.server import ThreadingHTTPServer
 from urllib.parse import urlencode
 
 from miro2obsidian import browser_setup
+
+
+def test_status_actions_match_connection_stage():
+    waiting = browser_setup._status_page("waiting", "")
+    authorizing = browser_setup._status_page("authorizing", "")
+    complete = browser_setup._status_page("complete", "")
+    failed = browser_setup._status_page("failed", "test-error")
+    assert "href='/continue'" not in waiting
+    assert "href='/continue'" in authorizing
+    assert "href='/status'" in authorizing
+    assert "href='/continue'" not in complete
+    assert "href='/status'" not in complete
+    assert "Return to the app" in complete
+    assert "href='/continue'" not in failed
+    assert "Restart setup" in failed
 
 
 def test_local_setup_uses_same_origin_and_saves_only_token(monkeypatch) -> None:
@@ -38,6 +55,16 @@ def test_local_setup_uses_same_origin_and_saves_only_token(monkeypatch) -> None:
         page = response.read().decode()
         assert response.status == 200
         assert response.getheader("Cache-Control") == "no-store"
+        script = re.search(r"<script>(.*?)</script>", page, re.DOTALL).group(1)
+        digest = base64.b64encode(hashlib.sha256(script.encode()).digest()).decode()
+        csp = response.getheader("Content-Security-Policy")
+        assert f"script-src 'sha256-{digest}'" in csp
+        assert "script-src 'unsafe-inline'" not in csp
+        assert "https://miro.com/app/settings/user-profile/apps/" in page
+        assert "developers.miro.com/page/developer-hub" not in page
+        assert page.index("Create new app") < page.index('name="client_id"')
+        assert '<details id="connect">' in page
+        assert "email sign-in" in page
         csrf = re.search(r'name="csrf" value="([^"]+)"', page).group(1)
         form = urlencode({"csrf": csrf, "client_id": "app-id", "client_secret": "test-secret"})
         headers = {"Content-Type": "application/x-www-form-urlencoded", "Origin": "https://other.example"}

@@ -34,6 +34,8 @@ miro2obsidian = ["schemas/v1/*.json", "schemas/v1/fixtures/*.json", "schemas/v1/
     "tools/miro_websdk_exporter/index.html",
     "tools/miro_websdk_exporter/panel.html",
     "tools/miro_websdk_exporter/exporter.js",
+    "tools/miro_websdk_exporter/theme.css",
+    "tools/miro_websdk_exporter/ui.js",
     "tools/miro_websdk_exporter/icon-outline.svg",
     "tools/miro_websdk_exporter/icon-color.svg",
     "tools/miro_websdk_exporter/manifest.example.yml",
@@ -51,3 +53,7 @@ target-version = "py313"
 
 [tool.ruff.lint]
 select = ["E4", "E7", "E9", "F"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+norecursedirs = [".git", ".venv", "venv", "work", "build", "dist"]

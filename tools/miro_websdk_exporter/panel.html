@@ -4,67 +4,31 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Miro Web SDK Exporter</title>
-    <style>
-      :root {
-        color-scheme: light dark;
-        font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      }
-
-      body {
-        margin: 0;
-        padding: 16px;
-      }
-
-      main {
-        display: grid;
-        gap: 12px;
-      }
-
-      .controls {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 8px;
-      }
-
-      button {
-        min-height: 36px;
-        padding: 0 12px;
-        border: 1px solid #8f99a8;
-        border-radius: 6px;
-        background: Canvas;
-        color: CanvasText;
-        cursor: pointer;
-      }
-
-      button:disabled {
-        cursor: default;
-        opacity: 0.55;
-      }
-
-      pre {
-        overflow: auto;
-        min-height: 240px;
-        max-height: 64vh;
-        padding: 12px;
-        border: 1px solid #8f99a8;
-        border-radius: 6px;
-        white-space: pre-wrap;
-      }
-    </style>
+    <link rel="stylesheet" href="./theme.css" />
+    <script src="./ui.js"></script>
   </head>
   <body>
-    <main>
-      <h1>Miro Web SDK Exporter</h1>
-      <p>Exporter version: 20260727-complete-json</p>
-      <div class="controls">
-        <button id="create-generated-probe" type="button">Create probe items</button>
+    <div class="app-shell sdk-shell"><aside class="rail" aria-label="Export overview">
+<div class="brand"><span class="brand-mark" aria-hidden="true">↗</span>Miro → Obsidian</div>
+<p>Your ideas, at home in your vault.</p>
+<span class="local-tag">Runs on your computer</span>
+<button id="theme-toggle" class="theme-toggle" type="button" aria-pressed="false">☾ Obsidian dark theme</button>
+<div class="language-switch" role="group" aria-label="Language / Язык">
+<button type="button" data-language="en" aria-pressed="true" lang="en">EN</button>
+<button type="button" data-language="ru" aria-pressed="false" lang="ru">RU</button></div></aside><main class="content">
+      <header class="page-header"><div class="eyebrow">Miro → Obsidian</div><h1>Export your Miro board</h1><p>Capture board data, then bring it into your Obsidian vault.</p></header>
+      <p class="sdk-version">Exporter version: 20260727-complete-json</p>
+      <div class="sdk-card"><div class="controls">
+
         <button id="export-board" type="button">Export board</button>
-        <button id="export-selection" type="button">Export selection</button>
-        <button id="download-json" type="button" disabled>Download JSON</button>
-        <button id="copy-json" type="button" disabled>Copy JSON</button>
+        <details><summary>Export selection</summary><button id="export-selection" type="button">Export selection</button></details>
       </div>
-      <pre id="output" aria-live="polite">Waiting for export...</pre>
-    </main>
+      <pre id="output" data-raw-output data-ui-message="Waiting for export..." aria-live="polite">Waiting for export...</pre>
+      <div class="controls">        <button id="download-json" type="button" disabled>Download JSON</button>
+        <button id="copy-json" type="button" disabled>Copy JSON</button>
+      </div></div>
+<details><summary>Developer tools</summary><p>Probe items are added to the current board.</p><button id="create-generated-probe" type="button">Create probe items</button></details>
+    </main></div>
     <script src="https://miro.com/app/static/sdk/v2/miro.js"></script>
     <script src="./exporter.js?v=20260727-complete-json"></script>
   </body>

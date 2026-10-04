@@ -16,7 +16,7 @@ how to create one, and which parts of setup are manual today.
   SDK JSON download. The planned first-run wizard will remove those technical
   steps.
 
-Creating the app is required by Miro's security model. This repository must not
+This local-first program uses an app you configure in your account. This repository must not
 ship one shared client secret that silently gives unrelated users access to each
 other's boards.
 
@@ -50,12 +50,18 @@ the team that owns the real board.
 ## 1. Create the Miro app
 
 1. Sign in to Miro.
-2. Open your avatar, then **Developer Hub** → **Your apps**, or open the
-   [Miro Developer Hub](https://developers.miro.com/page/developer-hub#your-apps).
+2. Open your avatar, then **Settings** → **Your apps**, or open
+   [Miro Your apps](https://miro.com/app/settings/user-profile/apps/).
 3. Select the organization and an existing Developer team. If none is available,
    create one and accept the developer terms.
 4. Create an app in that team.
 5. Use a recognizable name, for example `Miro to Obsidian - local export`.
+
+The generic link may redirect to a company-specific Profile settings address.
+Choose **Your apps**, then **Create new app** below the **Explore the Developer Hub**
+banner; **Get started** is optional. If the link does not open the settings, use
+the avatar route above. Keep Miro, email sign-in and the local setup form in the
+same browser. A login completed in another browser does not authorize this one.
 
 Creating the app does not move or copy any board. It creates credentials and a
 permission boundary for local export.

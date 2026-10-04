@@ -13,6 +13,7 @@ python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip
 python -m pip install -r requirements-dev.txt
+python -m pip install --no-deps -e .
 python -m playwright install chromium
 ```
 
@@ -29,6 +30,13 @@ node tests\websdk_capture_completeness_smoke.js tools\miro_websdk_exporter\expor
 Run `python -m scripts.run_regression` when a change affects conversion or
 rendering.
 
+Pytest's default suite is `tests/`, as configured in `pyproject.toml`. Keep
+temporary exports, preserved build output, and local archives under ignored
+`work/`; nested worktrees there are not collected by the default test run.
+Keep credentials out of archives and patches. Preserve unfinished changes
+before switching branches, and retain named stashes until their owner has
+recovered or deliberately retired them.
+
 ## Converter changes
 
 Each new conversion rule or fixed regression should include one minimized
@@ -36,8 +44,7 @@ fixture in `tests/fixtures/<case_name>/`:
 
 - `input.miro.json` with only the source data needed to reproduce the case;
 - `case.json` with structural, semantic, or geometry assertions;
--
-otes.md` explaining the rule and expected result;
+- `notes.md` explaining the rule and expected result;
 - a visual baseline only when the behavior cannot be asserted reliably in JSON.
 
 Do not add complete private board exports as fixtures. Remove unrelated content,

@@ -33,6 +33,9 @@ Thumbs.db
 nul
 tmp_src.txt
 *.part
+*.log
+.pytest_cache/
+.ruff_cache/
 
 # Canvas test outputs (в web_test)
 *_TEST.canvas

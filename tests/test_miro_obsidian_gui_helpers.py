@@ -36,13 +36,15 @@ class _Value:
 class MiroObsidianGuiHelperTests(unittest.TestCase):
     @unittest.skipUnless(os.name == "nt", "GUI smoke test requires Windows")
     def test_gui_constructs_with_pinned_customtkinter(self) -> None:
-        app = MiroPipelineApp()
-        try:
-            app.withdraw()
-            app.update_idletasks()
-            self.assertEqual(app.run_button.cget("text"), "Run pipeline")
-        finally:
-            app.destroy()
+        with tempfile.TemporaryDirectory() as directory:
+            with patch.dict(os.environ, {"MIRO2OBSIDIAN_UI_SETTINGS": str(Path(directory) / "ui.json")}):
+                app = MiroPipelineApp()
+                try:
+                    app.withdraw()
+                    app.update_idletasks()
+                    self.assertEqual(app.run_button.cget("text"), "Run pipeline")
+                finally:
+                    app.destroy()
 
     def test_board_id_from_text_accepts_full_miro_url_or_raw_id(self) -> None:
         self.assertEqual(

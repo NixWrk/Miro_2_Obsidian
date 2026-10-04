@@ -7,10 +7,10 @@ import threading
 import webbrowser
 from dataclasses import dataclass
 from pathlib import Path
-from tkinter import filedialog, messagebox
+from miro2obsidian.desktop_ui import filedialog, messagebox
 from typing import Callable
 
-import customtkinter as ctk
+from miro2obsidian import desktop_ui as ctk
 
 
 REPO_ROOT = Path(__file__).resolve().parent
@@ -29,6 +29,7 @@ from Json_2_Canvas.output_formats import (  # noqa: E402
 )
 from Json_2_Canvas.Scale_engine import ViewProfile  # noqa: E402
 from Miro_2_Json.miro_downloader import get_boards  # noqa: E402
+from miro2obsidian.app_setup import MIRO_APPS_URL  # noqa: E402
 from scripts.miro_oauth_token import (  # noqa: E402
     OAuthConfig,
     authorize_and_get_token,
@@ -222,8 +223,8 @@ class MiroPipelineApp(ctk.CTk):
     def __init__(self) -> None:
         super().__init__()
         self.title("Miro -> Obsidian Canvas")
-        self.geometry("1040x740")
-        self.minsize(940, 680)
+        self.geometry("1360x920")
+        self.minsize(1150, 760)
 
         self.token: str | None = os.environ.get("MIRO_ACCESS_TOKEN")
         self.oauth_config: OAuthConfig | None = None
@@ -238,36 +239,38 @@ class MiroPipelineApp(ctk.CTk):
         self._log("Ready. Default path: Miro board -> REST experimental JSON + assets -> Canvas.")
 
     def _build_ui(self) -> None:
-        ctk.set_appearance_mode("System")
-        ctk.set_default_color_theme("blue")
+        from miro2obsidian.desktop_wizard import GuidedWorkflow
+
+        self.guided = GuidedWorkflow(self)
+        scenario, source, destination, progress = self.guided.pages
 
         for column in range(4):
-            self.grid_columnconfigure(column, weight=1 if column == 1 else 0)
+            scenario.grid_columnconfigure(column, weight=1 if column == 1 else 0)
 
         pad = {"padx": 10, "pady": 7}
 
-        title = ctk.CTkLabel(self, text="Miro -> Obsidian Canvas", font=ctk.CTkFont(size=22, weight="bold"))
+        title = ctk.CTkLabel(scenario, text="Bring your boards home.", font=ctk.CTkFont(size=28, weight="bold"))
         title.grid(row=0, column=0, columnspan=2, sticky="w", padx=12, pady=(16, 10))
-        ctk.CTkLabel(self, text="Workflow").grid(row=0, column=2, sticky="e", **pad)
+        ctk.CTkLabel(scenario, text="Workflow").grid(row=0, column=2, sticky="e", **pad)
         self.workflow_mode = ctk.CTkOptionMenu(
-            self,
+            scenario,
             values=[MANUAL_WORKFLOW, CODE_WORKFLOW, AGENT_WORKFLOW],
-            command=self.on_workflow_mode_changed,
+            command=self.guided.workflow_changed,
             width=180,
         )
         self.workflow_mode.set(MANUAL_WORKFLOW)
         self.workflow_mode.grid(row=0, column=3, sticky="we", **pad)
 
-        ctk.CTkLabel(self, text="Source").grid(row=1, column=0, sticky="e", **pad)
+        ctk.CTkLabel(source, text="Source").grid(row=1, column=0, sticky="e", **pad)
         self.source_mode = ctk.CTkOptionMenu(
-            self,
+            source,
             values=[ACCOUNT_SOURCE_MODE, URL_SOURCE_MODE, URL_LIST_SOURCE_MODE, JSON_SOURCE_MODE],
-            command=self.on_source_mode_changed,
+            command=self.guided.source_changed,
         )
         self.source_mode.set(ACCOUNT_SOURCE_MODE)
         self.source_mode.grid(row=1, column=1, columnspan=3, sticky="we", **pad)
 
-        self.path_frame = ctk.CTkFrame(self, fg_color="transparent")
+        self.path_frame = ctk.CTkFrame(source, fg_color="transparent")
         self.path_frame.grid(row=2, column=0, columnspan=4, sticky="we")
         self.path_frame.grid_columnconfigure(1, weight=1)
 
@@ -277,8 +280,8 @@ class MiroPipelineApp(ctk.CTk):
         self.board_menu = ctk.CTkOptionMenu(self.account_frame, values=["Authenticate first"], command=self.on_board_selected)
         self.board_menu.grid(row=0, column=1, sticky="we", **pad)
         ctk.CTkButton(self.account_frame, text="Authenticate / refresh", width=170, command=self.authenticate_and_refresh_boards).grid(row=0, column=2, columnspan=2, **pad)
-        ctk.CTkButton(self.account_frame, text="Switch Miro team", command=self.reauthorize_and_refresh_boards).grid(row=1, column=1, sticky="we", **pad)
-        ctk.CTkButton(self.account_frame, text="Set up Miro app", width=170, command=self.open_miro_setup).grid(row=1, column=2, columnspan=2, **pad)
+        ctk.CTkButton(self.account_frame, text="Switch Miro team", command=self.reauthorize_and_refresh_boards).grid(row=1, column=1, sticky="w", **pad)
+        ctk.CTkButton(self.account_frame, text="Set up Miro app", variant="primary", width=170, command=self.open_miro_setup).grid(row=1, column=2, columnspan=2, **pad)
         ctk.CTkButton(self.account_frame, text="Forget saved token", command=self.forget_miro_connection).grid(row=2, column=2, columnspan=2, **pad)
 
         self.url_frame = ctk.CTkFrame(self.path_frame, fg_color="transparent")
@@ -303,52 +306,51 @@ class MiroPipelineApp(ctk.CTk):
         self.json_path.grid(row=0, column=1, columnspan=2, sticky="we", **pad)
         ctk.CTkButton(self.json_frame, text="Browse", width=130, command=self.pick_json_file).grid(row=0, column=3, **pad)
 
-        ctk.CTkLabel(self, text="Canvas folder").grid(row=3, column=0, sticky="e", **pad)
-        self.target_dir = ctk.CTkEntry(self)
+        ctk.CTkLabel(destination, text="Canvas folder").grid(row=3, column=0, sticky="e", **pad)
+        self.target_dir = ctk.CTkEntry(destination)
         self.target_dir.grid(row=3, column=1, columnspan=2, sticky="we", **pad)
-        ctk.CTkButton(self, text="Browse", width=130, command=self.pick_target_dir).grid(row=3, column=3, **pad)
+        ctk.CTkButton(destination, text="Browse", width=130, command=self.pick_target_dir).grid(row=3, column=3, **pad)
 
-        ctk.CTkLabel(self, text="Vault root (auto)").grid(row=4, column=0, sticky="e", **pad)
-        self.vault_root = ctk.CTkEntry(self)
+        ctk.CTkLabel(destination, text="Vault root (auto)").grid(row=4, column=0, sticky="e", **pad)
+        self.vault_root = ctk.CTkEntry(destination)
         self.vault_root.grid(row=4, column=1, columnspan=2, sticky="we", **pad)
         self.vault_root.configure(state="disabled")
-        self.vault_root_button = ctk.CTkButton(self, text="Auto", width=130)
+        self.vault_root_button = ctk.CTkButton(destination, text="Auto", width=130)
         self.vault_root_button.grid(row=4, column=3, **pad)
         self.vault_root_button.configure(state="disabled")
 
-        options = ctk.CTkFrame(self)
-        options.grid(row=5, column=0, columnspan=4, sticky="we", padx=10, pady=(10, 4))
-        for column in range(8):
-            options.grid_columnconfigure(column, weight=1 if column in {1, 3, 5, 7} else 0)
+        options = self.guided.advanced
+        for column in range(4):
+            options.grid_columnconfigure(column, weight=1 if column in {1, 3} else 0)
 
         ctk.CTkLabel(options, text="Scale mode").grid(row=0, column=0, sticky="e", padx=8, pady=8)
         self.scale_mode = ctk.CTkOptionMenu(options, values=["balanced", "overview", "readable"])
         self.scale_mode.set("readable")
-        self.scale_mode.grid(row=0, column=1, sticky="we", padx=8, pady=8)
+        self.scale_mode.grid(row=0, column=1, columnspan=1, sticky="we", padx=8, pady=8)
 
         ctk.CTkLabel(options, text="Text").grid(row=0, column=2, sticky="e", padx=8, pady=8)
         self.text_style_mode = ctk.CTkOptionMenu(options, values=["miro", "obsidian"])
         self.text_style_mode.set("miro")
-        self.text_style_mode.grid(row=0, column=3, sticky="we", padx=8, pady=8)
+        self.text_style_mode.grid(row=0, column=3, columnspan=1, sticky="we", padx=8, pady=8)
 
-        ctk.CTkLabel(options, text="Theme").grid(row=0, column=4, sticky="e", padx=8, pady=8)
+        ctk.CTkLabel(options, text="Theme").grid(row=1, column=0, sticky="e", padx=8, pady=8)
         self.theme = ctk.CTkOptionMenu(options, values=["dark", "light"])
         self.theme.set("dark")
-        self.theme.grid(row=0, column=5, sticky="we", padx=8, pady=8)
+        self.theme.grid(row=1, column=1, columnspan=1, sticky="we", padx=8, pady=8)
 
-        ctk.CTkLabel(options, text="Scale").grid(row=0, column=6, sticky="e", padx=8, pady=8)
+        ctk.CTkLabel(options, text="Scale").grid(row=1, column=2, sticky="e", padx=8, pady=8)
         self.scale = ctk.CTkEntry(options, placeholder_text="auto")
-        self.scale.grid(row=0, column=7, sticky="we", padx=8, pady=8)
+        self.scale.grid(row=1, column=3, columnspan=1, sticky="we", padx=8, pady=8)
 
-        ctk.CTkLabel(options, text="Min zoom").grid(row=1, column=0, sticky="e", padx=8, pady=(0, 8))
+        ctk.CTkLabel(options, text="Min zoom").grid(row=2, column=0, sticky="e", padx=8, pady=(0, 8))
         self.min_zoom = ctk.CTkEntry(options)
         self.min_zoom.insert(0, ZOOM_UNLOCKED_MIN_ZOOM)
-        self.min_zoom.grid(row=1, column=1, sticky="we", padx=8, pady=(0, 8))
+        self.min_zoom.grid(row=2, column=1, columnspan=1, sticky="we", padx=8, pady=(0, 8))
 
-        ctk.CTkLabel(options, text="Min font").grid(row=1, column=2, sticky="e", padx=8, pady=(0, 8))
+        ctk.CTkLabel(options, text="Min font").grid(row=2, column=2, sticky="e", padx=8, pady=(0, 8))
         self.min_font_px = ctk.CTkEntry(options)
         self.min_font_px.insert(0, "8")
-        self.min_font_px.grid(row=1, column=3, sticky="we", padx=8, pady=(0, 8))
+        self.min_font_px.grid(row=2, column=3, columnspan=1, sticky="we", padx=8, pady=(0, 8))
 
         self.allow_missing_assets = ctk.BooleanVar(value=False)
         self.allow_missing_assets_checkbox = ctk.CTkCheckBox(
@@ -357,9 +359,7 @@ class MiroPipelineApp(ctk.CTk):
             variable=self.allow_missing_assets,
         )
         self.allow_missing_assets_checkbox.grid(
-            row=1,
-            column=4,
-            columnspan=2,
+            row=7, column=0, columnspan=2,
             sticky="w",
             padx=8,
             pady=(0, 8),
@@ -372,9 +372,7 @@ class MiroPipelineApp(ctk.CTk):
             variable=self.stable_items,
         )
         self.stable_items_checkbox.grid(
-            row=2,
-            column=4,
-            columnspan=2,
+            row=7, column=2, columnspan=2,
             sticky="w",
             padx=8,
             pady=(0, 8),
@@ -388,9 +386,7 @@ class MiroPipelineApp(ctk.CTk):
             command=self.on_install_plugins_changed,
         )
         self.install_obsidian_plugins_checkbox.grid(
-            row=1,
-            column=6,
-            columnspan=2,
+            row=8, column=0, columnspan=4,
             sticky="w",
             padx=8,
             pady=(0, 8),
@@ -403,53 +399,53 @@ class MiroPipelineApp(ctk.CTk):
             variable=self.share_attachments,
         )
         self.share_attachments_checkbox.grid(
-            row=3,
-            column=0,
-            columnspan=4,
+            row=9, column=0, columnspan=4,
             sticky="w",
             padx=8,
             pady=(0, 8),
         )
 
-        ctk.CTkLabel(options, text="Format").grid(row=2, column=0, sticky="e", padx=8, pady=(0, 8))
+        ctk.CTkLabel(destination, text="Format").grid(row=5, column=0, sticky="e", padx=8, pady=(0, 8))
         self.output_format = ctk.CTkOptionMenu(
-            options, values=list(OUTPUT_FORMATS), command=self.on_format_changed
+            destination, values=list(OUTPUT_FORMATS), command=self.guided.format_changed
         )
         self.output_format.set(ADVANCED_CANVAS)
-        self.output_format.grid(row=2, column=1, sticky="we", padx=8, pady=(0, 8))
+        self.output_format.grid(row=5, column=1, columnspan=3, sticky="we", padx=8, pady=(0, 8))
 
         self.format_hint = ctk.CTkLabel(
-            options,
+            destination,
             text=FORMAT_HINTS[ADVANCED_CANVAS],
+            wraplength=700, justify="left",
             text_color="gray60",
             anchor="w",
         )
         self.format_hint.grid(
-            row=2, column=2, columnspan=6, sticky="we", padx=8, pady=(0, 8)
+            row=6, column=0, columnspan=4, sticky="we", padx=8, pady=(0, 8)
         )
 
-        ctk.CTkLabel(options, text="Web SDK JSON").grid(row=4, column=0, sticky="e", padx=8, pady=(0, 8))
-        self.websdk_path = ctk.CTkEntry(options, placeholder_text="Optional whole-board download")
-        self.websdk_path.grid(row=4, column=1, columnspan=5, sticky="we", padx=8, pady=(0, 8))
-        ctk.CTkButton(options, text="Browse", command=self.pick_websdk_file).grid(
-            row=4, column=6, columnspan=2, sticky="we", padx=8, pady=(0, 8)
+        ctk.CTkLabel(self.guided.sdk, text="Web SDK JSON").grid(row=5, column=0, sticky="e", padx=8, pady=(0, 8))
+        self.websdk_path = ctk.CTkEntry(self.guided.sdk, placeholder_text="Optional whole-board download")
+        self.websdk_path.grid(row=6, column=0, columnspan=3, sticky="we", padx=8, pady=(0, 8))
+        ctk.CTkButton(self.guided.sdk, text="Browse", command=self.pick_websdk_file).grid(
+            row=6, column=3, columnspan=1, sticky="we", padx=8, pady=(0, 8)
         )
 
         self.workflow_hint = ctk.CTkLabel(
-            self, text=WORKFLOW_HINTS[MANUAL_WORKFLOW], anchor="w", text_color="gray60"
+            scenario, text=WORKFLOW_HINTS[MANUAL_WORKFLOW], anchor="w", text_color="gray60", wraplength=470, justify="left"
         )
-        self.workflow_hint.grid(row=6, column=0, columnspan=2, sticky="we", padx=12, pady=(10, 8))
+        self.workflow_hint.grid(row=6, column=0, columnspan=4, sticky="we", padx=12, pady=(10, 8))
         self.agent_settings_button = ctk.CTkButton(
-            self, text="Configure agent", command=self.open_agent_settings, state="disabled"
+            scenario, text="Configure agent", command=self.open_agent_settings, state="disabled"
         )
-        self.agent_settings_button.grid(row=6, column=2, sticky="we", padx=10, pady=(10, 8))
-        self.run_button = ctk.CTkButton(self, text="Run pipeline", height=40, command=self.run_pipeline)
-        self.run_button.grid(row=6, column=3, sticky="e", padx=10, pady=(10, 8))
+        self.agent_settings_button.grid(row=7, column=0, columnspan=4, sticky="w", padx=12, pady=12)
+        self.run_button = ctk.CTkButton(self.action_bar, text="Run pipeline", height=44, fg_color=ctk.COLORS["yellow"], hover_color="#f4cf3e", text_color="#242137", command=self.guided.start)
+        self.run_button.grid(row=1, column=2, sticky="e", padx=10, pady=(10, 8))
 
-        self.log = ctk.CTkTextbox(self, height=150)
-        self.log.grid(row=7, column=0, columnspan=4, sticky="nsew", padx=10, pady=(4, 10))
-        self.grid_rowconfigure(7, weight=1)
+        self.log = ctk.CTkTextbox(progress, height=150, localize=True)
+        self.log.grid(row=8, column=0, columnspan=4, sticky="nsew", padx=10, pady=(4, 10))
+        progress.grid_rowconfigure(8, weight=1)
         self.on_source_mode_changed(ACCOUNT_SOURCE_MODE)
+        self.guided.finish()
 
     def _log(self, message: str) -> None:
         def append() -> None:
@@ -461,7 +457,7 @@ class MiroPipelineApp(ctk.CTk):
         self.after(0, append)
 
     def _set_busy(self, busy: bool) -> None:
-        self.after(0, lambda: self.run_button.configure(state="disabled" if busy else "normal"))
+        self.after(0, lambda: self.guided.set_busy(busy))
 
     def _set_entry(self, entry: ctk.CTkEntry, value: str, *, disabled: bool = False) -> None:
         entry.configure(state="normal")
@@ -483,27 +479,30 @@ class MiroPipelineApp(ctk.CTk):
     def open_miro_setup(self) -> None:
         dialog = ctk.CTkToplevel(self)
         dialog.title("Set up your Miro app")
-        dialog.geometry("620x380")
+        dialog.geometry("760x590")
         dialog.transient(self)
         dialog.grid_columnconfigure(1, weight=1)
         ctk.CTkLabel(
             dialog,
             text=(
-                "Create an app in Miro, set App URL to "
+                "No app yet? Open Miro Settings > Your apps and click Create new app "
+                "below the Developer Hub banner. Choose a Developer team, then set App URL to "
                 "http://localhost:8766/index.html and OAuth redirect URI to "
                 "http://localhost:8765/callback. Select boards:read and team:read, "
                 "then install the app in the board's team. Leave 'Expire user "
-                "authorization token' unchecked for unattended Code mode."
+                "authorization token' unchecked for unattended Code mode. "
+                "Finish email sign-in and OAuth in the same browser. "
+                "Enter Client ID and Client secret only after configuring the app."
             ),
             wraplength=520,
             justify="left",
         ).grid(row=0, column=0, columnspan=3, padx=16, pady=(18, 12), sticky="w")
-        ctk.CTkLabel(dialog, text="Client ID").grid(row=1, column=0, padx=16, pady=8, sticky="e")
+        ctk.CTkLabel(dialog, text="Client ID").grid(row=3, column=0, padx=16, pady=8, sticky="e")
         client_id_entry = ctk.CTkEntry(dialog)
-        client_id_entry.grid(row=1, column=1, padx=(16, 8), pady=8, sticky="we")
-        ctk.CTkLabel(dialog, text="Client secret").grid(row=2, column=0, padx=16, pady=8, sticky="e")
+        client_id_entry.grid(row=3, column=1, padx=(16, 8), pady=8, sticky="we")
+        ctk.CTkLabel(dialog, text="Client secret").grid(row=4, column=0, padx=16, pady=8, sticky="e")
         secret_entry = ctk.CTkEntry(dialog, show="*")
-        secret_entry.grid(row=2, column=1, padx=(16, 8), pady=8, sticky="we")
+        secret_entry.grid(row=4, column=1, padx=(16, 8), pady=8, sticky="we")
         def paste_credential(entry: ctk.CTkEntry) -> None:
             try:
                 value = dialog.clipboard_get()
@@ -518,18 +517,18 @@ class MiroPipelineApp(ctk.CTk):
             text="Paste",
             width=70,
             command=lambda: paste_credential(client_id_entry),
-        ).grid(row=1, column=2, padx=(0, 16), pady=8)
+        ).grid(row=3, column=2, padx=(0, 16), pady=8)
         ctk.CTkButton(
             dialog,
             text="Paste",
             width=70,
             command=lambda: paste_credential(secret_entry),
-        ).grid(row=2, column=2, padx=(0, 16), pady=8)
+        ).grid(row=4, column=2, padx=(0, 16), pady=8)
         ctk.CTkLabel(
             dialog,
             text="These values stay in this program's memory for this session.",
             wraplength=580,
-        ).grid(row=3, column=0, columnspan=3, padx=16, pady=8, sticky="w")
+        ).grid(row=5, column=0, columnspan=3, padx=16, pady=8, sticky="w")
 
         def use_credentials() -> None:
             try:
@@ -549,15 +548,25 @@ class MiroPipelineApp(ctk.CTk):
 
         ctk.CTkButton(
             dialog,
-            text="Open Miro Developer Hub",
-            command=lambda: webbrowser.open(
-                "https://developers.miro.com/page/developer-hub#your-apps"
-            ),
-        ).grid(row=4, column=0, padx=16, pady=16, sticky="we")
+            text="Open Your apps",
+            command=lambda: webbrowser.open(MIRO_APPS_URL),
+        ).grid(row=1, column=0, columnspan=3, padx=16, pady=8, sticky="w")
         ctk.CTkButton(
-            dialog, text="Connect", command=use_credentials
-        ).grid(row=4, column=1, columnspan=2, padx=16, pady=16, sticky="we")
-        client_id_entry.focus_set()
+            dialog, text="Connect", variant="primary", command=use_credentials
+        ).grid(row=6, column=1, columnspan=2, padx=16, pady=16, sticky="we")
+        credential_widgets = [child for child in dialog.winfo_children()
+                              if child.grid_info().get("row", 0) >= 3]
+        for child in credential_widgets:
+            child.grid_remove()
+
+        def show_credentials():
+            for child in credential_widgets:
+                child.grid()
+            ready.grid_remove()
+            client_id_entry.focus_set()
+
+        ready = ctk.CTkButton(dialog, text="I have configured my Miro app — connect", command=show_credentials)
+        ready.grid(row=2, column=0, columnspan=3, sticky="w", padx=16, pady=8)
 
     def _clear_saved_token(self) -> None:
         try:
@@ -626,6 +635,8 @@ class MiroPipelineApp(ctk.CTk):
             by_label[label] = board
         self.boards_by_label = by_label
         self.after(0, lambda: self.board_menu.configure(values=labels or ["No boards available"]))
+        if self.__dict__.get("guided") is not None:
+            self.after(0, lambda: self.guided.boards_loaded(bool(labels)))
         if labels:
             self.after(0, lambda: self.board_menu.set(labels[0]))
             self.after(0, lambda: self.on_board_selected(labels[0]))
@@ -645,6 +656,8 @@ class MiroPipelineApp(ctk.CTk):
         self.selected_account_board_id = ""
         self.board_menu.configure(values=["Authenticate first"])
         self.board_menu.set("Authenticate first")
+        if self.__dict__.get("guided") is not None:
+            self.guided.boards_loaded(False)
         self._log("Saved Miro token removed from the OS credential store.")
 
     def reauthorize_and_refresh_boards(self) -> None:
@@ -656,6 +669,8 @@ class MiroPipelineApp(ctk.CTk):
         self.selected_account_board_id = ""
         self.board_menu.configure(values=["Authenticate first"])
         self.board_menu.set("Authenticate first")
+        if self.__dict__.get("guided") is not None:
+            self.guided.boards_loaded(False)
         self._log("Choose the team that owns the target board in Miro OAuth.")
         self.authenticate_and_refresh_boards()
 
@@ -715,7 +730,7 @@ class MiroPipelineApp(ctk.CTk):
     def open_agent_settings(self) -> None:
         dialog = ctk.CTkToplevel(self)
         dialog.title("Agent command")
-        dialog.geometry("650x190")
+        dialog.geometry("760x300")
         dialog.transient(self)
         dialog.grab_set()
         ctk.CTkLabel(
@@ -743,7 +758,7 @@ class MiroPipelineApp(ctk.CTk):
             dialog.destroy()
             self._log("Agent command configured for this session." if command else "Using the default agent adapter.")
 
-        ctk.CTkButton(dialog, text="Use", command=save_command).pack(pady=(4, 14))
+        ctk.CTkButton(dialog, text="Use", variant="primary", command=save_command).pack(pady=(4, 14))
         entry.focus_set()
 
     def pick_target_dir(self) -> None:
@@ -793,9 +808,7 @@ class MiroPipelineApp(ctk.CTk):
             )
         )
         self.allow_missing_assets_checkbox.grid(
-            row=1,
-            column=4,
-            columnspan=2,
+            row=7, column=0, columnspan=2,
             sticky="w",
             padx=8,
             pady=(0, 8),
@@ -863,7 +876,7 @@ class MiroPipelineApp(ctk.CTk):
             if not target_text:
                 raise ValueError("Canvas folder is required.")
             json_path_text = self.json_path.get().strip()
-            websdk_path_text = self.websdk_path.get().strip()
+            websdk_path_text = self.websdk_path.get().strip() if source_mode in {ACCOUNT_SOURCE_MODE, URL_SOURCE_MODE} else ""
             if websdk_path_text and workflow_mode != AGENT_WORKFLOW and source_mode not in {ACCOUNT_SOURCE_MODE, URL_SOURCE_MODE}:
                 raise ValueError("Web SDK JSON can be paired with one Miro board at a time.")
             if websdk_path_text and workflow_mode != AGENT_WORKFLOW and not Path(websdk_path_text).is_file():

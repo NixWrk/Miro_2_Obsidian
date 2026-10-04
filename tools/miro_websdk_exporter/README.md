@@ -4,6 +4,12 @@ Buildless Miro app for capturing the maximum board JSON exposed by the Web SDK.
 It is a complementary source for the canonical REST+Web SDK production union
 and a probe tool for source-limited item families.
 
+Both screens use the shared Miro → Obsidian theme. **EN / RU** selects the
+interface language; **Obsidian dark theme** toggles appearance. Exported JSON
+and board content keep their original values. Appearance preferences are saved
+when browser storage is available. Rebuild `theme.css` and `ui.js` with
+`python -m scripts.build_ui_assets` after editing the shared theme or dictionary.
+
 If this is your first Miro Developer App, follow the
 [beginner setup guide](../../docs/MIRO_APP_SETUP.md) before using the steps
 below. Normal export needs only `boards:read` and `team:read`; add

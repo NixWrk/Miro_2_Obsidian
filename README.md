@@ -27,6 +27,8 @@ before producing the `.canvas` file.
   and visual regression fixtures.
 - Supports both a reproducible CLI pipeline and a desktop GUI.
 
+The desktop guides you through four steps: workflow, source, destination, and export progress. Only controls for the selected workflow are shown. Additional board data, connection options, and conversion settings are collapsed; source and destination are checked before continuing.
+
 ## Status
 
 The conversion pipeline is working and covered by an automated regression
@@ -38,6 +40,11 @@ the release tree. See [`SECURITY.md`](SECURITY.md) for the current handling poli
 This project does not synchronize changes back to Miro. The
 [miro-canvas](https://github.com/NixWrk/Obsidian-Plugin---Miro-Canvas) Obsidian plugin, which draws the Miro look from boards
 written in the `miro-canvas` format, lives in its own repository.
+
+The [roadmap](ROADMAP.md) distinguishes code in `main`, import automation on
+the development branch, and pending live acceptance. Token renewal, direct
+Web SDK handoff, the new JSON CLI/MCP service, and the setup wizard still await
+integration into `main`. Availability and live verification are tracked separately.
 
 ## Data flow
 
@@ -70,10 +77,13 @@ network access.
 
 ### Ready-made builds
 
-No Python needed: each [release](https://github.com/NixWrk/Miro_2_Obsidian/releases/latest)
-carries a build for Windows, macOS and Linux with two programs - the desktop
-window (`miro2obsidian-gui`, on macOS `Miro 2 Obsidian.app`) and the command
-line (`miro2obsidian`). Unpack the archive and run one of them.
+The Build workflow targets Windows, macOS and Linux with two programs: the
+desktop window (`miro2obsidian-gui`, on macOS `Miro 2 Obsidian.app`) and the
+command line (`miro2obsidian`). Check the assets of the selected
+[release](https://github.com/NixWrk/Miro_2_Obsidian/releases) for an available
+build for your platform. A packaged build needs no separately installed Python;
+unpack its archive and run one program. Cross-platform and clean-machine
+acceptance remain on the [roadmap](ROADMAP.md).
 
 The builds are not code-signed yet. On Windows, SmartScreen may warn on first
 start: choose **More info → Run anyway**. On macOS, open the app with a
@@ -151,6 +161,15 @@ miro2obsidian `
 ```
 
 ### Use the desktop GUI
+
+The desktop window, its dialogs, local setup page and Web SDK exporter share
+the Miro → Obsidian visual theme. Use **Language → EN / RU** and **Appearance →
+Light / Dark** in the desktop sidebar; open dialogs include the same controls.
+Browser pages offer **EN / RU** and **Obsidian dark theme**. Changing these
+preferences preserves form values and is independent of the exported Canvas
+theme. Desktop preferences are saved in `miro2obsidian/ui_preferences.json`
+under the OS application-data folder; browser preferences are per browser and
+host. See the [design system](docs/DESIGN_SYSTEM.md).
 
 ```powershell
 miro2obsidian-gui
@@ -307,6 +326,9 @@ python -m scripts.run_regression --skip-render
 ```
 
 Individual checks:
+
+Pytest discovers the repository's `tests/` directory by default. Local worktrees,
+archives, and exported boards under ignored `work/` are not part of this suite.
 
 ```powershell
 python -m compileall -q Json_2_Canvas Miro_2_Json miro2obsidian scripts tools tests Miro_2_Obsidian_GUI.py
