@@ -169,8 +169,8 @@ def run_rest_experimental_pipeline(
     board_id: str,
     token: str,
     source_json: Path,
-    target_dir: Path,
-    vault_root: Path,
+    target_dir: Path | None = None,
+    vault_root: Path | None = None,
     scale: float | None = None,
     view_profile: ViewProfile | None = None,
     min_font_px: int = 8,
@@ -195,11 +195,13 @@ def run_rest_experimental_pipeline(
             logger(message)
 
     source_json = Path(source_json)
-    target_dir = Path(target_dir)
-    vault_root = Path(vault_root)
+    output_format = normalize_output_format(output_format)
+    if output_format != RAW_JSON and (target_dir is None or vault_root is None):
+        raise ValueError("Canvas output requires target_dir and vault_root.")
+    target_dir = Path(target_dir) if target_dir is not None else source_json.parent
+    vault_root = Path(vault_root) if vault_root is not None else None
     attachment_dir = Path(attachment_dir) if attachment_dir else None
     profile = view_profile or ViewProfile(min_font_px=min_font_px)
-    output_format = normalize_output_format(output_format)
     if scale is not None:
         _validated_scale(scale)
     if websdk_json is not None and allow_missing_assets:
@@ -246,7 +248,7 @@ def run_rest_experimental_pipeline(
             )
         log("Canonical REST + Web SDK union is complete.")
 
-    if install_obsidian_plugins:
+    if install_obsidian_plugins and output_format != RAW_JSON:
         _install_obsidian_plugins_for_format(
             output_format=output_format,
             vault_root=vault_root,

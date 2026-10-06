@@ -52,8 +52,8 @@ def add_auth_args(parser: argparse.ArgumentParser) -> None:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
-            "Run the canonical Miro -> JSON -> Obsidian Canvas pipeline: "
-            "REST v2-experimental export, asset download, one Converter.py call."
+            "Miro Full Exporter: export maximum public-API board data, "
+            "comments, attachments and provenance; optionally create Obsidian Canvas."
         )
     )
     parser.add_argument(
@@ -68,8 +68,8 @@ def build_parser() -> argparse.ArgumentParser:
         type=Path,
         help="Merge a fresh maximum-profile Web SDK board export before conversion.",
     )
-    parser.add_argument("--target-dir", type=Path, required=True)
-    parser.add_argument("--vault-root", type=Path, required=True)
+    parser.add_argument("--target-dir", type=Path, help="Canvas destination; required for Canvas formats.")
+    parser.add_argument("--vault-root", type=Path, help="Obsidian vault; required for Canvas formats.")
     parser.add_argument(
         "--scale", type=float, help="Explicit converter scale. Defaults to auto scale."
     )
@@ -158,8 +158,10 @@ def main() -> int:
         return serve_setup(sys.argv[2:])
     parser = build_parser()
     args = parser.parse_args()
-    attachment_dir = args.attachment_dir or resolve_attachment_dir(
-        args.vault_root, args.target_dir
+    if args.output_format != RAW_JSON and (args.target_dir is None or args.vault_root is None):
+        parser.error("Canvas output requires --target-dir and --vault-root")
+    attachment_dir = None if args.output_format == RAW_JSON else (
+        args.attachment_dir or resolve_attachment_dir(args.vault_root, args.target_dir)
     )
     if args.existing_json:
         if args.stored_token:

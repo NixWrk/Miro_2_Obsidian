@@ -1,14 +1,18 @@
-# Miro to Obsidian Canvas
+# Miro Full Exporter
 
 **English** | [Russian](README.ru.md)
 
-A local-first, verifiable pipeline for exporting the maximum board data exposed
-by Miro's public APIs and converting it to a valid Obsidian Canvas.
+A standalone, local-first application for exporting the maximum board data
+exposed by Miro's public APIs. Save portable JSON, comments, attachments and
+source provenance to any folder, and optionally convert that export to Obsidian Canvas.
 
 The supported production path combines a strict Miro REST export, REST
 comments, downloaded assets, and a fresh whole-board Web SDK export. It keeps
 the original source objects and field-level provenance in the canonical JSON
-before producing the `.canvas` file.
+as a reusable export. Canvas conversion is an optional next step.
+
+The repository, package, commands (`miro2obsidian`, `miro2obsidian-gui`) and
+downloaded executable names retain their existing names for compatibility.
 
 > This is a maximum public-API export, not a byte-for-byte Miro backup. Known
 > API limitations are recorded in the output instead of being hidden.
@@ -27,7 +31,11 @@ before producing the `.canvas` file.
   and visual regression fixtures.
 - Supports both a reproducible CLI pipeline and a desktop GUI.
 
-The desktop guides you through four steps: workflow, source, destination, and export progress. Only controls for the selected workflow are shown. Additional board data, connection options, and conversion settings are collapsed; source and destination are checked before continuing.
+The desktop guides you through four steps: workflow, source, destination, and
+export progress. **Export data** is the default and accepts any output folder.
+**For Obsidian** offers Miro Canvas (recommended), standard Canvas and Advanced
+Canvas. Existing JSON selects the Obsidian conversion path automatically.
+Additional board data, connection options, and conversion settings are collapsed.
 
 ## Status
 
@@ -54,7 +62,8 @@ Miro board
   +  fresh whole-board Web SDK export
   -> canonical REST/Web SDK union with provenance
   -> required local assets
-  -> Json_2_Canvas/Converter.py
+  -> portable export JSON + attachment sidecar
+  -> optional Json_2_Canvas/Converter.py
   -> validated Obsidian .canvas
 ```
 
@@ -67,7 +76,7 @@ and contributes Web SDK-only items. Every original source item remains under
 - Windows 10 or 11 for the currently tested GUI and visual workflow.
 - Python 3.13.
 - Node.js only for the two optional Web SDK JavaScript smoke tests.
-- Obsidian for final visual verification.
+- Obsidian only for Canvas use and final visual verification.
 - A user-owned Miro Developer App for direct Miro exports.
 
 Converting an existing canonical JSON file does not require Miro credentials or
@@ -160,10 +169,35 @@ miro2obsidian `
   --target-dir path\to\ObsidianVault\CanvasFolder
 ```
 
+### Export data without Obsidian
+
+Use **Export data** in the desktop, or pass `--format raw-json` in the CLI.
+Neither an Obsidian vault nor a plugin is required:
+
+```powershell
+miro2obsidian `
+  --stored-token `
+  --board-id <board_id> `
+  --websdk-json path\to\websdk-board.json `
+  --source-json path\to\Exports\board.json `
+  --format raw-json
+```
+
+This example uses a token previously saved through GUI Code automation.
+For a first connection use the setup guide and `--oauth` instead. A fresh
+whole-board Web SDK capture is required for maximum public-API coverage; without
+it the source is REST-only. Keep `board.json` and `board_files/` together.
+`--target-dir` and `--vault-root` are required only for Canvas formats.
+
+The result screen opens the saved folder and offers **Prepare for Miro Canvas**.
+That action selects the saved JSON for offline conversion and asks for an
+Obsidian destination; it does not contact Miro or start conversion automatically.
+**Learn about Miro Canvas** opens the independent plugin's repository.
+
 ### Use the desktop GUI
 
 The desktop window, its dialogs, local setup page and Web SDK exporter share
-the Miro → Obsidian visual theme. Use **Language → EN / RU** and **Appearance →
+the Miro Full Exporter identity and visual theme. Use **Language → EN / RU** and **Appearance →
 Light / Dark** in the desktop sidebar; open dialogs include the same controls.
 Browser pages offer **EN / RU** and **Obsidian dark theme**. Changing these
 preferences preserves form values and is independent of the exported Canvas
@@ -201,8 +235,10 @@ The GUI supports four source choices:
 
 ### Choose an output format
 
-Both the CLI and the GUI write one of four formats, chosen with `--format`
-(CLI) or the Format menu (GUI):
+The CLI retains its existing `advanced-canvas` default. The GUI starts with
+**Export data** (`raw-json`); **For Obsidian** starts with `miro-canvas` and
+shows the three Canvas formats. Plugin installation is opt-in for Advanced Canvas.
+All four formats remain available through `--format`:
 
 - `advanced-canvas` (default): today's Canvas for the [Advanced Canvas](https://github.com/Developer-Mike/obsidian-advanced-canvas)
   plugin, with the richest styling.

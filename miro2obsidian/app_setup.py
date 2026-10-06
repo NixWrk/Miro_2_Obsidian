@@ -19,7 +19,7 @@ def setup_intro_html(*, refresh_supported: bool = False) -> str:
         'Miro may redirect to a company-specific settings address. If the link does not '
         'open Your apps, use your Miro avatar &rarr; Settings &rarr; Your apps.</li>'
         '<li>In Your apps click <strong>Create new app</strong>, name it '
-        '<strong>Miro to Obsidian - local export</strong> and select a Developer team. '
+        '<strong>Miro Full Exporter</strong> and select a Developer team. '
         'Create a Developer team if Miro asks. The Explore the Developer Hub / '
         'Get started banner is optional; use Create new app below it.</li>'
         '<li>Set App URL / SDK URI to <code>http://localhost:8766/index.html</code> '

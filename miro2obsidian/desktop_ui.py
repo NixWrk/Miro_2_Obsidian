@@ -251,7 +251,7 @@ class CTkOptionMenu(native.CTkOptionMenu):
         # because the old display string belongs to the previous language.
         selected = super().get()
         for value in self._original_values:
-            if selected in {value, translate(value, "ru")}:
+            if selected in {value, translate(value, "ru"), translate(value, "en")}:
                 selected = value
                 break
         super().configure(values=[self._presentation.text(value) for value in self._original_values])
@@ -297,12 +297,12 @@ def build_workspace(app):
     rail.grid_propagate(False)
     rail.grid_columnconfigure(0, weight=1)
     rail.grid_rowconfigure(6, weight=1)
-    CTkLabel(rail, text="↗  Miro → Obsidian", font=native.CTkFont(size=18, weight="bold"),
+    CTkLabel(rail, text="Miro Full Exporter", font=native.CTkFont(size=18, weight="bold"),
              text_color=COLORS["yellow"]).grid(row=0, column=0, padx=18, pady=(28, 14), sticky="w")
-    CTkLabel(rail, text="Your ideas, at home in your vault.", wraplength=215, justify="left",
+    CTkLabel(rail, text="Maximum public-API data, saved on your computer.", wraplength=215, justify="left",
              text_color="#c5bfd7").grid(row=1, column=0, padx=18, pady=(0, 24), sticky="w")
     app.journey_labels = []
-    for row, text in enumerate(("01   Choose a workflow", "02   Choose a source", "03   Save to Obsidian", "04   Export progress"), 2):
+    for row, text in enumerate(("01   Choose a workflow", "02   Choose a source", "03   Choose a destination", "04   Export progress"), 2):
         label = CTkLabel(rail, text=text, anchor="w", height=44, corner_radius=9,
                  fg_color="#403654" if row == 2 else "transparent", text_color="#f7f4ff"
                  )

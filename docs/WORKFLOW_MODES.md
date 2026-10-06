@@ -1,11 +1,13 @@
-# Three ways to run Miro to Obsidian
+# Three ways to run Miro Full Exporter
 
 **English** | [Russian](WORKFLOW_MODES.ru.md)
 
 The GUI's **Workflow** menu chooses who performs the Miro browser steps. Live
 imports share the REST export, optional canonical REST/Web SDK merge, asset
 download, and Canvas conversion code. Converting an existing JSON file needs
-no Miro access. A successful export covers the public API surface, not hidden
+no Miro access. **Export data** saves JSON and attachments to any folder;
+**For Obsidian** adds Canvas conversion and requires a vault destination.
+The result offers Miro Canvas as an optional next step. A successful export covers the public API surface, not hidden
 Miro internals.
 
 | Workflow | What runs automatically | What may require a person |

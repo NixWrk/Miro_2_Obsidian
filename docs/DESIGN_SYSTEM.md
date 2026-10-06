@@ -1,6 +1,6 @@
 # Application design
 
-The Miro → Obsidian visual language is implemented in the desktop window,
+The Miro Full Exporter identity and existing visual language are implemented in the desktop window,
 connection and agent dialogs, result/error dialogs, local browser setup and
 both Web SDK pages. Compatibility launchers open the same desktop window.
 The experimental setup wizard uses the same adapters in the local test snapshot;
@@ -63,6 +63,15 @@ form. Shared Russian strings live in `miro2obsidian/ui_strings.py`.
 ## Guided desktop workflow
 
 Use four sequential pages: workflow, source, destination, progress. Validate required choices before advancing. Show agent configuration only in Agent mode; restrict it to a single Miro board. Hide Miro connection and SDK controls for existing JSON. Keep optional SDK data on the source page and conversion tuning under Advanced settings on the destination page. Back navigation preserves inputs and is disabled while an export runs. Language and appearance controls stay available throughout.
+
+Default to Export data: any local folder, canonical JSON and attachment sidecar,
+no vault or plugin dependency. Keep source-export controls available separately
+from Canvas tuning. For Obsidian selects Miro Canvas first, with native and
+Advanced Canvas alternatives. Existing JSON selects conversion automatically.
+Keep canonical format values behind human labels in both languages. Result
+actions open the folder, prepare the saved JSON for Miro Canvas without running
+conversion, or open a written Canvas through Obsidian URI. Promotion of Miro
+Canvas is optional. Retain command, package and preference names for compatibility.
 
 Within the Miro account source, place setup first, board refresh second, and board selection third, all aligned from the left. Disable selection until a board list has loaded; in the connection-aware GUI disable refresh while disconnected. Optional board data follows these prerequisites. Disconnecting or resetting the list disables selection again.
 

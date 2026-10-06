@@ -95,27 +95,37 @@ def build_agent_prompt(
         "First take a read-only browser control snapshot. If no browser UI tool "
         "works, return needs_user with reason browser_unavailable immediately. "
     )
+    raw_export = output_format == "raw-json"
+    destination_hint = (
+        f"Export root: {json.dumps(str(vault_root))}\n"
+        f"Export folder: {json.dumps(str(target_dir))}\n"
+        if raw_export else
+        f"Vault root: {json.dumps(str(vault_root))}\n"
+        f"Canvas folder: {json.dumps(str(target_dir))}\n"
+    )
     return (
-        "Complete the Miro to Obsidian import. " + repository_hint +
+        ("Complete the standalone Miro Full Exporter export. " if raw_export else "Complete the Miro to Obsidian import. ") + repository_hint +
         "The user has authorized a live "
-        "export and work in the target vault. Preserve unrelated changes. "
+        "export and work in the selected destination. Preserve unrelated changes. "
         "Never read, print, persist, or request Miro secrets or tokens; if the "
         "existing authenticated browser permits it, transfer app credentials "
         "only with UI Copy/Paste controls. Reuse a working Miro app before "
         "creating another. Do not commit or push.\n"
         f"Board URL: {json.dumps(board_url)}\n"
-        f"Vault root: {json.dumps(str(vault_root))}\n"
-        f"Canvas folder: {json.dumps(str(target_dir))}\n"
+        + destination_hint +
         f"Output format: {json.dumps(output_format)}\n"
         "Use the strict REST export, Web SDK whole-board capture when accessible, "
-        "canonical merge, asset checks, and Canvas validation. Operate the Miro "
+        "canonical merge and asset checks. "
+        + ("Write JSON and its attachment sidecar; Obsidian and Canvas are not required. " if raw_export else "Validate the written Canvas. ") +
+        "Operate the Miro "
         "browser UI yourself for app setup and Web SDK export where possible. "
         + browser_hint +
         "If login, MFA, or administrator approval prevents progress, return "
         "needs_user with the matching reason. Do not claim maximum coverage without a verified Web SDK "
         "capture. Return only the requested JSON status, absolute artifact "
         "path, and absolute canonical source_json path. Save the canonical JSON "
-        "inside the selected vault. Use null paths unless complete."
+        + ("inside the selected export folder. " if raw_export else "inside the selected vault. ") +
+        "Use null paths unless complete."
     )
 
 
@@ -335,7 +345,7 @@ def run_agent(
         except BrowserLoginRequired:
             return AgentOutcome("needs_user", reason="login")
     if on_status:
-        on_status("Agent 2/3: exporting Miro sources and building Canvas.")
+        on_status("Agent 2/3: exporting Miro sources." if output_format == "raw-json" else "Agent 2/3: exporting Miro sources and building Canvas.")
     prompt = build_agent_prompt(
         board_url=board_url,
         target_dir=target_dir,

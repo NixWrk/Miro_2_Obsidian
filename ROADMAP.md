@@ -6,6 +6,18 @@ Only work present in `main` is described as available in the main checkout.
 
 ## Product boundaries
 
+The public product name is **Miro Full Exporter**. Its primary deliverable is a
+portable canonical Miro export with comments, local assets and provenance.
+Obsidian conversion is an optional destination, with Miro Canvas recommended
+within that destination. The CLI, package and release asset names remain
+`miro2obsidian` for compatibility. The working branch adds standalone raw JSON
+export without a vault, destination-aware GUI defaults and optional result
+actions; these changes still need integration and packaged acceptance.
+
+The next integration work must preserve this boundary: setup/token renewal and
+Web SDK capture belong to the exporter; an optional plugin handoff selects a
+vault and format without making standalone exports depend on the plugin.
+
 This repository owns Miro export, conversion, the desktop/CLI application,
 attachment storage, and the versioned board contract in `miro2obsidian/schemas`.
 The [miro-canvas plugin](https://github.com/NixWrk/Obsidian-Plugin---Miro-Canvas)

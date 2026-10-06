@@ -1,8 +1,15 @@
 """Contextual navigation around the existing desktop application service."""
 
 from pathlib import Path
+import webbrowser
 
 from miro2obsidian import desktop_ui as ctk
+from Json_2_Canvas.output_formats import MIRO_CANVAS, OUTPUT_FORMATS, RAW_JSON
+from miro2obsidian.desktop_actions import open_output_folder, obsidian_uri
+
+EXPORT_DATA = "Export data"
+FOR_OBSIDIAN = "For Obsidian"
+MIRO_CANVAS_URL = "https://github.com/NixWrk/Obsidian-Plugin---Miro-Canvas"
 
 
 class GuidedWorkflow:
@@ -12,12 +19,15 @@ class GuidedWorkflow:
         self.busy = False
         self.connected = False
         self.boards_ready = False
+        self.canvas_format = MIRO_CANVAS
+        self.result_frame = None
         app.workspace = ctk.build_workspace(app)
         app.workspace.grid_columnconfigure(0, weight=1)
         self.pages = [ctk.CTkFrame(app.workspace, fg_color="transparent") for _ in range(4)]
         for page in self.pages:
             page.grid_columnconfigure(1, weight=1)
         self.advanced = ctk.CTkFrame(self.pages[2])
+        self.export_options = ctk.CTkFrame(self.pages[2], fg_color="transparent")
         self.sdk = ctk.CTkFrame(self.pages[1])
         self.sdk.grid_columnconfigure(1, weight=1)
         self.sdk_open = False
@@ -29,14 +39,20 @@ class GuidedWorkflow:
 
     def finish(self):
         a = self.app
-        ctk.CTkLabel(self.pages[1], text="Choose the board or file to import.", anchor="w").grid(
+        ctk.CTkLabel(self.pages[1], text="Choose a Miro board or an existing export.", anchor="w").grid(
             row=0, column=0, columnspan=4, sticky="we", padx=12, pady=16)
-        ctk.CTkLabel(self.pages[2], text="Choose a folder inside your Obsidian vault.", anchor="w").grid(
+        self.destination_hint = ctk.CTkLabel(self.pages[2], text="Choose any folder for the JSON and attachments.", anchor="w")
+        self.destination_hint.grid(
             row=0, column=0, columnspan=4, sticky="we", padx=12, pady=16)
+        ctk.CTkLabel(self.pages[2], text="Destination").grid(row=1, column=0, sticky="e", padx=8, pady=8)
+        a.export_purpose = ctk.CTkOptionMenu(self.pages[2], values=[EXPORT_DATA, FOR_OBSIDIAN], command=self.purpose_changed)
+        a.export_purpose.set(EXPORT_DATA)
+        a.export_purpose.grid(row=1, column=1, columnspan=3, sticky="we", padx=8, pady=8)
         ctk.CTkLabel(self.pages[3], text="Export progress", font=ctk.CTkFont(size=28, weight="bold")).grid(
             row=0, column=0, columnspan=4, sticky="w", padx=12, pady=16)
         self.advanced_toggle = ctk.CTkButton(self.pages[2], text="Advanced settings", command=self.toggle_advanced)
         self.advanced_toggle.grid(row=7, column=0, columnspan=4, sticky="w", padx=12, pady=16)
+        self.export_options.grid(row=9, column=0, columnspan=4, sticky="we", padx=12, pady=8)
         # Vault discovery is automatic, so its disabled controls add no decision.
         a.vault_root.grid_remove()
         a.vault_root_button.grid_remove()
@@ -163,6 +179,9 @@ class GuidedWorkflow:
         if error:
             self.error.configure(text=error)
             return
+        if self.result_frame is not None:
+            self.result_frame.destroy()
+            self.result_frame = None
         self.show(3)
         self.app.run_pipeline()
 
@@ -173,6 +192,8 @@ class GuidedWorkflow:
         self.next.configure(state="disabled" if busy else "normal")
         self.app.workflow_mode.configure(state="disabled" if busy else "normal")
         self.app.source_mode.configure(state="disabled" if busy else "normal")
+        self.app.export_purpose.configure(state="disabled" if busy else "normal")
+        self.app.output_format.configure(state="disabled" if busy else "normal")
 
     def toggle_advanced(self):
         self.advanced_open = not self.advanced_open
@@ -206,14 +227,43 @@ class GuidedWorkflow:
         self.app.on_source_mode_changed(mode)
         self.context()
 
+    def purpose_changed(self, purpose):
+        a = self.app
+        if purpose == EXPORT_DATA:
+            if a.output_format.get() != RAW_JSON:
+                self.canvas_format = a.output_format.get()
+            a.output_format.configure(values=list(OUTPUT_FORMATS))
+            a.output_format.set(RAW_JSON)
+        else:
+            a.output_format.set(self.canvas_format)
+        self.context()
+
     def format_changed(self, mode):
         self.app.on_format_changed(mode)
         self.context()
 
     def context(self):
         a = self.app
+        if not hasattr(a, "export_purpose"):
+            return  # The source controls are initialized before finish().
         agent = a.workflow_mode.get() == "Agent"
         miro = a.source_mode.get() != "Existing JSON"
+        if not miro and a.output_format.get() == RAW_JSON:
+            a.output_format.set(self.canvas_format)
+        raw_export = a.output_format.get() == RAW_JSON
+        a.export_purpose.configure(values=[EXPORT_DATA, FOR_OBSIDIAN] if miro else [FOR_OBSIDIAN])
+        a.export_purpose.set(EXPORT_DATA if raw_export else FOR_OBSIDIAN)
+        if not raw_export:
+            self.canvas_format = a.output_format.get()
+        a.output_format.configure(values=list(OUTPUT_FORMATS) if raw_export else [value for value in OUTPUT_FORMATS if value != RAW_JSON])
+        a.on_format_changed(a.output_format.get())
+        a.destination_label.configure(text="Export folder" if raw_export else "Canvas folder")
+        self.destination_hint.configure(text="Choose any folder for the JSON and attachments." if raw_export else "Choose a folder inside your Obsidian vault.")
+        for widget in (a.output_format, a.format_label):
+            widget.grid_remove() if raw_export else widget.grid()
+        # Export controls stay available independently of Canvas layout settings.
+        for column, widget in enumerate((a.allow_missing_assets_checkbox, a.stable_items_checkbox)):
+            widget.grid(row=0, column=column, sticky="w", padx=8, pady=8)
         a.agent_settings_button.grid() if agent else a.agent_settings_button.grid_remove()
         if hasattr(a, "connection_label"):
             a.connection_label.grid() if miro else a.connection_label.grid_remove()
@@ -234,10 +284,56 @@ class GuidedWorkflow:
             from_file = a.websdk_choice.get() == "From file…"
             for child in (a.websdk_path, a.websdk_browse):
                 child.grid() if from_file else child.grid_remove()
-        if a.output_format.get() == "raw-json":
+        if raw_export:
             self.advanced.grid_remove()
             self.advanced_toggle.grid_remove()
         else:
             self.advanced_toggle.grid()
             if self.advanced_open:
                 self.advanced.grid(row=8, column=0, columnspan=4, sticky="we", padx=12, pady=8)
+
+    def show_result(self, path, source_json, output_format, *, degraded=False, item_count=None):
+        """Offer actions on the written export without running another import."""
+        if self.result_frame is not None:
+            self.result_frame.destroy()
+        self.result_frame = ctk.CTkFrame(self.pages[3], fg_color="transparent")
+        self.result_frame.grid(row=1, column=0, columnspan=4, sticky="we", padx=12, pady=12)
+        title = "Written with gaps" if degraded else "Export complete"
+        ctk.CTkLabel(self.result_frame, text=title, font=ctk.CTkFont(size=22, weight="bold")).pack(anchor="w", pady=8)
+        summary = "JSON, comments, attachments and source evidence are saved." if output_format == RAW_JSON else "The Canvas and its source export are saved."
+        ctk.CTkLabel(self.result_frame, text=summary, wraplength=700, justify="left").pack(anchor="w", pady=4)
+        if degraded:
+            ctk.CTkLabel(self.result_frame, text="Some source data or required assets are missing. See the export log for details.", wraplength=700, justify="left").pack(anchor="w", pady=4)
+        if item_count is not None:
+            ctk.CTkLabel(self.result_frame, text=f"Items: {item_count}").pack(anchor="w", pady=4)
+        ctk.CTkLabel(self.result_frame, text=str(path), wraplength=700, justify="left").pack(anchor="w", pady=4)
+        ctk.CTkButton(self.result_frame, text="Open folder", command=lambda: self.open_result(path.parent)).pack(anchor="w", pady=6)
+        if output_format != RAW_JSON:
+            ctk.CTkButton(self.result_frame, text="Open in Obsidian", variant="primary", command=lambda: webbrowser.open(obsidian_uri(path))).pack(anchor="w", pady=6)
+        if source_json:
+            ctk.CTkButton(self.result_frame, text="Prepare for Miro Canvas", command=lambda: self.prepare_canvas(source_json)).pack(anchor="w", pady=6)
+        ctk.CTkLabel(self.result_frame, text="Work with this board in Obsidian using Miro Canvas: sticky notes, shapes and comments.", wraplength=700, justify="left").pack(anchor="w", pady=(14, 4))
+        ctk.CTkButton(self.result_frame, text="Learn about Miro Canvas", command=lambda: webbrowser.open(MIRO_CANVAS_URL)).pack(anchor="w", pady=6)
+        ctk.CTkButton(self.result_frame, text="Export another board", command=lambda: self.show(1)).pack(anchor="w", pady=6)
+        self.show(3)
+        self.app.run_button.grid_remove()
+
+    def open_result(self, folder):
+        try:
+            open_output_folder(folder)
+        except OSError as exc:
+            self.app._log(f"Could not open the folder: {exc}")
+
+    def prepare_canvas(self, source_json):
+        if self.busy:
+            return
+        a = self.app
+        a.workflow_mode.set("Manual")
+        self.workflow_changed("Manual")
+        a.source_mode.set("Existing JSON")
+        a._set_entry(a.json_path, str(source_json))
+        a.output_format.set(MIRO_CANVAS)
+        self.source_changed("Existing JSON")
+        a._set_entry(a.target_dir, "")
+        a._set_entry(a.vault_root, "", disabled=True)
+        self.show(2)

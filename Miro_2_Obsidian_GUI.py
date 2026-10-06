@@ -144,10 +144,10 @@ class ConversionOptions:
 
 #: One line under the Format menu saying what the selected format is for.
 FORMAT_HINTS = {
-    ADVANCED_CANVAS: "For the Advanced Canvas plugin: today's default, richest styling.",
+    ADVANCED_CANVAS: "For the Advanced Canvas plugin: extended Canvas styling.",
     NATIVE_CANVAS: "Plain Obsidian, no plugin required: Markdown text, no HTML.",
     MIRO_CANVAS: "For the miro-canvas plugin: draws the Miro look from the source board.",
-    RAW_JSON: "Just the Miro data: no Canvas file, only the exported JSON.",
+    RAW_JSON: "Portable Miro export: JSON, comments, attachments and provenance. No Obsidian required.",
 }
 
 
@@ -222,7 +222,7 @@ def authorize_gui_token(
 class MiroPipelineApp(ctk.CTk):
     def __init__(self) -> None:
         super().__init__()
-        self.title("Miro -> Obsidian Canvas")
+        self.title("Miro Full Exporter")
         self.geometry("1360x920")
         self.minsize(1150, 760)
 
@@ -306,7 +306,8 @@ class MiroPipelineApp(ctk.CTk):
         self.json_path.grid(row=0, column=1, columnspan=2, sticky="we", **pad)
         ctk.CTkButton(self.json_frame, text="Browse", width=130, command=self.pick_json_file).grid(row=0, column=3, **pad)
 
-        ctk.CTkLabel(destination, text="Canvas folder").grid(row=3, column=0, sticky="e", **pad)
+        self.destination_label = ctk.CTkLabel(destination, text="Export folder")
+        self.destination_label.grid(row=3, column=0, sticky="e", **pad)
         self.target_dir = ctk.CTkEntry(destination)
         self.target_dir.grid(row=3, column=1, columnspan=2, sticky="we", **pad)
         ctk.CTkButton(destination, text="Browse", width=130, command=self.pick_target_dir).grid(row=3, column=3, **pad)
@@ -354,7 +355,7 @@ class MiroPipelineApp(ctk.CTk):
 
         self.allow_missing_assets = ctk.BooleanVar(value=False)
         self.allow_missing_assets_checkbox = ctk.CTkCheckBox(
-            options,
+            self.guided.export_options,
             text="Allow degraded export/source",
             variable=self.allow_missing_assets,
         )
@@ -367,7 +368,7 @@ class MiroPipelineApp(ctk.CTk):
 
         self.stable_items = ctk.BooleanVar(value=False)
         self.stable_items_checkbox = ctk.CTkCheckBox(
-            options,
+            self.guided.export_options,
             text="Use stable REST items",
             variable=self.stable_items,
         )
@@ -378,7 +379,7 @@ class MiroPipelineApp(ctk.CTk):
             pady=(0, 8),
         )
 
-        self.install_obsidian_plugins = ctk.BooleanVar(value=True)
+        self.install_obsidian_plugins = ctk.BooleanVar(value=False)
         self.install_obsidian_plugins_checkbox = ctk.CTkCheckBox(
             options,
             text="Install Advanced Canvas + zoom unlock",
@@ -405,16 +406,17 @@ class MiroPipelineApp(ctk.CTk):
             pady=(0, 8),
         )
 
-        ctk.CTkLabel(destination, text="Format").grid(row=5, column=0, sticky="e", padx=8, pady=(0, 8))
+        self.format_label = ctk.CTkLabel(destination, text="Format")
+        self.format_label.grid(row=5, column=0, sticky="e", padx=8, pady=(0, 8))
         self.output_format = ctk.CTkOptionMenu(
             destination, values=list(OUTPUT_FORMATS), command=self.guided.format_changed
         )
-        self.output_format.set(ADVANCED_CANVAS)
+        self.output_format.set(RAW_JSON)
         self.output_format.grid(row=5, column=1, columnspan=3, sticky="we", padx=8, pady=(0, 8))
 
         self.format_hint = ctk.CTkLabel(
             destination,
-            text=FORMAT_HINTS[ADVANCED_CANVAS],
+            text=FORMAT_HINTS[RAW_JSON],
             wraplength=700, justify="left",
             text_color="gray60",
             anchor="w",
@@ -765,6 +767,10 @@ class MiroPipelineApp(ctk.CTk):
         path = filedialog.askdirectory()
         if path:
             self._set_entry(self.target_dir, path)
+            if self.output_format.get() == RAW_JSON:
+                self._set_entry(self.vault_root, "", disabled=True)
+                self.fill_default_paths()
+                return
             try:
                 paths = resolve_vault_paths(Path(path))
                 self._set_entry(self.vault_root, str(paths.vault_root), disabled=True)
@@ -824,6 +830,7 @@ class MiroPipelineApp(ctk.CTk):
             self.fill_default_paths()
         else:
             self._show_path_frame(self.json_frame)
+        self.guided.context()
 
     def _run_one_board(
         self,
@@ -832,7 +839,7 @@ class MiroPipelineApp(ctk.CTk):
         label: str,
         source_json: Path,
         target_dir: Path,
-        vault_root: Path,
+        vault_root: Path | None,
         attachment_dir: Path | None,
         profile: ViewProfile,
         min_font_px: int,
@@ -874,7 +881,7 @@ class MiroPipelineApp(ctk.CTk):
             workflow_mode = self.workflow_mode.get()
             target_text = self.target_dir.get().strip()
             if not target_text:
-                raise ValueError("Canvas folder is required.")
+                raise ValueError("Choose an export folder first.")
             json_path_text = self.json_path.get().strip()
             websdk_path_text = self.websdk_path.get().strip() if source_mode in {ACCOUNT_SOURCE_MODE, URL_SOURCE_MODE} else ""
             if websdk_path_text and workflow_mode != AGENT_WORKFLOW and source_mode not in {ACCOUNT_SOURCE_MODE, URL_SOURCE_MODE}:
@@ -885,20 +892,21 @@ class MiroPipelineApp(ctk.CTk):
             board_text = self.board_id.get()
             account_board_id = self.selected_account_board_id
             account_label = self._selected_board_label() if source_mode == ACCOUNT_SOURCE_MODE else ""
-            min_font_px = int(self.min_font_px.get().strip() or "8")
-            profile = ViewProfile(
+            raw_export = self.output_format.get() == RAW_JSON
+            min_font_px = 8 if raw_export else int(self.min_font_px.get().strip() or "8")
+            profile = ViewProfile() if raw_export else ViewProfile(
                 min_zoom=float(self.min_zoom.get().strip() or "0.12"),
                 min_font_px=min_font_px,
                 scale_mode=self.scale_mode.get(),
             )
             options = ConversionOptions(
-                scale=self._parse_float_or_none(self.scale.get()),
+                scale=None if raw_export else self._parse_float_or_none(self.scale.get()),
                 theme=self.theme.get(),
                 text_style_mode=self.text_style_mode.get(),
                 output_format=self.output_format.get(),
                 allow_missing_assets=self.allow_missing_assets.get(),
                 prefer_experimental=not self.stable_items.get(),
-                install_obsidian_plugins=self.install_obsidian_plugins.get(),
+                install_obsidian_plugins=(self.install_obsidian_plugins.get() and self.output_format.get() == ADVANCED_CANVAS),
                 share_attachments=self.share_attachments.get(),
             )
             agent_command_spec = self.agent_command_spec
@@ -913,10 +921,14 @@ class MiroPipelineApp(ctk.CTk):
             try:
                 run_results = []
                 target_dir = Path(target_text)
-                vault_paths = resolve_vault_paths(target_dir)
-                vault_root = vault_paths.vault_root
-                attachment_dir = vault_paths.attachment_dir
-                self.after(0, lambda: self._set_entry(self.vault_root, str(vault_root), disabled=True))
+                if options.output_format == RAW_JSON:
+                    vault_root = None
+                    attachment_dir = None
+                else:
+                    vault_paths = resolve_vault_paths(target_dir)
+                    vault_root = vault_paths.vault_root
+                    attachment_dir = vault_paths.attachment_dir
+                    self.after(0, lambda: self._set_entry(self.vault_root, str(vault_root), disabled=True))
 
                 if workflow_mode == AGENT_WORKFLOW:
                     if source_mode not in {ACCOUNT_SOURCE_MODE, URL_SOURCE_MODE}:
@@ -933,7 +945,7 @@ class MiroPipelineApp(ctk.CTk):
                     outcome = run_agent(
                         board_url=f"https://miro.com/app/board/{board_id}/",
                         target_dir=target_dir,
-                        vault_root=vault_root,
+                        vault_root=vault_root or target_dir,
                         output_format=options.output_format,
                         repo_root=REPO_ROOT,
                         command=agent_command_spec,
@@ -962,11 +974,12 @@ class MiroPipelineApp(ctk.CTk):
                     else:
                         done_path = str(outcome.artifact_path)
                         self._log(f"Agent 3/3: validated result at {done_path}")
-                        self.after(0, lambda: messagebox.showinfo("Pipeline complete", done_path))
+                        self.after(0, lambda: self.guided.show_result(
+                            Path(done_path), outcome.source_json, options.output_format))
                     return
 
                 if workflow_mode == CODE_WORKFLOW:
-                    self._log("Code: checking the vault and selected source.")
+                    self._log("Code: checking the destination and selected source.")
                     if source_mode == JSON_SOURCE_MODE:
                         self._log("Code: reading local JSON; Miro access is unnecessary.")
                     elif not websdk_path_text:
@@ -1063,7 +1076,10 @@ class MiroPipelineApp(ctk.CTk):
                     if workflow_mode == CODE_WORKFLOW:
                         self._log("Code: export finished; the output passed the pipeline checks.")
                     self._log(f"Done: {done_path}")
-                    self.after(0, lambda: messagebox.showinfo("Pipeline complete", done_path))
+                if result:
+                    self.after(0, lambda: self.guided.show_result(
+                        result.canvas_path, result.source_json, options.output_format,
+                        degraded=bool(degraded), item_count=result.item_count))
             except Exception as exc:  # noqa: BLE001
                 self._log(f"Pipeline failed: {exc}")
                 show_error_later(self.after, "Pipeline failed", exc)

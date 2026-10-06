@@ -4,6 +4,13 @@ import re
 
 from miro2obsidian.ui_strings import RU
 
+DESKTOP_EN = {
+    "raw-json": "Miro data (JSON + attachments)",
+    "miro-canvas": "Miro Canvas (recommended)",
+    "native-canvas": "Standard Canvas",
+    "advanced-canvas": "Advanced Canvas",
+}
+
 DESKTOP_RU = {
     **RU,
     "Language": "Язык", "Appearance": "Интерфейс", "light": "Светлая", "dark": "Тёмная",
@@ -172,8 +179,10 @@ PREFIXES = {
 
 
 def translate(value, language="en"):
-    if language != "ru" or not isinstance(value, str):
+    if not isinstance(value, str):
         return value
+    if language != "ru":
+        return DESKTOP_EN.get(value, value)
     if value in DESKTOP_RU:
         return DESKTOP_RU[value]
     status = re.fullmatch(r"\[(Complete|Written with gaps|Needs you|Failed)\] (.*)", value)
@@ -193,6 +202,34 @@ def translate(value, language="en"):
 
 
 DESKTOP_RU.update({
+    "For the Advanced Canvas plugin: extended Canvas styling.": "Для плагина Advanced Canvas: расширенное оформление Canvas.",
+    "Portable Miro export: JSON, comments, attachments and provenance. No Obsidian required.": "Переносимый экспорт Miro: JSON, комментарии, вложения и происхождение данных. Obsidian не требуется.",
+    "raw-json": "Данные Miro (JSON + вложения)",
+    "miro-canvas": "Miro Canvas (рекомендуется)",
+    "native-canvas": "Обычный Canvas",
+    "advanced-canvas": "Advanced Canvas",
+    "Maximum public-API data, saved on your computer.": "Максимум данных публичных API, сохранённых на вашем компьютере.",
+    "03   Choose a destination": "03   Выберите назначение",
+    "Export data": "Экспорт данных",
+    "For Obsidian": "Для Obsidian",
+    "Destination": "Назначение",
+    "Export folder": "Папка экспорта",
+    "Choose a Miro board or an existing export.": "Выберите доску Miro или готовый экспорт.",
+    "Choose any folder for the JSON and attachments.": "Выберите любую папку для JSON и вложений.",
+    "Export complete": "Экспорт завершён",
+    "JSON, comments, attachments and source evidence are saved.": "JSON, комментарии, вложения и исходные данные сохранены.",
+    "The Canvas and its source export are saved.": "Canvas и исходный экспорт сохранены.",
+    "Some source data or required assets are missing. See the export log for details.": "Часть исходных данных или обязательных вложений отсутствует. Подробности в журнале экспорта.",
+    "Open folder": "Открыть папку",
+    "Open in Obsidian": "Открыть в Obsidian",
+    "Prepare for Miro Canvas": "Подготовить для Miro Canvas",
+    "Learn about Miro Canvas": "Подробнее о Miro Canvas",
+    "Export another board": "Экспортировать другую доску",
+    "Work with this board in Obsidian using Miro Canvas: sticky notes, shapes and comments.": "Работайте с этой доской в Obsidian с помощью Miro Canvas: стикеры, фигуры и комментарии.",
+    "Items": "Элементы",
+    "Connect Miro to export board data and attachments to your computer.": "Подключите Miro для экспорта данных доски и вложений на компьютер.",
+    "Capture board data and save a portable JSON export.": "Получите данные доски и сохраните переносимый экспорт JSON.",
+    "03   Export board data": "03   Экспортируйте данные доски",
     "Open Miro Settings > Your apps": "Откройте Miro: Settings → Your apps",
     "Open this link in your normal browser and sign in to Miro. Miro may redirect to a company-specific Profile settings URL; choose the Your apps tab. If the link does not open it, use your Miro avatar, Settings, then Your apps. The Explore the Developer Hub / Get started banner is optional. Finish email sign-in and setup in the same browser: sessions do not transfer between browsers. Miro renames screens now and then, so the labels on your screen may differ slightly from the ones quoted here; look for the same purpose.": "Откройте ссылку в обычном браузере и войдите в Miro. Возможен переход в настройки компании: выберите Your apps. Если ссылка не работает, нажмите аватар → Settings → Your apps. Баннер Developer Hub / Get started можно пропустить. Вход по письму и настройку завершайте в одном браузере: сеансы входа между браузерами не переносятся. Названия настроек Miro могут немного отличаться; ориентируйтесь на их назначение.",
     "Create your own Miro app in a Developer team": "Создайте приложение в Developer team",
