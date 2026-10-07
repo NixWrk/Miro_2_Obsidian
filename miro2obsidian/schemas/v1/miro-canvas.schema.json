@@ -11,6 +11,12 @@
       "const": 1
     },
     "settings": { "$ref": "#/$defs/settings" },
+    "properties": {
+      "description": "Board properties indexed as frontmatter by the plugin; all values remain plain JSON.",
+      "type": "object",
+      "maxProperties": 256,
+      "additionalProperties": true
+    },
     "transform": { "$ref": "#/$defs/transform" },
     "bindings": {
       "description": "Canvas node id to the source item it shows.",
@@ -335,6 +341,29 @@
         "locked": { "type": "boolean" },
         "showAttachmentName": { "type": "boolean" },
         "rotation": { "type": "number" },
+        "customStyles": {
+          "description": "Named local CSS styles defined in the plugin settings, in application order.",
+          "type": "array",
+          "maxItems": 32,
+          "uniqueItems": true,
+          "items": { "type": "string", "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$" }
+        },
+        "groupCollapse": {
+          "description": "Expanded size and members of a collapsed native group. Child positions are never removed.",
+          "type": "object",
+          "required": ["width", "height", "children"],
+          "properties": {
+            "width": { "type": "number", "minimum": 1 },
+            "height": { "type": "number", "minimum": 1 },
+            "children": {
+              "type": "array",
+              "maxItems": 100000,
+              "uniqueItems": true,
+              "items": { "type": "string", "minLength": 1 }
+            }
+          },
+          "additionalProperties": true
+        },
         "item": { "$ref": "#/$defs/localItem" },
         "shape": {
           "description": "The Miro shape a card is drawn as (rectangle, ellipse, a flowchart shape...); without the plugin it is a plain card. Not checked by the plugin's metadata validator; the renderer ignores what it does not know.",
