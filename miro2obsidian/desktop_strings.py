@@ -3,6 +3,12 @@
 import re
 
 from miro2obsidian.ui_strings import RU
+from miro2obsidian.app_setup import ACCESS_HELP, CONFIG_HELP, CONNECT_HELP, CREATE_HELP, TEAM_HELP, TOKEN_HELP
+from miro2obsidian.desktop_websdk_help import INTRO as WEBSDK_INTRO, SOURCE_HELP, STEPS as WEBSDK_STEPS, TROUBLESHOOTING as WEBSDK_TROUBLESHOOTING
+from miro2obsidian.export_methods import (
+    BATCH_HELP, LIMITS, OUTPUT_COVERAGE, REST_AND_SDK, REST_COVERAGE, REST_ONLY,
+    SDK_COVERAGE, SDK_REQUIRED, UNION_COVERAGE,
+)
 
 DESKTOP_EN = {
     "raw-json": "Miro data (JSON + attachments)",
@@ -253,4 +259,73 @@ DESKTOP_RU["Additional board data"] = "Дополнительные данные
 
 DESKTOP_RU["Return to the app to choose your board."] = "Вернитесь в приложение и выберите доску."
 
+DESKTOP_RU.update({
+    "Connect Miro": "Подключение Miro",
+    "Bring your boards home.": "Сохраните свои доски.",
+    "Miro Full Exporter · Local setup": "Miro Full Exporter · Локальное подключение",
+    "1. Create app": "1. Создать приложение",
+    "2. Configure app": "2. Настроить приложение",
+    "3. Connect": "3. Подключить",
+    "Create your Miro app": "Создайте приложение Miro",
+    "Configure your Miro app": "Настройте приложение Miro",
+    "Connect your Miro app": "Подключите приложение Miro",
+    "Open Developer Hub": "Открыть Developer Hub",
+    "Developer Hub address": "Адрес Developer Hub",
+    "App name": "Название приложения",
+    "Authorization token": "Токен авторизации",
+    "Copy": "Скопировать",
+    "Copied.": "Скопировано.",
+    "Copy failed. Select the address and press Ctrl+C.": "Не удалось скопировать. Выделите адрес и нажмите Ctrl+C.",
+    "App created — continue": "Приложение создано — продолжить",
+    "App configured — continue": "Приложение настроено — продолжить",
+    "I already have a configured app": "У меня уже есть настроенное приложение",
+    "Return to source": "Вернуться к выбору доски",
+    "App URL / SDK URI": "App URL / SDK URI — адрес приложения",
+    "Redirect URI for OAuth 2.0": "Redirect URI for OAuth 2.0 — адрес возврата",
+    "Permissions (scopes)": "Разрешения (scopes)",
+    "Enter both the Miro Client ID and Client secret.": "Заполните оба поля: Client ID и Client secret.",
+    "Waiting for Miro authorization. Finish it in your browser.": "Ожидаем разрешение Miro. Завершите авторизацию в браузере.",
+    CREATE_HELP: "Откройте Developer Hub, войдите и выберите Your apps → Create new app или Create your first app. Если открылись Profile settings, нажмите Get started в блоке Explore the Developer Hub. Раздел Apps & Integrations показывает установленные приложения; создать своё нужно в Developer Hub.",
+    TEAM_HELP: "Назовите приложение Miro Full Exporter и выберите Developer team. Если Miro требует Enterprise Developer team, её должен настроить администратор организации. Одного названия Dev team недостаточно.",
+    TOKEN_HELP: "До нажатия Create app снимите галочку Expire user authorization token. Эта версия не обновляет истекающие токены автоматически. Miro не позволяет изменить этот выбор после создания приложения. Если галочка уже включена, после истечения токена понадобится переподключение либо новое приложение с нужной настройкой.",
+    ACCESS_HELP: "Access token — разрешение на экспорт доски. Программа получает его автоматически при авторизации в Miro; вставлять его сюда не нужно. Client ID — идентификатор приложения, Client secret — отдельный секрет приложения.",
+    CONFIG_HELP: "В настройках приложения вставьте и сохраните два адреса ниже. Включите Use this URI for SDK authorization, если этот пункт есть. Выберите только boards:read и team:read. Установите приложение в команду, которой принадлежит доска.",
+    CONNECT_HELP: "Скопируйте Client ID и Client secret из раздела App Credentials в поля ниже. Miro и авторизацию проходите в одном браузере. Эти значения остаются в локальной памяти; режим автоматизации сохраняет только access token в системном хранилище.",
+})
+
 DESKTOP_RU["Restart setup from the app."] = "Запустите настройку заново из приложения."
+
+DESKTOP_RU.update({
+    "Downloaded Web SDK file": "Скачанный файл Web SDK",
+    "Choose the downloaded JSON, or leave empty": "Выберите скачанный JSON или оставьте поле пустым",
+    "How to download the board file": "Как скачать файл доски",
+    "Server command": "Команда запуска сервера",
+    "Source-checkout command (Windows)": "Команда из репозитория (Windows)",
+    WEBSDK_INTRO: "Для выбранного по умолчанию метода REST + Web SDK этот файл обязателен. Он добавляет данные доски, которые REST может не получить. Чтобы продолжить без него, явно выберите выше «Только REST (меньше данных)».",
+    WEBSDK_STEPS[0]: "1. Откройте PowerShell / терминал, выполните команду ниже и оставьте его открытым до скачивания JSON. Если команда не найдена, используйте команду из репозитория ниже.",
+    SOURCE_HELP: "Если программа запущена из этого репозитория на Windows, выполните следующую команду в его папке. Оставьте терминал открытым.",
+    WEBSDK_STEPS[1]: "2. В Developer Hub → Your apps откройте созданное вами приложение Miro. Сохраните App URL / SDK URI ниже, включите авторизацию SDK, если такой пункт есть, и установите / авторизуйте приложение в команде этой доски. Redirect URI для OAuth оставьте на порту 8765.",
+    WEBSDK_STEPS[2]: "3. Откройте эту же доску Miro в браузере. На левой панели выберите + More apps / + More tools и найдите приложение по заданному вами имени (например, Miro Full Exporter).",
+    WEBSDK_STEPS[3]: "4. В панели приложения нажмите Export board (экспорт доски). Export selection (экспорт выделения) не подходит. Сохраните скачанный JSON на компьютере.",
+    WEBSDK_STEPS[4]: "5. Вернитесь сюда, нажмите «Выбрать», укажите скачанный JSON и вскоре запустите экспорт. Оба снимка должны относиться к одной доске, быть не старше 24 часов и получены с разницей не более 60 минут.",
+    WEBSDK_TROUBLESHOOTING: "Нет приложения в списке? Проверьте установку в команду этой доски. Connection refused? Оставьте локальный сервер запущенным и проверьте App URL. Открытие localhost отдельно не экспортирует доску: приложение нужно открыть внутри Miro.",
+})
+
+DESKTOP_RU.update({
+    "Export method": "Метод экспорта",
+    "Export method and coverage": "Метод экспорта и состав данных",
+    "Miro REST + Web SDK data, saved on your computer.": "Данные REST + Web SDK Miro, сохранённые на вашем компьютере.",
+    REST_AND_SDK: "REST + Web SDK (рекомендуется)",
+    REST_ONLY: "Только REST (меньше данных)",
+    "Whole-board Web SDK JSON (required)": "JSON всей доски из Web SDK (обязательно)",
+    "Choose the downloaded whole-board JSON": "Выберите скачанный JSON всей доски",
+    "What each method saves": "Что сохраняет каждый метод",
+    REST_COVERAGE: "REST: доступные тексты, стикеры, фигуры, фреймы, карточки, карточки приложений, связи, изображения, документы и встроенные материалы, группы, теги и сведения о доске. Дополнительно читает детали связей, состав групп и назначения тегов; экспериментальный режим — узлы mind map и их детали. Комментарии и вложения получает отдельно. Некоторые изображения могут быть превью; часть документов Miro сохраняется как PDF/HTML.",
+    SDK_COVERAGE: "Web SDK: поддерживаемые объекты, группы и теги доски, явное экспериментальное чтение фигур и mind map, индексы слоёв и метаданные экспортирующего приложения, где они доступны. Может добавить объекты или заполнить геометрию, стили и другие поля REST. Источники пересекаются: SDK не гарантирует больше данных для каждого объекта. JSON не заменяет REST-комментарии и скачанные вложения.",
+    UNION_COVERAGE: "REST + Web SDK: объединяет оба источника без дублирования общих объектов. Данные REST имеют приоритет; Web SDK заполняет пустые поля и добавляет свои объекты. Этот метод выбран по умолчанию. Проверенный JSON всей доски из Web SDK обязателен; автоматического перехода на REST нет.",
+    LIMITS: "Текущие ограничения: некоторые таблицы, Kanban и неподдерживаемые виджеты могут отдавать только геометрию. SDK видит метаданные только экспортирующего приложения; недоступные методы отмечаются в JSON. Ответы на комментарии сверяются с полученными счётчиками и ссылками продолжения; охват всех закрытых веток не подтверждён. REST + Web SDK собирает больше источников, но не доказывает получение всех данных публичных API.",
+    OUTPUT_COVERAGE: "JSON сохраняет полученные исходные данные и их происхождение. Canvas показывает то, что поддерживают его формат и конвертер: объект может сохраниться в JSON, даже если его нельзя показать на Canvas.",
+    BATCH_HELP: "Экспорт списка ссылок сейчас поддерживает только REST. Для REST + Web SDK экспортируйте доски по одной, каждую со своим JSON, либо явно выберите «Только REST (меньше данных)».",
+    SDK_REQUIRED: "Для REST + Web SDK нужен скачанный JSON всей доски. Следуйте инструкции ниже и выберите файл либо явно переключитесь на «Только REST (меньше данных)».",
+    "REST + Web SDK requires complete attachments. Turn off Allow missing assets (degraded), or choose REST only (less data).": "REST + Web SDK требует полных вложений. Выключите «Разрешить отсутствие файлов» либо выберите «Только REST (меньше данных)».",
+})

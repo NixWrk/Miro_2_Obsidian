@@ -3,7 +3,7 @@
 **English** | [Russian](WORKFLOW_MODES.ru.md)
 
 The GUI's **Workflow** menu chooses who performs the Miro browser steps. Live
-imports share the REST export, optional canonical REST/Web SDK merge, asset
+imports default to REST plus a required canonical REST/Web SDK merge, asset
 download, and Canvas conversion code. Converting an existing JSON file needs
 no Miro access. **Export data** saves JSON and attachments to any folder;
 **For Obsidian** adds Canvas conversion and requires a vault destination.
@@ -13,16 +13,40 @@ Miro internals.
 | Workflow | What runs automatically | What may require a person |
 |---|---|---|
 | **Manual** | Conversion and validation after **Run pipeline** | Miro app setup, OAuth, choosing the board, and Web SDK download |
-| **Code automation** | REST items and comments, required assets, Canvas conversion, and validation; progress appears in the log | Initial Miro authorization; an optional Web SDK capture |
+| **Code automation** | REST items and comments, required assets, merge, Canvas conversion, and validation; progress appears in the log | Initial Miro authorization; a Web SDK capture unless REST only is explicitly selected |
 | **Agent** | A configured local agent attempts browser setup, REST plus Web SDK export, conversion, and validation | Account sign-in, MFA, administrator approval, or an unavailable browser tool |
 
 ## Manual
 
 Choose a source and Canvas folder in the GUI. For the maximum supported export,
 run the [Web SDK exporter](../tools/miro_websdk_exporter/README.md) on the board,
-download the **whole-board** JSON, and select it in **Web SDK JSON**. The GUI
+download the **whole-board** JSON, and select it in **Whole-board Web SDK JSON (required)**. The GUI
 passes that file to the strict canonical REST/Web SDK merge. A capture from a
-different or stale board is rejected. Leave the field empty for REST only.
+different or stale board is rejected. An empty field blocks the default method.
+Choose **REST only (less data)** explicitly to skip Web SDK; an old selected file
+is then ignored. Offline Existing JSON conversion does not require another capture.
+
+In the GUI, expand **Export method and coverage** on the source page. The
+**Whole-board Web SDK JSON (required)** field includes instructions in the same window:
+
+1. Run `miro2obsidian websdk-serve --port 8766` in a terminal and keep it open.
+   From this Windows checkout, run
+   `.\.venv\Scripts\python.exe -m scripts.miro_pipeline websdk-serve --port 8766`
+   in the repository folder instead. Both commands have a **Copy** button.
+2. In **Developer Hub → Your apps**, save
+   `http://localhost:8766/index.html` as your app's **App URL / SDK URI**
+   (also copyable in the GUI), enable SDK authorization if shown, and install /
+   authorize it in the board's team. Keep the OAuth redirect on port 8765.
+3. Open that board in your browser, choose **+ More apps / + More tools**, and
+   open the app under the name you gave it.
+4. Choose **Export board**, save the downloaded JSON, return to the desktop
+   app, and select it with **Browse**. **Export selection** is not accepted.
+5. Run the main export soon afterward: the captures must belong to the same
+   board, be at most 24 hours old, and be at most 60 minutes apart.
+
+If the app is missing, check its installation in the board's team. For
+`ERR_CONNECTION_REFUSED`, check the server and App URL. Opening the localhost
+page outside Miro does not capture the board.
 
 ## Code automation
 
@@ -50,7 +74,7 @@ For a scheduled run, invoke the CLI with `--stored-token`; it uses the same
 protected token without a browser:
 
 ```powershell
-miro2obsidian --stored-token `
+miro2obsidian --stored-token --rest-only `
   --board-id <board_id> `
   --source-json <vault>\_miro_sources\board.json `
   --target-dir <vault>\Canvas `
@@ -61,12 +85,18 @@ miro2obsidian --stored-token `
 Use the same OS user and vault session for scheduled runs (Task Scheduler,
 launchd, or cron). If no OS keyring is available, set `MIRO_ACCESS_TOKEN` in the
 process environment and omit `--stored-token`. If Miro revokes the token or the app
-is uninstalled, reconnect interactively. Code automation currently produces a
-REST-only export unless **Web SDK JSON** points to a fresh whole-board capture.
-It does not operate a browser by itself. Start the packaged Web SDK server with
+is uninstalled, reconnect interactively. The scheduled example explicitly opts
+into REST only and may omit board-only data. Remove `--rest-only` and provide
+`--websdk-json <fresh-whole-board.json>` for the combined method. Code automation
+requires that capture by default; it does not operate a browser by itself.
+Start the packaged Web SDK server with
 `miro2obsidian websdk-serve --port 8766` when capturing a board in Miro.
 
 ## Agent
+
+Agent completion requires a verified canonical REST + Web SDK source; an
+unavailable capture must produce `needs_user`, rather than an implicit REST-only
+success. The source verifier checks the union contract before accepting output.
 
 Choose **Agent** and one Miro board or URL. To use any local agent, set
 `MIRO2OBSIDIAN_AGENT_COMMAND` to a JSON array of executable and arguments, or

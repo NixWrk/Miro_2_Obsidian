@@ -43,6 +43,75 @@ class FakeSession:
 
 
 class MiroCommentProbeTests(unittest.TestCase):
+    def probe_threads(self, thread: dict, *reply_pages: dict) -> tuple[dict, FakeSession]:
+        session = FakeSession([
+            FakeResponse({}, status_code=400), FakeResponse({"data": [thread]}),
+            FakeResponse({}, status_code=404),
+            *(FakeResponse(page) for page in reply_pages),
+        ])
+        return run_comment_probe(board_id="board-1", token="synthetic-token", session=session, retry_delay_seconds=0), session
+
+    def test_reply_continuation_preserves_resolved_flag_and_source_pages(self) -> None:
+        payload, session = self.probe_threads({
+            "id": "thread-1", "resolved": True, "replyCount": 2,
+            "replies": {"data": [{"id": "reply-1", "text": "first"}], "total": 2,
+                        "links": {"next": "/v2/boards/board-1/comments/thread-1/messages?cursor=2"}},
+        }, {"data": [{"id": "reply-2", "text": "second"}], "total": 2})
+        comment = payload["comments"][0]
+        self.assertTrue(comment["resolved"])
+        self.assertEqual([r["id"] for r in comment["replies"]["data"]], ["reply-1", "reply-2"])
+        coverage = payload["completeness"]["thread_coverage"]
+        self.assertTrue(coverage["replies_verified"])
+        self.assertFalse(coverage["resolved_threads_verified"])
+        self.assertEqual(len(coverage["threads"][0]["original_replies"]["data"]), 1)
+        self.assertEqual(len(session.calls), 4)
+
+    def test_missing_reply_evidence_is_unknown_even_for_resolved_thread(self) -> None:
+        payload, _ = self.probe_threads({"id": "thread-1", "resolved": True, "messages": [{"id": "message-1"}]})
+        coverage = payload["completeness"]["thread_coverage"]
+        self.assertFalse(coverage["replies_verified"])
+        self.assertFalse(coverage["resolved_threads_verified"])
+        self.assertTrue(payload["completeness"]["complete"])
+        self.assertEqual(payload["completeness"]["scope"], "available_collection_pages")
+        self.assertEqual(payload["comments"][0]["messages"], [{"id": "message-1"}])
+
+    def test_reply_audit_rejects_truncation_malformed_counts_and_unsafe_links(self) -> None:
+        cases = [
+            {"replyCount": 2, "replies": [{"id": "r1"}]},
+            {"replyCount": 2},
+            {"replyCount": True, "replies": []},
+            {"replyCount": 1, "replies": {"data": [], "total": 0}},
+            {"replies": {"data": [{"id": "r1"}], "links": {"next": "https://attacker.invalid/next"}}},
+            {"replies": {"data": [{"id": "r1"}], "links": {"next": "/v2/boards/other/comments"}}},
+            {"replies": {"data": [{"id": "r1"}], "hasMore": True}},
+        ]
+        for fields in cases:
+            with self.subTest(fields=fields), self.assertRaises(CommentProbeError):
+                self.probe_threads({"id": "thread-1", **fields})
+
+    def test_reply_audit_rejects_duplicate_reply_ids(self) -> None:
+        with self.assertRaisesRegex(CommentProbeError, "repeated an ID"):
+            self.probe_threads({
+                "id": "thread-1", "replyCount": 2,
+                "replies": {"data": [{"id": "r1"}], "links": {"next": "comments/thread-1/messages?cursor=2"}},
+            }, {"data": [{"id": "r1"}]})
+
+    def test_embedded_messages_use_their_own_count_and_supplied_links(self) -> None:
+        payload, _ = self.probe_threads({
+            "id": "thread-1", "replyCount": 1, "messageCount": 2,
+            "messages": {"data": [{"id": "root"}], "total": 2,
+                         "links": {"next": "/v2/boards/board-1/comments/thread-1/messages?cursor=2"}},
+        }, {"data": [{"id": "second"}], "total": 2})
+        coverage = payload["completeness"]["thread_coverage"]
+        self.assertTrue(coverage["messages_verified"])
+        self.assertFalse(coverage["replies_verified"])
+        self.assertEqual(len(payload["comments"][0]["messages"]["data"]), 2)
+        self.assertEqual(len(coverage["message_threads"][0]["original_messages"]["data"]), 1)
+
+    def test_message_truncation_is_rejected(self) -> None:
+        with self.assertRaisesRegex(CommentProbeError, "truncated"):
+            self.probe_threads({"id": "thread-1", "messages": {"data": [{"id": "root"}], "total": 2}})
+
     def test_build_requests_checks_public_and_experimental_paths(self) -> None:
         requests = build_comment_probe_requests(
             "board-1",

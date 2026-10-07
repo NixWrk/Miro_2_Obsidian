@@ -21,7 +21,11 @@ def test_setup_uses_account_independent_miro_settings_link():
         "target": "_blank",
         "rel": "noopener noreferrer",
     }]
-    assert MIRO_APPS_URL == "https://miro.com/app/settings/user-profile/apps/"
+    assert MIRO_APPS_URL == "https://developers.miro.com/page/developer-hub#your-apps"
+    assert "Get started banner is optional" not in setup_intro_html()
+    assert "Authorization token" in setup_intro_html()
+    assert "data-copy-target=\"setup-app-url\"" in setup_intro_html()
+    assert "data-copy-target=\"setup-redirect\"" in setup_intro_html()
 
 
 def test_token_guidance_matches_the_version_capability():

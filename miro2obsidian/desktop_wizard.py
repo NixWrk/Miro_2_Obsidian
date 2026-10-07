@@ -6,6 +6,7 @@ import webbrowser
 from miro2obsidian import desktop_ui as ctk
 from Json_2_Canvas.output_formats import MIRO_CANVAS, OUTPUT_FORMATS, RAW_JSON
 from miro2obsidian.desktop_actions import open_output_folder, obsidian_uri
+from miro2obsidian.export_methods import REST_ONLY, websdk_selection_error
 
 EXPORT_DATA = "Export data"
 FOR_OBSIDIAN = "For Obsidian"
@@ -30,7 +31,7 @@ class GuidedWorkflow:
         self.export_options = ctk.CTkFrame(self.pages[2], fg_color="transparent")
         self.sdk = ctk.CTkFrame(self.pages[1])
         self.sdk.grid_columnconfigure(1, weight=1)
-        self.sdk_open = False
+        self.sdk_open = True
         self.advanced_open = False
         self.error = ctk.CTkLabel(app.action_bar, text="", anchor="w", wraplength=700)
         self.error.grid(row=1, column=0, columnspan=4, sticky="we", padx=12, pady=4)
@@ -59,7 +60,7 @@ class GuidedWorkflow:
         for child in self.pages[2].winfo_children():
             if isinstance(child, ctk.CTkLabel) and getattr(child, "_original_text", "") == "Vault root (auto)":
                 child.grid_remove()
-        self.sdk_toggle = ctk.CTkButton(self.pages[1], text="Additional board data", command=self.toggle_sdk)
+        self.sdk_toggle = ctk.CTkButton(self.pages[1], text="Export method and coverage", command=self.toggle_sdk)
         self.sdk_toggle.grid(row=4, column=0, columnspan=4, sticky="w", padx=12, pady=12)
         self.connection_extras = []
         for child in a.account_frame.winfo_children():
@@ -156,13 +157,23 @@ class GuidedWorkflow:
             entry = a.json_path if mode == "Existing JSON" else a.url_list_path
             if not Path(entry.get().strip()).is_file():
                 return "Choose an existing source file first."
-        return ""
+        return self.export_source_error()
+
+    def export_source_error(self):
+        a = self.app
+        return websdk_selection_error(
+            source_mode=a.source_mode.get(), workflow_mode=a.workflow_mode.get(),
+            method=a.export_method.get(), path=a.websdk_path.get().strip(),
+            allow_missing_assets=a.allow_missing_assets.get(),
+        )
 
     def advance(self):
         if self.busy:
             return
         error = self.source_error() if self.step == 1 else ""
         if error:
+            self.sdk_open = True
+            self.context()
             self.error.configure(text=error)
         else:
             self.show(min(2, self.step + 1))
@@ -177,6 +188,8 @@ class GuidedWorkflow:
             error = "Choose an export folder first."
             self.show(2)
         if error:
+            self.sdk_open = True
+            self.context()
             self.error.configure(text=error)
             return
         if self.result_frame is not None:
@@ -194,6 +207,7 @@ class GuidedWorkflow:
         self.app.source_mode.configure(state="disabled" if busy else "normal")
         self.app.export_purpose.configure(state="disabled" if busy else "normal")
         self.app.output_format.configure(state="disabled" if busy else "normal")
+        self.app.export_method.configure(state="disabled" if busy else "normal")
 
     def toggle_advanced(self):
         self.advanced_open = not self.advanced_open
@@ -270,7 +284,7 @@ class GuidedWorkflow:
         a.stable_items_checkbox.grid() if miro else a.stable_items_checkbox.grid_remove()
         a.install_obsidian_plugins_checkbox.grid() if a.output_format.get() == "advanced-canvas" else a.install_obsidian_plugins_checkbox.grid_remove()
         # SDK capture is relevant only to Miro workflows handled by this app.
-        sdk = (a.source_mode.get() == "Miro URL" or
+        sdk = (a.source_mode.get() in {"Miro URL", "Miro URL list"} or
                (a.source_mode.get() == "Miro account" and self.boards_ready)) and not agent
         if sdk:
             self.sdk_toggle.grid()
@@ -280,6 +294,10 @@ class GuidedWorkflow:
             self.sdk.grid(row=5, column=0, columnspan=4, sticky="we", padx=12, pady=8)
         else:
             self.sdk.grid_remove()
+        from_file = a.export_method.get() != REST_ONLY and a.source_mode.get() != "Miro URL list"
+        for child in (a.websdk_file_label, a.websdk_path, a.websdk_browse, a.websdk_help.frame):
+            child.grid() if from_file else child.grid_remove()
+        a.websdk_help.batch_note.grid() if a.source_mode.get() == "Miro URL list" else a.websdk_help.batch_note.grid_remove()
         if hasattr(a, "websdk_choice"):
             from_file = a.websdk_choice.get() == "From file…"
             for child in (a.websdk_path, a.websdk_browse):

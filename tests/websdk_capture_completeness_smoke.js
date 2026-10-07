@@ -7,7 +7,7 @@ if (!exporterPath) {
 }
 const exporterSource = fs.readFileSync(exporterPath, "utf8");
 
-async function runScenario({ items, selection = [], boardInfo, includeGetInfo = true }) {
+async function runScenario({ items, selection = [], boardInfo, includeGetInfo = true, boardMethods = {} }) {
   const listeners = {};
   const elements = new Map();
   function element(id) {
@@ -34,6 +34,7 @@ async function runScenario({ items, selection = [], boardInfo, includeGetInfo = 
     get: async () => items,
     getSelection: async () => selection,
     notifications: { showInfo: async () => {} },
+    ...boardMethods,
   };
   if (includeGetInfo) {
     board.getInfo = async () => boardInfo;
@@ -54,6 +55,40 @@ function requireIncludes(values, expected) {
 
 (async () => {
   const validItem = { id: "item-1", type: "shape" };
+  const calls = [];
+  const enriched = await runScenario({
+    items: [validItem, { id: "frame-1", type: "frame" }],
+    boardInfo: { id: "board-1" },
+    boardMethods: {
+      experimental: { get: async ({ type }) => {
+        calls.push(type);
+        return type === "shape"
+          ? [{ id: "item-1", type: "shape", content: "richer", style: { fillColor: "#123456" } }]
+          : [{ id: "mind-1", type: "mindmap_node", nodeView: { content: "mind map" } }];
+      } },
+      getLayerIndex: async item => { calls.push(`layer:${item.id}`); return item.id === "item-1" ? 0 : 2; },
+      getMetadata: async item => { calls.push(`metadata:${item.id}`); return { synthetic: false, empty: [] }; },
+      getAppData: async () => ({ synthetic: "app-only" }),
+    },
+  });
+  if (!enriched.completeness.capture_complete || enriched.items.length !== 3) throw new Error("enriched union incomplete");
+  const shape = enriched.items.find(item => item.id === "item-1");
+  if (shape.layerIndex !== 0 || shape.content !== "richer" || shape.appMetadata.synthetic !== false) throw new Error("enrichment values lost");
+  if (!calls.includes("shape") || !calls.includes("mindmap_node") || calls.includes("layer:frame-1") || calls.includes("metadata:frame-1")) throw new Error("incorrect enrichment call inventory");
+  const evidence = enriched.provenance.read_enrichment;
+  const stableVariant = evidence.variants.find((v) => v.item_id === validItem.id && v.method === "miro.board.get");
+  const experimentalVariant = evidence.variants.find((v) => v.item_id === validItem.id && v.method === "miro.board.experimental.get:shape");
+  if (evidence.variants.length !== 3 || stableVariant.item.content !== undefined || experimentalVariant.item.content !== "richer") throw new Error("original SDK variants lost");
+  if (evidence.app_data.synthetic !== "app-only" || evidence.app_metadata_scope !== "exporting_app_only") throw new Error("board app data provenance lost");
+  const failedRead = await runScenario({
+    items: [validItem], boardInfo: { id: "board-1" },
+    boardMethods: { experimental: { get: async () => { throw new Error("synthetic read failed"); } } },
+  });
+  if (failedRead.completeness.capture_complete || failedRead.provenance.read_enrichment.complete) throw new Error("failed read claimed complete");
+  const badLayer = await runScenario({
+    items: [validItem], boardInfo: { id: "board-1" }, boardMethods: { getLayerIndex: async () => -1 },
+  });
+  if (badLayer.completeness.capture_complete) throw new Error("invalid layer claimed complete");
   const complete = await runScenario({
     items: [validItem],
     selection: [validItem],

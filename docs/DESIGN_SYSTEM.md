@@ -1,7 +1,7 @@
 # Application design
 
 The Miro Full Exporter identity and existing visual language are implemented in the desktop window,
-connection and agent dialogs, result/error dialogs, local browser setup and
+inline connection setup, agent dialogs, result/error dialogs, local browser setup and
 both Web SDK pages. Compatibility launchers open the same desktop window.
 The experimental setup wizard uses the same adapters in the local test snapshot;
 its broader feature branch still awaits integration.
@@ -62,7 +62,16 @@ form. Shared Russian strings live in `miro2obsidian/ui_strings.py`.
 
 ## Guided desktop workflow
 
-Use four sequential pages: workflow, source, destination, progress. Validate required choices before advancing. Show agent configuration only in Agent mode; restrict it to a single Miro board. Hide Miro connection and SDK controls for existing JSON. Keep optional SDK data on the source page and conversion tuning under Advanced settings on the destination page. Back navigation preserves inputs and is disabled while an export runs. Language and appearance controls stay available throughout.
+Connection setup occupies the existing workspace, never a second native window.
+Use Create app, Configure app and Connect panels with one panel visible at a
+time. Put token-expiry guidance before creation, copyable read-only addresses
+on Configure, and both credential fields on Connect. Keep language/theme
+controls in the main rail. Validation and connection failures stay inline;
+switching steps preserves values, success or cancellation clears input fields.
+The browser setup mirrors these steps with the same public copy and CSP-hashed
+script. Never put Client secrets or access tokens in copy controls or URL fields.
+
+Use four sequential pages: workflow, source, destination, progress. Validate required choices before advancing. Show agent configuration only in Agent mode; restrict it to a single Miro board. Hide Miro connection and SDK controls for existing JSON. Show export method, coverage and required Web SDK instructions on the source page by default; keep conversion tuning under Advanced settings on the destination page. REST-only export requires an explicit choice. Back navigation preserves inputs and is disabled while an export runs. Language and appearance controls stay available throughout.
 
 Default to Export data: any local folder, canonical JSON and attachment sidecar,
 no vault or plugin dependency. Keep source-export controls available separately

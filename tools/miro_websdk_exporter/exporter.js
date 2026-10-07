@@ -453,9 +453,108 @@
     }
     return toPlain(await miro.board.getInfo(), undefined, serializationIssues, "$.board");
   }
+  async function enrichBoardReads(items, plainItems, issues) {
+    const evidence = { revision: "20261006-read-enrichment", outcomes: [], variants: [], app_data: null };
+    const errors = [];
+    async function read(owner, name, args, method, itemId) {
+      const outcome = { method, ...(itemId ? { item_id: String(itemId) } : {}) };
+      evidence.outcomes.push(outcome);
+      if (!owner || typeof owner[name] !== "function") {
+        outcome.status = "unavailable";
+        return { available: false };
+      }
+      try {
+        const value = await owner[name](...args);
+        outcome.status = "captured";
+        return { available: true, value, outcome };
+      } catch (_) {
+        // Record the failed method without dumping SDK errors or credentials.
+        outcome.status = "failed";
+        errors.push(`${method}:${itemId || "board"}:read_failed`);
+        return { available: false };
+      }
+    }
+    function mergeFields(target, incoming) {
+      for (const key of Object.keys(incoming)) {
+        const value = incoming[key];
+        if (value == null || value === "") continue;
+        if (value && typeof value === "object" && !Array.isArray(value) &&
+            target[key] && typeof target[key] === "object" && !Array.isArray(target[key])) {
+          mergeFields(target[key], value);
+        } else {
+          target[key] = value;
+        }
+      }
+    }
+    const index = new Map();
+    plainItems.forEach((item, i) => { if (item && item.id) index.set(String(item.id), i); });
+    for (const type of ["shape", "mindmap_node"]) {
+      const result = await read(miro.board.experimental, "get", [{ type }], `miro.board.experimental.get:${type}`);
+      if (!result.available) continue;
+      if (!Array.isArray(result.value)) {
+        errors.push(`experimental_${type}:not_array`);
+        continue;
+      }
+      const incoming = result.value.map((item, i) => toPlain(item, undefined, issues, `$.read_enrichment.${type}[${i}]`));
+      result.outcome.record_count = incoming.length;
+      result.outcome.item_ids = incoming.map((item) => String(item && item.id || ""));
+      errors.push(...itemStructureErrors(incoming, `experimental_${type}`));
+      for (let i = 0; i < incoming.length; i++) {
+        const item = incoming[i];
+        if (!item || !item.id || !item.type) continue;
+        if (item.type !== type) {
+          errors.push(`experimental_${type}:unexpected_type:${item.type}`);
+          continue;
+        }
+        const id = String(item.id);
+        evidence.variants.push({ item_id: id, method: `miro.board.experimental.get:${type}`, item: toPlain(item) });
+        if (index.has(id)) {
+          const existing = plainItems[index.get(id)];
+          evidence.variants.push({ item_id: id, method: "miro.board.get", item: toPlain(existing) });
+          mergeFields(existing, item);
+          items[index.get(id)] = result.value[i];
+        } else {
+          index.set(id, plainItems.length);
+          plainItems.push(item);
+          items.push(result.value[i]);
+        }
+      }
+    }
+    const metadataTypes = new Set(["card", "connector", "embed", "image", "preview", "shape", "sticky_note", "text"]);
+    const layerTypes = new Set([...metadataTypes, "app_card", "mindmap_node"]);
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
+      const plain = plainItems[i];
+      if (!plain || !plain.id || !plain.type) continue;
+      if (layerTypes.has(plain.type)) {
+        const layer = await read(miro.board, "getLayerIndex", [item], "miro.board.getLayerIndex", plain.id);
+        if (layer.available) {
+          if (!Number.isInteger(layer.value) || layer.value < 0) {
+            errors.push(`getLayerIndex:${plain.id}:invalid_index`);
+          } else {
+            plain.layerIndex = layer.value;
+          }
+        }
+      }
+      if (metadataTypes.has(plain.type)) {
+        const metadata = await read(miro.board, "getMetadata", [item], "miro.board.getMetadata", plain.id);
+        if (metadata.available) {
+          plain.appMetadata = toPlain(metadata.value, undefined, issues, `$.items[${i}].appMetadata`);
+        }
+      }
+    }
+    const appData = await read(miro.board, "getAppData", [], "miro.board.getAppData");
+    if (appData.available) {
+      evidence.app_data = toPlain(appData.value, undefined, issues, "$.read_enrichment.app_data");
+    }
+    evidence.complete = errors.length === 0;
+    evidence.errors = errors;
+    evidence.app_metadata_scope = "exporting_app_only";
+    return evidence;
+  }
   async function exportBoard() {
     assertMiroReady();
-    const items = await miro.board.get();
+    const items = [...await miro.board.get()];
     const selection = await miro.board.getSelection();
     const itemSerializationIssues = [];
     const selectionSerializationIssues = [];
@@ -463,6 +562,8 @@
     const plainItems = items.map((item, index) =>
       toPlain(item, undefined, itemSerializationIssues, `$.items[${index}]`)
     );
+    const stableItemCount = items.length;
+    const readEnrichment = await enrichBoardReads(items, plainItems, itemSerializationIssues);
     const plainSelection = selection.map((item, index) =>
       toPlain(item, undefined, selectionSerializationIssues, `$.selection[${index}]`)
     );
@@ -491,6 +592,7 @@
       ...structuralErrors,
       ...selectionStructuralErrors,
       ...boardStructuralErrors,
+      ...readEnrichment.errors,
     ];
     const allSerializationIssues = [
       ...itemSerializationIssues,
@@ -510,6 +612,7 @@
       itemsComplete &&
       selectionComplete &&
       boardIdentityComplete &&
+      readEnrichment.complete &&
       allSerializationErrors.length === 0;
     const payload = {
       schema_version: 1,
@@ -526,7 +629,9 @@
           scope: "api_exposed_board_items",
           raw_count: items.length,
           serialized_count: plainItems.length,
+          stable_get_count: stableItemCount,
         },
+        read_enrichment: readEnrichment,
         board: {
           method: typeof miro.board.getInfo === "function" ? "miro.board.getInfo" : "unavailable",
           identity_complete: boardIdentityComplete,

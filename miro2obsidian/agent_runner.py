@@ -114,7 +114,7 @@ def build_agent_prompt(
         f"Board URL: {json.dumps(board_url)}\n"
         + destination_hint +
         f"Output format: {json.dumps(output_format)}\n"
-        "Use the strict REST export, Web SDK whole-board capture when accessible, "
+        "Use the strict REST export and a required verified Web SDK whole-board capture, "
         "canonical merge and asset checks. "
         + ("Write JSON and its attachment sidecar; Obsidian and Canvas are not required. " if raw_export else "Validate the written Canvas. ") +
         "Operate the Miro "
@@ -122,7 +122,7 @@ def build_agent_prompt(
         + browser_hint +
         "If login, MFA, or administrator approval prevents progress, return "
         "needs_user with the matching reason. Do not claim maximum coverage without a verified Web SDK "
-        "capture. Return only the requested JSON status, absolute artifact "
+        "capture. If Web SDK capture is unavailable, return needs_user rather than silently falling back to REST only. Return only the requested JSON status, absolute artifact "
         "path, and absolute canonical source_json path. Save the canonical JSON "
         + ("inside the selected export folder. " if raw_export else "inside the selected vault. ") +
         "Use null paths unless complete."

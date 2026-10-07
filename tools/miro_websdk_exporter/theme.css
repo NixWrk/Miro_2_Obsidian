@@ -35,9 +35,16 @@ button:hover{background:var(--button-hover)}:focus-visible{outline:3px solid #93
 .language-switch{display:flex;gap:8px;margin-top:14px}.language-switch button{background:transparent;border:1px solid #736584;
 color:#eeeaf5;padding:7px 14px;font-size:13px}.language-switch button[aria-pressed="true"]{background:#403654;border-color:#b99aff}
 .page-footer{color:var(--muted);font-size:12px;padding:0 4px 28px}
+[hidden]{display:none!important}.setup-nav{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:20px}
+.setup-nav button{background:var(--control);color:var(--ink);padding:10px 14px}
+.setup-nav [aria-current="step"]{background:var(--button);color:#fff}
+.copy-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;align-items:center;margin:18px 0}
+.copy-row label{grid-column:1/-1;margin:0}.copy-row input{margin:0;font-size:14px;min-width:0}
+.copy-row button{padding:12px 16px}.setup-nav~section p{max-width:70ch}
 @media(max-width:800px){.app-shell{grid-template-columns:1fr;margin:20px auto;gap:20px}.rail{position:static;padding:20px 24px}
 .rail .eyebrow,.journey,.rail p{display:none}.local-tag{margin-top:14px}h1{font-size:30px}}
-@media(max-width:440px){.app-shell{padding:0 12px}section,details,.status-card{padding:20px}section ol>li{padding-left:40px}}
+@media(max-width:440px){.app-shell{padding:0 12px}section,details,.status-card{padding:20px}section ol>li{padding-left:40px}
+.copy-row{grid-template-columns:minmax(0,1fr)}.copy-row button{justify-self:start}}
 
 .sdk-shell{max-width:1060px}.sdk-shell .rail{position:static}
 .sdk-card{background:var(--surface);border:1px solid var(--border);border-radius:18px;padding:24px}

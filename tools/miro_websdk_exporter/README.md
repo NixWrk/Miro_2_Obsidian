@@ -86,12 +86,25 @@ Only `Export board` produces the profile accepted by the canonical merge:
 - `source_surface: "web_sdk"` and `export_scope: "board"`;
 - `capture_profile: "maximum_board_v1"`;
 - `exported_at` and board identity from `miro.board.getInfo()` when available;
-- `items[]` from one complete `miro.board.get()` call;
+- `items[]` from a complete `miro.board.get()` call enriched by explicit
+  experimental shape/mindmap reads, supported layer indices and app metadata;
 - `provenance` with raw/serialized counts and serialization issues;
 - `completeness` with capture status, coverage basis and known API limitations;
 - `selection[]` and `selected_item_ids` as context only;
 - deep `diagnostics` for unsupported/table-like items;
 - `summary.by_type`.
+
+The base `maximum_board_v1` version remains compatible with existing imports.
+New captures add `provenance.read_enrichment.revision: "20261006-read-enrichment"`.
+It records attempted methods, unavailable methods, failed reads, original SDK
+variants and board app data. Item counts describe the resulting ID union;
+`provenance.items.stable_get_count` separately records the base `get()` count.
+`layerIndex` and `appMetadata` stay on captured items. `getMetadata` and
+`getAppData` expose only data of the exporting app, not other installed apps.
+Frames are excluded from layer reads and unsupported item types from metadata
+reads. A callable method that fails makes the capture incomplete. A method
+absent in the SDK runtime is recorded as `unavailable`; this is an explicit
+coverage limitation, not proof that the board contains none of that data.
 
 `Export selection` and `Create probe items` remain diagnostics and are rejected
 as production board sources. Every fresh board export must show the current

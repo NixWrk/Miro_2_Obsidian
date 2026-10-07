@@ -4,13 +4,13 @@ import os
 import json
 import re
 import threading
-import webbrowser
 from dataclasses import dataclass
 from pathlib import Path
 from miro2obsidian.desktop_ui import filedialog, messagebox
 from typing import Callable
 
 from miro2obsidian import desktop_ui as ctk
+from miro2obsidian.export_methods import REST_AND_SDK, REST_ONLY
 
 
 REPO_ROOT = Path(__file__).resolve().parent
@@ -29,13 +29,11 @@ from Json_2_Canvas.output_formats import (  # noqa: E402
 )
 from Json_2_Canvas.Scale_engine import ViewProfile  # noqa: E402
 from Miro_2_Json.miro_downloader import get_boards  # noqa: E402
-from miro2obsidian.app_setup import MIRO_APPS_URL  # noqa: E402
 from scripts.miro_oauth_token import (  # noqa: E402
     OAuthConfig,
     authorize_and_get_token,
     callback_recovery_hint,
     config_from_env,
-    session_oauth_config,
 )
 from miro2obsidian.agent_runner import parse_agent_command, run_agent  # noqa: E402
 from miro2obsidian.credential_store import (  # noqa: E402
@@ -425,12 +423,21 @@ class MiroPipelineApp(ctk.CTk):
             row=6, column=0, columnspan=4, sticky="we", padx=8, pady=(0, 8)
         )
 
-        ctk.CTkLabel(self.guided.sdk, text="Web SDK JSON").grid(row=5, column=0, sticky="e", padx=8, pady=(0, 8))
-        self.websdk_path = ctk.CTkEntry(self.guided.sdk, placeholder_text="Optional whole-board download")
+        ctk.CTkLabel(self.guided.sdk, text="Export method").grid(row=0, column=0, sticky="w", padx=8, pady=8)
+        self.export_method = ctk.CTkOptionMenu(self.guided.sdk, values=[REST_AND_SDK, REST_ONLY], command=lambda _value: self.guided.context())
+        self.export_method.set(REST_AND_SDK)
+        self.export_method.grid(row=0, column=1, columnspan=3, sticky="we", padx=8, pady=8)
+        self.websdk_file_label = ctk.CTkLabel(self.guided.sdk, text="Whole-board Web SDK JSON (required)")
+        self.websdk_file_label.grid(row=5, column=0, columnspan=4, sticky="w", padx=8, pady=(0, 8))
+        self.websdk_path = ctk.CTkEntry(self.guided.sdk, placeholder_text="Choose the downloaded whole-board JSON")
         self.websdk_path.grid(row=6, column=0, columnspan=3, sticky="we", padx=8, pady=(0, 8))
-        ctk.CTkButton(self.guided.sdk, text="Browse", command=self.pick_websdk_file).grid(
+        self.websdk_browse = ctk.CTkButton(self.guided.sdk, text="Browse", command=self.pick_websdk_file)
+        self.websdk_browse.grid(
             row=6, column=3, columnspan=1, sticky="we", padx=8, pady=(0, 8)
         )
+        from miro2obsidian.desktop_websdk_help import WebSDKHelp
+
+        self.websdk_help = WebSDKHelp(self, self.guided.sdk)
 
         self.workflow_hint = ctk.CTkLabel(
             scenario, text=WORKFLOW_HINTS[MANUAL_WORKFLOW], anchor="w", text_color="gray60", wraplength=470, justify="left"
@@ -479,96 +486,13 @@ class MiroPipelineApp(ctk.CTk):
         return value or "board"
 
     def open_miro_setup(self) -> None:
-        dialog = ctk.CTkToplevel(self)
-        dialog.title("Set up your Miro app")
-        dialog.geometry("760x590")
-        dialog.transient(self)
-        dialog.grid_columnconfigure(1, weight=1)
-        ctk.CTkLabel(
-            dialog,
-            text=(
-                "No app yet? Open Miro Settings > Your apps and click Create new app "
-                "below the Developer Hub banner. Choose a Developer team, then set App URL to "
-                "http://localhost:8766/index.html and OAuth redirect URI to "
-                "http://localhost:8765/callback. Select boards:read and team:read, "
-                "then install the app in the board's team. Leave 'Expire user "
-                "authorization token' unchecked for unattended Code mode. "
-                "Finish email sign-in and OAuth in the same browser. "
-                "Enter Client ID and Client secret only after configuring the app."
-            ),
-            wraplength=520,
-            justify="left",
-        ).grid(row=0, column=0, columnspan=3, padx=16, pady=(18, 12), sticky="w")
-        ctk.CTkLabel(dialog, text="Client ID").grid(row=3, column=0, padx=16, pady=8, sticky="e")
-        client_id_entry = ctk.CTkEntry(dialog)
-        client_id_entry.grid(row=3, column=1, padx=(16, 8), pady=8, sticky="we")
-        ctk.CTkLabel(dialog, text="Client secret").grid(row=4, column=0, padx=16, pady=8, sticky="e")
-        secret_entry = ctk.CTkEntry(dialog, show="*")
-        secret_entry.grid(row=4, column=1, padx=(16, 8), pady=8, sticky="we")
-        def paste_credential(entry: ctk.CTkEntry) -> None:
-            try:
-                value = dialog.clipboard_get()
-            except Exception:  # noqa: BLE001
-                messagebox.showerror("Miro app", "Clipboard is empty.", parent=dialog)
-                return
-            entry.delete(0, "end")
-            entry.insert(0, value)
+        from miro2obsidian.desktop_setup import ConnectionSetup
 
-        ctk.CTkButton(
-            dialog,
-            text="Paste",
-            width=70,
-            command=lambda: paste_credential(client_id_entry),
-        ).grid(row=3, column=2, padx=(0, 16), pady=8)
-        ctk.CTkButton(
-            dialog,
-            text="Paste",
-            width=70,
-            command=lambda: paste_credential(secret_entry),
-        ).grid(row=4, column=2, padx=(0, 16), pady=8)
-        ctk.CTkLabel(
-            dialog,
-            text="These values stay in this program's memory for this session.",
-            wraplength=580,
-        ).grid(row=5, column=0, columnspan=3, padx=16, pady=8, sticky="w")
-
-        def use_credentials() -> None:
-            try:
-                config = session_oauth_config(client_id_entry.get(), secret_entry.get())
-            except ValueError as exc:
-                messagebox.showerror("Miro app", str(exc), parent=dialog)
-                return
-            with self.token_lock:
-                self.oauth_config = config
-                self.token = None
-                self._credential_saved_in_session = False
-                self._clear_saved_token()
-            secret_entry.delete(0, "end")
-            dialog.destroy()
-            self._log("Miro app credentials ready for this session.")
-            self.authenticate_and_refresh_boards()
-
-        ctk.CTkButton(
-            dialog,
-            text="Open Your apps",
-            command=lambda: webbrowser.open(MIRO_APPS_URL),
-        ).grid(row=1, column=0, columnspan=3, padx=16, pady=8, sticky="w")
-        ctk.CTkButton(
-            dialog, text="Connect", variant="primary", command=use_credentials
-        ).grid(row=6, column=1, columnspan=2, padx=16, pady=16, sticky="we")
-        credential_widgets = [child for child in dialog.winfo_children()
-                              if child.grid_info().get("row", 0) >= 3]
-        for child in credential_widgets:
-            child.grid_remove()
-
-        def show_credentials():
-            for child in credential_widgets:
-                child.grid()
-            ready.grid_remove()
-            client_id_entry.focus_set()
-
-        ready = ctk.CTkButton(dialog, text="I have configured my Miro app — connect", command=show_credentials)
-        ready.grid(row=2, column=0, columnspan=3, sticky="w", padx=16, pady=8)
+        setup = self.__dict__.get("_setup_view")
+        if setup is None:
+            self._setup_view = ConnectionSetup(self)
+        else:
+            setup.show(setup.step)
 
     def _clear_saved_token(self) -> None:
         try:
@@ -676,16 +600,21 @@ class MiroPipelineApp(ctk.CTk):
         self._log("Choose the team that owns the target board in Miro OAuth.")
         self.authenticate_and_refresh_boards()
 
-    def authenticate_and_refresh_boards(self) -> None:
+    def authenticate_and_refresh_boards(self, *, on_complete=None, on_error=None) -> None:
         def worker() -> None:
             try:
                 token = self._token()
                 if self.token:
                     self._log("Miro token ready for this GUI session.")
                 self._apply_boards(get_boards(token))
+                if on_complete:
+                    self.after(0, on_complete)
             except Exception as exc:  # noqa: BLE001
                 self._log(f"OAuth failed: {exc}")
-                show_error_later(self.after, "OAuth failed", exc)
+                if on_error:
+                    self.after(0, lambda message=str(exc): on_error(message))
+                else:
+                    show_error_later(self.after, "OAuth failed", exc)
 
         threading.Thread(target=worker, daemon=True).start()
 
@@ -883,7 +812,14 @@ class MiroPipelineApp(ctk.CTk):
             if not target_text:
                 raise ValueError("Choose an export folder first.")
             json_path_text = self.json_path.get().strip()
-            websdk_path_text = self.websdk_path.get().strip() if source_mode in {ACCOUNT_SOURCE_MODE, URL_SOURCE_MODE} else ""
+            export_error = self.guided.export_source_error()
+            if export_error:
+                self.guided.show(1)
+                self.guided.sdk_open = True
+                self.guided.context()
+                self.guided.error.configure(text=export_error)
+                return
+            websdk_path_text = self.websdk_path.get().strip() if source_mode in {ACCOUNT_SOURCE_MODE, URL_SOURCE_MODE} and self.export_method.get() == REST_AND_SDK else ""
             if websdk_path_text and workflow_mode != AGENT_WORKFLOW and source_mode not in {ACCOUNT_SOURCE_MODE, URL_SOURCE_MODE}:
                 raise ValueError("Web SDK JSON can be paired with one Miro board at a time.")
             if websdk_path_text and workflow_mode != AGENT_WORKFLOW and not Path(websdk_path_text).is_file():

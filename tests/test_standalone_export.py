@@ -66,7 +66,7 @@ def test_canvas_service_rejects_missing_destination_before_export(tmp_path):
 def test_raw_export_cli_does_not_read_vault_settings(tmp_path):
     source = tmp_path / "board.json"
     with (
-        patch.object(sys, "argv", ["miro2obsidian", "--board-id", "example", "--source-json", str(source), "--format", "raw-json"]),
+        patch.object(sys, "argv", ["miro2obsidian", "--rest-only", "--board-id", "example", "--source-json", str(source), "--format", "raw-json"]),
         patch("scripts.miro_pipeline.resolve_token_from_args", return_value="synthetic-token"),
         patch("scripts.miro_pipeline.resolve_attachment_dir") as vault_settings,
         patch("miro2obsidian.application.export_complete_board_source", side_effect=fake_export),
@@ -121,6 +121,11 @@ def test_gui_exports_outside_vault_and_offers_offline_conversion(tmp_path, monke
         app.guided.source_changed("Miro URL")
         app.board_id.insert(0, "https://miro.com/app/board/example/")
         app.target_dir.insert(0, str(tmp_path / "Exports"))
+        # REST-only export is an explicit alternative to the GUI's combined default.
+        from miro2obsidian.export_methods import REST_ONLY
+
+        app.export_method.set(REST_ONLY)
+        app.guided.context()
         # Hidden Canvas tuning must not block a data export.
         app.scale.insert(0, "invalid")
         app.min_zoom.delete(0, "end")

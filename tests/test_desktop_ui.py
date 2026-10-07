@@ -59,6 +59,41 @@ def test_web_assets_follow_shared_theme(tmp_path):
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Native GUI requires a Windows display")
+@pytest.mark.parametrize("state", ["normal", "disabled"])
+def test_language_switch_works_without_customtkinter_textbox_state_cget(tmp_path, monkeypatch, state):
+    from Miro_2_Obsidian_GUI import MiroPipelineApp
+    from miro2obsidian import desktop_ui as ctk
+
+    monkeypatch.setenv("MIRO2OBSIDIAN_UI_SETTINGS", str(tmp_path / "ui.json"))
+    original_cget = ctk.native.CTkTextbox.cget
+
+    def legacy_cget(self, attribute):
+        if attribute == "state":
+            raise ValueError("'state' is not a supported argument")
+        return original_cget(self, attribute)
+
+    monkeypatch.setattr(ctk.native.CTkTextbox, "cget", legacy_cget)
+    app = MiroPipelineApp()
+    app.withdraw()
+    try:
+        app.log.insert("end", "Export complete\n")
+        app.log.configure(state=state)
+        app.open_miro_setup()
+        setup = app._setup_view
+        setup.show(2)
+        setup.client_id.insert(0, "synthetic-id")
+        setup.client_secret.insert(0, "synthetic-secret")
+        for language, expected in (("ru", "Экспорт завершён"), ("en", "Export complete")):
+            app.ui.change("language", language)
+            assert expected in app.log.get("1.0", "end")
+            assert app.log._textbox.cget("state") == state
+            assert setup.client_id.get() == "synthetic-id"
+            assert setup.client_secret.get() == "synthetic-secret"
+    finally:
+        app.destroy()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Native GUI requires a Windows display")
 def test_guided_workflow_validates_and_hides_irrelevant_controls(tmp_path, monkeypatch):
     from Miro_2_Obsidian_GUI import MiroPipelineApp
 
@@ -158,7 +193,7 @@ def test_context_for_all_workflows_and_sources(tmp_path, monkeypatch):
                 assert bool(app.agent_settings_button.winfo_manager()) == (workflow == "Agent")
                 assert bool(app.stable_items_checkbox.winfo_manager()) == (source != "Existing JSON")
                 assert bool(guide.sdk_toggle.winfo_manager()) == (
-                    workflow != "Agent" and source in {"Miro account", "Miro URL"})
+                    workflow != "Agent" and source in {"Miro account", "Miro URL", "Miro URL list"})
                 visible = [frame for frame in (app.account_frame, app.url_frame,
                            app.url_list_frame, app.json_frame) if frame.winfo_manager()]
                 assert len(visible) == 1
@@ -200,6 +235,48 @@ def test_sdk_file_picker_only_follows_file_choice(tmp_path, monkeypatch):
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Native GUI requires a Windows display")
+def test_websdk_instructions_are_inline_copyable_and_translated(tmp_path, monkeypatch):
+    from Miro_2_Obsidian_GUI import MiroPipelineApp
+    from miro2obsidian import desktop_ui as ctk
+    from miro2obsidian.app_setup import APP_URL
+    from miro2obsidian.desktop_websdk_help import SOURCE_COMMAND, WEBSDK_COMMAND
+
+    monkeypatch.setenv("MIRO2OBSIDIAN_UI_SETTINGS", str(tmp_path / "ui.json"))
+    app = MiroPipelineApp()
+    app.withdraw()
+    copied = []
+    monkeypatch.setattr(app, "clipboard_clear", lambda: None)
+    monkeypatch.setattr(app, "clipboard_append", copied.append)
+    try:
+        app.source_mode.set("Miro URL")
+        app.guided.source_changed("Miro URL")
+        app.guided.show(1)
+        app.websdk_path.insert(0, "synthetic-board.json")
+        help_view = app.websdk_help
+        assert help_view.frame.master is app.guided.sdk
+        assert app.guided.sdk.winfo_manager() == "grid"
+        assert not any(isinstance(child, ctk.CTkToplevel) for child in app.winfo_children())
+        for entry, button, value in (
+            (help_view.command, help_view.command_copy, WEBSDK_COMMAND),
+            (help_view.source_command, help_view.source_copy, SOURCE_COMMAND),
+            (help_view.app_url, help_view.url_copy, APP_URL),
+        ):
+            assert entry.get() == value
+            assert entry.cget("state") == "readonly"
+            button.invoke()
+            assert copied[-1] == value
+        for language, heading in (("ru", "Как скачать файл доски"), ("en", "How to download the board file")):
+            app.ui.change("language", language)
+            assert help_view.notes[0].cget("text") == heading
+            assert "Export board" in help_view.notes[6].cget("text")
+            assert app.websdk_path.get() == "synthetic-board.json"
+        app.guided.toggle_sdk()
+        assert not app.guided.sdk.winfo_manager()
+    finally:
+        app.destroy()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Native GUI requires a Windows display")
 def test_setup_browser_action_precedes_credentials(tmp_path, monkeypatch):
     import Miro_2_Obsidian_GUI as gui
     from miro2obsidian import desktop_ui as ctk
@@ -208,23 +285,18 @@ def test_setup_browser_action_precedes_credentials(tmp_path, monkeypatch):
     app = gui.MiroPipelineApp()
     app.withdraw()
     try:
-        if hasattr(gui, "SetupWizard"):
-            dialog = gui.SetupWizard(app, settings_file=tmp_path / "wizard.json")
-            assert dialog.open_button.grid_info().get("row", 3) < dialog.copy_frame.grid_info()["row"]
-            assert dialog.copy_frame.grid_info()["row"] < dialog.form_frame.grid_info().get("row", 5)
-            assert not dialog.form_frame.winfo_manager() or dialog.step.get("form")
-        else:
-            app.open_miro_setup()
-            dialog = next(child for child in app.winfo_children() if isinstance(child, ctk.CTkToplevel))
-            children = dialog.winfo_children()
-            browser = next(child for child in children if getattr(child, "_original_text", "") == "Open Your apps")
-            ready = next(child for child in children if getattr(child, "_original_text", "") == "I have configured my Miro app — connect")
-            entries = [child for child in children if isinstance(child, ctk.CTkEntry)]
-            assert all(not child.winfo_manager() for child in entries)
-            assert browser.grid_info()["row"] < ready.grid_info()["row"]
-            ready.invoke()
-            assert all(child.winfo_manager() == "grid" for child in entries)
-            assert all(browser.grid_info()["row"] < child.grid_info()["row"] for child in entries)
-        dialog.destroy()
+        app.open_miro_setup()
+        setup = app._setup_view
+        assert not any(isinstance(child, ctk.CTkToplevel) for child in app.winfo_children())
+        assert setup.step == 0
+        assert setup.panels[0].winfo_manager() == "grid"
+        assert not setup.panels[2].winfo_manager()
+        setup.show(2)
+        app.update_idletasks()
+        assert setup.client_id.winfo_manager() == "grid"
+        assert setup.client_secret.winfo_manager() == "grid"
+        assert setup.client_id.grid_info()["row"] != setup.client_secret.grid_info()["row"]
+        assert setup.client_secret.cget("show") == "*"
+        setup.close()
     finally:
         app.destroy()

@@ -60,11 +60,11 @@ def test_local_setup_uses_same_origin_and_saves_only_token(monkeypatch) -> None:
         csp = response.getheader("Content-Security-Policy")
         assert f"script-src 'sha256-{digest}'" in csp
         assert "script-src 'unsafe-inline'" not in csp
-        assert "https://miro.com/app/settings/user-profile/apps/" in page
-        assert "developers.miro.com/page/developer-hub" not in page
+        assert "developers.miro.com/page/developer-hub#your-apps" in page
         assert page.index("Create new app") < page.index('name="client_id"')
-        assert '<details id="connect">' in page
-        assert "email sign-in" in page
+        assert '<section data-setup-panel="2" hidden>' in page
+        assert "you do not paste it here" in page
+        assert "data-copy-target" in page
         csrf = re.search(r'name="csrf" value="([^"]+)"', page).group(1)
         form = urlencode({"csrf": csrf, "client_id": "app-id", "client_secret": "test-secret"})
         headers = {"Content-Type": "application/x-www-form-urlencoded", "Origin": "https://other.example"}

@@ -50,18 +50,24 @@ the team that owns the real board.
 ## 1. Create the Miro app
 
 1. Sign in to Miro.
-2. Open your avatar, then **Settings** → **Your apps**, or open
-   [Miro Your apps](https://miro.com/app/settings/user-profile/apps/).
-3. Select the organization and an existing Developer team. If none is available,
-   create one and accept the developer terms.
-4. Create an app in that team.
-5. Use a recognizable name, for example `Miro to Obsidian - local export`.
+2. Open [Developer Hub → Your apps](https://developers.miro.com/page/developer-hub#your-apps)
+   in the browser where you are signed in. If you start from Profile settings →
+   Your apps, press **Get started** in **Explore the Developer Hub**.
+3. Choose **Create new app** or **Create your first app**. Apps & Integrations
+   lists installed applications; it is not the creation screen.
+4. Enter `Miro Full Exporter` and select a Developer team. If Miro requires an
+   Enterprise Developer team, the organization administrator must set it up.
+   A regular team named `Dev team` is not proof that it is a Developer team.
+5. Before **Create app**, leave **Expire user authorization token** unchecked
+   for this version. It does not automatically renew expiring tokens, and Miro
+   does not allow changing this choice after creation. If you already created
+   an expiring app, reconnect after expiry or create an app with the supported setting.
 
-The generic link may redirect to a company-specific Profile settings address.
-Choose **Your apps**, then **Create new app** below the **Explore the Developer Hub**
-banner; **Get started** is optional. If the link does not open the settings, use
-the avatar route above. Keep Miro, email sign-in and the local setup form in the
-same browser. A login completed in another browser does not authorize this one.
+Keep Miro, email sign-in and authorization in the same browser. A login
+completed in another browser does not authorize this one. The desktop setup
+stays inside the main window: **Create app → Configure app → Connect**.
+Each address and the app name have a **Copy** button. Existing apps can skip
+directly to Connect. The optional local browser setup uses the same three steps.
 
 Creating the app does not move or copy any board. It creates credentials and a
 permission boundary for local export.
@@ -166,11 +172,15 @@ Then:
 
 1. Open the target board in Miro.
 2. Open **+ More apps** or **+ More tools** in the board's left toolbar.
-3. Select `Miro to Obsidian - local export`.
+3. Select the app under the name you gave it, for example `Miro Full Exporter`.
 4. Select **Export board**, not **Export selection**.
 5. Keep the downloaded JSON. It must be from the same board and close in time to
    the REST export.
-6. Pass it to `miro2obsidian` with `--websdk-json` as shown in the
+6. In the GUI, expand **Export method and coverage** and use **Browse** in
+   **Whole-board Web SDK JSON (required)**. This section also provides inline steps and
+   copy buttons for the server command and App URL. REST + Web SDK is required
+   by default; explicitly select **REST only (less data)** to skip this capture.
+   In the CLI, pass it with `--websdk-json` as shown in the
    project [README](../README.md#export-maximum-public-api-data).
 
 The current Web SDK download is a manual bridge. The planned local companion

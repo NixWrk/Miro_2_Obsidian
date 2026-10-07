@@ -172,6 +172,12 @@ def export_board_comments(
         logger(
             f"comments={len(comments)} decision={payload.get('decision') or 'unknown'}"
         )
+        coverage = completeness.get("thread_coverage")
+        if isinstance(coverage, dict):
+            logger(
+                f"comment_coverage replies_verified={coverage.get('replies_verified')} "
+                f"resolved_threads_verified={coverage.get('resolved_threads_verified')}"
+            )
     return comments
 
 
@@ -915,6 +921,12 @@ def _build_complete_board_source(
             "requirements": dict(asset_stats),
         },
     }
+    probe_completeness = comment_provenance.get("probe_completeness", {})
+    if isinstance(probe_completeness, dict) and "thread_coverage" in probe_completeness:
+        completeness["comments"].update({
+            "scope": "available_collection_pages",
+            "thread_coverage": deepcopy(probe_completeness["thread_coverage"]),
+        })
     payload = build_board_source_payload(
         items,
         comments,

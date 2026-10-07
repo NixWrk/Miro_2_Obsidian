@@ -177,6 +177,33 @@ def rest_export(
 
 
 class MergeMiroSourcesTests(unittest.TestCase):
+    def test_enrichment_and_comment_coverage_survive_canonical_merge(self) -> None:
+        rest = rest_export([{"id": "shape-1", "type": "shape", "data": {"content": "REST"}}])
+        coverage = {"replies_verified": True, "resolved_threads_verified": False, "threads": []}
+        rest["completeness"]["comments"]["thread_coverage"] = coverage
+        sdk = websdk_export([{"id": "shape-1", "type": "shape", "content": "SDK", "layerIndex": 0, "appMetadata": {"flag": False}}])
+        enrichment = {"revision": "20261006-read-enrichment", "complete": True, "errors": [],
+                      "outcomes": [{"method": "miro.board.getAppData", "status": "captured"}],
+                      "app_data": {"synthetic": "data"}, "app_metadata_scope": "exporting_app_only"}
+        sdk["provenance"]["read_enrichment"] = enrichment
+        merged = merge_sources(rest, sdk)
+        item = merged["items"][0]
+        self.assertEqual(item["data"]["content"], "REST")
+        self.assertEqual(item["layerIndex"], 0)
+        self.assertEqual(item["appMetadata"], {"flag": False})
+        self.assertEqual(item["source_provenance"]["selected_field_sources"]["layerIndex"], "web_sdk")
+        self.assertEqual(merged["completeness"]["comments"]["thread_coverage"], coverage)
+        self.assertEqual(merged["source_metadata"]["web_sdk"]["provenance"]["read_enrichment"], enrichment)
+
+    def test_merge_rejects_failed_additional_sdk_read(self) -> None:
+        sdk = websdk_export([])
+        sdk["provenance"]["read_enrichment"] = {
+            "revision": "20261006-read-enrichment", "complete": True, "errors": [],
+            "outcomes": [{"method": "miro.board.getAppData", "status": "failed"}],
+        }
+        with self.assertRaisesRegex(ValueError, "outcomes"):
+            merge_sources(rest_export([]), sdk)
+
     def test_preserves_rest_item_and_marks_shared_websdk_surface(self) -> None:
         rest_item = {"id": "text-1", "type": "text", "data": {"content": "<p>REST</p>"}}
         websdk = websdk_export(

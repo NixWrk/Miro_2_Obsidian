@@ -279,13 +279,16 @@ class CTkTextbox(native.CTkTextbox):
         return super().delete(first, last)
 
     def retranslate(self):
-        state = self.cget("state")
+        # CustomTkinter 5.x does not expose the native Text state through cget.
+        state = self._textbox.cget("state")
         view = self._textbox.yview()
         super().configure(state="normal")
-        super().delete("1.0", "end")
-        super().insert("1.0", self._presentation.text(self._original_content))
-        self._textbox.yview_moveto(view[0])
-        super().configure(state=state)
+        try:
+            super().delete("1.0", "end")
+            super().insert("1.0", self._presentation.text(self._original_content))
+            self._textbox.yview_moveto(view[0])
+        finally:
+            super().configure(state=state)
 
 
 def build_workspace(app):
@@ -299,7 +302,7 @@ def build_workspace(app):
     rail.grid_rowconfigure(6, weight=1)
     CTkLabel(rail, text="Miro Full Exporter", font=native.CTkFont(size=18, weight="bold"),
              text_color=COLORS["yellow"]).grid(row=0, column=0, padx=18, pady=(28, 14), sticky="w")
-    CTkLabel(rail, text="Maximum public-API data, saved on your computer.", wraplength=215, justify="left",
+    CTkLabel(rail, text="Miro REST + Web SDK data, saved on your computer.", wraplength=215, justify="left",
              text_color="#c5bfd7").grid(row=1, column=0, padx=18, pady=(0, 24), sticky="w")
     app.journey_labels = []
     for row, text in enumerate(("01   Choose a workflow", "02   Choose a source", "03   Choose a destination", "04   Export progress"), 2):

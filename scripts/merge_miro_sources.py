@@ -395,6 +395,19 @@ def validate_websdk_export(
     )
 
     provenance = payload.get("provenance")
+    read_enrichment = provenance.get("read_enrichment") if isinstance(provenance, dict) else None
+    if read_enrichment is not None:
+        if not isinstance(read_enrichment, dict) or read_enrichment.get("revision") != "20261006-read-enrichment":
+            raise ValueError("Web SDK read enrichment revision is unsupported")
+        if read_enrichment.get("complete") is not True or read_enrichment.get("errors") != []:
+            raise ValueError("Web SDK additional reads must be complete")
+        outcomes = read_enrichment.get("outcomes")
+        if not isinstance(outcomes, list) or any(
+            not isinstance(outcome, dict) or outcome.get("status") not in {"captured", "unavailable"}
+            or not isinstance(outcome.get("method"), str)
+            for outcome in outcomes
+        ):
+            raise ValueError("Web SDK additional read outcomes are malformed or failed")
     item_provenance = provenance.get("items") if isinstance(provenance, dict) else None
     if not isinstance(item_provenance, dict):
         raise ValueError("Web SDK provenance.items is required")
@@ -1109,7 +1122,13 @@ def merge_sources(
                 "items": websdk_info["item_count"],
                 "comments": websdk_info["comment_count"],
             },
-            "comments": {"complete": True, "items": len(merged_comments)},
+            "comments": {
+                "complete": True, "items": len(merged_comments),
+                **({
+                    "scope": "available_collection_pages",
+                    "thread_coverage": deepcopy(rest_root["completeness"]["comments"]["thread_coverage"]),
+                } if "thread_coverage" in rest_root["completeness"]["comments"] else {}),
+            },
             "assets": {"complete": False, "checked": False},
         },
     }

@@ -14,13 +14,13 @@ as a reusable export. Canvas conversion is an optional next step.
 The repository, package, commands (`miro2obsidian`, `miro2obsidian-gui`) and
 downloaded executable names retain their existing names for compatibility.
 
-> This is a maximum public-API export, not a byte-for-byte Miro backup. Known
+> Coverage follows the implemented API sources, not a byte-for-byte Miro backup. Known
 > API limitations are recorded in the output instead of being hidden.
 
 ## What it does
 
 - Exports all paginated board items available through Miro REST.
-- Exports complete REST comment threads and metadata.
+- Exports available REST comments and metadata, checks returned reply counts and follows server-provided reply links; reports unverified thread coverage.
 - Captures the whole open board through the Miro Web SDK `maximum_board_v1`
   profile.
 - Merges REST and Web SDK data without discarding either original source.
@@ -186,7 +186,7 @@ miro2obsidian `
 This example uses a token previously saved through GUI Code automation.
 For a first connection use the setup guide and `--oauth` instead. A fresh
 whole-board Web SDK capture is required for maximum public-API coverage; without
-it the source is REST-only. Keep `board.json` and `board_files/` together.
+it you must explicitly choose `--rest-only`. Keep `board.json` and `board_files/` together.
 `--target-dir` and `--vault-root` are required only for Canvas formats.
 
 The result screen opens the saved folder and offers **Prepare for Miro Canvas**.
@@ -212,7 +212,8 @@ miro2obsidian-gui
 The GUI has four source choices and three execution modes:
 
 - **Manual**: operate Miro yourself and optionally select a downloaded
-  whole-board JSON in **Web SDK JSON** for strict REST/Web SDK union.
+  whole-board JSON in **Whole-board Web SDK JSON (required)** for strict REST/Web SDK union.
+  Expand **Export method and coverage** for inline download steps and copy buttons.
 - **Code automation**: code runs REST, comments, assets, and Canvas conversion
   with narrated log steps. The token is kept in the OS credential store when available;
   the CLI can repeat exports with `--stored-token` without a browser.
@@ -223,6 +224,24 @@ The GUI has four source choices and three execution modes:
   Sign-in, MFA, and team approval can still require the account owner.
 
 See [three workflow modes](docs/WORKFLOW_MODES.md) for setup and limits.
+
+Live GUI and CLI exports default to **REST + Web SDK**. Missing Web SDK JSON
+blocks export instead of silently reducing coverage. Select **REST only (less
+data)** in the GUI or pass `--rest-only` in the CLI to opt out explicitly.
+The CLI rejects `--rest-only` together with `--websdk-json` or `--existing-json`.
+The URL-list GUI workflow currently requires an explicit REST-only choice;
+combined capture works one board at a time. Offline JSON conversion is unchanged.
+
+| Source method | What the current exporter saves | Main limits |
+|---|---|---|
+| REST only | Available text, sticky notes, shapes, frames, cards, connectors, images, documents and embeds; connector/group details, group members, tag assignments and board metadata; experimental mindmaps when enabled; available comments and attachments | All-resolved-thread coverage is unverified; assets can be previews or generated PDF/HTML |
+| Web SDK capture | Supported board objects, groups/tags, experimental shapes/mindmaps, layer indices and exporting-app metadata; may fill values absent from REST | Unavailable methods are recorded; metadata of other apps is inaccessible; comments/files come from the REST/download path |
+| REST + Web SDK (default) | Union of both sources, preserving original records and field provenance; REST takes priority for shared values | API restrictions remain; unsupported widgets can expose geometry without their content |
+
+The [independent coverage audit and implementation follow-up](docs/MIRO_EXPORT_AUDIT_2026-10-06.md) records the fixed tag-pagination defect, added reads and remaining live verification work. The JSON stores captured source evidence. Canvas can display only what its
+format and converter support, so JSON coverage and visible Canvas coverage are
+different. Neither method promises every Miro detail. The source page shows
+this comparison alongside the Web SDK instructions.
 
 The GUI supports four source choices:
 
@@ -332,7 +351,7 @@ button removes that connection.
 A successful maximum export requires:
 
 - complete REST item pagination;
-- complete REST comments;
+- all pages of available REST comment collections, with reply counts and supplied continuation links checked;
 - a fresh `maximum_board_v1` Web SDK board capture;
 - matching board identity across both sources;
 - zero missing required assets;
@@ -343,6 +362,9 @@ A successful maximum export requires:
 promise access to hidden internals of unsupported widgets. In particular, the
 Web SDK cannot replace REST comments, and some table, document, slide, and
 unsupported-widget details may not be available from either public surface.
+Comment `complete` means the available collection pages were captured, not proof
+of every thread on Miro. `completeness.comments.thread_coverage` records reply
+verification and explicitly leaves all-resolved-thread coverage unverified.
 
 See the measured [Miro versus Canvas display gaps](docs/MIRO_VS_CANVAS_DISPLAY_GAPS.md)
 and the [Miro capability matrix](docs/MIRO_CAPABILITIES.md).

@@ -18,12 +18,14 @@ to it when they prefer to read along.
 
 ## Create the person's own Miro app (once)
 
-1. Miro → avatar → **Settings** → **Your apps**
-   (<https://miro.com/app/settings/user-profile/apps/>). Select an
-   organization and an existing Developer team, or create one if needed.
-2. Click **Create new app** below the **Explore the Developer Hub** banner (the
-   **Get started** button is optional). Create an app in that team with a recognisable name such as
-   `Miro to Obsidian - local export`.
+1. Open <https://developers.miro.com/page/developer-hub#your-apps> in the
+   signed-in browser. If Profile settings → Your apps opens, use **Get started**
+   in the Developer Hub banner. Apps & Integrations lists installed apps.
+2. Choose **Create new app** or **Create your first app**, select a Developer
+   team and name the app `Miro Full Exporter`. Before creation, leave **Expire
+   user authorization token** unchecked: this version does not renew expiring
+   tokens and Miro makes this choice permanent for the app. An Enterprise
+   Developer team may require the organization administrator.
 3. App settings - exact values:
    - App URL / SDK URI: `http://localhost:8766/index.html`
    - OAuth redirect URI: `http://localhost:8765/callback`, and tick **Use this
@@ -33,7 +35,7 @@ to it when they prefer to read along.
    board** (not just the Developer team) → **Install & authorize**. A team
    administrator may have to approve it.
 6. In Manual or Code mode, the person enters **Client ID** and **Client secret**
-   in the GUI **Set up Miro app** dialog for this session, or in their own
+   in the GUI **Set up Miro app** inline Connect step for this session, or in their own
    terminal for CLI use - never into the chat. In Agent mode, use Miro's UI
    Copy buttons and paste directly into the GUI fields without reading or
    exposing the clipboard contents:
@@ -44,8 +46,7 @@ to it when they prefer to read along.
    (copied from `.miro_oauth.local.example.json`; Git ignores it).
 
 Use the same browser for Miro, email sign-in and the local setup form. A sign-in
-completed in another browser does not authorize this one. The generic Your apps
-link may redirect to the user's company settings; never hard-code that company ID.
+completed in another browser does not authorize this one. Use the Developer Hub entry point; never hard-code a company settings ID.
 
 ## Export and convert
 
@@ -65,14 +66,13 @@ required assets, checks the board's identity and freshness, then converts.
 In the window: **Miro account** → **Authenticate / refresh** → choose the board
 (or **Miro URL** / **Miro URL list**), choose **Format**, run.
 
-**Maximum export** (adds what only the open board exposes through Miro's Web
-SDK): start `miro2obsidian websdk-serve --port 8766`, open the
+**Default combined export** (adds complementary data from the open board): start `miro2obsidian websdk-serve --port 8766`, open the
 board in Miro → **+ More apps** → the app → **Export board**, keep the
-downloaded JSON and select it in the GUI's **Web SDK JSON** field, or pass it
+downloaded JSON and select it in the GUI's **Whole-board Web SDK JSON (required)** field, or pass it
 with `--websdk-json <file>` together with a fresh REST export of the same
 board. The strict canonical merge checks identity, freshness and coverage.
 Agent mode should operate the browser controls when available; if unavailable,
-report the limitation and use Code mode for REST-only export.
+return needs_user. The user can explicitly choose Code mode with REST only (less data), or pass --rest-only in the CLI. An empty SDK field no longer silently selects REST. See docs/MIRO_EXPORT_AUDIT_2026-10-06.md for known uncollected read surfaces.
 
 ## When it goes wrong
 

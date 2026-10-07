@@ -3,9 +3,10 @@ from __future__ import annotations
 import argparse
 import time
 from collections import Counter
+from copy import deepcopy
 from pathlib import Path
 from typing import Any
-from urllib.parse import parse_qsl, urljoin, urlsplit
+from urllib.parse import parse_qsl, unquote, urljoin, urlsplit
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -302,6 +303,18 @@ def _fetch_paginated_comment_items(
     current_url = str(first_result.get("url") or "")
     current_params = dict(first_result.get("params") or {})
     expected_total = _pagination_int(first_body, "total")
+    seen_item_ids: set[str] = set()
+
+    def check_ids(body: dict[str, Any]) -> None:
+        for item in body["data"]:
+            if not isinstance(item, dict) or not str(item.get("id") or "").strip():
+                raise CommentProbeError("Comment page contains a malformed item or missing ID.")
+            item_id = str(item["id"])
+            if item_id in seen_item_ids:
+                raise CommentProbeError("Comment collection pagination repeated an ID.")
+            seen_item_ids.add(item_id)
+
+    check_ids(first_body)
     captured_records = len(first_body["data"])
     next_request = _next_page_request(
         first_body,
@@ -355,6 +368,7 @@ def _fetch_paginated_comment_items(
         elif page_total is not None and page_total != expected_total:
             raise CommentProbeError("Comment pagination total changed between pages.")
         captured_records += len(raw_body["data"])
+        check_ids(raw_body)
         comments.extend(extract_comment_items([{**page, "body": raw_body}]))
         current_url = next_url
         current_params = next_params
@@ -385,6 +399,142 @@ def decide_probe_result(available_count: int, comment_count: int) -> str:
     if available_count > 0:
         return "comments_source_available_empty"
     return "separate_source_not_found_in_checked_rest_paths"
+
+
+def _audit_comment_threads(
+    comments: list[dict[str, Any]],
+    *,
+    source_urls: dict[str, str],
+    session: Any,
+    token: str,
+    retry_delay_seconds: float,
+    collection_key: str = "replies",
+) -> dict[str, Any]:
+    """Verify returned evidence; follow only reply links actually supplied by Miro.
+
+    The checked REST paths have no verified contract for resolved-thread coverage.
+    Absence of a replies field or count therefore remains unknown, never zero.
+    """
+    threads: list[dict[str, Any]] = []
+    verified_key = f"{collection_key}_verified"
+    count_keys = {"replies": ("replyCount", "reply_count"), "messages": ("messageCount", "message_count")}[collection_key]
+    for comment in comments:
+        audit: dict[str, Any] = {"id": comment.get("id"), verified_key: False}
+        threads.append(audit)
+        declared = None
+        for key in count_keys:
+            count = _pagination_int(comment, key)
+            if count is not None:
+                if declared is not None and declared != count:
+                    raise CommentProbeError("Comment reply counts disagree.")
+                declared = count
+        replies = comment.get(collection_key)
+        if replies is None:
+            if declared not in (None, 0):
+                if collection_key == "replies" and comment.get("messages") is not None:
+                    audit.update({
+                        "declared_records": declared,
+                        "reason": "reply_count_not_reconciled_with_messages_without_contract",
+                    })
+                    continue
+                raise CommentProbeError("Comment declares replies but provides neither replies nor continuation.")
+            audit.update({"declared_records": declared, verified_key: declared == 0})
+            continue
+        if isinstance(replies, list):
+            page = {"data": replies}
+        elif isinstance(replies, dict) and isinstance(replies.get("data"), list):
+            page = deepcopy(replies)
+        else:
+            raise CommentProbeError("Comment replies returned malformed data.")
+        collected: list[dict[str, Any]] = []
+        seen_ids: set[str] = set()
+        seen_urls: set[str] = set()
+        current_url = source_urls[str(comment.get("source"))]
+        source_url = current_url
+        raw_pages = []
+        while True:
+            count = _pagination_int(page, "total")
+            if count is not None:
+                if declared is not None and declared != count:
+                    raise CommentProbeError("Comment replies total changed or disagrees with reply count.")
+                declared = count
+            size = _pagination_int(page, "size")
+            if size is not None and size != len(page["data"]):
+                raise CommentProbeError("Comment replies size does not match data.")
+            for reply in page["data"]:
+                if not isinstance(reply, dict):
+                    raise CommentProbeError("Comment replies contain a non-object.")
+                reply_id = str(reply.get("id") or "")
+                if reply_id and reply_id in seen_ids:
+                    raise CommentProbeError("Comment reply pagination repeated an ID.")
+                if reply_id:
+                    seen_ids.add(reply_id)
+                collected.append(deepcopy(reply))
+            if declared is not None and len(collected) > declared:
+                raise CommentProbeError("Comment replies exceed declared total.")
+            link = _next_page_url(page)
+            if not link:
+                if declared is not None and len(collected) != declared:
+                    raise CommentProbeError("Comment replies truncated before declared total without continuation.")
+                if page.get("hasMore") is True or page.get("has_more") is True or page.get("cursor"):
+                    raise CommentProbeError("Comment reply continuation has no server-provided URL.")
+                break
+            if not page["data"]:
+                raise CommentProbeError("Comment reply pagination made no progress.")
+            next_url = urljoin(current_url, link)
+            # Keep authorization on the checked origin and inside this board.
+            board_path = urlsplit(source_url).path.rsplit("/", 1)[0] + "/"
+            parsed_next = urlsplit(next_url)
+            decoded_path = unquote(parsed_next.path)
+            if (
+                not _same_origin(source_url, next_url)
+                or not decoded_path.startswith(board_path)
+                or any(part in {".", ".."} for part in decoded_path.split("/"))
+                or parsed_next.username is not None
+                or parsed_next.password is not None
+            ):
+                raise CommentProbeError("Comment reply link left the checked board or origin.")
+            if next_url in seen_urls:
+                raise CommentProbeError("Comment reply pagination repeated a URL.")
+            seen_urls.add(next_url)
+            response, _ = _get_with_retry(
+                session=session, url=next_url, params={}, token=token,
+                retry_delay_seconds=retry_delay_seconds,
+            )
+            if classify_status(int(response.status_code)) != "available":
+                raise CommentProbeError("Comment reply page request failed.")
+            page = _response_body(response, include_body=True)
+            if not isinstance(page, dict) or not isinstance(page.get("data"), list):
+                raise CommentProbeError("Comment reply page returned malformed data.")
+            raw_pages.append({"url": next_url, "body": deepcopy(page)})
+            current_url = next_url
+        if raw_pages:
+            audit[f"original_{collection_key}"] = deepcopy(replies)
+            audit["pages"] = raw_pages
+            if isinstance(replies, dict):
+                comment[collection_key] = {**deepcopy(replies), "data": collected}
+            else:
+                comment[collection_key] = collected
+        audit.update({
+            "captured_records": len(collected), "declared_records": declared,
+            verified_key: declared is not None,
+        })
+    coverage = {
+        "scope": "returned_threads_and_server_provided_nested_links",
+        verified_key: bool(threads) and all(t[verified_key] for t in threads),
+        "resolved_threads_verified": False,
+        "resolved_threads_reason": "checked_rest_paths_have_no_verified_resolved_thread_contract",
+        "returned_resolved_thread_ids": [c.get("id") for c in comments if c.get("resolved") is True],
+        "threads": threads,
+    }
+    if collection_key == "replies":
+        message_coverage = _audit_comment_threads(
+            comments, source_urls=source_urls, session=session, token=token,
+            retry_delay_seconds=retry_delay_seconds, collection_key="messages",
+        )
+        coverage["messages_verified"] = message_coverage["messages_verified"]
+        coverage["message_threads"] = message_coverage["threads"]
+    return coverage
 
 
 def run_comment_probe(
@@ -467,6 +617,10 @@ def run_comment_probe(
                 retry_delay_seconds=retry_delay_seconds,
             )
         )
+    thread_coverage = _audit_comment_threads(
+        comments, source_urls={result["key"]: result["url"] for result in available},
+        session=session, token=token, retry_delay_seconds=retry_delay_seconds,
+    )
     blocking = sorted(
         classification
         for classification in by_classification
@@ -502,6 +656,8 @@ def run_comment_probe(
             "source_available": bool(available),
             "all_available_pages_fetched": bool(available),
             "blocking_classifications": blocking,
+            "scope": "available_collection_pages",
+            "thread_coverage": thread_coverage,
         },
         "requests": results,
         "comments": comments,

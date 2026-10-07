@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlsplit
 
-from miro2obsidian.app_setup import setup_intro_html
+from miro2obsidian.app_setup import ACCESS_HELP, CONNECT_HELP, setup_intro_html
 from miro2obsidian.ui_theme import html_page, theme_script_source
 from miro2obsidian.credential_store import save_access_token
 from scripts.miro_oauth_token import authorize_and_get_token, session_oauth_config
@@ -151,15 +151,14 @@ def _page(body: str) -> str:
 def _form_page(csrf: str) -> str:
     return _page(
         setup_intro_html() +
-        '<details id="connect"><summary>I have configured my Miro app — connect</summary>'
-        '<p>Copy the Client ID and Client secret from '
-        'your own Miro app. They stay in this local process memory until OAuth finishes. '
-        'Only the access token is saved in your operating system credential store.</p>'
+        '<section data-setup-panel="2" hidden><h2>Connect your Miro app</h2>'
+        f'<p>{CONNECT_HELP}</p><p>{ACCESS_HELP}</p>'
         '<form method="post" action="/connect" autocomplete="off">'
         f'<input type="hidden" name="csrf" value="{html.escape(csrf, quote=True)}">'
         '<label>Client ID<input name="client_id" required autocomplete="off"></label>'
         '<label>Client secret<input name="client_secret" type="password" required autocomplete="off"></label>'
-        '<button type="submit">Connect to Miro</button></form></details>'
+        '<button type="button" data-step-target="1">Back</button> '
+        '<button type="submit">Connect to Miro</button></form></section>'
     )
 
 

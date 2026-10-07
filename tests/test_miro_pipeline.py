@@ -846,7 +846,7 @@ class MiroPipelineTests(unittest.TestCase):
 
             argv = [
                 "miro2obsidian.application.py",
-                "--board-id",
+                "--rest-only", "--board-id",
                 "board-1",
                 "--source-json",
                 str(source_json),
@@ -886,7 +886,7 @@ class MiroPipelineTests(unittest.TestCase):
             )
             argv = [
                 "miro2obsidian",
-                "--board-id", "board-1",
+                "--rest-only", "--board-id", "board-1",
                 "--source-json", str(root / "board.json"),
                 "--target-dir", str(root),
                 "--vault-root", str(root),
@@ -911,7 +911,7 @@ class MiroPipelineTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             argv = [
-                "miro2obsidian", "--board-id", "board-1",
+                "miro2obsidian", "--rest-only", "--board-id", "board-1",
                 "--source-json", str(root / "board.json"),
                 "--target-dir", str(root), "--vault-root", str(root),
                 "--stored-token",
@@ -1201,7 +1201,7 @@ class MiroPipelineTests(unittest.TestCase):
             )
             argv = [
                 "miro2obsidian.application.py",
-                "--board-id",
+                "--rest-only", "--board-id",
                 "board-1",
                 "--source-json",
                 str(source_json),
@@ -1234,6 +1234,7 @@ class MiroPipelineTests(unittest.TestCase):
                 vault_root=root / "vault",
                 target_dir=root / "target",
                 existing_json=False,
+                rest_only=True,
                 board_id="board-1",
                 source_json=root / "board.json",
                 websdk_json=None,
