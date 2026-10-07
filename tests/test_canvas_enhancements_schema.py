@@ -8,6 +8,7 @@ def metadata():
     return {
         "schemaVersion": 1,
         "properties": {"tags": ["planning"], "aliases": ["Plan"], "owner": "[[Team]]"},
+        "nodeRedirects": {"old": {"file": "boards/New.canvas", "nodeId": "old", "future": 1}},
         "localOverrides": {
             "group": {
                 "customStyles": ["quiet-card"],
@@ -27,6 +28,12 @@ def test_feature_fields_and_unknown_extensions_are_valid():
 def test_properties_require_an_object():
     value = metadata()
     value["properties"] = "not an object"
+    assert validate_canvas_metadata(value)
+
+
+def test_card_redirects_require_a_destination():
+    value = metadata()
+    value["nodeRedirects"]["old"]["file"] = ""
     assert validate_canvas_metadata(value)
 
 
