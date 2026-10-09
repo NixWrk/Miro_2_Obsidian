@@ -389,6 +389,7 @@
         },
         "borderStyle": { "enum": ["solid", "dashed", "dotted", "none"] },
         "borderWidth": { "type": "number", "minimum": 0 },
+        "cornerRadius": { "description": "Equal physical x/y corner radius for rectangular shapes, in board units; clamped to half the shorter side when painted.", "type": "number", "minimum": 0, "maximum": 1000 },
         "connector": {
           "description": "How a native edge is drawn beyond native Canvas: route, stroke, caps, width, label position and bends. Not checked by the plugin's metadata validator; values it does not know are ignored.",
           "type": "object",
