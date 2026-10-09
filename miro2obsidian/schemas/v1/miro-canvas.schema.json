@@ -11,6 +11,25 @@
       "const": 1
     },
     "settings": { "$ref": "#/$defs/settings" },
+    "properties": {
+      "description": "Board properties indexed as frontmatter by the plugin; all values remain plain JSON.",
+      "type": "object",
+      "maxProperties": 256,
+      "additionalProperties": true
+    },
+    "nodeRedirects": {
+      "description": "Card links retained after encapsulation: former node id to its new board and node id.",
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "required": ["file", "nodeId"],
+        "properties": {
+          "file": { "type": "string", "minLength": 1 },
+          "nodeId": { "type": "string", "minLength": 1 }
+        },
+        "additionalProperties": true
+      }
+    },
     "transform": { "$ref": "#/$defs/transform" },
     "bindings": {
       "description": "Canvas node id to the source item it shows.",
@@ -259,6 +278,13 @@
           "maxItems": 8192,
           "items": { "type": "number" }
         },
+        "widths": {
+          "description": "Optional width at each point, in board units. Its length equals points.length / 2; width remains the maximum for old readers and bounds.",
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 4096,
+          "items": { "type": "number", "exclusiveMinimum": 0, "maximum": 1000 }
+        },
         "breaks": {
           "type": "array",
           "items": { "type": "integer", "exclusiveMinimum": 0 }
@@ -328,6 +354,29 @@
         "locked": { "type": "boolean" },
         "showAttachmentName": { "type": "boolean" },
         "rotation": { "type": "number" },
+        "customStyles": {
+          "description": "Named local CSS styles defined in the plugin settings, in application order.",
+          "type": "array",
+          "maxItems": 32,
+          "uniqueItems": true,
+          "items": { "type": "string", "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$" }
+        },
+        "groupCollapse": {
+          "description": "Expanded size and members of a collapsed native group. Child positions are never removed.",
+          "type": "object",
+          "required": ["width", "height", "children"],
+          "properties": {
+            "width": { "type": "number", "minimum": 1 },
+            "height": { "type": "number", "minimum": 1 },
+            "children": {
+              "type": "array",
+              "maxItems": 100000,
+              "uniqueItems": true,
+              "items": { "type": "string", "minLength": 1 }
+            }
+          },
+          "additionalProperties": true
+        },
         "item": { "$ref": "#/$defs/localItem" },
         "shape": {
           "description": "The Miro shape a card is drawn as (rectangle, ellipse, a flowchart shape...); without the plugin it is a plain card. Not checked by the plugin's metadata validator; the renderer ignores what it does not know.",
@@ -340,6 +389,7 @@
         },
         "borderStyle": { "enum": ["solid", "dashed", "dotted", "none"] },
         "borderWidth": { "type": "number", "minimum": 0 },
+        "cornerRadius": { "description": "Equal physical x/y corner radius for rectangular shapes, in board units; clamped to half the shorter side when painted.", "type": "number", "minimum": 0, "maximum": 1000 },
         "connector": {
           "description": "How a native edge is drawn beyond native Canvas: route, stroke, caps, width, label position and bends. Not checked by the plugin's metadata validator; values it does not know are ignored.",
           "type": "object",

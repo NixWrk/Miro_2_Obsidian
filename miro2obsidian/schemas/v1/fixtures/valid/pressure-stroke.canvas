@@ -1,0 +1,45 @@
+{
+  "nodes": [
+    {
+      "id": "pressure1",
+      "type": "text",
+      "text": "",
+      "x": 0,
+      "y": 0,
+      "width": 100,
+      "height": 30
+    }
+  ],
+  "edges": [],
+  "miroCanvas": {
+    "schemaVersion": 1,
+    "localOverrides": {
+      "pressure1": {
+        "item": {
+          "type": "drawing",
+          "stroke": {
+            "color": "#ffffff",
+            "width": 12,
+            "box": {
+              "width": 100,
+              "height": 30
+            },
+            "points": [
+              10,
+              15,
+              50,
+              15,
+              90,
+              15
+            ],
+            "widths": [
+              2,
+              12,
+              3
+            ]
+          }
+        }
+      }
+    }
+  }
+}
