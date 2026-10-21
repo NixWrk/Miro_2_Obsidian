@@ -29,6 +29,7 @@ function setup({ pending = ["board-1"], server = true, postStatus = 200, postBod
       elements.set(id, {
         disabled: false,
         textContent: "",
+        dataset: {},
         addEventListener(event, callback) {
           listeners[`${id}:${event}`] = callback;
         },

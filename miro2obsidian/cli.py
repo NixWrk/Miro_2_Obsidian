@@ -24,7 +24,7 @@ import webbrowser
 from pathlib import Path
 from typing import Any, Sequence
 
-from Json_2_Canvas.output_formats import ADVANCED_CANVAS, OUTPUT_FORMATS
+from Json_2_Canvas.output_formats import ADVANCED_CANVAS, OUTPUT_FORMATS, RAW_JSON
 from Json_2_Canvas.Scale_engine import DEFAULT_FIT_MARGIN, ViewProfile
 from miro2obsidian import app_setup, import_service, mcp_server, miro_auth
 from miro2obsidian.agent_guide import AGENT_GUIDE
@@ -77,7 +77,7 @@ def build_parser() -> argparse.ArgumentParser:
     for name, helptext in (
         ("guide", "Print the step-by-step checklist."),
         ("manifest", "Print the Miro app manifest (YAML)."),
-        ("open", "Open the Miro Developer Hub in the browser."),
+        ("open", "Open Miro Settings > Your apps in the browser."),
     ):
         leaf = setup_sub.add_parser(name, help=helptext)
         _json_flag(leaf)
@@ -119,14 +119,15 @@ def build_parser() -> argparse.ArgumentParser:
     imp = sub.add_parser("import", help="Import boards into a vault.")
     imp.add_argument("--board", action="append", default=[], metavar="REF", help="Board id, URL or name (repeatable).")
     imp.add_argument("--boards-file", type=Path, help="File with one board reference per line; # starts a comment.")
-    imp.add_argument("--vault", type=Path, required=True)
+    imp.add_argument("--vault", type=Path, help="Required for Canvas; raw JSON can use --output-dir instead.")
+    imp.add_argument("--output-dir", type=Path, help="Standalone JSON and attachments folder; use with --format raw-json.")
     imp.add_argument("--folder", help="Folder for the boards, relative to the vault or absolute inside it (default: Miro).")
     imp.add_argument("--format", dest="output_format", choices=list(OUTPUT_FORMATS), default=ADVANCED_CANVAS)
     imp.add_argument(
         "--websdk",
-        default="auto",
+        default="required",
         metavar="auto|required|skip|PATH",
-        help="auto: use the Miro app's capture when possible; required: never fall back to REST only; "
+        help="required (default): never fall back to REST only; auto: explicitly allow a degraded REST-only fallback; "
         "skip: REST only; or the path of a capture file.",
     )
     imp.add_argument("--capture-timeout", type=float, default=import_service.DEFAULT_CAPTURE_TIMEOUT_SECONDS)
@@ -289,7 +290,7 @@ def _cmd_setup(args: argparse.Namespace) -> int:
             _json_out({"opened": opened, "url": app_setup.DEVELOPER_HUB_URL})
         else:
             _out(
-                "Opened the Miro Developer Hub in your browser."
+                "Opened Miro Settings > Your apps in your browser."
                 if opened
                 else f"Could not open a browser. Open this page yourself: {app_setup.DEVELOPER_HUB_URL}"
             )
@@ -445,10 +446,12 @@ def _login_with_form(args: argparse.Namespace) -> int:
         if args.json:
             _json_out({"event": "form_url", "url": url})
         elif args.no_browser:
-            _out(f"Open this form in your browser and paste your Client ID and Client secret there: {url}")
+            _out(f"Open this setup page in your Miro browser: {url}. "
+                 "Create and configure the app first, then expand the connection form.")
         else:
-            _out(f"Opened a local form in your browser ({url}). Paste your Client ID and Client secret "
-                 "there, then approve access in Miro.")
+            _out(f"Opened the setup page in your browser ({url}). "
+                 "Create and configure the app first, then expand the connection form "
+                 "and approve access in Miro in the same browser.")
 
     state = browser_setup.run_form(
         open_browser=not args.no_browser,
@@ -550,10 +553,15 @@ def _cmd_import(args: argparse.Namespace, parser: argparse.ArgumentParser) -> in
         parser.error(f"cannot read --boards-file: {exc}")
     if not refs:
         parser.error("give at least one --board REF or a --boards-file")
-    vault = args.vault
-    if not vault.is_dir():
+    if args.output_dir is not None and args.output_format != RAW_JSON:
+        parser.error("--output-dir requires --format raw-json; use --vault and --folder for Canvas")
+    output_dir = args.output_dir.expanduser().resolve() if args.output_dir is not None else None
+    vault = args.vault.expanduser().resolve() if args.vault is not None else output_dir
+    if vault is None:
+        parser.error("Canvas output requires --vault; raw JSON requires --output-dir or --vault")
+    if args.output_dir is None and not vault.is_dir():
         parser.error(f"the vault folder does not exist: {vault}")
-    folder = _resolve_folder(vault, args.folder)
+    folder = output_dir or _resolve_folder(vault, args.folder)
     view = ViewProfile(
         width=args.viewport_width,
         height=args.viewport_height,

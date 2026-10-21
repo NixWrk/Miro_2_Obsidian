@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import tempfile
+import time
 from pathlib import Path
 from typing import Any
 
@@ -26,6 +27,15 @@ def write_json_atomic(path: Path, payload: dict[str, Any]) -> None:
                 indent=2,
                 allow_nan=False,
             )
-        os.replace(temporary, path)
+        for attempt in range(6):
+            try:
+                os.replace(temporary, path)
+                break
+            except PermissionError as exc:
+                # Windows indexers and sync clients can briefly lock a newly
+                # published Canvas between format conversion and deduplication.
+                if getattr(exc, "winerror", None) not in (5, 32, 33) or attempt == 5:
+                    raise
+                time.sleep(0.05 * 2 ** attempt)
     finally:
         temporary.unlink(missing_ok=True)

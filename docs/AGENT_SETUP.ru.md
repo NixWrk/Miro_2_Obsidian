@@ -74,7 +74,13 @@ MCP-инструменты miro2obsidian. Начни с `agent_guide`, зате�
    форма. Вы вставляете в неё Client ID и Client secret и одобряете доступ в
    Miro. Агент их не видит.
 3. `miro2obsidian boards --json`, чтобы найти доски.
-4. `miro2obsidian import --board "<ссылка>" --board "<ссылка2>" --vault "<vault>" --folder "<папка>" --format <формат> --websdk auto --json`.
+4. `miro2obsidian import --board "<ссылка>" --board "<ссылка2>" --vault "<vault>" --folder "<папка>" --format <формат> --websdk required --json`.
+
+Для отдельного JSON замените `--vault ... --folder ...` на `--output-dir
+"<папка экспорта>" --format raw-json`. Obsidian не требуется. Автоматический
+захват по умолчанию требует Web SDK (`required`); `auto` явно разрешает
+неполный вариант. Инструмент MCP `import_boards` принимает аналогичную папку
+в `output_dir` с форматом `raw-json`.
 5. Прочитать последнюю строку JSON (`"event": "summary"`) и сообщить статус каждой
    доски.
 

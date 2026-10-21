@@ -120,7 +120,7 @@ class AgentRunnerTests(unittest.TestCase):
                 "assert request['protocol_version'] == 2\n"
                 "assert request['board_url'].endswith('/example=/')\n"
                 "assert request['pipeline_command']\n"
-                "assert request['import_command'][-5:] == ['--format', 'native-canvas', '--websdk', 'auto', '--json']\n"
+                "assert request['import_command'][-5:] == ['--format', 'native-canvas', '--websdk', 'required', '--json']\n"
                 "assert '--board' in request['import_command'] and request['doctor_command'][-1] == '--json'\n"
                 "assert request['websdk_server_command'][-3:] == ['websdk-serve', '--port', '8766']\n"
                 "assert request['browser_cdp_url'] is None\n"
@@ -590,7 +590,7 @@ class AgentProtocolV2Tests(unittest.TestCase):
             "auth status --json",
             "auth login --form",
             "import --board",
-            "--websdk auto",
+            "--websdk required",
             "untrusted",
             "degraded",
             "Never read, print, persist, or request Miro secrets",

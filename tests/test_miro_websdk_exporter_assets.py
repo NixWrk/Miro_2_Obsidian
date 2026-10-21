@@ -7,7 +7,7 @@ import unittest
 from functools import partial
 from http.server import ThreadingHTTPServer
 from pathlib import Path
-from urllib.request import urlopen
+from urllib.request import ProxyHandler, build_opener
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -49,10 +49,11 @@ class MiroWebsdkExporterAssetTests(unittest.TestCase):
         thread.start()
         try:
             port = httpd.server_address[1]
+            opener = build_opener(ProxyHandler({}))
             paths = [*module.LEGACY_PATHS, "/callback?_miro=1&_sdk=stable"]
             for path in paths:
                 with self.subTest(path=path):
-                    with urlopen(
+                    with opener.open(
                         f"http://127.0.0.1:{port}{path}", timeout=2
                     ) as response:
                         body = response.read()

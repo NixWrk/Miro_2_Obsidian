@@ -18,11 +18,11 @@ from miro2obsidian.import_service import ImportResult
 class WebSdkChoiceTests(unittest.TestCase):
     def test_code_automation_defaults_to_automatic_capture(self) -> None:
         self.assertEqual(gui_support.default_websdk_choice("Code automation"), gui_support.WEBSDK_AUTO)
-        self.assertEqual(gui_support.default_websdk_choice("Manual"), gui_support.WEBSDK_OFF)
+        self.assertEqual(gui_support.default_websdk_choice("Manual"), gui_support.WEBSDK_FILE)
         self.assertEqual(gui_support.default_websdk_choice("Manual", has_file=True), gui_support.WEBSDK_FILE)
 
     def test_choices_map_to_import_service_modes(self) -> None:
-        self.assertEqual(gui_support.resolve_websdk_option(gui_support.WEBSDK_AUTO, ""), "auto")
+        self.assertEqual(gui_support.resolve_websdk_option(gui_support.WEBSDK_AUTO, ""), "required")
         self.assertEqual(gui_support.resolve_websdk_option(gui_support.WEBSDK_OFF, "ignored"), "skip")
         self.assertEqual(
             gui_support.WEBSDK_CHOICES,
@@ -174,7 +174,7 @@ class OutcomeTests(unittest.TestCase):
         generic = outcome("failed", "error", "Boom.", "Run `miro2obsidian doctor` to check the setup.")
         self.assertNotIn("miro2obsidian", generic.next_step or "")
         apps = outcome("needs_user", "app_setup_required", "Not allowed.", "See `miro2obsidian setup guide`.")
-        self.assertIn("step 4", apps.next_step or "")
+        self.assertIn("installation step", apps.next_step or "")
         plain = outcome("needs_user", "file_locked", "Locked.", "Close the board in Obsidian and retry.")
         self.assertEqual(plain.next_step, "Close the board in Obsidian and retry.")
 
@@ -279,10 +279,10 @@ class EventTests(unittest.TestCase):
         fmt = gui_support.format_import_event
         self.assertEqual(fmt({"event": "board_started", "message": "Importing A."}), "Importing A.")
         self.assertEqual(fmt({"event": "step", "message": "Doing it."}), "Doing it.")
-        self.assertIn("Needs you: Stuck. Next: Click.", fmt({"event": "needs_user", "message": "Stuck.", "next_step": "Click."}))
+        self.assertIn("Needs you: Stuck.\nWhat to do: Click.", fmt({"event": "needs_user", "message": "Stuck.", "next_step": "Click."}))
         self.assertEqual(
             fmt({"event": "board_finished", "result": {"status": "degraded", "board_name": "A"}}),
-            "A: Written with gaps.",
+            "[Written with gaps] A",
         )
         self.assertIsNone(fmt({"event": "unknown"}))
 

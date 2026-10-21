@@ -529,7 +529,23 @@ def test_import_defaults_match_the_legacy_cli(recorded, capsys, vault) -> None:
     assert opts.output_format == legacy.output_format
     assert opts.view_profile == miro_pipeline.view_profile_from_args(legacy)
     assert (opts.theme, opts.text_style_mode, opts.min_font_px) == (legacy.theme, legacy.text_style_mode, legacy.min_font_px)
-    assert opts.websdk == "auto" and opts.open_board is True
+    assert opts.websdk == "required" and opts.open_board is True
+
+
+def test_standalone_import_resolves_relative_output_folder(recorded, capsys, monkeypatch, tmp_path) -> None:
+    monkeypatch.chdir(tmp_path)
+    code, _, _ = run(capsys, "import", "--board", BOARD, "--format", "raw-json", "--output-dir", "Exports", "--json")
+    assert code == 0
+    opts = recorded["options"]
+    assert opts.target_dir == tmp_path / "Exports"
+    assert opts.source_dir == tmp_path / "Exports"
+    assert opts.websdk == "required"
+
+
+def test_canvas_rejects_output_dir_before_import(recorded, capsys, tmp_path) -> None:
+    code, _, err = run(capsys, "import", "--board", BOARD, "--output-dir", str(tmp_path))
+    assert code == 1 and "--format raw-json" in err
+    assert "options" not in recorded
 
 
 def test_import_passes_view_and_attachment_options(recorded, capsys, vault, tmp_path) -> None:

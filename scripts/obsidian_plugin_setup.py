@@ -4,6 +4,7 @@ import argparse
 import hashlib
 import json
 import shutil
+import sys
 import tempfile
 import urllib.error
 import urllib.request
@@ -16,7 +17,13 @@ from scripts.miro_export_bundle import is_link_or_reparse
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-ZOOM_UNLOCK_SOURCE = REPO_ROOT / "tools" / "obsidian_plugins" / "canvas-zoom-unlock"
+def zoom_unlock_directory() -> Path:
+    checkout_path = REPO_ROOT / "tools" / "obsidian_plugins" / "canvas-zoom-unlock"
+    installed_path = Path(sys.prefix) / "share" / "miro2obsidian" / "plugins" / "canvas-zoom-unlock"
+    return next((path for path in (checkout_path, installed_path) if path.is_dir()), checkout_path)
+
+
+ZOOM_UNLOCK_SOURCE = zoom_unlock_directory()
 
 ADVANCED_CANVAS_ID = "advanced-canvas"
 ADVANCED_CANVAS_REPO = "Developer-Mike/obsidian-advanced-canvas"

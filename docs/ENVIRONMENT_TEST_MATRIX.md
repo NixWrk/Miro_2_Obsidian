@@ -1,5 +1,8 @@
 # Environment test matrix (Windows, 2026-09-28)
 
+Latest local integration checks: [2026-10-21 report](INTEGRATION_TESTS_2026-10-21.md).
+The historical live results below do not verify the newly combined workflows.
+
 Test board: `https://miro.com/app/board/uXjVJSz4qHA=/`. Test vault:
 `OBS_TEST`. No credential values were saved in this repository or test log.
 

@@ -23,10 +23,25 @@ Push-Location $repositoryRoot
 try {
     if (-not (Test-Path -LiteralPath $virtualEnvPython)) {
         $pyLauncher = Get-Command py -ErrorAction SilentlyContinue
+        $launcherReady = $false
         if ($pyLauncher) {
+            try {
+                & py -3.13 -c "import sys; raise SystemExit(0 if sys.version_info[:2] == (3, 13) else 1)" 2>$null
+                $launcherReady = $LASTEXITCODE -eq 0
+            }
+            catch {
+                # A stale Windows launcher can exist without knowing Python on PATH.
+                $launcherReady = $false
+            }
+        }
+        if ($launcherReady) {
             & py -3.13 -m venv .venv
         }
         else {
+            & python -c "import sys; raise SystemExit(0 if sys.version_info[:2] == (3, 13) else 'Python 3.13 is required')"
+            if ($LASTEXITCODE -ne 0) {
+                throw "Could not find Python 3.13. Install it and retry."
+            }
             & python -m venv .venv
         }
         if ($LASTEXITCODE -ne 0) {
@@ -46,6 +61,8 @@ try {
             Invoke-VenvPython @("-m", "playwright", "install", "chromium")
         }
     }
+
+    Invoke-VenvPython @("-m", "pip", "check")
 }
 finally {
     Pop-Location

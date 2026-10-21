@@ -18,7 +18,7 @@ from email.utils import parsedate_to_datetime
 from pathlib import Path
 from threading import Lock
 from typing import Callable, Optional
-from urllib.parse import unquote, urljoin, urlsplit, urlunsplit, parse_qsl, urlencode
+from urllib.parse import quote, unquote, urljoin, urlsplit, urlunsplit, parse_qsl, urlencode
 
 import requests
 from requests.adapters import HTTPAdapter
@@ -274,6 +274,9 @@ def _dedupe_miro_items(items: list[dict]) -> list[dict]:
 
     def fill_missing(target: dict, source: dict) -> None:
         for key, value in source.items():
+            if key == "tagIds" and isinstance(value, list) and isinstance(target.get(key), list):
+                target[key] = list(dict.fromkeys([*target[key], *value]))
+                continue
             if key not in target or target[key] in (None, "", [], {}):
                 target[key] = deepcopy(value)
             elif isinstance(target[key], dict) and isinstance(value, dict):
@@ -599,9 +602,10 @@ def get_items_on_board(
     confirm_skip_source: Optional[Callable[[str, int, str], bool]] = None,
     confirm_exp_fallback: Optional[Callable[[int], bool]] = None,
     metadata: dict | None = None,
+    read_details: bool = True,
 ) -> list[dict]:
     """
-    Максимально полная выкачка данных по доске (для бэкапа) через Miro REST v2.
+    Сбор доступных объектов и дополнительных чтений Miro REST v2.
     Возвращает единый список dict'ов, где у каждого объекта:
       - 'type'       : тип верхнего уровня (как в REST, напр. 'item', 'connector', 'tag', 'frame', 'member', 'board', ...)
       - 'source'     : из какого эндпоинта получен объект (напр. 'items', 'connectors', 'members', 'board')
@@ -609,7 +613,8 @@ def get_items_on_board(
       - остальные поля — как вернул API.
 
     Примечания:
-      - Комментарии и talktrack недоступны через публичный REST и требуют Board Export API (Enterprise).
+      - Комментарии собираются отдельным экспериментальным REST-путём production pipeline.
+      - Talktrack требует отдельного источника; здесь он не собирается.
       - Бинарники (оригиналы) отдельных типов не всегда доступны на прямую; REST вернёт метаданные/URLs.
       - Если prefer_experimental_items=True, items берутся из v2-experimental (даёт контент фигур/flowchart).
         При частичном падении пагинации вызывается confirm_exp_fallback(n_partial) — пользователь решает,
@@ -636,6 +641,7 @@ def get_items_on_board(
     source_records: Counter[str] = Counter()
     skipped_sources: list[str] = []
     partial_sources: list[str] = []
+    read_evidence: dict = {"enabled": read_details, "group_members": {}, "tag_members": {}}
 
     def log(msg: str) -> None:
         if logger:
@@ -671,23 +677,48 @@ def get_items_on_board(
         obj_type: str,
         source: str,
         enrich: Optional[Callable[[dict], None]] = None,
+        query_params: Optional[dict[str, str]] = None,
+        offset_mode: bool = False,
     ) -> None:
         nonlocal page_no, all_items
         cursor = ""
         next_url = ""
+        offset: int | None = None
+        expected_total: int | None = None
+        captured_records = 0
+        seen_ids: set[str] = set()
         seen_requests: set[tuple[str, tuple[tuple[str, str], ...]]] = set()
+
+        def page_integer(payload: dict, key: str) -> int | None:
+            value = payload.get(key)
+            if value is None:
+                return None
+            if isinstance(value, bool) or not str(value).isdigit():
+                raise RuntimeError(f"{source} pagination returned malformed {key}.")
+            return int(value)
+
         while True:
             if next_url:
                 request_url = urljoin(base_url, next_url)
+                link_query = dict(parse_qsl(urlsplit(request_url).query))
                 params: dict[str, str] = {}
+                for key, value in (query_params or {}).items():
+                    if key in link_query and link_query[key] != value:
+                        raise RuntimeError(f"{source} pagination changed collection filter.")
+                    if key not in link_query:
+                        params[key] = value
             else:
                 request_url = base_url
-                params = {"limit": str(MAX_LIMIT)}
+                params = {"limit": str(MAX_LIMIT), **(query_params or {})}
                 if cursor:
                     params["cursor"] = cursor
+                elif offset is not None:
+                    params["offset"] = str(offset)
 
             if not _miro_api_url_is_allowed(request_url):
                 raise RuntimeError(f"{source} pagination links.next left api.miro.com.")
+            if urlsplit(request_url).path.rstrip("/") != urlsplit(base_url).path.rstrip("/"):
+                raise RuntimeError(f"{source} pagination changed board or collection path.")
             request_key = (request_url, tuple(sorted(params.items())))
             if request_key in seen_requests:
                 raise RuntimeError(f"{source} pagination repeated the same request.")
@@ -710,12 +741,34 @@ def get_items_on_board(
                 payload.get("data"), list
             ):
                 raise RuntimeError(f"{source} pagination returned malformed data.")
+            request_query = {**dict(parse_qsl(urlsplit(request_url).query)), **params}
+            returned_offset = page_integer(payload, "offset")
+            requested_offset = int(request_query.get("offset", str(captured_records if "cursor" in request_query else 0)))
+            if returned_offset is not None and returned_offset != requested_offset:
+                raise RuntimeError(f"{source} pagination response offset does not match request.")
+            size = page_integer(payload, "size")
+            if size is not None and size != len(payload["data"]):
+                raise RuntimeError(f"{source} pagination size does not match data.")
+            total = page_integer(payload, "total")
+            if total is not None:
+                if expected_total is None:
+                    expected_total = total
+                elif total != expected_total:
+                    raise RuntimeError(f"{source} pagination total changed between pages.")
+            captured_records += len(payload["data"])
+            if expected_total is not None and captured_records > expected_total:
+                raise RuntimeError(f"{source} pagination exceeds declared total.")
             batch: list[dict] = []
             for raw_item in payload["data"]:
                 if not isinstance(raw_item, dict):
                     raise RuntimeError(
                         f"{source} pagination returned a non-object item."
                     )
+                item_id = str(raw_item.get("id") or "")
+                if item_id and item_id in seen_ids:
+                    raise RuntimeError(f"{source} pagination repeated item ID {item_id}.")
+                if item_id:
+                    seen_ids.add(item_id)
                 raw_item.setdefault("type", obj_type)
                 raw_item["source"] = source
                 if enrich:
@@ -742,10 +795,24 @@ def get_items_on_board(
             elif next_link:
                 cursor = ""
                 next_url = urljoin(request_url, next_link)
+            elif expected_total is not None and captured_records < expected_total:
+                if not batch:
+                    raise RuntimeError(f"{source} pagination made no progress before declared total.")
+                if cursor or "cursor" in request_query:
+                    raise RuntimeError(f"{source} pagination ended before declared total.")
+                offset = requested_offset + len(batch)
+                cursor = ""
+                next_url = ""
+            elif offset_mode and expected_total is None and len(batch) == MAX_LIMIT:
+                offset = requested_offset + len(batch)
+                cursor = ""
+                next_url = ""
             else:
                 break
+        if expected_total is not None and captured_records != expected_total:
+            raise RuntimeError(f"{source} pagination did not capture declared total.")
 
-    def fetch_single(url: str, as_type: str, source: str) -> None:
+    def fetch_single(url: str, as_type: str, source: str, expected_id: str | None = None) -> None:
         if not _miro_api_url_is_allowed(url):
             raise RuntimeError(f"{source} endpoint left api.miro.com.")
         response = sess.get(url, timeout=30)
@@ -753,6 +820,8 @@ def get_items_on_board(
         payload = response.json()
         if not isinstance(payload, dict):
             raise RuntimeError(f"{source} endpoint returned malformed data.")
+        if expected_id is not None and str(payload.get("id") or "") != expected_id:
+            raise RuntimeError(f"{source} endpoint returned a different item ID.")
         payload.setdefault("type", as_type)
         payload["source"] = source
         all_items.append(payload)
@@ -825,7 +894,7 @@ def get_items_on_board(
     ]
     for url, t, src in others:
         try:
-            fetch_cursor_paginated(url, t, src)
+            fetch_cursor_paginated(url, t, src, offset_mode=(src == "tags"))
         except requests.HTTPError as e:
             status = getattr(e.response, "status_code", None)
             if status in (401, 403):
@@ -871,9 +940,46 @@ def get_items_on_board(
         else:
             raise
 
-    log(
-        f"Получено: {len(all_items)} объектов ({fmt_counts(Counter(i['type'] for i in all_items))})"
-    )
+    if read_details:
+        if prefer_experimental_items:
+            fetch_cursor_paginated(
+                f"{base_exp}/mindmap_nodes", "mindmap_node", "mindmap_nodes(v2-experimental)"
+            )
+        initial_items = list(all_items)
+        known_types = {str(item["id"]): item["type"] for item in initial_items if item.get("id")}
+        for kind in ("connector", "group", "mindmap_node"):
+            ids = sorted({str(item["id"]) for item in initial_items if item.get("id") and item.get("type") == kind})
+            for item_id in ids:
+                detail_base = base_exp if kind == "mindmap_node" else base_v2
+                fetch_single(f"{detail_base}/{kind}s/{quote(item_id, safe='')}", kind, f"{kind}_detail:{item_id}", item_id)
+                if kind == "group":
+                    first = len(all_items)
+
+                    def group_member(item: dict) -> None:
+                        if item.get("type") == "item" and str(item.get("id")) in known_types:
+                            item["type"] = known_types[str(item["id"])]
+                        item.setdefault("groupId", item_id)
+
+                    fetch_cursor_paginated(f"{base_v2}/groups/items", "item", f"group_members:{item_id}", group_member, {"group_item_id": item_id})
+                    read_evidence["group_members"][item_id] = [str(item["id"]) for item in all_items[first:] if item.get("id")]
+
+        tag_ids = sorted({str(item["id"]) for item in initial_items if item.get("id") and item.get("type") == "tag"})
+        for tag_id in tag_ids:
+            first = len(all_items)
+
+            def tag_member(item: dict) -> None:
+                if item.get("type") == "item" and str(item.get("id")) in known_types:
+                    item["type"] = known_types[str(item["id"])]
+                # This assignment is derived from the documented tag_id filter.
+                ids = item.get("tagIds", [])
+                if not isinstance(ids, list) or any(not isinstance(value, str) for value in ids):
+                    raise RuntimeError("Tag membership returned malformed tagIds.")
+                item["tagIds"] = list(dict.fromkeys([*ids, tag_id]))
+
+            fetch_cursor_paginated(f"{base_v2}/items", "item", f"tag_members:{tag_id}", tag_member, {"tag_id": tag_id}, offset_mode=True)
+            read_evidence["tag_members"][tag_id] = [str(item["id"]) for item in all_items[first:] if item.get("id")]
+
+    log(f"Получено: {len(all_items)} объектов ({fmt_counts(Counter(i['type'] for i in all_items))})")
     if metadata is not None:
         metadata.update(
             {
@@ -887,6 +993,7 @@ def get_items_on_board(
                 "skipped_sources": list(skipped_sources),
                 "partial_sources": list(partial_sources),
                 "raw_item_count": len(all_items),
+                "read_details": read_evidence,
             }
         )
     return all_items

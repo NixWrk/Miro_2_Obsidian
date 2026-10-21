@@ -48,6 +48,9 @@ def test_local_setup_uses_same_origin_and_saves_full_connection(monkeypatch) -> 
         page = response.read().decode()
         assert response.status == 200
         assert response.getheader("Cache-Control") == "no-store"
+        assert "https://developers.miro.com/page/developer-hub#your-apps" in page
+        assert page.index("Create new app") < page.index('name="client_id"')
+        assert '<details id="connect">' in page
         csrf = re.search(r'name="csrf" value="([^"]+)"', page).group(1)
         form = urlencode({"csrf": csrf, "client_id": "app-id", "client_secret": "test-secret"})
         headers = {"Content-Type": "application/x-www-form-urlencoded", "Origin": "https://other.example"}

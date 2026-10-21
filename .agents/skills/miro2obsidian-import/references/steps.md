@@ -41,9 +41,9 @@ All accept `--json` unless noted. Exit codes: 0 ok or complete, 2 degraded,
 
 `import` options: `--board REF` (repeatable; id, URL or exact name),
 `--boards-file FILE` (one reference per line, `#` comments), `--vault PATH`
-(required), `--folder NAME` (inside the vault; default `Miro`),
+(required for Canvas; standalone JSON uses `--output-dir PATH`), `--folder NAME` (inside the vault; default `Miro`),
 `--format {advanced-canvas,native-canvas,miro-canvas,raw-json}` (default
-`advanced-canvas`), `--websdk auto|required|skip|PATH`, `--capture-timeout S`
+`advanced-canvas`), `--websdk auto|required|skip|PATH` (default `required`), `--capture-timeout S`
 (default 180), `--no-open` (do not open boards in the browser), `--source-dir`,
 `--attachment-dir`, `--keep-board-attachments`, `--install-obsidian-plugins`,
 `--stable-items`, and the view options `--scale`, `--scale-mode`, `--theme` and
@@ -67,7 +67,7 @@ one at a time. In short:
    (<https://developers.miro.com/page/developer-hub#your-apps>). Pick an
    organization and a Developer team, or create one.
 2. Create an app there with a recognisable name, for example
-   `Miro to Obsidian - local export`.
+   `Miro Full Exporter`.
 3. Settings, exact values (or paste the manifest from `setup manifest` if the
    page offers a manifest editor):
    - App URL / SDK URI: `http://localhost:8766/index.html`
@@ -146,3 +146,18 @@ After one connection the person can run `miro2obsidian import --boards-file
 <file> --vault <vault> --websdk skip` from Task Scheduler, launchd or cron as the
 same OS user. See `docs/WORKFLOW_MODES.md`. Exit code 3 means the person must
 reconnect.
+
+## Desktop modes and standalone export
+
+Exactly three workflows: Manual downloads and selects a whole-board Web SDK
+file; Code automation (default) captures and exports sequentially; Agent uses
+commands and, where available, browser UI to handle setup and export. Ask the
+owner only for sign-in, MFA, consent, admin approval, or steps your tools cannot
+perform. Do not read credentials; browser adapters may use UI Copy/Paste.
+
+GUI Export data saves raw JSON and attachments in any folder. For Obsidian
+adds Canvas conversion. CLI standalone export: `miro2obsidian import --board
+"<URL>" --format raw-json --output-dir "<folder>" --websdk required --json`.
+MCP import_boards uses output_dir with format raw-json instead of vault.
+Default automatic capture never silently falls back to REST. Only explicit
+auto permits a degraded fallback; skip explicitly selects REST only.

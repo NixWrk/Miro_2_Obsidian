@@ -68,10 +68,10 @@ WEBSDK_CHOICES = (WEBSDK_AUTO, WEBSDK_OFF, WEBSDK_FILE)
 
 
 def default_websdk_choice(workflow_mode: str, *, has_file: bool = False) -> str:
-    """Code automation captures by itself; Manual stays REST-only unless a file is given."""
+    """Code captures directly; Manual requires an explicitly chosen board file."""
     if workflow_mode == "Code automation":
         return WEBSDK_AUTO
-    return WEBSDK_FILE if has_file else WEBSDK_OFF
+    return WEBSDK_FILE
 
 
 def resolve_websdk_option(
@@ -83,7 +83,7 @@ def resolve_websdk_option(
     be honored.
     """
     if choice == WEBSDK_AUTO:
-        return "auto"
+        return "required"
     if choice == WEBSDK_OFF:
         return "skip"
     if choice == WEBSDK_FILE:
@@ -218,7 +218,7 @@ AGENT_REASON_HINTS: dict[str, tuple[str, str]] = {
     ),
     "app_setup_required": (
         "The Miro app is not installed in the team that owns this board.",
-        "Install the app into that team ('Set up Miro app', step 4), then run it again.",
+        "Install the app into that team ('Set up Miro app', installation step), then run it again.",
     ),
 }
 _DEFAULT_NEEDS_USER = (
@@ -242,6 +242,7 @@ class BoardOutcome:
     warnings: tuple[str, ...] = ()
     reason: str | None = None
     diagnostics_log: str | None = None
+    source_json: str | None = None
 
 
 @dataclass(frozen=True)
@@ -267,19 +268,19 @@ _CONNECT_STEP = (
 )
 _GUI_NEXT_STEPS = {
     "app_setup_required": (
-        "Install the Miro app into the team that owns this board ('Set up Miro app', step 4; a "
+        "Install the Miro app into the team that owns this board ('Set up Miro app', installation step; a "
         "team administrator may have to approve it), then press Run pipeline again."
     ),
     "board_not_found": "Use 'Refresh boards' and pick the board from the list, or paste the board link.",
     "websdk_capture_timeout": (
         "On the open board click the Miro to Obsidian app icon in the left toolbar (More apps, "
         "then the app), wait for the export to finish, then press Run pipeline again. If the "
-        "icon is missing, install the app into the board's team ('Set up Miro app', step 4)."
+        "icon is missing, install the app into the board's team ('Set up Miro app', installation step)."
     ),
     "websdk_unavailable": (
         "For the full export keep Web SDK on Automatic, click the Miro to Obsidian app icon on "
         "the open board if nothing happens within about 20 seconds, and run again. If the icon "
-        "is missing, install the app into the board's team ('Set up Miro app', step 4)."
+        "is missing, install the app into the board's team ('Set up Miro app', installation step)."
     ),
     "incomplete_source": "Run again so the board is captured afresh, or set Web SDK to Off (REST only).",
     "missing_assets": (
@@ -331,6 +332,7 @@ def outcome_from_import_result(result: Any) -> BoardOutcome:
         message=message,
         next_step=next_step,
         artifact_path=result.artifact_path,
+        source_json=result.source_json,
         websdk_missing=bool(missing),
         warnings=tuple(result.warnings or ()),
         reason=reason,
@@ -349,9 +351,11 @@ def outcome_from_pipeline(result: Any | None, *, degraded: bool, name: str = "")
             message="The source is reported incomplete; the output was written from what it contains.",
             next_step=f"Missing source data or assets are listed for: {result.source_json}",
             artifact_path=path,
+            source_json=str(result.source_json),
             reason="incomplete_source",
         )
-    return BoardOutcome("complete", name=name or Path(path).stem, message="Converted the JSON.", artifact_path=path)
+    return BoardOutcome("complete", name=name or Path(path).stem, message="Converted the JSON.", artifact_path=path,
+                        source_json=str(result.source_json))
 
 
 def outcome_from_agent(outcome: Any, *, name: str = "") -> BoardOutcome:
@@ -377,6 +381,7 @@ def outcome_from_agent(outcome: Any, *, name: str = "") -> BoardOutcome:
         message=message,
         next_step=next_step,
         artifact_path=artifact,
+        source_json=str(outcome.source_json) if outcome.source_json else None,
         websdk_missing=status == "degraded" and outcome.websdk_used is not True,
         reason=outcome.reason,
         diagnostics_log=log_path,
@@ -438,14 +443,16 @@ def format_import_event(event: Mapping[str, Any], *, narrate: bool = False) -> s
     if kind == "step":
         return message or None
     if kind == "needs_user":
-        step = event.get("next_step")
-        return f"Needs you: {message}" + (f" Next: {step}" if step else "")
+        message, step = _gui_texts(BoardOutcome(
+            "needs_user", message=message, next_step=event.get("next_step"), reason=event.get("reason"),
+        ))
+        return f"Needs you: {message}" + (f"\nWhat to do: {step}" if step else "")
     if kind == "board_finished":
         result = event.get("result")
         if isinstance(result, Mapping):
             label = STATUS_LABELS.get(str(result.get("status")), str(result.get("status")))
             name = result.get("board_name") or result.get("board_id") or "board"
-            return f"{name}: {label}."
+            return f"[{label}] {name}"
         return None
     if kind == "batch_finished":
         return message or None
@@ -494,7 +501,7 @@ def build_agent_instructions(
     target_dir: Path | str | None,
     output_format: str,
     boards: Sequence[str] = (),
-    websdk: str = "auto",
+    websdk: str = "required",
 ) -> str:
     """A ready prompt a person pastes into their own AI agent (variant 3).
 
@@ -505,14 +512,18 @@ def build_agent_instructions(
     target = Path(target_dir) if target_dir else None
     vault_text = str(vault) if vault else "<VAULT PATH>"
     folder = _folder_for_cli(vault, target)
+    raw_export = output_format == "raw-json"
     refs = [str(b).strip() for b in boards if str(b).strip()]
     websdk_arg = websdk if websdk in {"auto", "skip", "required"} else _quote(websdk)
 
     command = [f"{cli_command} import"]
     command += [f"--board {_quote(ref)}" for ref in refs] or ['--board "<BOARD>"']
-    command.append(f"--vault {_quote(vault_text)}")
-    if folder:
-        command.append(f"--folder {_quote(folder)}")
+    if raw_export:
+        command.append(f"--output-dir {_quote(str(target) if target else '<EXPORT FOLDER>')}")
+    else:
+        command.append(f"--vault {_quote(vault_text)}")
+        if folder:
+            command.append(f"--folder {_quote(folder)}")
     command.append(f"--format {output_format}")
     command.append(f"--websdk {websdk_arg}")
     command.append("--json")
@@ -524,11 +535,13 @@ def build_agent_instructions(
             f"- Not chosen yet. Run `{cli_command} boards --json`, show me the list and ask which boards I want."
         ]
     lines = [
-        "Please copy my Miro boards into my Obsidian vault with the miro2obsidian program.",
+        "Please export my Miro boards with Miro Full Exporter (miro2obsidian).",
         "",
         "What to do",
-        f"- Vault: {vault_text if vault else 'not set yet: ask me for the path of my Obsidian vault'}",
-        f"- Folder inside the vault: {folder or 'Miro (default)'}",
+        *([f"- Export folder: {target or 'not set yet: ask me for the export folder'}"] if raw_export else [
+            f"- Vault: {vault_text if vault else 'not set yet: ask me for the path of my Obsidian vault'}",
+            f"- Folder inside the vault: {folder or 'Miro (default)'}",
+        ]),
         f"- Output format: {output_format}",
         "- Boards:",
         *[f"  {line}" for line in board_lines],
@@ -576,7 +589,7 @@ def wizard_steps(**kwargs: Any) -> list[dict[str, Any]]:
             "id": CONNECT_STEP_ID,
             "title": "Connect the program to your app",
             "instructions": (
-                "Open your app's settings in the Developer Hub and find its credentials. "
+                "Open Miro Settings > Your apps, select your configured app and find its credentials. "
                 "Copy the Client ID and the Client secret into the two boxes below (the "
                 "secret stays hidden), then click Connect. Your browser opens so you can "
                 "approve access for the team that owns your boards. The connection is saved "

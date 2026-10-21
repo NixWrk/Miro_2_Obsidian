@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import difflib
 import json
+import math
 import os
 import platform
 import re
@@ -38,7 +39,7 @@ from urllib.request import ProxyHandler, build_opener
 
 import requests
 
-from Json_2_Canvas.output_formats import ADVANCED_CANVAS, normalize_output_format
+from Json_2_Canvas.output_formats import ADVANCED_CANVAS, RAW_JSON, normalize_output_format
 from Json_2_Canvas.Scale_engine import ViewProfile
 from Miro_2_Json.miro_downloader import get_boards
 from miro2obsidian import application, miro_auth, paths
@@ -328,10 +329,10 @@ class ImportOptions:
     the view options default to the same values as the command line.
     """
 
-    vault_root: Path
+    vault_root: Path | None = None
     target_dir: Path | None = None
     output_format: str = ADVANCED_CANVAS
-    websdk: str | Path = "auto"
+    websdk: str | Path = "required"
     capture_timeout_seconds: float = DEFAULT_CAPTURE_TIMEOUT_SECONDS
     open_board: bool = True
     source_dir: Path | None = None
@@ -348,7 +349,17 @@ class ImportOptions:
     allow_missing_assets: bool = False
 
     def __post_init__(self) -> None:
-        vault = Path(self.vault_root)
+        output_format = normalize_output_format(self.output_format)
+        if self.vault_root is None:
+            if output_format != RAW_JSON:
+                raise ValueError("Canvas output requires an Obsidian vault.")
+            if self.target_dir is None:
+                raise ValueError("Choose an export folder for raw JSON.")
+            target = Path(self.target_dir).expanduser().resolve()
+            object.__setattr__(self, "target_dir", target)
+            vault = target
+        else:
+            vault = Path(self.vault_root)
         object.__setattr__(self, "vault_root", vault)
         object.__setattr__(self, "output_format", normalize_output_format(self.output_format))
         target = Path(self.target_dir) if self.target_dir else vault / DEFAULT_FOLDER_NAME
@@ -357,7 +368,7 @@ class ImportOptions:
         object.__setattr__(self, "target_dir", target)
         if not _is_inside(target, vault):
             raise ValueError("The Canvas folder must be inside the vault.")
-        source = Path(self.source_dir) if self.source_dir else vault / DEFAULT_SOURCE_DIR_NAME
+        source = Path(self.source_dir) if self.source_dir else (target if output_format == RAW_JSON else vault / DEFAULT_SOURCE_DIR_NAME)
         object.__setattr__(self, "source_dir", source)
         if self.attachment_dir is not None:
             object.__setattr__(self, "attachment_dir", Path(self.attachment_dir))
@@ -368,8 +379,8 @@ class ImportOptions:
             object.__setattr__(self, "websdk", Path(websdk))
         else:
             raise ValueError("websdk must be 'auto', 'required', 'skip' or a file path.")
-        if float(self.capture_timeout_seconds) <= 0:
-            raise ValueError("capture_timeout_seconds must be positive.")
+        if not math.isfinite(float(self.capture_timeout_seconds)) or float(self.capture_timeout_seconds) <= 0:
+            raise ValueError("capture_timeout_seconds must be positive and finite.")
 
     @property
     def websdk_mode(self) -> str:
@@ -857,7 +868,7 @@ def _import_board(batch: _Batch, options: ImportOptions, board: ResolvedBoard) -
 
     stem = _safe_stem(name, board.board_id, batch.used_stems)
     source_json = options.source_dir / f"{stem}.json"
-    attachment_dir = options.attachment_dir or resolve_attachment_dir(
+    attachment_dir = None if options.output_format == RAW_JSON else options.attachment_dir or resolve_attachment_dir(
         options.vault_root, options.target_dir
     )
     _step(batch, board, "Exporting the board through Miro's REST API." if capture.path is None
@@ -893,7 +904,8 @@ def _import_board(batch: _Batch, options: ImportOptions, board: ResolvedBoard) -
         warnings.append(capture.warning)
     status = "complete"
     reason: str | None = None
-    next_step: str | None = f"Open {pipeline.canvas_path} in Obsidian."
+    next_step: str | None = (f"Open {pipeline.source_json.parent} to use the JSON and attachments."
+                            if pipeline.output_kind == "raw_json" else f"Open {pipeline.canvas_path} in Obsidian.")
     kind = "JSON export" if pipeline.output_kind == "raw_json" else "Canvas"
     message = f"Imported {pipeline.item_count} items into a {kind}."
     if application.pipeline_result_is_degraded(pipeline):

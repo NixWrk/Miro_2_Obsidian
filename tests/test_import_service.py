@@ -194,7 +194,7 @@ def test_option_defaults_follow_the_cli(vault) -> None:
     assert opts.target_dir == vault / "Miro"
     assert opts.source_dir == vault / "_miro_sources"
     assert opts.output_format == ADVANCED_CANVAS
-    assert opts.websdk == "auto" and opts.websdk_mode == "auto"
+    assert opts.websdk == "required" and opts.websdk_mode == "required"
     assert opts.capture_timeout_seconds == 180
     assert opts.open_board is True and opts.share_attachments is True
     assert opts.install_obsidian_plugins is False and opts.attachment_dir is None
@@ -212,6 +212,9 @@ def test_option_validation(vault, tmp_path) -> None:
         ImportOptions(vault_root=vault, websdk="  ")
     with pytest.raises(ValueError):
         ImportOptions(vault_root=vault, capture_timeout_seconds=0)
+    for timeout in (float("nan"), float("inf"), -float("inf")):
+        with pytest.raises(ValueError):
+            ImportOptions(vault_root=vault, capture_timeout_seconds=timeout)
     assert ImportOptions(vault_root=vault, target_dir=Path("Sub/Dir")).target_dir == vault / "Sub" / "Dir"
     assert ImportOptions(vault_root=vault, websdk="SKIP").websdk == "skip"
     file_opts = ImportOptions(vault_root=vault, websdk="capture.json")
@@ -444,7 +447,7 @@ def test_unopenable_browser_still_waits(vault, pipeline, tmp_path) -> None:
 
 def test_capture_timeout_in_auto_mode_degrades_to_rest_only(vault, pipeline, tmp_path) -> None:
     server = FakeServer(tmp_path, outcomes={ID_A: CaptureTimeout("No capture arrived within 180 s.")})
-    (result,) = run([named(ID_A, "Roadmap")], options(vault), server)
+    (result,) = run([named(ID_A, "Roadmap")], options(vault, websdk="auto"), server)
     assert pipeline.calls[0]["websdk_json"] is None
     assert (result.status, result.reason, result.websdk_used) == ("degraded", "websdk_unavailable", False)
     assert result.artifact_path and result.source_json
@@ -466,7 +469,7 @@ def test_capture_timeout_in_required_mode_needs_the_user(vault, pipeline, tmp_pa
 
 def test_rejected_capture_degrades_in_auto_and_fails_in_required(vault, pipeline, tmp_path) -> None:
     rejected = {ID_A: CaptureRejected("The exporter sent a capture that failed validation: stale")}
-    (auto,) = run([named(ID_A)], options(vault), FakeServer(tmp_path, outcomes=dict(rejected)))
+    (auto,) = run([named(ID_A)], options(vault, websdk="auto"), FakeServer(tmp_path, outcomes=dict(rejected)))
     assert (auto.status, auto.reason) == ("degraded", "websdk_unavailable")
     (req,) = run([named(ID_A)], options(vault, websdk="required"), FakeServer(tmp_path, outcomes=dict(rejected)))
     assert (req.status, req.reason) == ("failed", "websdk_unavailable")
@@ -476,7 +479,7 @@ def test_capture_server_that_cannot_start(vault, pipeline) -> None:
     def factory():
         raise CaptureServerUnavailable("Port 8766 is already in use by another program.")
 
-    (auto,) = run([named(ID_A)], options(vault), factory=factory)
+    (auto,) = run([named(ID_A)], options(vault, websdk="auto"), factory=factory)
     assert (auto.status, auto.reason) == ("degraded", "websdk_unavailable")
     assert "Port 8766" in auto.warnings[0]
     (req,) = run([named(ID_A)], options(vault, websdk="required"), factory=factory)
@@ -486,7 +489,7 @@ def test_capture_server_that_cannot_start(vault, pipeline) -> None:
 
 def test_request_refusal_is_handled(vault, pipeline, tmp_path) -> None:
     server = FakeServer(tmp_path, request_error=CaptureRejected("The server refused the request (403)."))
-    (result,) = run([named(ID_A)], options(vault), server)
+    (result,) = run([named(ID_A)], options(vault, websdk="auto"), server)
     assert result.status == "degraded"
 
 

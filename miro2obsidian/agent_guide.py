@@ -10,7 +10,7 @@ from __future__ import annotations
 AGENT_GUIDE = """\
 # miro2obsidian: agent procedure
 
-You are helping a person copy Miro boards into an Obsidian vault.
+You are helping a person export Miro boards to a folder or an Obsidian vault.
 Run the commands below with your shell tool. Do not use a browser for anything
 a command can do. Replace `miro2obsidian` with the full command you were given
 if it is not on PATH. Every command accepts --json (machine-readable output).
@@ -25,7 +25,8 @@ if it is not on PATH. Every command accepts --json (machine-readable output).
 5. Never invent board ids or paths. Ask the person if you do not know them.
 
 ## Step 1: check the setup
-    miro2obsidian doctor --vault "<VAULT PATH>" --json
+    miro2obsidian doctor --json
+For Canvas, also pass --vault "<VAULT PATH>". Raw JSON needs no Obsidian setup.
 - Read `next_steps` (a list, most important first). Do the first one, then repeat step 1.
 - `ready` is true when you may continue to step 3.
 - `connection.connected` false: go to step 2.
@@ -47,12 +48,15 @@ Use `--query TEXT` to filter. A board reference is an id, a board URL, or an exa
 board name. Ask the person which boards they want if it is unclear.
 
 ## Step 4: import
-    miro2obsidian import --board "<REF>" --board "<REF2>" --vault "<VAULT PATH>" --folder "<FOLDER>" --format native-canvas --websdk auto --json
+    miro2obsidian import --board "<REF>" --board "<REF2>" --output-dir "<EXPORT FOLDER>" --format raw-json --websdk required --json
+- For Canvas, replace --output-dir with --vault "<VAULT PATH>" --folder "<FOLDER>".
 - `--folder` is inside the vault (default: Miro). `--format` is one of
   native-canvas (plain Obsidian), advanced-canvas, miro-canvas, raw-json.
   Ask the person if unsure; use native-canvas if they only use Obsidian.
-- `--websdk auto` opens each board in the person's browser so the Miro app can
+- `--websdk required` (default) opens each board in the person's browser so the Miro app can
   send extra data. Leave the browser alone while it waits (up to 3 minutes per board).
+- Never switch to REST-only without the person's request. `auto` explicitly allows
+  degraded fallback, `skip` explicitly selects REST only, a file uses manual capture.
 - Output is JSON lines. The last line has `"event":"summary"` with `results`
   (one per board) and `exit_code`.
 

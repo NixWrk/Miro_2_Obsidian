@@ -5,6 +5,11 @@
 A local-first, verifiable pipeline for exporting the maximum board data exposed
 by Miro's public APIs and converting it to a valid Obsidian Canvas.
 
+The desktop app is **Miro Full Exporter**: choose Manual, Code automation or
+Agent, then source and destination. It defaults to a portable JSON export with
+attachments in any folder. **For Obsidian** adds Canvas conversion. The shared
+purple/yellow design has Russian/English and light/dark settings.
+
 The supported production path combines a strict Miro REST export, REST
 comments, downloaded assets, and a fresh whole-board Web SDK export. It keeps
 the original source objects and field-level provenance in the canonical JSON
@@ -64,11 +69,10 @@ and contributes Web SDK-only items. Every original source item remains under
 | **Code automation** | Do the one-time human steps; code then renews tokens, captures, exports and converts, including on a schedule | [Workflow modes](docs/WORKFLOW_MODES.md) |
 | **Agent** | Tell any AI agent "set everything up and export boards X and Y to folder Z" | [Agent setup](docs/AGENT_SETUP.md) |
 
-Miro reserves a few steps for a person: creating your own app in the Developer
-Hub, signing in (with MFA), approving access, and, where required, team
-administrator approval. One click on the app icon on the board may also be
-needed. No variant can skip these; [Workflow modes](docs/WORKFLOW_MODES.md)
-lists exactly what is automatic and what is not.
+Sign-in, MFA, consent and any team administrator approval require the account
+owner. An agent with browser control can configure the app; a shell-only agent
+guides you through those browser steps. A click on the app icon may also be
+needed. [Workflow modes](docs/WORKFLOW_MODES.md) describes the exact boundaries.
 
 For MCP clients: `miro2obsidian mcp` starts the server and
 `miro2obsidian mcp --print-config --client claude-desktop` prints the config
@@ -198,9 +202,9 @@ miro2obsidian-gui
 
 The GUI has four source choices and three execution modes:
 
-- **Manual**: operate Miro yourself. A step-by-step **Set up Miro app** wizard
-  (with Copy and Open buttons and a manifest copy) helps you create and connect
-  your app.
+- **Manual**: operate Miro yourself and select downloaded whole-board Web SDK
+  JSON. The embedded three-stage **Set up Miro app** wizard provides Copy/Open
+  buttons and resumes setup progress.
 - **Code automation**: code runs one or many boards through the import service,
   with a status for each board. The connection lives in the OS credential store
   and renews its own token. The Web SDK option is **Automatic**, **Off** or **From
@@ -282,13 +286,13 @@ the difficulty and benefit, team installation, and troubleshooting.
 
 ```powershell
 miro2obsidian import --board <name, URL or id> --vault path\to\ObsidianVault `
-  --folder CanvasFolder --websdk auto
+  --folder CanvasFolder --websdk required
 ```
 
 If Miro starts the exporter app by itself when the board opens, no click is
 needed; otherwise click the app icon in the board's left toolbar once. Whether
 Miro starts it by itself is not yet verified live. If no capture arrives,
-`--websdk auto` writes a REST-only result, marks it `degraded` and warns;
+`--websdk auto` explicitly allows a REST-only result, marks it `degraded` and warns;
 `--websdk required` asks for the click instead.
 
 By default, the REST and Web SDK captures must describe the same board, be no

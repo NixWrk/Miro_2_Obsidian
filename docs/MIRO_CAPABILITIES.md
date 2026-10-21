@@ -2,6 +2,45 @@
 
 Last verified: 2026-07-27.
 
+The [independent 2026-10-06 audit](MIRO_EXPORT_AUDIT_2026-10-06.md) identifies
+missing reads and a synthetic tag-pagination defect. The subsequent changes
+add offset/total reconciliation, REST connector/group details and memberships,
+tag assignments, experimental REST mindmap lists/details, and explicit SDK
+experimental shape/mindmap, layer-index and app-metadata reads. These changes
+are verified with synthetic responses, not a new live-board run. This historical
+converter matrix is not proof of exhaustive API capture. Groups/styles overlap
+across REST and SDK; table limits depend on surface, date and access. Distinguish
+collected JSON from visible Canvas nodes.
+
+## Capture evidence added on 2026-10-06
+
+- Tags and items-by-tag use offset pagination, reconcile returned totals, and
+  reject inconsistent counts or duplicate page IDs. A synthetic 60-tag board
+  now captures all 60 tags. Tag filters and group filters survive next links.
+- REST reads connector details, group details and group members, and items
+  assigned to each tag. Original variants remain in provenance; derived
+  `groupId`/`tagIds` are backed by the filtered membership responses in
+  `provenance.items.read_details`. Experimental mode additionally reads the
+  documented [mindmap list](https://developers.miro.com/reference/get-mindmap-nodes-experimental)
+  and [detail](https://developers.miro.com/reference/get-mindmap-node-experimental).
+- SDK explicitly reads `experimental.get` for shapes and mindmap nodes,
+  `getLayerIndex` for supported non-frame items, and `getMetadata`/`getAppData`
+  for the exporting app. Metadata of other apps is not exposed by these methods.
+  `provenance.read_enrichment` records per-method captured/unavailable/failed
+  outcomes, original experimental variants and app data. Available-method
+  errors block a complete capture; unavailable methods remain explicit limits.
+- Comments retain state, messages and replies. Declared nested counts are
+  reconciled, and only server-provided continuation URLs on the same board and
+  origin are fetched. Truncated replies/messages fail before publication. With
+  no count contract, completeness remains unknown. A reply count cannot be
+  equated with a messages count that may include the root message.
+- Comment `complete` proves available collection pages were fetched.
+  `thread_coverage.replies_verified` and `messages_verified` report returned
+  nested evidence. `resolved_threads_verified` remains false: neither the
+  official REST contract nor a fresh live test establishes coverage of all
+  resolved threads. Observing a resolved thread proves only that thread was
+  returned, not that all resolved threads were included.
+
 This file is the project reference for deciding whether a missing Canvas node is a converter bug, a known intentional drop, or source data that Miro does not expose through the current export path.
 
 Use it before creating a converter issue:

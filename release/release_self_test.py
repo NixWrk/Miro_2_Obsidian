@@ -14,6 +14,7 @@ from pathlib import Path
 def _check() -> list[str]:
     problems: list[str] = []
     import customtkinter  # noqa: F401 - the desktop window's toolkit and its themes
+    import keyring  # noqa: F401 - required by the saved, renewable connection
 
     from miro2obsidian import application  # noqa: F401 - the whole pipeline
     from miro2obsidian import cli, import_service, mcp_server  # noqa: F401 - agent surface
@@ -28,7 +29,10 @@ def _check() -> list[str]:
     if not obsidian_plugin_setup.ZOOM_UNLOCK_SOURCE.is_dir():
         problems.append(f"missing bundled plugin: {obsidian_plugin_setup.ZOOM_UNLOCK_SOURCE}")
     try:
-        websdk_directory()
+        sdk_dir = websdk_directory()
+        for name in ("index.html", "panel.html", "exporter-core.js", "exporter.js", "handoff.js", "theme.css", "ui.js"):
+            if not (sdk_dir / name).is_file():
+                problems.append(f"missing Web SDK asset: {name}")
     except FileNotFoundError as exc:
         problems.append(str(exc))
     themes = Path(customtkinter.__file__).resolve().parent / "assets" / "themes"
@@ -47,7 +51,7 @@ def run_self_test_if_asked() -> None:
         from miro2obsidian.browser_bridge import start_browser_bridge
 
         try:
-            with TemporaryDirectory(prefix="miro2obsidian-browser-self-test-") as directory:
+            with TemporaryDirectory(prefix="miro2obsidian-browser-self-test-", ignore_cleanup_errors=True) as directory:
                 with start_browser_bridge(
                     "data:text/html,<title>browser-self-test</title>",
                     profile_dir=Path(directory),

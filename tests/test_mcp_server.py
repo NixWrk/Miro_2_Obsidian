@@ -191,9 +191,9 @@ def test_every_input_schema_is_valid_json_schema_and_closed(session) -> None:
 def test_schemas_for_the_documented_parameters(session) -> None:
     tools = {t["name"]: t["inputSchema"] for t in session.request("tools/list")["result"]["tools"]}
     assert set(tools["import_boards"]["properties"]) == {
-        "boards", "vault", "folder", "format", "websdk", "capture_timeout_seconds", "open_board",
+        "boards", "vault", "folder", "format", "websdk", "capture_timeout_seconds", "open_board", "output_dir",
     }
-    assert tools["import_boards"]["required"] == ["boards", "vault"]
+    assert tools["import_boards"]["required"] == ["boards"]
     assert tools["import_boards"]["properties"]["format"]["enum"] == [
         "advanced-canvas", "native-canvas", "miro-canvas", "raw-json",
     ]
@@ -238,7 +238,7 @@ def test_descriptions_warn_about_untrusted_board_content(session) -> None:
         ("capture_board", {"board": "x", "timeout_seconds": True}),
         ("capture_board", {"board": "x", "timeout_seconds": 1}),
         ("import_boards", {"vault": "/v"}),
-        ("import_boards", {"boards": ["a"]}),
+        ("import_boards", {"boards": ["a"], "output_dir": 12}),
         ("import_boards", {"boards": "a", "vault": "/v"}),
         ("import_boards", {"boards": [], "vault": "/v"}),
         ("import_boards", {"boards": [1], "vault": "/v"}),
@@ -419,7 +419,18 @@ def test_import_boards_defaults_match_the_command_line(session, monkeypatch, vau
     session.call("import_boards", {"boards": ["a"], "vault": str(vault)})
     options = run_imports.call_args.args[1]
     assert options.target_dir == vault / "Miro"
-    assert options.output_format == "advanced-canvas" and options.websdk == "auto" and options.open_board is True
+    assert options.output_format == "advanced-canvas" and options.websdk == "required" and options.open_board is True
+
+
+def test_standalone_json_import_needs_no_vault(session, monkeypatch, tmp_path) -> None:
+    run_imports = MagicMock(return_value=[ImportResult("complete", board_id="a")])
+    monkeypatch.setattr(import_service, "run_imports", run_imports)
+    folder = tmp_path / "Exports"
+    result = session.call("import_boards", {"boards": ["a"], "output_dir": str(folder), "format": "raw-json"})
+    assert result["isError"] is False
+    options = run_imports.call_args.args[1]
+    assert options.target_dir == options.source_dir == folder
+    assert options.websdk == "required"
 
 
 def test_import_boards_rejects_a_missing_vault_and_a_folder_outside_it(session, monkeypatch, tmp_path, vault) -> None:

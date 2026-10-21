@@ -99,7 +99,7 @@ class MiroObsidianGuiHelperTests(unittest.TestCase):
             app.update_idletasks()
             self.assertEqual(app.run_button.cget("text"), "Run pipeline")
             self.assertEqual(app.copy_agent_button.cget("text"), "Copy instructions for my agent")
-            self.assertEqual(app.websdk_choice.get(), gui_support.WEBSDK_OFF)
+            self.assertEqual(app.websdk_choice.get(), gui_support.WEBSDK_AUTO)
             app.workflow_mode.set(CODE_WORKFLOW)
             app.on_workflow_mode_changed(CODE_WORKFLOW)
             self.assertEqual(app.websdk_choice.get(), gui_support.WEBSDK_AUTO)
@@ -387,7 +387,7 @@ class MiroObsidianGuiHelperTests(unittest.TestCase):
         self.assertEqual(account, [ResolvedBoard("uXjA=", name="Alpha")])
         self.assertEqual(
             selected_board_inputs(URL_SOURCE_MODE, board_text="https://miro.com/app/board/uXjB=/?x=1"),
-            ["uXjB="],
+            ["https://miro.com/app/board/uXjB=/?x=1"],
         )
         self.assertEqual(selected_board_inputs(URL_SOURCE_MODE, board_text="Roadmap"), ["Roadmap"])
         with tempfile.TemporaryDirectory() as tmp:
@@ -475,7 +475,7 @@ class MiroObsidianGuiHelperTests(unittest.TestCase):
             with patch("Miro_2_Obsidian_GUI.run_imports", side_effect=fake_run_imports) as run:
                 outcomes = app._execute_request(self._request(vault))
         inputs, options = run.call_args.args
-        self.assertEqual(inputs, ["uXjA="])
+        self.assertEqual(inputs, ["https://miro.com/app/board/uXjA=/"])
         self.assertEqual(options.websdk, "auto")
         self.assertEqual(options.vault_root, vault.resolve())
         self.assertEqual([o.status for o in outcomes], ["degraded"])
@@ -587,6 +587,7 @@ class MiroObsidianGuiHelperTests(unittest.TestCase):
         app.workflow_mode = _Value(CODE_WORKFLOW)
         app.target_dir = _Value("/vault/Boards")
         app.websdk_choice = _Value(gui_support.WEBSDK_FILE)
+        app.export_method = _Value("REST + Web SDK (recommended)")
         app.websdk_path = _Value("")
         app.min_font_px = _Value("8")
         app.min_zoom = _Value("0.12")
@@ -608,7 +609,7 @@ class MiroObsidianGuiHelperTests(unittest.TestCase):
             app._collect_run_request()
         app.websdk_choice = _Value(gui_support.WEBSDK_AUTO)
         request = app._collect_run_request()
-        self.assertEqual(request.websdk, "auto")
+        self.assertEqual(request.websdk, "required")
         app.websdk_choice = _Value(gui_support.WEBSDK_OFF)
         self.assertEqual(app._collect_run_request().websdk, "skip")
 
@@ -625,7 +626,7 @@ class MiroObsidianGuiHelperTests(unittest.TestCase):
         with patch("Miro_2_Obsidian_GUI.gui_support.agent_cli_command", return_value="miro2obsidian"):
             text = app._agent_instructions_text()
         self.assertIn("miro2obsidian agent-guide", text)
-        self.assertIn('--board "uXjA="', text)
+        self.assertIn('--board "https://miro.com/app/board/uXjA=/"', text)
         self.assertIn("--format native-canvas", text)
         self.assertIn("--websdk skip", text)
         self.assertIn("miro2obsidian mcp --print-config", text)

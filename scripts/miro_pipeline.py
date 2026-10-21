@@ -85,13 +85,15 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--board-id", help="Required unless --existing-json is used.")
     parser.add_argument("--source-json", type=Path, required=True)
-    parser.add_argument(
+    source_method = parser.add_mutually_exclusive_group()
+    source_method.add_argument(
         "--websdk-json",
         type=Path,
         help="Merge a fresh maximum-profile Web SDK board export before conversion.",
     )
-    parser.add_argument("--target-dir", type=Path, required=True)
-    parser.add_argument("--vault-root", type=Path, required=True)
+    source_method.add_argument("--rest-only", action="store_true", help="Explicitly export less data using REST without Web SDK.")
+    parser.add_argument("--target-dir", type=Path)
+    parser.add_argument("--vault-root", type=Path)
     parser.add_argument(
         "--scale", type=float, help="Explicit converter scale. Defaults to auto scale."
     )
@@ -189,10 +191,14 @@ def main() -> int:
             return cli.main(sys.argv[1:])
     parser = build_parser()
     args = parser.parse_args()
-    attachment_dir = args.attachment_dir or resolve_attachment_dir(
-        args.vault_root, args.target_dir
+    if args.output_format != RAW_JSON and (args.target_dir is None or args.vault_root is None):
+        parser.error("Canvas output requires --target-dir and --vault-root")
+    attachment_dir = None if args.output_format == RAW_JSON else (
+        args.attachment_dir or resolve_attachment_dir(args.vault_root, args.target_dir)
     )
     if args.existing_json:
+        if args.rest_only:
+            parser.error("--rest-only cannot be combined with --existing-json")
         if args.stored_token:
             parser.error("--stored-token cannot be combined with --existing-json")
         if args.websdk_json is not None:
@@ -231,6 +237,8 @@ def main() -> int:
             parser.error("--board-id is required unless --existing-json is used")
         if args.allow_incomplete_source:
             parser.error("--allow-incomplete-source requires --existing-json")
+        if args.websdk_json is None and not args.rest_only:
+            parser.error("Live export requires --websdk-json <whole-board.json>. Use 'miro2obsidian import' for automatic capture, or explicitly choose --rest-only for less data.")
         if args.websdk_json is not None and args.allow_missing_assets:
             parser.error(
                 "--websdk-json cannot be combined with --allow-missing-assets"

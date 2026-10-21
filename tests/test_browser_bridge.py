@@ -54,7 +54,9 @@ class BrowserBridgeTests(unittest.TestCase):
             "p=sync_playwright().start(); b=p.chromium.connect_over_cdp(sys.argv[1]); "
             "print(b.contexts[0].pages[0].title()); b.close(); p.stop()"
         )
-        with tempfile.TemporaryDirectory() as temp:
+        # Chromium can keep a journal handle briefly after CDP disconnects on Windows.
+        # This test verifies cross-process browser access, not synchronous profile deletion.
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temp:
             with start_browser_bridge(
                 "data:text/html,<title>bridge-smoke</title>",
                 profile_dir=Path(temp),

@@ -1,7 +1,6 @@
-"""Help for creating the user's own Miro app (the one step code cannot do).
+"""Help for configuring a Miro app for this local-first program.
 
-Miro's security model requires every person to own the app that reads their
-boards. Creating it happens in Miro's Developer Hub, in a browser. This module
+This program uses an app the user configures in Miro's Your apps settings. This module
 only provides the *text* for that step: a manifest to paste and a structured
 checklist that the CLI (``setup guide``), the GUI and agents render. Nothing
 here contacts Miro or handles a secret.
@@ -12,6 +11,7 @@ the wording on screen may differ and names the *purpose* of each field.
 
 from __future__ import annotations
 
+import html
 import json
 import re
 from typing import Any
@@ -23,8 +23,10 @@ __all__ = [
     "setup_steps",
 ]
 
-DEVELOPER_HUB_URL = "https://developers.miro.com/page/developer-hub#your-apps"
-DEFAULT_APP_NAME = "Miro to Obsidian - local export"
+MIRO_APPS_URL = "https://developers.miro.com/page/developer-hub#your-apps"
+# Keep the public name used by CLI, GUI and MCP adapters.
+DEVELOPER_HUB_URL = MIRO_APPS_URL
+DEFAULT_APP_NAME = "Miro Full Exporter"
 DEFAULT_SDK_PORT = 8766
 DEFAULT_OAUTH_PORT = 8765
 SCOPES = ("boards:read", "team:read")
@@ -107,11 +109,15 @@ def setup_steps(
     return [
         {
             "id": "open_developer_hub",
-            "title": "Open the Miro Developer Hub",
+            "title": "Open Miro Settings > Your apps",
             "instructions": (
-                "Sign in to Miro in your browser, then open the Developer Hub "
-                "page 'Your apps'. (In Miro you can also open your avatar and "
-                "choose Developer Hub, then Your apps.) " + labels_note
+                "Open this link in your normal browser and sign in to Miro. "
+                "Miro may redirect to a company-specific Profile settings URL; "
+                "choose the Your apps tab. If the link does not open it, use "
+                "your Miro avatar, Settings, then Your apps. The Explore the "
+                "Developer Hub / Get started banner is optional. Finish email "
+                "sign-in and setup in the same browser: sessions do not transfer "
+                "between browsers. " + labels_note
             ),
             "url": DEVELOPER_HUB_URL,
             "copy_values": {},
@@ -121,12 +127,13 @@ def setup_steps(
             "id": "create_app",
             "title": "Create your own Miro app in a Developer team",
             "instructions": (
+                "In Your apps click Create new app below the Developer Hub banner. "
                 "Pick the organization and a Developer team (create one and "
                 "accept the developer terms if none exists), then create a new "
                 "app. Give it a recognizable name. Creating the app does not "
                 "move or copy any board; it only creates the credentials and "
-                "permissions this program uses. Miro requires every person to "
-                "own this app, so it cannot be done for you."
+                "permissions this program uses. This local-first program uses "
+                "an app you configure rather than shipping shared credentials."
             ),
             "url": DEVELOPER_HUB_URL,
             "copy_values": {"App name": app_name},
@@ -205,3 +212,92 @@ def setup_steps(
             "actor": "person",
         },
     ]
+
+
+def setup_intro_html(*, refresh_supported: bool = False) -> str:
+    """The two public setup steps; browser_setup adds credentials as step three."""
+    token_help = (
+        "Expiring authorization tokens are supported; the saved connection can renew them."
+        if refresh_supported else TOKEN_HELP
+    )
+    return (
+        '<nav class="setup-nav" aria-label="Connection steps">'
+        '<button type="button" data-step-target="0">1. Create app</button>'
+        '<button type="button" data-step-target="1">2. Configure app</button>'
+        '<button type="button" data-step-target="2">3. Connect</button></nav>'
+        '<section data-setup-panel="0"><h2>Create your Miro app</h2>'
+        f'<p>{CREATE_HELP}</p>'
+        f'<a href="{MIRO_APPS_URL}" target="_blank" rel="noopener noreferrer">Open Developer Hub</a>'
+        + _copy_value("setup-hub", "Developer Hub address", MIRO_APPS_URL)
+        + _copy_value("setup-name", "App name", APP_NAME)
+        + f'<p>{TEAM_HELP}</p><h3>Authorization token</h3><p>{token_help}</p>'
+        '<button type="button" data-step-target="1">App created — continue</button> '
+        '<button type="button" data-step-target="2">I already have a configured app</button></section>'
+        '<section data-setup-panel="1" hidden><h2>Configure your Miro app</h2>'
+        f'<p>{CONFIG_HELP}</p>'
+        + _copy_value("setup-app-url", "App URL / SDK URI", APP_URL)
+        + _copy_value("setup-redirect", "Redirect URI for OAuth 2.0", REDIRECT_URI)
+        + _copy_value("setup-scopes", "Permissions (scopes)", " ".join(SCOPES))
+        + '<button type="button" data-step-target="0">Back</button> '
+        '<button type="button" data-step-target="2">App configured — continue</button></section>'
+        '<p id="copy-status" role="status" aria-live="polite" data-ui-message=""></p>'
+    )
+
+
+# Shared copy and presentation for the desktop and browser setup.
+APP_NAME = "Miro Full Exporter"
+
+APP_URL = "http://localhost:8766/index.html"
+
+REDIRECT_URI = "http://localhost:8765/callback"
+
+CREATE_HELP = "Open Developer Hub, sign in and choose Your apps, then Create new app or Create your first app. If Profile settings opens instead, use Get started in the Explore the Developer Hub banner. Apps & Integrations lists installed apps; it does not create your own app."
+
+TEAM_HELP = "Name the app Miro Full Exporter and select a Developer team. If Miro asks for an Enterprise Developer team, your organization administrator must set it up; a team merely named Dev team is not enough."
+
+TOKEN_HELP = "Choose the token lifetime before creating the app. Expiring tokens are supported: the saved connection renews them automatically when Miro provides a refresh token. Sign-in or consent can still be required after access is revoked."
+
+ACCESS_HELP = "An access token is the permission to export your board. This program obtains it automatically through Miro authorization; you do not paste it here. Client ID identifies the app, and Client secret is the app's separate key."
+
+CONFIG_HELP = "In the app settings, paste these two addresses and save them. Enable Use this URI for SDK authorization if offered. Select only boards:read and team:read. Install the app in the team that owns your board."
+
+CONNECT_HELP = "Copy Client ID and Client secret from App Credentials into the fields below. Finish authorization in the same browser. The connection, including the app secret and refresh token, is kept in your operating system credential store so future exports can renew access automatically. Nothing is written to project files."
+
+def _copy_value(identifier: str, label: str, value: str) -> str:
+    return (
+        f'<div class="copy-row"><label for="{identifier}">{html.escape(label)}</label>'
+        f'<input id="{identifier}" value="{html.escape(value, quote=True)}" readonly>'
+        f'<button type="button" data-copy-target="{identifier}">Copy</button></div>'
+    )
+
+SETUP_SCRIPT = """
+document.addEventListener('DOMContentLoaded', () => {
+  const panels = [...document.querySelectorAll('[data-setup-panel]')];
+  if (!panels.length) return;
+  const show = step => {
+    panels.forEach(panel => { panel.hidden = panel.dataset.setupPanel !== step; });
+    document.querySelectorAll('.setup-nav [data-step-target]').forEach(button => {
+      button.setAttribute('aria-current', button.dataset.stepTarget === step ? 'step' : 'false');
+    });
+  };
+  document.querySelectorAll('[data-step-target]').forEach(button =>
+    button.addEventListener('click', () => show(button.dataset.stepTarget)));
+  document.querySelectorAll('[data-copy-target]').forEach(button => button.addEventListener('click', async () => {
+    const input = document.getElementById(button.dataset.copyTarget);
+    const status = document.getElementById('copy-status');
+    if (!input?.readOnly) return;
+    try {
+      if (navigator.clipboard?.writeText) await navigator.clipboard.writeText(input.value);
+      else {
+        input.focus(); input.select();
+        if (!document.execCommand('copy')) throw new Error('copy failed');
+      }
+      window.miro2obsidianUI.setMessage(status, 'Copied.');
+    } catch (_) {
+      input.focus(); input.select();
+      window.miro2obsidianUI.setMessage(status, 'Copy failed. Select the address and press Ctrl+C.');
+    }
+  }));
+  show('0');
+});
+"""

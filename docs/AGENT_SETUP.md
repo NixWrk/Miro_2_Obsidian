@@ -72,10 +72,16 @@ guide says `miro2obsidian`.
    in your browser. You paste the Client ID and Client secret there and approve
    access in Miro. The agent never sees them.
 3. `miro2obsidian boards --json` to find boards.
-4. `miro2obsidian import --board "<ref>" --board "<ref2>" --vault "<vault>" --folder "<folder>" --format <format> --websdk auto --json`.
+4. `miro2obsidian import --board "<ref>" --board "<ref2>" --vault "<vault>" --folder "<folder>" --format <format> --websdk required --json`.
 5. Read the last JSON line (`"event": "summary"`) and report each board's status.
 
 Exit codes: 0 complete, 2 degraded, 3 a person must act, 1 failed.
+
+For standalone JSON, replace `--vault ... --folder ...` with `--output-dir
+"<export folder>" --format raw-json`. No Obsidian installation is required.
+Automatic capture defaults to `--websdk required`; `auto` is an explicit
+degraded fallback. MCP `import_boards` supports the same destination as
+`output_dir` with format `raw-json`.
 
 The import opens each board in your default browser so the Miro app can send its
 data. Leave that tab alone while the command waits (up to 3 minutes per board by

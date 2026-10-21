@@ -24,6 +24,7 @@ from scripts.obsidian_plugin_setup import (  # noqa: E402
     install_zoom_unlock,
     plugin_has_runtime,
     setup_obsidian_plugins,
+    zoom_unlock_directory,
 )
 
 
@@ -35,6 +36,17 @@ def runtime_hashes(path: Path) -> dict[str, str]:
 
 
 class ObsidianPluginSetupTests(unittest.TestCase):
+    def test_installed_package_finds_zoom_plugin_without_checkout(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            prefix = Path(tmp) / "installed"
+            source = prefix / "share" / "miro2obsidian" / "plugins" / "canvas-zoom-unlock"
+            source.mkdir(parents=True)
+            with (
+                patch("scripts.obsidian_plugin_setup.REPO_ROOT", Path(tmp) / "no-checkout"),
+                patch("scripts.obsidian_plugin_setup.sys.prefix", str(prefix)),
+            ):
+                self.assertEqual(zoom_unlock_directory(), source)
+
     def test_setup_enables_existing_advanced_canvas_and_local_zoom_plugin(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             vault = Path(tmp) / "vault"

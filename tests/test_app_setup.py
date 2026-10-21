@@ -19,7 +19,7 @@ def test_manifest_has_only_the_keys_miro_accepts() -> None:
     ]
     assert keys == ["appName", "sdkUri", "redirectUris", "scopes"]
     assert "icons" not in text
-    assert "appName: Miro to Obsidian - local export" in text
+    assert "appName: Miro Full Exporter" in text
     assert "sdkUri: http://localhost:8766/index.html" in text
     assert "  - http://localhost:8765/callback" in text
     assert "  - boards:read" in text and "  - team:read" in text
@@ -110,4 +110,4 @@ def test_custom_ports_flow_into_steps() -> None:
 
 
 def test_module_exports() -> None:
-    assert app_setup.DEVELOPER_HUB_URL.startswith("https://developers.miro.com/")
+    assert app_setup.DEVELOPER_HUB_URL == "https://developers.miro.com/page/developer-hub#your-apps"

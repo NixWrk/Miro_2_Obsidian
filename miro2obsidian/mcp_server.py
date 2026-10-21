@@ -362,8 +362,14 @@ def _tool_capture_board(ctx: ToolContext, args: dict[str, Any]) -> tuple[dict[st
 
 
 def _tool_import_boards(ctx: ToolContext, args: dict[str, Any]) -> tuple[dict[str, Any], bool]:
-    vault = Path(args["vault"]).expanduser()
-    if not vault.is_dir():
+    output_format = args.get("format", ADVANCED_CANVAS)
+    output_dir = Path(args["output_dir"]).expanduser().resolve() if args.get("output_dir") else None
+    if output_dir is not None and output_format != "raw-json":
+        return _failed("output_dir requires format raw-json; use vault for Canvas.", "invalid_options")
+    vault = Path(args["vault"]).expanduser().resolve() if args.get("vault") else None
+    if vault is None and output_dir is None:
+        return _failed("Give a vault for Canvas or output_dir for raw-json.", "invalid_options")
+    if vault is not None and not vault.is_dir():
         return _failed(
             "The vault folder does not exist.",
             "vault_not_found",
@@ -372,9 +378,9 @@ def _tool_import_boards(ctx: ToolContext, args: dict[str, Any]) -> tuple[dict[st
     try:
         options = import_service.ImportOptions(
             vault_root=vault,
-            target_dir=Path(args["folder"]) if args.get("folder") else None,
-            output_format=args.get("format", ADVANCED_CANVAS),
-            websdk=args.get("websdk", "auto"),
+            target_dir=output_dir or (Path(args["folder"]) if args.get("folder") else None),
+            output_format=output_format,
+            websdk=args.get("websdk", "required"),
             capture_timeout_seconds=float(
                 args.get("capture_timeout_seconds", import_service.DEFAULT_CAPTURE_TIMEOUT_SECONDS)
             ),
@@ -426,8 +432,8 @@ TOOLS: tuple[Tool, ...] = (
     ),
     Tool(
         "setup_guide",
-        "Get the one-time checklist for creating the person's own Miro app in Miro's Developer Hub (Miro "
-        "requires every user to own the app that reads their boards). Steps with actor 'person' can only be "
+        "Get the one-time checklist for configuring an app in Miro Settings > Your apps for this "
+        "local-first program. Steps with actor 'person' can only be "
         "done by the human in their browser: relay them to the person in order, one at a time, and wait for "
         "them to confirm each. You cannot do those steps for them. Afterwards call auth_login_form. "
         + _SECRET_NOTE,
@@ -513,7 +519,8 @@ TOOLS: tuple[Tool, ...] = (
     ),
     Tool(
         "import_boards",
-        "Import one or more Miro boards into an Obsidian vault. Long-running (up to minutes per board): the "
+        "Export one or more Miro boards to a folder (raw-json with output_dir) or an Obsidian vault. "
+        "Long-running (up to minutes per board): the "
         "call blocks until done and sends progress and log notifications meanwhile. Ask the person which "
         "boards, which vault folder and which format they want (native-canvas for plain Obsidian, "
         "advanced-canvas for the Advanced Canvas plugin, miro-canvas for the miro-canvas plugin, raw-json for "
@@ -522,7 +529,7 @@ TOOLS: tuple[Tool, ...] = (
         "it complete), needs_user (relay message and next_step, wait until the person is done, then call "
         "again with the same arguments), failed (report message and reason honestly). "
         "summary.exit_code: 0 complete, 2 degraded, 3 needs_user, 1 failed. Do not edit vault files yourself. "
-        "websdk: auto uses the Miro app's capture when possible, required never falls back to REST only, skip "
+        "websdk defaults to required and never falls back to REST only; auto explicitly allows a degraded fallback; skip "
         "is REST only. " + _UNTRUSTED_NOTE,
         _schema(
             {
@@ -534,6 +541,7 @@ TOOLS: tuple[Tool, ...] = (
                     "description": "Board ids, board URLs or exact board names.",
                 },
                 "vault": {"type": "string", "minLength": 1, "description": "Path of the Obsidian vault folder."},
+                "output_dir": {"type": "string", "minLength": 1, "description": "Standalone export folder, only for raw-json; no vault needed."},
                 "folder": {
                     "type": "string",
                     "description": "Folder for the boards, relative to the vault or absolute inside it (default Miro).",
@@ -543,7 +551,7 @@ TOOLS: tuple[Tool, ...] = (
                 "capture_timeout_seconds": {"type": "integer", "minimum": 10, "maximum": 3600},
                 "open_board": {"type": "boolean", "description": "Open boards in the browser (default true)."},
             },
-            required=["boards", "vault"],
+            required=["boards"],
         ),
         _tool_import_boards,
     ),
